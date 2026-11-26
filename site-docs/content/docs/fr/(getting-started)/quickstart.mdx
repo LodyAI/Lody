@@ -1,0 +1,157 @@
+---
+title: "Démarrage rapide"
+description: "Installez et configurez Lody depuis l'application de bureau ou la CLI, puis connectez GitHub et configurez vos agents."
+---
+
+import { MonitorDown, TabletSmartphone, Compass, SquareTerminal } from 'lucide-react';
+
+# Démarrage rapide
+
+Lody fonctionne partout où vous travaillez : des applications natives pour macOS, Windows et Linux, des applications mobiles pour iOS et
+Android, n'importe quel navigateur, ainsi qu'une CLI que vous pouvez exécuter sur un serveur distant.
+
+<Cards>
+  <Card href="/fr/download" title="Télécharger l'application de bureau" icon={<MonitorDown />}>
+    macOS, Windows, Linux
+  </Card>
+  <Card href="/fr/download" title="Télécharger l'application mobile" icon={<TabletSmartphone />}>
+    iOS, Android
+  </Card>
+  <Card href="/login" icon={<Compass />} title="Se connecter à Lody">
+    Ouvrir Lody dans votre navigateur
+  </Card>
+  <Card href="#start-from-the-cli" icon={<SquareTerminal />} title="Démarrer la CLI">
+    Utiliser Lody depuis un serveur
+  </Card>
+</Cards>
+
+Exécutez cette commande sur un serveur :
+
+```bash
+npx lody daemon start
+```
+
+## Démarrer depuis l'application de bureau
+
+- Téléchargez le programme d'installation pour votre plateforme depuis la [page de téléchargement](/fr/download) et installez-le.
+- Sur macOS ou Linux, vous pouvez également l'installer avec [Homebrew](https://formulae.brew.sh/cask/lody) :
+  ```bash
+  brew install --cask lody
+  ```
+- Au premier lancement, Lody ouvre votre navigateur pour vous permettre de vous inscrire ou de vous connecter.
+- L'application de bureau démarre également le [démon CLI](/fr/docs/cli#daemon-mode) local de Lody sur votre machine. La
+  CLI est le processus dans lequel les agents s'exécutent réellement.
+
+## Démarrer depuis la CLI
+
+### Prérequis
+
+- Node.js 22.23.4+ (22.x), 24.22.1+ (24.x) ou 26.12.1+ (26.x), avec Node-API 10+
+
+### Démarrer
+
+```bash tab="Démon (recommandé)"
+npx lody daemon start
+```
+
+```bash tab="Premier plan"
+npx lody login
+npx lody start
+```
+
+`npx lody daemon start` vérifie d'abord qu'il peut joindre Lody et que cette machine est connectée. Si ce
+n'est pas le cas, il lance immédiatement le flux de code d'appareil : il ouvre la page de connexion dans votre navigateur (sur une
+machine sans interface graphique, il affiche le lien à la place) et attend que vous ayez terminé, puis passe en
+arrière-plan. C'est aussi ainsi que vous connectez une machine distante : exécutez la commande via SSH sur un serveur, une VM cloud ou
+un autre poste de travail, et cette machine apparaîtra dans votre espace de travail.
+
+Le démon relance la CLI si elle se ferme de façon inattendue. Si vous n'avez aucun accès à un navigateur, démarrez-le
+directement avec `npx lody daemon start --auth <cli_token>`. Vous pouvez consulter et générer un `cli_token`
+dans l'application de bureau sous **Paramètres** -> **Compte** -> **CLI Token**. `npx lody login` reste
+disponible si vous préférez vous connecter lors d'une étape distincte.
+
+<Callout title="Utiliser l'application de bureau uniquement comme télécommande">
+L'application de bureau démarre par défaut sa CLI locale intégrée afin de pouvoir exécuter des agents sur cet ordinateur. Si
+vous souhaitez uniquement contrôler des agents sur d'autres machines, ouvrez **Paramètres** -> **Général** -> **Démarrage**
+et désactivez **Exécuter l'agent local**.
+
+Une fois l'option désactivée, l'application de bureau cesse de gérer cette CLI et la laisse désactivée au lancement suivant. Les agents
+exécutés sur d'autres machines ne sont pas affectés.
+
+</Callout>
+
+## Ajouter un projet
+
+### Ajouter un projet local
+
+<Tabs items={['Bureau', 'Mobile', 'CLI']}>
+<Tab value="Bureau">
+Utilisez le bouton en haut à droite de **Paramètres** -> **Projets**. Choisissez la machine souhaitée,
+et Lody liste ses répertoires afin que vous puissiez en sélectionner un comme racine du projet.
+</Tab>
+<Tab value="Mobile">
+Utilisez le bouton en haut à droite de **Projets**. Choisissez la machine souhaitée, et Lody liste
+ses répertoires afin que vous puissiez en sélectionner un comme racine du projet.
+</Tab>
+<Tab value="CLI">
+Exécutez `npx lody project add <path>`, où `<path>` est le répertoire racine du projet.
+</Tab>
+</Tabs>
+
+### Connecter votre dépôt GitHub
+
+Dans l'application web, cliquez sur **Paramètres** en bas à gauche, puis sur **Intégration GitHub** ->
+**Gérer** pour autoriser l'accès à vos dépôts GitHub. Lody vous redirige ensuite afin
+que vous puissiez choisir les dépôts à ajouter à votre espace de travail. [En savoir plus](/fr/docs/github)
+
+## Configurer les agents
+
+Lody intègre des fournisseurs ACP prêts à l'emploi, dont Claude Code, Codex, Grok, Kimi Code, Devin, Pi,
+DeepSeek Harness, Bub et Dimcode. Vous pouvez également utiliser des agents ACP personnalisés ainsi que toute CLI répertoriée dans le
+[registre ACP](https://agentclientprotocol.com/get-started/registry). Ajoutez-les et configurez-les sous
+**Paramètres** -> **Agents** dans l'application de bureau ou mobile.
+
+[Claude Code et Codex](/fr/docs/claude-codex-capabilities) sont maintenus directement par Lody et
+prennent donc en charge des capacités qui vont au-delà du protocole ACP.
+
+Pour Dimcode intégré, installez d'abord une CLI compatible ACP sur la machine cible et assurez-vous que `dimcode acp` est disponible dans le PATH. Vous gérez sa version vous-même ; Lody ne le télécharge ni ne le met à jour. Après une mise à jour, actualisez le fournisseur dans les Paramètres. Consultez le [guide d'installation de Dimcode](https://www.dimcode.dev/en/docs/getting-started/).
+
+### Questions fréquentes
+
+<Accordions>
+  <Accordion title="L'agent que je souhaite utiliser ne figure pas dans la liste">
+     Vous pouvez utiliser votre propre agent ACP. Rendez-vous dans **Paramètres** -> **Agents** dans l'application de bureau ou
+     mobile, choisissez **Agent personnalisé**, puis renseignez la commande de lancement et ses arguments.
+  </Accordion>
+  <Accordion title="J'ai choisi un agent, mais le modèle le plus récent est absent">
+      Lody actualise la configuration de chaque agent au démarrage de l'application et au début d'une conversation.
+      Si un modèle attendu est manquant, essayez le bouton d'actualisation dans la configuration de l'agent. Pour un
+      modèle tout juste sorti, il vous faudra peut-être patienter jusqu'à ce que Lody ajoute sa prise en charge.
+  </Accordion>
+</Accordions>
+
+## Emplacements des fichiers
+
+| Contenu  | Chemin          |
+| -------- | --------------- |
+| Dépôts   | `~/.lody/repos` |
+| Journaux | `~/.lody/logs`  |
+
+## Toujours impossible de vous connecter ? Réinitialisez le cache local
+
+Si l'application affiche des données obsolètes ou ne parvient pas à se charger après une mise à jour de version, ouvrez **Paramètres** ->
+**Cache et stockage** et utilisez **Vider le cache local**. Cela supprime le cache local de Lody pour tous les espaces de travail
+(copies hors ligne, caches de données synchronisées et caches d'images) et recharge l'application. Votre compte et vos données
+synchronisées sont en sécurité et sont téléchargés de nouveau automatiquement, et vous restez connecté. Sur mobile, la même option se trouve
+sur la page Paramètres.
+
+## Étapes suivantes
+
+🎉 Voilà qui couvre la configuration de base. À partir d'ici, vous pouvez explorer davantage ce que propose Lody :
+
+- [Exécuter votre première session](/fr/docs/first-session) - Une petite tâche, du prompt jusqu'au résultat vérifié
+- [Lire les concepts et le glossaire](/fr/docs/concepts) - Les objets derrière chaque écran
+- [Commandes CLI](/fr/docs/cli) - Découvrir toutes les commandes et options de `lody`
+- [Découvrir les worktrees](/fr/docs/worktrees) - Comprendre comment Lody isole les tâches
+- [Types d'environnements d'exécution CLI](/fr/docs/cli-runtimes) - Ajouter des environnements d'exécution du registre ACP ou un agent ACP personnalisé
+- [Accès mobile](/fr/docs/mobile) - Examiner et approuver des modifications depuis votre téléphone

@@ -1,0 +1,14 @@
+---
+title: "20260901-2"
+version: 0.89.2
+date: 2026-09-01
+description: "Se corrigieron problemas de navegación, restauración y renderizado en pestañas de sesión, y se redujo la latencia de entrada al cambiar rápidamente de sesión."
+---
+
+Versión 0.89.2
+
+### 🐛 Correcciones y mejoras
+
+- Se corrigió el comportamiento de las pestañas de sesión para que permanezcan en la conversación prevista y se recuperen correctamente cuando llegan datos asíncronos o sesiones hijas pendientes, se realizan cambios rápidos o se restauran sesiones.
+- Se redujo la latencia de entrada durante el cambio de sesión al agrupar la navegación rápida y mover el trabajo en segundo plano fuera de la ruta de entrada.
+- Se evitó que las relaciones padre-hijo mal formadas entre sesiones provocaran bucles de redirección y cierres inesperados del renderizador.

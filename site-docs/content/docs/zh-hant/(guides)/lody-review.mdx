@@ -1,0 +1,59 @@
+---
+title: "Lody Review"
+description: "使用 lody review 將 Agent 產生的程式碼審查轉換為可互動、可分享的 HTML 報告，無需登入 Lody。"
+---
+
+# Lody Review
+
+`lody review` 會將結構化的程式碼審查轉換為自包含的 HTML 報告。它會在本地端針對你的 Git 儲存庫執行，
+不需要 Lody 帳號，也無需啟動伺服器，直接透過 `file://` URL 開啟結果。
+
+## 建立審查報告
+
+最簡單的工作流程是請 Coding Agent 執行整個過程：
+
+```text
+使用 `npx lody review` 幫我審查 <pull-request-url>。
+```
+
+底層步驟如下：
+
+1. 輸出權威的審查格式：
+
+   ```bash
+   npx lody review prompt
+   ```
+
+2. 請 Agent 檢查目標分支或 Pull Request，並依照輸出的格式撰寫 `.review.md` 檔案。
+3. 渲染並開啟報告：
+
+   ```bash
+   npx lody review <name>.review.md
+   ```
+
+預設情況下，產生的 `.review.html` 會寫入系統暫存目錄，避免意外成為儲存庫的一部分。CLI 會輸出其絕對路徑，方便你重新開啟、移動或分享該檔案。
+
+## 報告內容
+
+報告會將相關的變更分組、渲染檔案 Diff、將審查發現連結至對應的程式碼行，並支援嚴重等級與審查清單。你也可以在閱讀報告時新增評論，並將其複製為 Markdown。
+
+## 使用需求
+
+- 在要審查的 Git 工作樹內執行此指令，或透過 `--repo <dir>` 指定目錄。
+- 審查中所引用的 Commit 必須存在於本地端。渲染 Pull Request 前，請先執行 Fetch 或 Checkout 取得對應分支。
+- `.review.md` 檔案會以唯讀模式依據本地儲存庫進行解析。
+- 先前匯出的 `.review.json`、`.review.json.gz` 或 `.review.json.br` 快照檔為自包含格式，無需 Git 即可渲染。
+
+首次渲染時可能會下載對應版本的 Review Viewer。Lody 會進行驗證並快取於本地端，以供後續使用。
+
+## 選項
+
+```bash
+npx lody review <file> --repo <dir>
+npx lody review <file> --output <report.html>
+npx lody review <file> --no-open
+```
+
+- `--repo` 指定用於解析 `.review.md` 的儲存庫。
+- `--output` 覆寫產生的 HTML 檔案路徑。
+- `--no-open` 只寫入報告檔案，不自動開啟瀏覽器。

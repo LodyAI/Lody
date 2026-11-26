@@ -23,7 +23,11 @@ const settingsStory = stylex.create({
     fontSize: 'var(--text-sm)',
     lineHeight: 'var(--text-sm--line-height)',
   },
-  divider: { borderBottomWidth:"1px",borderBottomStyle:"solid",borderBottomColor:"color-mix(in oklab,hsl(var(--border) / 1) 40%,transparent)" },
+  divider: {
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'color-mix(in oklab,hsl(var(--border) / 1) 40%,transparent)',
+  },
 });
 const phoneFrame = stylex.create({
   frame: {

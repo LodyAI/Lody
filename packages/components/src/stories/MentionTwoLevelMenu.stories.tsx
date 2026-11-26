@@ -1048,4 +1048,15 @@ export const AgentRoleOnSeveralMachines: Story = {
   },
 };
 
-const mentionSceneStyles = stylex.create({ input: { width: '100%', resize: 'none', borderWidth: 0, borderRadius: field.radiusMedium, backgroundColor: field.background, color: field.value, boxShadow: field.well, padding: 'calc(var(--spacing) * 2)' } });
+const mentionSceneStyles = stylex.create({
+  input: {
+    width: '100%',
+    resize: 'none',
+    borderWidth: 0,
+    borderRadius: field.radiusMedium,
+    backgroundColor: field.background,
+    color: field.value,
+    boxShadow: field.well,
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});

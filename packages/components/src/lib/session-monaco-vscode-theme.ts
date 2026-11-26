@@ -52,9 +52,7 @@ export function toMonacoThemeData(
   };
 }
 
-function vscodeTypeToMonacoBase(
-  type: LodyResolvedVSCodeTheme['type']
-): monaco.editor.BuiltinTheme {
+function vscodeTypeToMonacoBase(type: LodyResolvedVSCodeTheme['type']): monaco.editor.BuiltinTheme {
   switch (type) {
     case 'light':
       return 'vs';
@@ -71,8 +69,12 @@ function vscodeTypeToMonacoBase(
 function toMonacoRules(rule: TextMateTokenColorRule): monaco.editor.ITokenThemeRule[] {
   if (rule.scope === undefined) return [];
   const scopes = Array.isArray(rule.scope) ? rule.scope : splitScopeString(rule.scope);
-  const fg = rule.settings.foreground ? stripHash(normalizeHex(rule.settings.foreground)) : undefined;
-  const bg = rule.settings.background ? stripHash(normalizeHex(rule.settings.background)) : undefined;
+  const fg = rule.settings.foreground
+    ? stripHash(normalizeHex(rule.settings.foreground))
+    : undefined;
+  const bg = rule.settings.background
+    ? stripHash(normalizeHex(rule.settings.background))
+    : undefined;
   const fontStyle = rule.settings.fontStyle?.trim();
   return scopes
     .map((scope) => scope.trim())

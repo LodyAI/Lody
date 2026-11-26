@@ -905,12 +905,10 @@ function VisualAnnotationInspectorHarness() {
       const existingIds = new Set(current.map((reference) => reference.commentId));
       const nextReferences = stagedReferences
         .filter((reference) => !existingIds.has(reference.commentId))
-        .map(
-          (reference): VisualAnnotationReferenceInputBlock => ({
-            ...reference,
-            status: 'submitted',
-          })
-        );
+        .map((reference): VisualAnnotationReferenceInputBlock => ({
+          ...reference,
+          status: 'submitted',
+        }));
       return nextReferences.length > 0 ? [...nextReferences, ...current] : current;
     });
     setComments((current) =>
@@ -983,19 +981,18 @@ function VisualAnnotationInspectorHarness() {
         <section {...stylex.props(storyStyles.previewPanel)}>
           <div {...stylex.props(storyStyles.previewToolbar)}>
             <div>
-              <p {...stylex.props(storyStyles.eyebrow)}>
-                Iframe harness
-              </p>
-              <h2 {...stylex.props(storyStyles.panelTitle)}>
-                Live annotation preview
-              </h2>
+              <p {...stylex.props(storyStyles.eyebrow)}>Iframe harness</p>
+              <h2 {...stylex.props(storyStyles.panelTitle)}>Live annotation preview</h2>
             </div>
             <div {...stylex.props(storyStyles.deviceSwitcher)}>
               {devices.map((device) => (
                 <button
                   key={device.id}
                   type="button"
-                  {...stylex.props(storyStyles.deviceButton, deviceId === device.id ? storyStyles.selectedDevice : storyStyles.idleDevice)}
+                  {...stylex.props(
+                    storyStyles.deviceButton,
+                    deviceId === device.id ? storyStyles.selectedDevice : storyStyles.idleDevice
+                  )}
                   onClick={() => {
                     setDeviceId(device.id);
                     setIframeReady(false);
@@ -1045,9 +1042,7 @@ function VisualAnnotationInspectorHarness() {
         <aside {...stylex.props(storyStyles.controlsPanel)}>
           <div {...stylex.props(storyStyles.controlsHeading)}>
             <div>
-              <p {...stylex.props(storyStyles.eyebrow)}>
-                Parent controls
-              </p>
+              <p {...stylex.props(storyStyles.eyebrow)}>Parent controls</p>
               <h2 {...stylex.props(storyStyles.panelTitle)}>Annotation mode</h2>
             </div>
             <Button
@@ -1127,9 +1122,7 @@ function VisualAnnotationInspectorHarness() {
           <div {...stylex.props(storyStyles.inspectorPanel)}>
             <div {...stylex.props(storyStyles.sectionHeading)}>
               <h3 {...stylex.props(storyStyles.sectionTitle)}>Comments</h3>
-              <span {...stylex.props(storyStyles.pendingBadge)}>
-                {pendingCount} completed
-              </span>
+              <span {...stylex.props(storyStyles.pendingBadge)}>{pendingCount} completed</span>
             </div>
             <div {...stylex.props(storyStyles.commentsList)}>
               {comments.length > 0 ? (
@@ -1142,15 +1135,27 @@ function VisualAnnotationInspectorHarness() {
                       key={comment.id}
                       type="button"
                       onClick={() => setActiveCommentId(comment.id)}
-                      {...stylex.props(storyStyles.commentRow, activeCommentId === comment.id ? storyStyles.selectedComment : storyStyles.idleComment)}
+                      {...stylex.props(
+                        storyStyles.commentRow,
+                        activeCommentId === comment.id
+                          ? storyStyles.selectedComment
+                          : storyStyles.idleComment
+                      )}
                     >
                       <span
-                        {...stylex.props(storyStyles.statusDot, isSubmitted ? storyStyles.submittedDot : isStaged ? storyStyles.stagedDot : isResolved ? storyStyles.resolvedDot : storyStyles.pendingDot)}
+                        {...stylex.props(
+                          storyStyles.statusDot,
+                          isSubmitted
+                            ? storyStyles.submittedDot
+                            : isStaged
+                              ? storyStyles.stagedDot
+                              : isResolved
+                                ? storyStyles.resolvedDot
+                                : storyStyles.pendingDot
+                        )}
                       />
                       <span {...stylex.props(storyStyles.commentText)}>
-                        <span {...stylex.props(storyStyles.commentBody)}>
-                          {comment.body}
-                        </span>
+                        <span {...stylex.props(storyStyles.commentBody)}>{comment.body}</span>
                         <span {...stylex.props(storyStyles.commentTarget)}>
                           {comment.anchor.target.tag}
                           {isSubmitted ? ' · submitted' : isStaged ? ' · staged' : ''}
@@ -1200,10 +1205,7 @@ function VisualAnnotationInspectorHarness() {
               <div {...stylex.props(storyStyles.draftStack)}>
                 <div {...stylex.props(storyStyles.referenceList)}>
                   {stagedReferences.map((reference) => (
-                    <div
-                      key={reference.commentId}
-                      {...stylex.props(storyStyles.referenceRow)}
-                    >
+                    <div key={reference.commentId} {...stylex.props(storyStyles.referenceRow)}>
                       <VisualAnnotationReferenceCard
                         reference={reference}
                         xstyle={storyStyles.referenceCard}
@@ -1246,21 +1248,17 @@ function VisualAnnotationInspectorHarness() {
           <div {...stylex.props(storyStyles.inspectorPanel)}>
             <div {...stylex.props(storyStyles.sectionHeading)}>
               <h3 {...stylex.props(storyStyles.sectionTitle)}>Conversation</h3>
-              <span {...stylex.props(storyStyles.sentBadge)}>
-                {sentReferences.length} sent
-              </span>
+              <span {...stylex.props(storyStyles.sentBadge)}>{sentReferences.length} sent</span>
             </div>
             {sentReferences.length > 0 ? (
               <div {...stylex.props(storyStyles.referenceList)}>
                 {sentReferences.map((reference) => (
-                  <div
-                    key={reference.commentId}
-                    {...stylex.props(storyStyles.sentReference)}
-                  >
-                    <p {...stylex.props(storyStyles.referenceLabel)}>
-                      Session input block
-                    </p>
-                    <VisualAnnotationReferenceCard reference={reference} xstyle={storyStyles.referenceCard} />
+                  <div key={reference.commentId} {...stylex.props(storyStyles.sentReference)}>
+                    <p {...stylex.props(storyStyles.referenceLabel)}>Session input block</p>
+                    <VisualAnnotationReferenceCard
+                      reference={reference}
+                      xstyle={storyStyles.referenceCard}
+                    />
                   </div>
                 ))}
               </div>

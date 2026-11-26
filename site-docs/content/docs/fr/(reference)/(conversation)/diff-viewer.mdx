@@ -1,0 +1,57 @@
+---
+title: "Visionneuse de diffs"
+description: "Examinez en temps réel les modifications de fichiers effectuées par l'agent de code, avec les diffs par tour, le nombre de lignes modifiées, les onglets de fichiers et les sections inchangées dépliables."
+---
+
+# Visionneuse de diffs
+
+Lody synchronise en temps réel les mises à jour de fichiers effectuées par l'agent de code après chaque tour de conversation.
+
+## Diffs du tour en cours
+
+Lorsque vous demandez à l'IA d'éditer du code et de modifier des fichiers, Lody compare l'état des
+fichiers avant et après ce tour de conversation. À la fin du tour, il affiche toutes les
+modifications de fichiers ainsi que le nombre de lignes modifiées sous la bulle de message de
+l'agent de code.
+
+<ConversationDiffPreview locale="fr" />
+
+Cliquez sur n'importe quel fichier pour ouvrir un onglet de diff et accéder directement à ce
+fichier. Le premier clic peut prendre un peu plus de temps pendant la synchronisation et le
+chargement des données.
+
+<DiffViewerPreview locale="fr" />
+
+Vous pouvez également cliquer sur le bouton de dépliage dans le panneau pour afficher les sections
+inchangées du fichier.
+
+## Commentaires sur les lignes
+
+Survolez une ligne de diff pouvant être commentée et cliquez sur le `+` à côté du numéro de ligne
+pour ajouter un commentaire Markdown. Sur mobile, appuyez sur une ligne pouvant être commentée pour
+ouvrir la zone de commentaire. Les commentaires prennent en charge les réponses en fil de
+discussion, le marquage comme résolu/non résolu et le renvoi du fil dans le chat pour que l'agent
+le traite.
+
+Si la session est liée à une PR GitHub, les commentaires Lody peuvent être synchronisés en tant que
+commentaires sur les lignes d'une revue de PR GitHub. Les fils de revue GitHub existants
+apparaissent également dans le diff Lody afin que vous puissiez répondre en contexte.
+
+Consultez [Commentaires de diff](/fr/docs/diff-comments) pour découvrir l'ensemble du flux de travail.
+
+## Diffs sur l'ensemble de la conversation
+
+En plus des modifications par tour, vous pouvez cliquer sur le bouton permettant d'ouvrir la barre
+latérale dans le coin supérieur droit de l'interface de chat afin d'afficher la barre latérale
+Fichiers et modifications.
+
+Dans l'onglet `Changes`, vous pouvez consulter toutes les modifications de fichiers de la
+conversation en cours.
+
+## Revue à distance
+
+Lorsque la machine de la session est en ligne, les appareils distants peuvent ouvrir les fichiers
+modifiés et les diffs via le même fournisseur de fichiers de session que celui utilisé par
+l'interface de bureau. Si un diff ou un fichier est encore en cours de synchronisation, Lody affiche
+l'état actuel (indisponible ou en cours de chargement) au lieu de deviner à partir du dernier
+instantané de l'espace de travail.

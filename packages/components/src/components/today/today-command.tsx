@@ -34,9 +34,7 @@ export function TodayCommandPlaceholder() {
   );
   useEffect(() => {
     if (!isElectronRenderer() || isAuxiliaryWindow()) return;
-    void getIpcServices()
-      ?.app.syncTodayShortcutState({ enabled, workspace })
-      .catch(console.error);
+    void getIpcServices()?.app.syncTodayShortcutState({ enabled, workspace }).catch(console.error);
   }, [enabled, workspace]);
   return null;
 }

@@ -1,0 +1,41 @@
+---
+title: "Liste des fichiers"
+description: "Parcourez les fichiers de projet et de session, ouvrez les fichiers modifiés, recherchez dans les fichiers texte, prévisualisez le Markdown et modifiez des fichiers collaboratifs en temps réel depuis Lody."
+---
+
+# Liste des fichiers
+
+Lody propose deux vues de fichiers :
+
+- Les **fichiers de projet** affichent un projet local ou un dépôt GitHub sans nécessiter de session.
+- Les **fichiers de session** affichent le worktree de la session en cours, y compris les fichiers modifiés par l'agent.
+
+## Parcourir les fichiers de projet
+
+Sur mobile, ouvrez un projet depuis l'onglet **Projets**, puis passez à **Fichiers**. Vous pouvez explorer les dossiers et ouvrir des fichiers texte directement depuis la vue du projet. Cela fonctionne aussi bien pour les projets locaux que pour les dépôts GitHub, lorsque la machine propriétaire ou le fournisseur du dépôt est disponible.
+
+La navigation dans les fichiers de projet est utile lorsque vous souhaitez inspecter un dépôt avant de démarrer une nouvelle conversation, ou lorsque vous devez consulter un fichier loin de votre ordinateur.
+
+## Parcourir les fichiers de session
+
+Cliquez sur le bouton de déploiement de la barre latérale dans le coin supérieur droit de l'interface de discussion pour ouvrir la barre latérale Fichiers et modifications.
+
+Dans l'onglet `Files`, vous pouvez afficher la liste complète des fichiers de la conversation en cours. Les fichiers modifiés dans la conversation en cours sont mis en surbrillance afin d'être plus faciles à repérer.
+
+<SessionFilesPreview locale="fr" />
+
+Cliquez sur un fichier texte pour ouvrir un aperçu du fichier dans la session. Les lignes longues passent automatiquement à la ligne, ce qui rend les journaux, les fichiers générés et les fichiers source compacts plus faciles à lire dans le volet d'aperçu.
+
+## Ouverture rapide et recherche
+
+Depuis une visionneuse de fichiers de session, utilisez le champ de recherche de fichiers pour trouver des fichiers indexés et en ouvrir un sans faire défiler l'arborescence. Lorsqu'un fichier texte est ouvert, cliquez sur l'icône de recherche dans la barre d'outils du fichier pour ouvrir la recherche dans le fichier.
+
+## Aperçu Markdown
+
+Les fichiers Markdown s'ouvrent par défaut en mode source. Cliquez sur l'icône d'œil dans la barre d'outils du fichier pour passer à l'aperçu mis en forme ; cliquez à nouveau dessus pour revenir au code source. Le survol de l'icône permet d'afficher un aperçu rapide sans quitter l'éditeur.
+
+## Édition en temps réel
+
+Lorsqu'un fichier de session s'appuie sur un fournisseur collaboratif en direct, qu'il s'agit d'un fichier texte et que votre rôle dispose d'un accès en écriture, la visionneuse de fichiers devient modifiable. Les modifications sont enregistrées dans le worktree de la session et synchronisées avec les collaborateurs en temps réel.
+
+Si un fichier est en lecture seule, historique, trop volumineux, binaire, ou si la machine hôte est hors ligne, Lody maintient la visionneuse en lecture seule et affiche l'état de disponibilité actuel dans la barre d'état du fichier.

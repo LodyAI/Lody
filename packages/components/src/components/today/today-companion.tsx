@@ -20,15 +20,22 @@ export function TodayCompanion({
   const [target, setTarget] = useState<TodayViewTarget>(initialTarget);
   const navigate = (next: TodayViewTarget) => {
     setTarget(next);
-    void getIpcServices()?.app.updateTodayCompanion(name, {
-      type: 'target', target: { workspace: initialTarget.workspace, member: next.member, date: next.date }
-    }).catch(console.error);
+    void getIpcServices()
+      ?.app.updateTodayCompanion(name, {
+        type: 'target',
+        target: { workspace: initialTarget.workspace, member: next.member, date: next.date },
+      })
+      .catch(console.error);
   };
   const [pinned, setPinned] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  useEffect(() => onIpcEvent('app.todayCompanionFullscreen', (event) => {
-    if (event.name === name) setFullscreen(event.fullscreen);
-  }), [name]);
+  useEffect(
+    () =>
+      onIpcEvent('app.todayCompanionFullscreen', (event) => {
+        if (event.name === name) setFullscreen(event.fullscreen);
+      }),
+    [name]
+  );
   const ready = useRef(false);
   const document = popup.document;
   const show = useCallback(() => {
@@ -87,26 +94,28 @@ export function TodayCompanion({
 
   return (
     <ElectronFullscreenContext.Provider value={fullscreen}>
-    <ModalContainerProvider container={document.body}>
-      <PopupContainerProvider container={document.body}>
-        <div id="root">
-          <TodayWindowFrame>
-            <TodayView
-              target={target}
-              onNavigate={navigate}
-              standalone
-              ownerWindow={popup}
-              onDayReady={show}
-              pinned={pinned}
-              onTogglePin={() => {
-                void getIpcServices()?.app.updateTodayCompanion(name, { type: 'pin', pinned: !pinned })
-                  .then(setPinned).catch(console.error);
-              }}
-            />
-          </TodayWindowFrame>
-        </div>
-      </PopupContainerProvider>
-    </ModalContainerProvider>
+      <ModalContainerProvider container={document.body}>
+        <PopupContainerProvider container={document.body}>
+          <div id="root">
+            <TodayWindowFrame>
+              <TodayView
+                target={target}
+                onNavigate={navigate}
+                standalone
+                ownerWindow={popup}
+                onDayReady={show}
+                pinned={pinned}
+                onTogglePin={() => {
+                  void getIpcServices()
+                    ?.app.updateTodayCompanion(name, { type: 'pin', pinned: !pinned })
+                    .then(setPinned)
+                    .catch(console.error);
+                }}
+              />
+            </TodayWindowFrame>
+          </div>
+        </PopupContainerProvider>
+      </ModalContainerProvider>
     </ElectronFullscreenContext.Provider>
   );
 }

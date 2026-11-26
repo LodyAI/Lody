@@ -79,7 +79,9 @@ export const ApproverShowsCode: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(
-      canvas.getByRole('button', { name: /Show a code on this device instead|改为在这台设备上显示配对码/ })
+      canvas.getByRole('button', {
+        name: /Show a code on this device instead|改为在这台设备上显示配对码/,
+      })
     );
     await expect(await canvas.findByText(CODE)).toBeVisible();
   },

@@ -1,0 +1,31 @@
+---
+title: "20260810"
+version: 0.77.2
+date: 2026-08-10
+description: "Ajout du collage et du glisser-déposer de fichiers dans la discussion, de la réauthentification des Agents dans l'application, de diagnostics plus clairs et d'importantes améliorations de performances et de fiabilité."
+---
+
+Version 0.77.2
+
+### ✨ Nouveautés
+
+- Ajout de la prise en charge du collage de fichiers dans la zone de saisie et de leur téléversement par glisser-déposer.
+- Les images dans la discussion ainsi que les fichiers image autonomes peuvent désormais être ouverts, zoomés et déplacés. Sur ordinateur, ils peuvent également être copiés ou enregistrés depuis le menu contextuel.
+- Les Agents peuvent désormais être réauthentifiés directement dans Lody lorsque leur authentification expire, sans avoir à recréer la session.
+- Les erreurs d'Agent peuvent désormais être dépliées pour afficher tous les détails, avec copie en un clic des informations de diagnostic. Les détails des erreurs sont également entièrement accessibles sur mobile.
+- Amélioration des invitations à l'espace de travail, des approbations d'adhésion et des parcours de partage de ressources privées, avec des messages plus clairs lorsqu'aucune machine ni aucun projet n'est disponible pour le partage.
+- Lody ouvre désormais automatiquement un projet local après son importation.
+- Les paramètres de facturation sont désormais accessibles sur le web mobile.
+
+### 🐛 Corrections et améliorations
+
+- Réduction significative de la charge sur le thread principal lors du défilement de l'arborescence de fichiers ou du changement de session, rendant les grands projets, le basculement entre sessions et la réouverture de la barre latérale droite plus fluides.
+- Réduction de la pression sur le processeur et la mémoire liée à la synchronisation en arrière-plan, à la persistance et à la reconnexion. Une instabilité réseau ou un problème dans une seule salle de synchronisation ne déclenche plus de tempête de reconnexions à haute fréquence sur l'ensemble de l'espace de travail.
+- Correction d'échecs de synchronisation occasionnels et de retards dans les réponses des Agents après l'inactivité de sessions locales, ainsi que de la perte de branches lors de la restauration de sessions.
+- Correction des messages de pilotage qui pouvaient rester bloqués après avoir échoué à atteindre un Agent en cours d'exécution. Si un message ne peut pas être inséré immédiatement, il est désormais mis en file d'attente pour le prochain tour normal.
+- Correction des opérations Git utilisant les identifiants du mauvais compte dans les environnements multi-espaces de travail, ainsi que des sessions plus anciennes qui ne parvenaient pas à se restaurer lorsque leurs branches locale et distante portaient le même nom.
+- Le sélecteur du mode Plan fonctionne de nouveau sur mobile.
+- Correction du bouton de copie de message qui ne répondait pas.
+- Les téléphones continuent désormais d'utiliser la mise en page mobile en orientation paysage, et l'application web ne tente plus d'ouvrir l'application native sans interaction de l'utilisateur.
+- Correction d'erreurs de menus déroulants dans le tiroir mobile, de statistiques coupées, de noms d'Agents tronqués et de chemins de projets trop longs débordant des boîtes de dialogue.
+- La page de plantage de l'application affiche désormais une erreur lisible et vous permet de copier le rapport. Si la récupération échoue de manière répétée, vous pouvez effacer les données locales et vous reconnecter après confirmation de l'action.

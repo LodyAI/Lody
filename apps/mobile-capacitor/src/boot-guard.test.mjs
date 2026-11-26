@@ -201,6 +201,7 @@ void test('pre-React failure beacon excludes an error name carrying private meta
     '@capacitor/app': { App: {} },
     '@lody/components/lib/boot-failure': {
       usageSharingAllowed: () => sharing,
+      resolveBootFailureLanguage: () => 'en',
       renderBootFailure(_root, error) {
         visibleError = error;
       },

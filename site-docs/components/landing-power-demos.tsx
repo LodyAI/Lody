@@ -18,7 +18,7 @@ import {
   LANDING_PR_DEMO_DATA,
   LANDING_USAGE_MEMBERS,
 } from './landing-power-demo-data';
-import { POWER_DEMO_COPY, type PowerDemoCopy } from './landing-power-i18n';
+import { POWER_DEMO_COPY, type PowerDemoCopy, type PowerDemoLocale } from './landing-power-i18n';
 import { AnthropicIcon, OpenAIIcon } from './landing-replica/icons';
 import { PowerPrView } from './landing-replica/power-pr';
 import {
@@ -231,7 +231,7 @@ function PowerPrDemo({ copy }: { copy: PowerDemoCopy }) {
 
 export type PowerDemoId = 'usage' | 'pr';
 
-export function LandingPowerDemo({ id, locale }: { id: PowerDemoId; locale: 'en' | 'zh' }) {
+export function LandingPowerDemo({ id, locale }: { id: PowerDemoId; locale: PowerDemoLocale }) {
   const copy = POWER_DEMO_COPY[locale];
   return id === 'usage' ? <PowerUsageDemo copy={copy} /> : <PowerPrDemo copy={copy} />;
 }

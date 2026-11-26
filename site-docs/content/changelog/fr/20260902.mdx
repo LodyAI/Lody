@@ -1,0 +1,23 @@
+---
+title: "20260902"
+version: 0.89.4
+date: 2026-09-02
+description: "Amélioration de l'authentification ACP personnalisée, de la reprise lors de la configuration initiale sur ordinateur, de la stabilité des sessions, du signalement des échecs de mise à jour et du routage des aperçus en production."
+---
+
+Version 0.89.4
+
+### ✨ Nouveautés
+
+- Amélioration du flux d'authentification interactif pour les fournisseurs ACP personnalisés.
+- Amélioration de l'expérience au premier lancement sur ordinateur avec un statut plus clair et des parcours de reprise lorsqu'un problème survient pendant la configuration.
+
+### 🐛 Corrections et améliorations
+
+- Correction d'incohérences concernant les rôles d'agent, la configuration et l'état sur plusieurs tours de session.
+- Correction de la vue « All Changes » qui incluait du contenu provenant de l'extérieur du worktree local actuel.
+- Correction du programme de mise à jour sur ordinateur qui signalait un succès alors que l'installation avait échoué.
+- Amélioration des squelettes de chargement des listes de sessions et de tâches, et localisation des invites de réparation des pull requests.
+- Correction des connexions aux aperçus en production qui utilisaient le mauvais domaine d'environnement.
+- Mise à jour du runtime Claude Code intégré.
+- Merci aux contributeurs externes audichuang et ImSingee.

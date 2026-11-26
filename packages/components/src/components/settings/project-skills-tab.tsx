@@ -3,8 +3,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@/lib/posthog-context';
 import { formatDistanceToNow, type Locale } from 'date-fns';
-import { enUS } from 'date-fns/locale/en-US';
-import { zhCN } from 'date-fns/locale/zh-CN';
+import { getDateFnsLocale } from '@/lib/date-fns-locale';
 import { AlertCircle, Boxes, Info, PackageOpen, RefreshCw, Search, User } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@/ui/spinner';
@@ -207,7 +206,7 @@ export function ProjectSkillsView({
   const { t, i18n } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
-  const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const locale: Locale = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
   const totalSkills = useMemo(
     () => groups.reduce((sum, group) => sum + group.skills.length, 0),
     [groups]

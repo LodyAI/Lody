@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import semver from 'semver'
 import { parse as parseYaml } from 'yaml'
@@ -7,8 +7,15 @@ import { nightlyBuilderOverrides } from './release-profile.mjs'
 const MAX_RELEASE_NOTES_BYTES = 64 * 1024
 const CHANGELOG_LOCALES = {
   en: 'en',
-  zh_CN: 'zh'
+  zh_CN: 'zh',
+  zh_Hant: 'zh-hant',
+  ja: 'ja',
+  ko: 'ko',
+  es: 'es',
+  fr: 'fr',
+  ru: 'ru'
 }
+const REQUIRED_CHANGELOG_LOCALES = new Set(['en', 'zh_CN'])
 
 function requireNonEmptyString(value, field, file) {
   if (typeof value !== 'string' || value.trim().length === 0) {
@@ -85,8 +92,11 @@ function readChangelogIdentity(source) {
   }
 }
 
-function findSiteChangelogEntry({ repoRoot, localeDirectory, version }) {
+function findSiteChangelogEntry({ repoRoot, localeDirectory, version, required }) {
   const directory = path.join(repoRoot, 'site-docs', 'content', 'changelog', localeDirectory)
+  if (!required && !existsSync(directory)) {
+    return null
+  }
   const matches = readdirSync(directory, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.mdx'))
     .map((entry) => {
@@ -97,22 +107,28 @@ function findSiteChangelogEntry({ repoRoot, localeDirectory, version }) {
     .filter(({ identity }) => identity?.version === version && !identity.draft)
     .map(({ file, source }) => parseChangelogMdx(source, file))
 
-  if (matches.length !== 1) {
+  if (matches.length > 1 || (required && matches.length !== 1)) {
     throw new Error(
       `Expected exactly one published ${localeDirectory} changelog for ${version}, found ${matches.length}`
     )
   }
-  return matches[0]
+  return matches[0] ?? null
 }
 
 export function loadElectronUpdateReleaseInfo({ repoRoot, version }) {
   const contentVersion = validateChangelogVersion(version)
-  const entries = Object.fromEntries(
-    Object.entries(CHANGELOG_LOCALES).map(([locale, localeDirectory]) => [
-      locale,
-      findSiteChangelogEntry({ repoRoot, localeDirectory, version: contentVersion })
-    ])
-  )
+  const entries = {}
+  for (const [locale, localeDirectory] of Object.entries(CHANGELOG_LOCALES)) {
+    const entry = findSiteChangelogEntry({
+      repoRoot,
+      localeDirectory,
+      version: contentVersion,
+      required: REQUIRED_CHANGELOG_LOCALES.has(locale)
+    })
+    if (entry) {
+      entries[locale] = entry
+    }
+  }
 
   const releaseDates = new Set(
     Object.values(entries)

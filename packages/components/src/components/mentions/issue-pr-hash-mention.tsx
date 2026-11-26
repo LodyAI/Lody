@@ -465,7 +465,9 @@ export function useRepoIssuesAndPRs(
           if (isUnlinkedIssuePrRepoError(err)) {
             issuePrUnavailableKeys.add(key);
             setData((prev) =>
-              prev.entry ? { entry: prev.entry, status: 'ready' } : { entry: null, status: 'unavailable' }
+              prev.entry
+                ? { entry: prev.entry, status: 'ready' }
+                : { entry: null, status: 'unavailable' }
             );
             return;
           }
@@ -516,7 +518,9 @@ export function useRepoIssuesAndPRs(
         if (isUnlinkedIssuePrRepoError(err)) {
           issuePrUnavailableKeys.add(key);
           setData((prev) =>
-            prev.entry ? { entry: prev.entry, status: 'ready' } : { entry: null, status: 'unavailable' }
+            prev.entry
+              ? { entry: prev.entry, status: 'ready' }
+              : { entry: null, status: 'unavailable' }
           );
           return;
         }

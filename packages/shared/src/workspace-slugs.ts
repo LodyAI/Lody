@@ -2,7 +2,13 @@ export const WORKSPACE_SLUG_RESERVED_LANDING_PREFIXES = [
   'blog',
   'changelog',
   'docs',
+  'es',
+  'fr',
+  'ja',
+  'ko',
+  'ru',
   'zh',
+  'zh-hant',
 ] as const;
 
 export const WORKSPACE_SLUG_RESERVED_LANDING_EXACT_PATHS = [

@@ -284,10 +284,21 @@ export const HiddenByScope: Story = {
 const themeStyles = stylex.create({
   glyph: { height: '100%', width: '280px', flexShrink: 0 },
   row: { flex: '1 1 0%' },
-  hint: { padding: 'calc(var(--spacing) * 6)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint: {
+    padding: 'calc(var(--spacing) * 6)',
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   spaced: { marginTop: 'calc(var(--spacing) * 4)' },
   copy: { marginTop: 'calc(var(--spacing) * 2)', color: uiColors.label },
-  row2: { flex: '1 1 0%', padding: 'calc(var(--spacing) * 6)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  row2: {
+    flex: '1 1 0%',
+    padding: 'calc(var(--spacing) * 6)',
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
 });
 
 const previewStyles = stylex.create({

@@ -1,0 +1,44 @@
+---
+title: "20261123"
+version: 0.114.0
+date: 2026-11-23
+description: "Mémoire EverMe, plan Today, organisation des sessions et améliorations apportées aux aperçus, aux modèles et à la CLI."
+---
+
+Version 0.114.0
+
+### ✨ Nouveautés
+
+- EverMe est désormais disponible en tant que fournisseur de mémoire à l'échelle du compte. Installez-le en un clic ou configurez-le manuellement.
+- Le plan expérimental Today rassemble notes, tâches à faire et mentions de sessions sur une seule page. Transformez un élément en tâche, concentrez-vous sur une branche, étendez votre sélection par étapes ou modifiez plusieurs éléments à la fois. Sur ordinateur, ouvrez Today dans sa propre fenêtre à côté de votre session.
+- Organisez vos sessions dans Focus, Later et Settled au sein de la nouvelle vue Statut. Mettez une session en pause pendant une ou trois heures, ou faites-la glisser de nouveau dans Focus.
+- Regroupez les sessions épinglées et réorganisez-les manuellement. Choisissez quels groupes afficher sur chaque appareil ou démarrez une session directement dans un groupe. La barre latérale défile automatiquement lorsque vous faites glisser une session près du bord.
+- Appuyez sur ⌘/Ctrl + 1–9 pour basculer entre les neuf premières sessions visibles. Dépliez les listes plus longues page par page.
+- Associez ou dissociez une PR GitHub à une session, confiez une PR associée à Auto delivery et consultez les retours de fusion dans la barre latérale.
+- Ouvrez le répertoire de travail d'une session dans le Finder ou l'Explorateur de fichiers depuis son menu. Cliquez sur une URL dans le terminal avec la touche de modification pour l'ouvrir dans votre navigateur.
+- Prévisualisez les pièces jointes dans le panneau latéral de la session et ajustez la vitesse de lecture des vidéos.
+- Appuyez sur Flèche haut ou Flèche bas dans une zone de saisie vide pour rappeler les messages envoyés. Personnalisez les raccourcis pour la recherche de modèle, l'effort de réflexion et le menu des pièces jointes.
+- Codex ajoute une option de vitesse Ultrafast. Vous pouvez désormais vous connecter à Antigravity à distance depuis Lody.
+- Dans les paramètres de Lody Agent, consultez et actualisez les modèles disponibles depuis un point de terminaison personnalisé, et définissez le modèle par défaut, l'effort de réflexion et le niveau d'autonomie pour les nouvelles sessions. Les éditeurs de Prompt et de Rôle d'agent ont également été repensés.
+- Laissez Lody exécuter une commande longue en arrière-plan. Lorsqu'elle se termine, la session reçoit le résultat et poursuit son exécution. Les éditeurs de session peuvent également gérer les automatisations sur les machines partagées.
+- Exportez et importez des espaces de travail depuis Paramètres → Données sur ordinateur ou depuis la CLI. Les membres de l'espace de travail de destination disposent d'un accès en lecture seule au contenu importé depuis un autre espace de travail.
+
+### 🐛 Correctifs et améliorations
+
+- Les archives s'ouvrent désormais sous forme d'une liste unique, vous permettant de parcourir les anciennes sessions sans avoir à déplier de groupes.
+- La zone de saisie respecte la taille de police de votre interface. Les raccourcis de prompt fonctionnent également lors de la modification d'un message envoyé.
+- Cliquez sur une mention de session dans un message envoyé pour ouvrir cette session. Les liens Markdown vers des sessions de l'espace de travail actif s'ouvrent également dans Lody.
+- Les sous-menus de la zone de saisie restent à l'écran dans les fenêtres étroites. Le menu de mention masque les catégories Issue et PR pour les projets sans dépôt GitHub associé.
+- Les fenêtres en arrière-plan ne marquent plus les sessions comme lues de manière inattendue. La réorganisation de Focus préserve également l'état non lu d'une session qui vient de revenir de Later.
+- Les fenêtres ouvertes conservent leur propre vue de barre latérale lorsque vous réduisez un groupe ou modifiez un filtre dans une autre fenêtre.
+- L'arrêt d'un envoi conserve les messages en file d'attente sous forme de brouillons que vous pouvez modifier et envoyer vous-même. Un simple « continue » reprend un tour interrompu par un redémarrage.
+- Correction d'un problème entraînant la perte de sessions nouvellement créées après un plantage et l'absence de certains fichiers dans la liste des modifications de l'espace de travail.
+- Les aperçus restent ouverts lorsque vous quittez une session puis y revenez. Correction des aperçus HTML locaux volumineux et des ressources ou redirections de projet qui ne se chargeaient pas dans les aperçus.
+- Les recherches de fichiers à distance s'exécutent sur la machine hébergeant les fichiers. Les branches GitHub se chargent page par page pour réduire le temps d'attente dans les grands projets.
+- Correction des menus de commandes et de compétences vides dans Antigravity, ainsi que des sessions qui restaient affichées comme actives après la fin des tâches en arrière-plan.
+- Correction d'un problème empêchant le chargement complet du catalogue de modèles Magpie lorsqu'un modèle fournissait des valeurs personnalisées d'effort de raisonnement ou une longue liste de types d'entrée.
+- Les connexions d'agent, les requêtes d'utilisation de Claude, les connexions de l'application de bureau et les automatisations utilisent votre proxy configuré. Vous pouvez également poursuivre la connexion à l'application de bureau dans votre navigateur.
+- Correction de la commande lody indisponible dans le terminal après une installation autonome. Une réinstallation explicite active désormais la nouvelle version du daemon installée.
+- Le démarrage de l'application de bureau est plus rapide, le daemon CLI consomme moins de mémoire et les sessions longues chargent leur historique plus efficacement lors de leur réouverture.
+
+Merci à YangtzeSeventh, Kina, samzong, biny, Astro-Han, peanuts022, Jackey-Z et songtianlun.

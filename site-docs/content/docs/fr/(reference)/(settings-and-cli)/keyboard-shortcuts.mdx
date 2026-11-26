@@ -1,0 +1,55 @@
+---
+title: "Palette de commandes et raccourcis clavier"
+description: "Utilisez la palette de commandes de Lody, personnalisez les raccourcis de l'application et du système, et ouvrez Session rapide sans quitter le clavier."
+---
+
+# Palette de commandes et raccourcis clavier
+
+Lody propose une palette de commandes pour rechercher des actions et des sessions, ainsi qu'une page de paramètres permettant de personnaliser les raccourcis clavier de l'application et du système.
+
+## Ouvrir la palette de commandes
+
+Appuyez sur `Cmd+K` sous macOS ou sur `Ctrl+K` sur les autres plateformes. `Cmd/Ctrl+Shift+P` permet également de l'ouvrir.
+
+La palette :
+
+- recherche les commandes disponibles dans la vue actuelle
+- retrouve les sessions par titre, libellé de projet/dépôt ou nom de branche afin que vous puissiez changer de session sans passer par la barre latérale
+- affiche le raccourci clavier actif à côté de chaque commande
+- prend en charge la navigation avec les touches fléchées, `Enter` pour exécuter et `Escape` pour fermer
+
+Les commandes qui ne s'appliquent pas à l'écran actuel sont masquées.
+
+L'entrée **Search** de la barre latérale ouvre cette même palette. La recherche de navigation entre sessions ne porte pas sur le texte des conversations ; utilisez la [Recherche dans la conversation](/fr/docs/session-search) pour trouver du texte dans la conversation en cours.
+
+## Personnaliser les raccourcis
+
+Ouvrez **Settings** -> **Keyboard**. Cliquez sur la ligne d'un raccourci, puis appuyez sur la nouvelle combinaison de touches.
+
+Vous pouvez :
+
+- réattribuer une commande
+- supprimer son raccourci
+- attribuer un raccourci à une commande qui n'en a pas
+- réinitialiser tous les raccourcis de l'application à leurs valeurs par défaut
+- visualiser et rejeter les conflits avant d'enregistrer
+
+Les modifications apportées aux raccourcis de l'application sont enregistrées sur l'appareil actuel et ne sont pas synchronisées avec les autres appareils. Certaines combinaisons réservées par le navigateur ne peuvent pas être interceptées dans l'application web.
+
+## Changer d'onglet de session
+
+Dans l'application de bureau, les raccourcis `Cmd/Ctrl+1` à `Cmd/Ctrl+8` permettent d'accéder directement à l'onglet de conversation correspondant, et `Cmd/Ctrl+9` affiche le dernier onglet — selon la même convention que celle utilisée par les navigateurs pour leur barre d'onglets. `Cmd/Ctrl+Shift+,` et `Cmd/Ctrl+Shift+.` permettent de passer respectivement à l'onglet précédent et à l'onglet suivant, tandis que `Cmd/Ctrl+T` ouvre un nouvel onglet.
+
+## Rappeler les messages envoyés
+
+Dans l'éditeur d'une conversation, appuyez sur `Up` lorsqu'il est vide pour afficher le dernier message que vous avez envoyé dans cette conversation. Continuez d'appuyer sur `Up` pour remonter plus loin et sur `Down` pour avancer ; appuyer sur `Down` après votre message le plus récent vide de nouveau l'éditeur. Seul le texte est rétabli, sans les pièces jointes ni les commentaires référencés.
+
+Saisir du texte, appuyer sur `Left`/`Right` ou cliquer dans le texte permet de revenir au mode d'édition normal, avec le texte rappelé comme brouillon. Lorsque l'éditeur contient déjà du texte, `Up` et `Down` déplacent le curseur comme d'habitude.
+
+## Raccourcis globaux de l'application de bureau
+
+L'application de bureau dispose également de raccourcis à l'échelle du système qui fonctionnent même lorsque Lody n'a pas le focus. Ils figurent dans la section **Global shortcuts** et peuvent être réattribués séparément.
+
+Le raccourci par défaut de Session rapide est `Cmd/Ctrl+Shift+N`. Il ouvre ou masque un petit éditeur autonome afin que vous puissiez démarrer une session sans ramener la fenêtre principale de Lody au premier plan.
+
+Les raccourcis globaux doivent inclure `Command`, `Control` ou `Alt`. Si le système d'exploitation ou une autre application utilise déjà une combinaison, Lody conserve le raccourci précédent et signale le conflit.

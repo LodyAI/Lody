@@ -295,10 +295,7 @@ function hasDisallowedQueryEncoding(rawQuery: string): boolean {
   return false;
 }
 
-function readBoundedParams(
-  url: URL,
-  allowedKeys: readonly string[]
-): Map<string, string> | null {
+function readBoundedParams(url: URL, allowedKeys: readonly string[]): Map<string, string> | null {
   const allowed = new Set(allowedKeys);
   const out = new Map<string, string>();
   for (const key of url.searchParams.keys()) {
@@ -446,9 +443,7 @@ export function buildAppActionLink(target: AppActionLink): string {
 
 export function parseAppActionLink(raw: string): AppActionLink | null {
   if (raw.length > 8192 || /[\s\\#]/u.test(raw)) return null;
-  if (
-    !/^[a-zA-Z.-]+:\/\/(?:schedules|settings\/[a-z-]+)(?:\?[^#]*)?$/u.test(raw)
-  ) {
+  if (!/^[a-zA-Z.-]+:\/\/(?:schedules|settings\/[a-z-]+)(?:\?[^#]*)?$/u.test(raw)) {
     return null;
   }
   const qIndex = raw.indexOf('?');

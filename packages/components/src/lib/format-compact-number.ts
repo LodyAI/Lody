@@ -6,10 +6,7 @@
  * runtime default and is what previously leaked Chinese units into English UI.
  */
 
-export function formatCompactNumber(
-  value: number,
-  locale: string | null | undefined
-): string {
+export function formatCompactNumber(value: number, locale: string | null | undefined): string {
   if (!Number.isFinite(value)) return '0';
   return new Intl.NumberFormat(locale ?? 'en', {
     notation: 'compact',
@@ -32,8 +29,7 @@ export function formatUsdAmount(
     ...(options?.minimumFractionDigits !== undefined
       ? { minimumFractionDigits: options.minimumFractionDigits }
       : {}),
-    maximumFractionDigits:
-      options?.maximumFractionDigits ?? (abs > 0 && abs < 1 ? 3 : 2),
+    maximumFractionDigits: options?.maximumFractionDigits ?? (abs > 0 && abs < 1 ? 3 : 2),
   }).format(safeValue);
 }
 

@@ -1,0 +1,105 @@
+---
+title: "Tareas programadas"
+description: "Haz que tu máquina inicie un chat con un agente elegido según una programación o bajo demanda, o deja que un agente proponga una tarea desde la conversación."
+---
+
+# Tareas programadas
+
+Una **tarea programada** envía un prompt a las horas que elijas, con el agente, modelo, modo de permisos y proyecto que hayas seleccionado. Cada ejecución es un chat normal: ábrelo, sigue conversando o deténlo cuando quieras.
+
+Usos habituales: resumir los commits fusionados de ayer cada mañana, revisar avisos de seguridad de dependencias todos los días laborables, redactar el informe semanal los viernes o guardar una tarea manual que ejecutas con un clic cuando la necesitas.
+
+## Dónde se ejecuta
+
+Las tareas programadas no se ejecutan en la nube. **Una de tus propias máquinas** es propietaria de cada una:
+
+- Esa máquina ejecuta la [CLI de Lody](/es/docs/cli) (la aplicación de escritorio la inicia por ti), en una versión compatible con tareas programadas.
+- Las horas se interpretan según la **zona horaria local de esa máquina**; no hay selector de zona horaria. «Todos los días a las 9:00» significa las 9:00 en esa máquina.
+- Si la máquina está apagada, en suspensión o la CLI no se está ejecutando, no se ejecutará nada a esa hora. Consulta [ejecuciones omitidas](#ejecuciones-omitidas) para saber qué ocurre después.
+
+Puedes ver y gestionar las tareas programadas en la web, el escritorio y el teléfono, pero solo la máquina propietaria las ejecuta.
+
+## Programar un mensaje desde una conversación
+
+En una conversación existente, selecciona **+ → Programar envío…**, elige una fecha y hora futuras según el reloj de la máquina de destino y luego pulsa el botón de envío programado del redactor. Esta entrada envía el mensaje una sola vez y no está disponible en la página de nuevo chat.
+
+El texto, las imágenes, los archivos y las referencias se guardan juntos una vez que los adjuntos se preparan correctamente. La barra de información conserva un icono de mensaje programado. Haz clic en él para ver la hora de envío y la píldora Editar. Editar abre los controles de fecha y hora, con preajustes de 30 minutos, 1 hora y 5 horas; Quitar hora vuelve al envío normal sin perder el borrador. Los guardados fallidos también conservan el borrador.
+
+El resumen del mensaje pendiente encima del redactor abre Detalles de programación, donde puedes editar el mensaje y la hora o cancelarlo. La cancelación espera la confirmación de la máquina propietaria; si el envío ya se confirmó, el mensaje aparece como enviado. Enviado significa que se entregó a la conversación, independientemente del resultado final del agente.
+
+Usa tu propia máquina con una CLI compatible con mensajes completos. Si está en suspensión o sin conexión a la hora solicitada, envía una única ejecución de recuperación al volver. Si la conversación está ocupada, primero termina su trabajo actual. La configuración de modelo, permisos, MCP y Rol queda congelada en el momento de la aceptación.
+
+## Continuar después del restablecimiento de cuota de Claude
+
+Cuando Claude informa un límite de sesión y se agota su cuota de 5 horas, aparece el acceso directo **Enviar continuar tras el restablecimiento** encima del redactor si hay una hora de restablecimiento futura disponible. Haz clic una vez para programar el mensaje literal `continue` un segundo después de ese restablecimiento, en esta conversación, usando la configuración de ejecución del turno fallido. Tu borrador actual en el redactor permanece intacto.
+
+El acceso directo usa la marca de tiempo de cuota del proveedor, no el texto del reloj en el mensaje de error. No infiere fechas ni trata un límite semanal como un límite de 5 horas. Una cuota de mayor duración que siga agotada también impide que aparezca el acceso directo. Después de guardar, **Ver continuación programada** abre los detalles del mensaje existente para hacer cambios o cancelarlo. No se programa ninguna continuación hasta que hagas clic.
+
+## Crear una tarea programada
+
+Abre **Programaciones** en la barra lateral y selecciona **Nueva programación** (o busca "New Schedule" en la paleta de comandos). El editor tiene la misma forma que el redactor:
+
+1. **Nombre y prompt**: lo que el agente debe hacer en cada ejecución.
+2. **Agente, modelo y permisos**: los mismos controles que en la parte inferior del redactor. Una tarea nueva comienza con la máquina y el agente que usaste por última vez en la pantalla inicial del chat, junto con la configuración recordada de ese agente. Los valores predeterminados mostrados están listos para usarse; no se requiere seleccionar permisos adicionales. Proveedores como Pi, que no tienen selector de permisos, usan su propia política de ejecución.
+3. **Máquina, proyecto, worktree**: el proyecto es opcional; sin uno, cada ejecución es un chat simple con el agente y sin ningún repositorio descargado.
+4. **Enviar a** y **Disparador**: consulta los apartados siguientes.
+
+Todo lo que falte aparece marcado con un signo de exclamación junto al control que lo corrige. Al guardar vuelves a la lista.
+
+## Disparadores
+
+- **Según una programación**: elige una regla en **Repetir** y luego la hora:
+  - todos los días, todos los días laborables, todas las semanas (elige los días), todos los meses (elige las fechas)
+  - cada pocas horas, cada pocos minutos
+  - una vez (una fecha y una hora)
+- **Manual**: nunca se ejecuta por sí sola; se ejecuta únicamente cuando pulsas **Ejecutar ahora**. Útil para un prompt que reutilizas.
+
+El editor muestra la lista de **Próximas ejecuciones** para que puedas comprobar la regla. Las horas y las fechas se introducen manualmente.
+
+## A dónde van las ejecuciones
+
+- **Nuevo chat en cada ejecución** (predeterminado): cada ejecución inicia su propio chat.
+- **Un chat para esta tarea**: cada ejecución se añade al mismo chat, para tareas que se apoyan en el contexto anterior. El chat se crea en la primera ejecución; **Iniciar un chat nuevo** mueve las ejecuciones posteriores a uno nuevo.
+- **Un chat existente**: las ejecuciones se añaden a un chat que elijas. Se usa el agente de ese chat y no se elige ningún proyecto por separado.
+
+## Gestionar tareas programadas
+
+Cada fila de la lista muestra el nombre, la frecuencia, la próxima ejecución y con qué se ejecuta:
+
+- Las filas con horario tienen **Pausar** / **Reanudar** directamente en la fila; las filas manuales tienen **Ejecutar ahora**.
+- Haz clic derecho en una fila para abrirla, ejecutarla ahora, pausarla o reanudarla, abrir la **Última ejecución** o eliminarla (eliminar pide confirmación primero).
+- Al hacer clic en una fila se deslizan sus detalles desde la derecha: pausar, ejecutar ahora y eliminar en la parte superior, y el **Historial de ejecuciones** en la parte inferior. Arrastra el divisor para cambiar el tamaño; haz clic en un espacio vacío de la lista para cerrar.
+
+Solo el creador puede editar, pausar o eliminar una tarea programada. Pausar detiene las ejecuciones futuras; los chats que ya hayan comenzado deben cancelarse por separado.
+
+## Dejar que un agente la configure
+
+Dile al agente algo como «comprueba si hay actualizaciones de dependencias todos los días laborables a las 9:00» y redactará el nombre, el prompt y la regla, y luego mostrará una tarjeta **¿Programar esta tarea?** en el chat.
+
+- La tarjeta usa el agente, el modo de permisos, la máquina y el proyecto de la conversación actual, y enumera exactamente lo que se creará.
+- **Editar** te permite cambiar el nombre, el prompt y la regla horaria directamente en la tarjeta.
+- **Crear** la crea; **Ignorar** la descarta. Una vez creada, la tarjeta ya no puede editarse: modifica la tarea desde la página de Programaciones.
+
+Para modificar una tarea que ya tienes, pídele al agente que la cambie, por ejemplo «añade una regla al prompt de la revisión nocturna». Mostrará una tarjeta **¿Actualizar esta tarea programada?** con el nombre y la regla horaria actuales y propuestos, además de las líneas modificadas del prompt. **Aplicar** guarda el cambio e **Ignorar** lo descarta; todo lo que la tarjeta no muestra permanece tal como está. Si editas la tarea después de la propuesta, la tarjeta deja de ser aplicable: pide al agente una nueva propuesta.
+
+Un agente solo puede proponer una tarea programada o un cambio en una; nunca puede crear ni modificar una por sí mismo.
+
+## Ejecuciones omitidas
+
+Si la máquina estaba sin conexión a la hora programada, la tarea se ejecuta **una vez** cuando vuelve a estar en línea, correspondiente a la hora omitida más reciente, no una vez por cada franja omitida.
+
+Si la ejecución anterior sigue en curso cuando llega la hora de la siguiente, la nueva ejecución espera y comienza en cuanto termina la anterior; como máximo queda una ejecución en espera.
+
+## Preguntas frecuentes
+
+### ¿Por qué una tarea muestra "Waiting for the schedule configuration to finish syncing"?
+
+La máquina propietaria aún no ha recibido la configuración más reciente; durante unos segundos después de guardar, esto es normal. Si persiste, comprueba que la máquina esté en línea y que su CLI esté actualizada.
+
+### ¿Por qué no puedo elegir una máquina?
+
+Las tareas programadas solo se ejecutan en tus propias máquinas con una CLI compatible. Actualiza la CLI de Lody en esa máquina.
+
+### ¿Se despertará mi ordenador para ejecutar una tarea?
+
+No. La CLI comprueba y ejecuta las tareas mientras la máquina está activa; no despierta a un ordenador en suspensión. Al despertar ejecuta una única recuperación, tal como se describe en [ejecuciones omitidas](#ejecuciones-omitidas).

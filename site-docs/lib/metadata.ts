@@ -1,7 +1,20 @@
 import { absolutePageUrl, SITE_URL } from './site-url.mjs';
+import type { SiteBcp47Locale } from '../src/site-pages/shared.ts';
+
 const OG_IMAGE_PATH = '/og-image.png';
 const DEFAULT_DESCRIPTION =
   'Lody is a team workspace for running AI coding agents in parallel with isolated Git worktrees, live diff review, GitHub integration, and mobile access.';
+
+const OG_LOCALE_BY_BCP47: Record<SiteBcp47Locale, string> = {
+  'en-US': 'en_US',
+  'zh-CN': 'zh_CN',
+  'zh-Hant': 'zh_TW',
+  ja: 'ja_JP',
+  ko: 'ko_KR',
+  es: 'es_ES',
+  fr: 'fr_FR',
+  ru: 'ru_RU',
+};
 
 /** Append `| Lody` to a document head title unless it is already branded. */
 export function brandTitle(title: string, brand = 'Lody'): string {
@@ -12,7 +25,7 @@ export function brandTitle(title: string, brand = 'Lody'): string {
 }
 
 type Alternate = {
-  lang: 'en-US' | 'zh-CN';
+  lang: SiteBcp47Locale;
   path: string;
 };
 
@@ -40,7 +53,7 @@ export function pageHead(args: {
   title: string;
   description?: string;
   path: string;
-  locale: 'en-US' | 'zh-CN';
+  locale: SiteBcp47Locale;
   type?: 'website' | 'article';
   publishedTime?: string;
   image?: string;
@@ -66,7 +79,7 @@ export function pageHead(args: {
       { property: 'og:description', content: description },
       { property: 'og:url', content: canonical },
       { property: 'og:site_name', content: 'Lody' },
-      { property: 'og:locale', content: args.locale.replace('-', '_') },
+      { property: 'og:locale', content: OG_LOCALE_BY_BCP47[args.locale] },
       { property: 'og:type', content: args.type ?? 'website' },
       { property: 'og:image', content: image },
       ...(args.publishedTime

@@ -139,13 +139,14 @@ function RequestCards({
   workspaceId: WorkspaceId;
   session: SessionMeta;
 }) {
-  const { data: requests, error, retry } = useCloudQueryState(
-    cloudOperations.sessionSharing.listRequests,
-    {
-      workspaceId,
-      sourceSessionId: session.id,
-    }
-  );
+  const {
+    data: requests,
+    error,
+    retry,
+  } = useCloudQueryState(cloudOperations.sessionSharing.listRequests, {
+    workspaceId,
+    sourceSessionId: session.id,
+  });
   if (error) {
     return <RequestsUnavailable onRetry={retry} />;
   }

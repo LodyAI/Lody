@@ -88,13 +88,9 @@ export function CustomSnoozeDialog({
     >
       <Dialog.Content xstyle={themeStyles.glyph}>
         <Dialog.Header xstyle={themeStyles.copy}>
-          <Dialog.Title>
-            {t('sidebar.status.snooze.customTitle', 'Snooze until…')}
-          </Dialog.Title>
+          <Dialog.Title>{t('sidebar.status.snooze.customTitle', 'Snooze until…')}</Dialog.Title>
           {target?.title ? (
-            <Dialog.Description xstyle={themeStyles.hint}>
-              {target.title}
-            </Dialog.Description>
+            <Dialog.Description xstyle={themeStyles.hint}>{target.title}</Dialog.Description>
           ) : null}
         </Dialog.Header>
 
@@ -103,7 +99,9 @@ export function CustomSnoozeDialog({
             {quickOffsets.map((preset) => (
               <Button
                 key={preset.label}
-                type="button" variant="secondary" size="small"
+                type="button"
+                variant="secondary"
+                size="small"
                 onClick={() => setValue(toLocalDateTimeInputValue(preset.ms))}
               >
                 <Timer {...stylex.props(themeStyles.hint2)} aria-hidden="true" />
@@ -156,15 +154,54 @@ export function CustomSnoozeDialog({
 }
 
 const themeStyles = stylex.create({
-  glyph: { maxWidth: '24rem', gap: 0, overflow: 'hidden', padding: { 'default': 0, '@media (min-width: 640px)': 0 } },
-  copy: { paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4], paddingRight: { 'default': appSpace[12], '@media (min-width: 640px)': appSpace[12] }, textAlign: 'start' },
+  glyph: {
+    maxWidth: '24rem',
+    gap: 0,
+    overflow: 'hidden',
+    padding: { default: 0, '@media (min-width: 640px)': 0 },
+  },
+  copy: {
+    paddingInline: { default: appSpace[4], '@media (min-width: 640px)': appSpace[5] },
+    paddingBlock: appSpace[4],
+    paddingRight: { default: appSpace[12], '@media (min-width: 640px)': appSpace[12] },
+    textAlign: 'start',
+  },
   copy2: { fontSize: uiText.bodySize, lineHeight: uiText.bodyLeading },
-  hint: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  column: { display: 'flex', flexDirection: 'column', gap: appSpace[3], paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4] },
+  hint: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  column: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appSpace[3],
+    paddingInline: { default: appSpace[4], '@media (min-width: 640px)': appSpace[5] },
+    paddingBlock: appSpace[4],
+  },
   row: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: appSpace[1.5] },
   hint2: { height: appSpace[3], width: appSpace[3], color: uiColors.secondaryLabel },
-  row2: { display: 'flex', alignItems: 'center', gap: appSpace[1.5], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  row2: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: appSpace[1.5],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
   copy3: { height: appSpace[3.5], width: appSpace[3.5], color: uiColors.warning },
-  copy4: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.destructive },
-  panel: { backgroundColor: uiColors.secondaryBackground, paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[3] },
+  copy4: {
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.destructive,
+  },
+  panel: {
+    backgroundColor: uiColors.secondaryBackground,
+    paddingInline: { default: appSpace[4], '@media (min-width: 640px)': appSpace[5] },
+    paddingBlock: appSpace[3],
+  },
 });

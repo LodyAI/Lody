@@ -1,0 +1,49 @@
+---
+title: "Skills"
+description: "在 Lody 中瀏覽專案與機器全域 Skills、檢視 SKILL.md 指令，並在 Prompt 中使用 $ 提及。"
+---
+
+# Skills
+
+Lody 會從支援的專案目錄與機器全域 Skill 目錄中探索 Agent Skills。每個 Skill 是一個包含
+`SKILL.md` 檔案的目錄，內含可供 Coding Agent 重複使用的指令。
+
+Lody 中的 Skills 為唯讀功能：Lody 可以探索、顯示並參照 Skill，但不會安裝、編輯或同步 Skill 檔案。
+
+## 瀏覽 Skills
+
+在桌面端開啟 **設定** -> **專案**，選擇一個專案並切換至 **Skills** 分頁。
+
+在行動端開啟專案，切換至 **設定**，然後選擇 **專案技能**。
+
+清單會依來源路徑分組，並顯示可用的中繼資料，例如名稱、描述、版本、作者、範圍與符號連結狀態。
+開啟某個 Skill 即可閱讀其渲染後的 `SKILL.md` 內容。
+
+## 專案 Skills 與全域 Skills
+
+- **專案 Skills**：來自本機專案內受識別的 Skill 目錄，或 GitHub 專案預設分支中的 Skill 目錄。
+- **全域 Skills**：來自執行 Agent 的機器上目前作業系統使用者的受識別目錄，例如 `~/.codex/skills` 或
+  `~/.claude/skills`。
+
+全域 Skills 依附於特定機器。GitHub 專案設定會顯示儲存庫中的 Skills，而對話也可提供該
+Session 所選機器上相容的全域 Skills。
+
+## 提及 Skill
+
+1. 為對話選擇專案與 Agent Config。
+2. 在輸入框中輸入 `$`。
+3. 繼續輸入以依 Skill 名稱篩選。
+4. 使用方向鍵並按 `Enter`，或直接點擊該 Skill。
+
+輸入框會保留易讀的 `$skill-name` 標記。傳送訊息時，Lody 會將此參照展開為對應的 `SKILL.md` 路徑，
+讓所選 Agent 能夠載入並遵循其中的指令。
+
+當不同 Agent 對目錄的支援情況有所差異時，選單會根據目前的 ACP Provider 進行篩選。
+
+## 重新整理與離線行為
+
+Lody 會在目前裝置快取 Skill 中繼資料，並在背景重新整理。如果專案或所屬機器暫時無法連線，先前
+快取的結果仍可繼續顯示，並標記為過期或無法使用的狀態。
+
+只要符號連結仍位於允許的專案或使用者家目錄（Home）範圍內，系統即支援讀取；不安全或已失效的
+連結則會略過。

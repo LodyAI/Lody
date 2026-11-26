@@ -803,12 +803,12 @@ describe('single history writer', () => {
       })
     ).toBe('GPT-6.2 Sol');
     expect(formatAgentAuthorModelDisplayName({ id: providerModelId })).toBe('codex/gpt-6.2-sol');
-    expect(
-      formatAgentAuthorModelDisplayName({ id: providerModelId, name: providerModelId })
-    ).toBe('codex/gpt-6.2-sol');
-    expect(
-      formatAgentAuthorModelDisplayName({ id: 'openrouter/anthropic/claude-sonnet-4' })
-    ).toBe('openrouter/anthropic/claude-sonnet-4');
+    expect(formatAgentAuthorModelDisplayName({ id: providerModelId, name: providerModelId })).toBe(
+      'codex/gpt-6.2-sol'
+    );
+    expect(formatAgentAuthorModelDisplayName({ id: 'openrouter/anthropic/claude-sonnet-4' })).toBe(
+      'openrouter/anthropic/claude-sonnet-4'
+    );
     expect(
       formatAgentAuthorModelDisplayName({ id: 'openrouter/anthropic%2Fclaude-sonnet-4' })
     ).toBe('openrouter/anthropic/claude-sonnet-4');

@@ -1,4 +1,5 @@
 import type { ElectronUpdaterState } from '@lody/shared';
+import { normalizeSupportedLanguage } from '@lody/shared/language';
 
 /**
  * Sidebar update banner model. `downloading` and `downloaded` are the only
@@ -58,7 +59,8 @@ export function pickLocalizedReleaseNotes(
   if (!state) return null;
 
   const byLocale = state.releaseNotesByLocale;
-  const preferred = language?.toLowerCase().startsWith('zh') ? byLocale?.zh_CN : byLocale?.en;
+  const normalized = normalizeSupportedLanguage(language) ?? 'en';
+  const preferred = byLocale?.[normalized];
 
   for (const candidate of [preferred, byLocale?.en, state.releaseNotes]) {
     const trimmed = candidate?.trim();

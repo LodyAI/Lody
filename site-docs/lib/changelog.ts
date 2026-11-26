@@ -1,4 +1,6 @@
-export type ChangelogLocale = 'en' | 'zh';
+import { localeCode, localizeSitePath, type SiteLocale } from '@site/src/site-pages/shared';
+
+export type ChangelogLocale = SiteLocale;
 
 type ChangelogFrontmatter = {
   title: string;
@@ -68,7 +70,7 @@ export function normalizeChangelogEntries(
         locale,
         slug,
         date,
-        url: locale === 'zh' ? `/zh/changelog/${slug}` : `/changelog/${slug}`,
+        url: localizeSitePath(`/changelog/${slug}`, locale),
         docPath: entry.info.path,
       };
     })
@@ -85,9 +87,11 @@ export function formatChangelogDate(date: string | undefined, locale: ChangelogL
   if (!match) return date;
 
   const parsed = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
-  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+  const useLongMonth =
+    locale === 'zh' || locale === 'zh-hant' || locale === 'ja' || locale === 'ko';
+  return new Intl.DateTimeFormat(localeCode(locale), {
     year: 'numeric',
-    month: locale === 'zh' ? 'long' : 'short',
+    month: useLongMonth ? 'long' : 'short',
     day: 'numeric',
   }).format(parsed);
 }

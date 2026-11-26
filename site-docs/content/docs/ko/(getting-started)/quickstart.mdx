@@ -1,0 +1,130 @@
+---
+title: "빠른 시작"
+description: "데스크톱 앱이나 CLI에서 Lody를 설치 및 설정하고, GitHub를 연결한 뒤 에이전트를 구성하는 방법을 안내합니다."
+---
+
+import { MonitorDown, TabletSmartphone, Compass, SquareTerminal } from 'lucide-react';
+
+# 빠른 시작
+
+Lody는 macOS, Windows, Linux용 네이티브 앱, iOS 및 Android용 모바일 앱, 모든 브라우저, 그리고 원격 서버에서 실행할 수 있는 CLI까지 작업하는 모든 환경에서 실행됩니다.
+
+<Cards>
+  <Card href="/ko/download" title="데스크톱 앱 다운로드" icon={<MonitorDown />}>
+    macOS, Windows, Linux
+  </Card>
+  <Card href="/ko/download" title="모바일 앱 다운로드" icon={<TabletSmartphone />}>
+    iOS, Android
+  </Card>
+  <Card href="/login" icon={<Compass />} title="Lody 로그인">
+    브라우저에서 Lody 열기
+  </Card>
+  <Card href="#start-from-the-cli" icon={<SquareTerminal />} title="CLI 시작하기">
+    서버에서 Lody 사용하기
+  </Card>
+</Cards>
+
+서버에서 다음 명령어를 실행하세요:
+
+```bash
+npx lody daemon start
+```
+
+## 데스크톱 앱에서 시작하기
+
+- [다운로드 페이지](/ko/download)에서 사용 중인 플랫폼에 맞는 설치 파일을 다운로드하여 설치하세요.
+- macOS 또는 Linux에서는 [Homebrew](https://formulae.brew.sh/cask/lody)로도 설치할 수 있습니다:
+  ```bash
+  brew install --cask lody
+  ```
+- 처음 실행하면 회원가입 또는 로그인을 위해 브라우저가 열립니다.
+- 데스크톱 앱은 또한 머신에서 Lody의 로컬 [CLI 데몬](/ko/docs/cli#daemon-mode)을 시작합니다. CLI는 실제로 에이전트가 실행되는 프로세스입니다.
+
+## CLI에서 시작하기
+
+### 사전 요구 사항
+
+- Node.js 22.23.4+(22.x), 24.22.1+(24.x) 또는 26.12.1+(26.x), Node-API 10+ 지원
+
+### 시작
+
+```bash tab="데몬 (권장)"
+npx lody daemon start
+```
+
+```bash tab="포그라운드"
+npx lody login
+npx lody start
+```
+
+`npx lody daemon start`는 먼저 Lody에 연결할 수 있는지와 현재 머신이 로그인되어 있는지 확인합니다. 로그인되어 있지 않으면 그 자리에서 바로 디바이스 코드(device code) 흐름을 시작합니다. 브라우저에서 로그인 페이지를 열고(헤드리스 머신에서는 대신 링크를 출력합니다) 로그인을 완료할 때까지 기다린 다음 백그라운드로 전환됩니다. 원격 머신을 연결할 때도 동일한 방식을 사용합니다. 서버, 클라우드 VM 또는 다른 워크스테이션에서 SSH를 통해 이 명령어를 실행하면 해당 머신이 워크스페이스에 표시됩니다.
+
+데몬은 CLI가 예기치 않게 종료되더라도 다시 실행되도록 복구합니다. 브라우저에 전혀 접근할 수 없는 환경이라면 `npx lody daemon start --auth <cli_token>`으로 직접 시작하세요. `cli_token`은 데스크톱 앱의 **Settings** -> **Account** -> **CLI Token**에서 확인하고 생성할 수 있습니다. 로그인을 별도 단계로 진행하고 싶다면 `npx lody login`도 계속 사용할 수 있습니다.
+
+<Callout title="데스크톱 앱을 순수 원격 제어용으로 사용하기">
+데스크톱 앱은 이 컴퓨터에서 에이전트를 실행할 수 있도록 번들된 로컬 CLI를 기본적으로 시작합니다. 다른 머신에 있는 에이전트만 제어하려면 **Settings** -> **General** -> **Startup**을 열고 **Run local agent**를 끄세요.
+
+설정을 끄면 데스크톱 앱은 해당 CLI 관리를 중지하고 다음 실행 시에도 꺼진 상태를 유지합니다. 다른 머신에서 실행 중인 에이전트는 영향을 받지 않습니다.
+
+</Callout>
+
+## 프로젝트 추가하기
+
+### 로컬 프로젝트 추가하기
+
+<Tabs items={['데스크톱', '모바일', 'CLI']}>
+<Tab value="데스크톱">
+**Settings** -> **Projects** 오른쪽 상단의 버튼을 사용하세요. 원하는 머신을 선택하면 Lody가 해당 머신의 디렉터리 목록을 표시하므로, 그중 하나를 프로젝트 루트로 선택할 수 있습니다.
+</Tab>
+<Tab value="모바일">
+**Projects** 오른쪽 상단의 버튼을 사용하세요. 원하는 머신을 선택하면 Lody가 해당 머신의 디렉터리 목록을 표시하므로, 그중 하나를 프로젝트 루트로 선택할 수 있습니다.
+</Tab>
+<Tab value="CLI">
+`npx lody project add <path>`를 실행하세요. 여기서 `<path>`는 프로젝트 루트 디렉터리입니다.
+</Tab>
+</Tabs>
+
+### GitHub 리포지토리 연결하기
+
+웹 앱의 왼쪽 하단에서 **Settings**를 클릭한 뒤 **GitHub Integration** -> **Manage**로 이동하여 GitHub 리포지토리 접근 권한을 승인하세요. 승인 후 Lody로 리디렉션되면 워크스페이스에 추가할 리포지토리를 선택할 수 있습니다. [자세히 알아보기](/ko/docs/github)
+
+## 에이전트 구성하기
+
+Lody에는 Claude Code, Codex, Grok, Kimi Code, Devin, Pi, DeepSeek Harness, Bub, Dimcode를 포함한 내장 ACP 프로바이더가 함께 제공됩니다. 커스텀 ACP 에이전트나 [ACP Registry](https://agentclientprotocol.com/get-started/registry)에 등록된 모든 CLI도 가져와 사용할 수 있습니다. 데스크톱 또는 모바일 앱의 **Settings** -> **Agents**에서 에이전트를 추가하고 구성하세요.
+
+[Claude Code 및 Codex](/ko/docs/claude-codex-capabilities)는 Lody가 직접 유지 관리하므로 ACP 프로토콜이 다루는 범위 이상의 기능을 지원합니다.
+
+내장 Dimcode를 사용하려면 먼저 대상 머신에 ACP 호환 CLI를 설치하고 PATH에서 `dimcode acp`를 실행할 수 있는지 확인하세요. 버전 관리는 사용자가 직접 해야 하며, Lody는 이를 다운로드하거나 업그레이드하지 않습니다. 업그레이드 후에는 Settings에서 프로바이더를 새로고침하세요. 자세한 내용은 [Dimcode 설치 가이드](https://www.dimcode.dev/en/docs/getting-started/)를 참고하세요.
+
+### 자주 묻는 질문
+
+<Accordions>
+  <Accordion title="원하는 에이전트가 목록에 없습니다">
+     직접 만든 ACP 에이전트를 가져와 사용할 수 있습니다. 데스크톱 또는 모바일 앱에서 **Settings** -> **Agents**로 이동해 **Custom Agent**를 선택한 뒤, 실행 명령어와 인자를 입력하세요.
+  </Accordion>
+  <Accordion title="에이전트를 선택했는데 최신 모델이 보이지 않습니다">
+      Lody는 앱이 시작될 때와 대화가 시작될 때 각 에이전트의 구성을 새로고침합니다. 기대했던 모델이 보이지 않는다면 에이전트 구성 화면의 새로고침 버튼을 눌러 보세요. 방금 출시된 모델이라면 Lody가 지원을 추가할 때까지 기다려야 할 수도 있습니다.
+  </Accordion>
+</Accordions>
+
+## 파일 위치
+
+| 항목       | 경로            |
+| ---------- | --------------- |
+| 리포지토리 | `~/.lody/repos` |
+| 로그 파일  | `~/.lody/logs`  |
+
+## 여전히 연결에 실패하나요? 로컬 캐시 초기화하기
+
+버전 업데이트 후 오래된 데이터가 표시되거나 앱을 불러오지 못한다면 **Settings** -> **Cache & storage**를 열고 **Clear local cache**를 사용하세요. 이 기능은 모든 워크스페이스의 Lody 로컬 캐시(오프라인 사본, 동기화된 데이터 캐시, 이미지 캐시)를 삭제하고 앱을 다시 불러옵니다. 계정과 동기화된 데이터는 안전하게 유지되며 자동으로 다시 다운로드되고, 로그인 상태도 그대로 유지됩니다. 모바일에서도 Settings 페이지에 동일한 옵션이 있습니다.
+
+## 다음 단계
+
+🎉 기본 설정은 여기까지입니다. 이제 Lody가 제공하는 더 다양한 기능을 살펴보세요:
+
+- [첫 번째 세션 실행하기](/ko/docs/first-session) - 프롬프트 입력부터 결과 검토까지 작은 작업 하나를 끝까지 진행해 봅니다
+- [개념 및 용어집 읽기](/ko/docs/concepts) - 모든 화면의 기반이 되는 핵심 개념을 살펴봅니다
+- [CLI 명령어](/ko/docs/cli) - 모든 `lody` 명령어와 옵션을 확인합니다
+- [워크트리에 대해 알아보기](/ko/docs/worktrees) - Lody가 작업을 격리하는 방식을 이해합니다
+- [CLI 런타임 유형](/ko/docs/cli-runtimes) - ACP Registry 런타임 또는 커스텀 ACP 에이전트를 추가합니다
+- [모바일 액세스](/ko/docs/mobile) - 휴대폰에서 변경 사항을 검토하고 승인합니다

@@ -1109,7 +1109,6 @@ function MobileChatPreviewToggle({
         </button>
       ) : null}
     </div>
-
   );
 }
 

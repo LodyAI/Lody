@@ -1,0 +1,9 @@
+{
+  "title": "에이전트 및 런타임",
+  "pages": [
+    "cli-runtimes",
+    "claude-codex-capabilities",
+    "skills",
+    "device-resource-monitoring"
+  ]
+}

@@ -86,7 +86,9 @@ const assistantMessage = (
 });
 
 const buildItems = (messages: SessionHistoryParsed[]): ChatStreamItem[] =>
-  messages.map((message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const);
+  messages.map(
+    (message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const
+  );
 
 /**
  * Message is being synced to the server (local CRDT written, waitUntilSynced pending).

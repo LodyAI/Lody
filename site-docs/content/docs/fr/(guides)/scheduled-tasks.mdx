@@ -1,0 +1,105 @@
+---
+title: "Tâches planifiées"
+description: "Demandez à votre machine de démarrer une discussion avec l'Agent de votre choix selon un calendrier ou à la demande, ou laissez un Agent vous en proposer une depuis la conversation."
+---
+
+# Tâches planifiées
+
+Une **tâche planifiée** envoie un prompt aux heures que vous choisissez, avec l'Agent, le modèle, le mode d'autorisation et le projet que vous avez sélectionnés. Chaque exécution est une discussion ordinaire : ouvrez-la, poursuivez l'échange ou arrêtez-la quand vous le souhaitez.
+
+Utilisations typiques : résumer chaque matin les commits fusionnés la veille, vérifier les avis de sécurité des dépendances chaque jour ouvré, rédiger le rapport hebdomadaire le vendredi — ou conserver une tâche manuelle que vous lancez en un clic lorsque vous en avez besoin.
+
+## Où s'exécute-t-elle
+
+Les tâches planifiées ne s'exécutent pas dans le cloud. **L'une de vos propres machines** est responsable de chacune d'elles :
+
+- Cette machine exécute la [Lody CLI](/fr/docs/cli) (l'application de bureau la démarre pour vous), dans une version prenant en charge la planification.
+- Les heures sont interprétées selon le **fuseau horaire local de cette machine** ; il n'y a pas de sélecteur de fuseau. « Tous les jours à 9:00 » signifie 9:00 sur cette machine.
+- Si la machine est éteinte, en veille ou si la CLI ne s'exécute pas, rien ne se lance à ce moment-là. Consultez [exécutions manquées](#exécutions-manquées) pour savoir ce qui se passe ensuite.
+
+Vous pouvez consulter et gérer vos tâches planifiées sur le web, sur ordinateur et sur téléphone, mais seule la machine propriétaire les exécute.
+
+## Planifier l'envoi d'un message depuis une conversation
+
+Dans une conversation existante, sélectionnez **+ → Planifier l'envoi…**, choisissez une date et une heure futures selon l'horloge de la machine cible, puis appuyez sur le bouton d'envoi planifié du composeur. Cette option envoie le message une seule fois et n'est pas disponible sur la page de nouvelle discussion.
+
+Le texte, les images, les fichiers et les références sont enregistrés ensemble une fois la préparation des pièces jointes terminée. La barre d'informations conserve une icône de message planifié. Cliquez dessus pour voir l'heure d'envoi et la pastille Modifier. Modifier ouvre les contrôles de date et d'heure, avec des préréglages de 30 minutes, 1 heure et 5 heures ; Supprimer l'heure revient à un envoi ordinaire sans perdre le brouillon. Les échecs d'enregistrement conservent également le brouillon.
+
+Le résumé des messages en attente au-dessus du composeur ouvre Détails de la planification, où vous pouvez modifier le message et l'heure ou l'annuler. L'annulation attend la confirmation de la machine propriétaire ; si l'envoi a déjà été validé, le message apparaît comme envoyé. « Envoyé » signifie transmis à la conversation, indépendamment du résultat final de l'Agent.
+
+Utilisez votre propre machine équipée d'une CLI prenant en charge les messages complets. Si elle est en veille ou hors ligne à l'heure demandée, elle effectue un seul envoi de rattrapage à son retour. Une conversation occupée termine d'abord son travail en cours. Les paramètres de modèle, d'autorisation, de MCP et de Rôle sont figés au moment de l'acceptation.
+
+## Poursuivre après une réinitialisation du quota Claude
+
+Lorsque Claude signale une limite de session et que son quota de 5 heures est épuisé, un raccourci **Envoyer continue après réinitialisation** s'affiche au-dessus du composeur si une heure de réinitialisation future est disponible. Cliquez une fois pour planifier le message littéral `continue` une seconde après cette réinitialisation, dans cette conversation, avec les paramètres d'exécution du tour ayant échoué. Votre brouillon actuel dans le composeur reste intact.
+
+Le raccourci utilise l'horodatage de quota du fournisseur, et non le texte horaire figurant dans l'erreur. Il ne déduit pas de dates et ne traite pas une limite hebdomadaire comme une limite de 5 heures. Un quota plus long toujours épuisé empêche également l'affichage du raccourci. Après l'enregistrement, **Voir le continue planifié** ouvre les détails du message existant pour le modifier ou l'annuler. Aucune reprise n'est planifiée tant que vous n'avez pas cliqué.
+
+## Créer une tâche planifiée
+
+Ouvrez **Planifications** dans la barre latérale et choisissez **Nouvelle planification** (ou recherchez « Nouvelle planification » dans la palette de commandes). L'éditeur a la même forme que le composeur :
+
+1. **Nom et prompt** — ce que l'Agent doit faire à chaque exécution.
+2. **Agent, modèle et autorisation** — les mêmes contrôles qu'en bas du composeur. Une nouvelle tâche démarre avec la machine et l'Agent que vous avez utilisés en dernier sur la page d'accueil du chat, ainsi que les paramètres mémorisés de cet Agent. Les valeurs par défaut affichées sont prêtes à l'emploi ; aucune sélection d'autorisation supplémentaire n'est requise. Les fournisseurs comme Pi qui ne disposent pas de sélecteur d'autorisation utilisent leur propre politique d'exécution.
+3. **Machine, projet, worktree** — le projet est facultatif ; sans projet, chaque exécution est une discussion simple avec l'Agent et aucun dépôt n'est extrait.
+4. **Envoyer vers** et **Déclencheur** — voir ci-dessous.
+
+Tout élément manquant est signalé par un point d'exclamation à côté du contrôle permettant de le corriger. L'enregistrement vous ramène à la liste.
+
+## Déclencheurs
+
+- **Selon une planification** — choisissez une règle sous **Répéter**, puis l'heure :
+  - tous les jours, tous les jours ouvrés, toutes les semaines (choisissez les jours), tous les mois (choisissez les dates)
+  - toutes les quelques heures, toutes les quelques minutes
+  - une fois (une date et une heure)
+- **Manuel** — ne s'exécute jamais automatiquement ; la tâche ne se lance que lorsque vous appuyez sur **Exécuter maintenant**. Pratique pour un prompt que vous réutilisez.
+
+L'éditeur affiche la liste des **Prochaines exécutions** afin que vous puissiez vérifier la règle. Les heures et les dates sont saisies au clavier.
+
+## Où vont les exécutions
+
+- **Nouvelle discussion à chaque exécution** (par défaut) — chaque exécution démarre sa propre discussion.
+- **Une seule discussion pour cette tâche** — chaque exécution est ajoutée à la même discussion, pour les tâches qui s'appuient sur le contexte précédent. La discussion est créée lors de la première exécution ; **Démarrer une nouvelle discussion** déplace les exécutions suivantes vers une nouvelle discussion.
+- **Une discussion existante** — les exécutions sont ajoutées à une discussion que vous choisissez. L'Agent de cette discussion est utilisé, et aucun projet distinct n'est sélectionné.
+
+## Gérer les tâches planifiées
+
+Chaque ligne de la liste indique le nom, la fréquence, la prochaine exécution et la configuration utilisée :
+
+- Les lignes planifiées proposent **Mettre en pause** / **Reprendre** directement sur la ligne ; les lignes manuelles proposent **Exécuter maintenant**.
+- Faites un clic droit sur une ligne pour l'ouvrir, l'exécuter maintenant, la mettre en pause ou la reprendre, ouvrir la **Dernière exécution** ou la supprimer (la suppression demande une confirmation).
+- Cliquer sur une ligne fait glisser ses détails depuis la droite : mettre en pause, exécuter maintenant et supprimer en haut, **Historique des exécutions** en bas. Faites glisser le séparateur pour redimensionner ; cliquez dans un espace vide de la liste pour fermer.
+
+Seul le créateur peut modifier, mettre en pause ou supprimer une tâche planifiée. La mise en pause arrête les exécutions futures ; les discussions déjà démarrées doivent être annulées séparément.
+
+## Laisser un Agent la configurer
+
+Dites à l'Agent quelque chose comme « vérifie les mises à jour de dépendances chaque jour ouvré à 9 h » et il prépare le nom, le prompt et la règle, puis affiche une carte **Planifier cette tâche ?** dans la discussion.
+
+- La carte reprend l'Agent, le mode d'autorisation, la machine et le projet de la conversation en cours, et énumère exactement ce qui sera créé.
+- **Modifier** vous permet de changer le nom, le prompt et la règle horaire directement sur la carte.
+- **Créer** la crée ; **Ignorer** l'abandonne. Une fois créée, la carte ne peut plus être modifiée — modifiez la tâche depuis la page Planifications.
+
+Pour réviser une tâche que vous avez déjà, demandez à l'Agent de la modifier, par exemple « ajoute une règle au prompt de revue nocturne ». Il affiche une carte **Mettre à jour cette tâche planifiée ?** avec le nom et la règle horaire actuels et proposés, ainsi que les lignes modifiées du prompt. **Appliquer** enregistre la modification et **Ignorer** l'abandonne ; tout ce que la carte n'affiche pas reste inchangé. Si vous modifiez la tâche après la proposition, la carte ne s'applique plus : demandez une nouvelle proposition à l'Agent.
+
+Un Agent peut uniquement proposer une tâche planifiée ou une modification de celle-ci ; il ne peut jamais en créer ou en modifier une lui-même.
+
+## Exécutions manquées
+
+Si la machine était hors ligne à l'heure prévue, la tâche s'exécute **une fois** à son retour, pour l'horaire manqué le plus récent — et non une fois par créneau manqué.
+
+Si l'exécution précédente est encore en cours lorsque la suivante arrive à échéance, la nouvelle exécution patiente et démarre une fois la précédente terminée ; au plus une exécution reste en attente.
+
+## Questions fréquentes
+
+### Une tâche affiche « Waiting for the schedule configuration to finish syncing » ?
+
+La machine propriétaire n'a pas encore reçu la dernière configuration ; pendant quelques secondes après l'enregistrement, c'est normal. Si le message persiste, vérifiez que la machine est en ligne et que sa CLI est à jour.
+
+### Pourquoi ne puis-je pas choisir une machine ?
+
+Les tâches planifiées ne s'exécutent que sur vos propres machines disposant d'une CLI compatible. Mettez à jour la Lody CLI sur cette machine.
+
+### Mon ordinateur sortira-t-il de veille pour exécuter une tâche ?
+
+Non. La CLI vérifie et exécute les tâches lorsque la machine est éveillée ; elle ne sort pas un ordinateur de veille. Au réveil, elle effectue un seul rattrapage, comme décrit dans [exécutions manquées](#exécutions-manquées).

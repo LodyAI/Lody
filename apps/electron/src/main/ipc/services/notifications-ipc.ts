@@ -1,7 +1,13 @@
 import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { IpcMethod } from 'electron-ipc-decorator'
-import type { ShowSessionCompletionNotificationInput } from '@lody/shared/electron-ipc'
+import type {
+  DevicePairingNotificationLanguage,
+  ShowSessionCompletionNotificationInput
+} from '@lody/shared/electron-ipc'
+import { SUPPORTED_LANGUAGES } from '@lody/shared/language'
 import { getIpcServiceDeps } from '../ipc-service-deps'
+
+const ALLOWED_DEVICE_PAIRING_LANGUAGES = new Set<string>([...SUPPORTED_LANGUAGES, 'zh'])
 
 function isShowSessionCompletionNotificationInput(
   payload: unknown
@@ -33,12 +39,16 @@ export class NotificationsIpc extends ProductWindowIpcService {
   private readonly pairingHints = new Map<string, number>()
 
   @IpcMethod()
-  async showDevicePairingRequest(input: { requestId: string; language: 'en' | 'zh' }) {
+  async showDevicePairingRequest(input: {
+    requestId: string
+    language: DevicePairingNotificationLanguage
+  }) {
     if (
       !input ||
       typeof input.requestId !== 'string' ||
       !/^[0-9a-f]{32}$/.test(input.requestId) ||
-      !['en', 'zh'].includes(input.language)
+      typeof input.language !== 'string' ||
+      !ALLOWED_DEVICE_PAIRING_LANGUAGES.has(input.language)
     )
       return { shown: false }
     const now = Date.now()

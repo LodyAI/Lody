@@ -1,7 +1,4 @@
-import {
-  normalizeFileDiff,
-  type FileDiff,
-} from '@lody/shared';
+import { normalizeFileDiff, type FileDiff } from '@lody/shared';
 import type { SessionFileChangeEntry } from '@/lib/session-file-provider';
 
 export type SessionDiffChangeEntry = {
@@ -244,10 +241,7 @@ export const buildSessionDiffSummary = (
     }
   }
 
-  if (
-    Object.keys(diffEntriesByTurn).length === 0 &&
-    Object.keys(fileDiffsByTurn).length === 0
-  ) {
+  if (Object.keys(diffEntriesByTurn).length === 0 && Object.keys(fileDiffsByTurn).length === 0) {
     return EMPTY_SESSION_DIFF_SUMMARY;
   }
 

@@ -1,0 +1,94 @@
+---
+title: "Capacités de Claude et Codex"
+description: "Capacités exposées par Lody pour Claude Code et Codex, notamment l'orientation des tâches en cours, les commandes slash, AskUserQuestion, le mode Fast Mode, les tâches en arrière-plan et planifiées, la génération d'images et les objectifs (Goals)."
+---
+
+# Capacités de Claude et Codex
+
+Lody détecte les capacités du runtime à partir de la configuration d'agent (Agent Config) sélectionnée et expose les fonctionnalités prises en charge de Claude Code et Codex directement dans l'interface de conversation.
+
+Si une capacité manque après avoir modifié la configuration d'un agent, actualisez les capacités de cette configuration d'agent depuis **Settings** -> **Agent Config**, ou exécutez `lody agent-config refresh-capabilities <idOrName>` sur la machine qui héberge la configuration.
+
+## Claude Code
+
+### Orienter une tâche en cours
+
+Pendant que Claude Code travaille, utilisez **Steer** pour changer de direction sans arrêter la tâche en cours ni recommencer depuis le début. Définissez **Settings** -> **General** -> **Queued message behavior** sur **Guide** pour orienter les messages que vous envoyez lorsque l'agent est occupé, ou choisissez **Steer** sur le premier message en file d'attente. Lody maintient le message en attente jusqu'à ce que Claude Code confirme avoir appliqué la nouvelle instruction, puis poursuit la diffusion de la réponse dans le tour ainsi orienté.
+
+Le fait d'orienter la tâche principale n'annule pas automatiquement les tâches en arrière-plan de Claude Code. Claude Code détermine si ces tâches restent pertinentes dans la nouvelle direction, ce qui vous permet de réorienter le travail principal sans perdre les avancées parallèles utiles.
+
+### Commandes slash
+
+Claude Code peut exposer des commandes slash telles que `/review`, `/compact` ou `/undo`. Saisissez `/` au début du champ de texte pour parcourir les commandes disponibles pour la configuration actuelle.
+
+<SlashCommandsPreview locale="fr" />
+
+Consultez [Commandes slash](/fr/docs/slash-commands) pour tous les détails d'interaction.
+
+### AskUserQuestion
+
+Claude Code peut poser des questions complémentaires pendant l'exécution d'une tâche. Lody affiche ces demandes sous forme de cartes interactives avec des champs à choix unique, à choix multiple ou de réponse personnalisée, puis renvoie votre réponse à l'agent.
+
+<AskQuestionPreview locale="fr" />
+
+### Fast Mode
+
+Certaines configurations Claude Code exposent un bouton Fast Mode — un bouton en forme d'éclair (⚡) dans le sélecteur de mode sous le composeur. Activez-le pour bénéficier d'un profil de réponse accéléré ; l'infobulle précise le compromis (environ 2,5× plus rapide pour un coût par jeton plus élevé). Ce bouton n'apparaît que lorsque la configuration sélectionnée annonce cette option, et votre choix est mémorisé par session et appliqué au prochain message que vous envoyez.
+
+### Tâches en arrière-plan
+
+Lorsque Claude Code délègue du travail à des tâches en arrière-plan — sous-agents ou commandes shell en arrière-plan — Lody affiche un panneau de tâches directement dans la conversation :
+
+- Pendant l'exécution des tâches, le panneau reste déplié avec un indicateur de chargement et un en-tête **"Waiting on N background tasks"**, afin que la discussion ne soit pas bloquée pendant leur traitement.
+- Chaque ligne indique l'acteur de la tâche (le type de sous-agent, le nom du workflow, ou `Bash` / `Task`), une description optionnelle et l'outil qu'elle exécute actuellement.
+- Une fois tout terminé, le panneau se replie sur un résumé **"N background tasks"** que vous pouvez déplier pour examiner chaque tâche, y compris les jetons et les outils qu'elle a utilisés.
+
+Ce panneau signale uniquement la progression — il ne permet pas d'annuler des tâches individuellement.
+
+### Tâches planifiées
+
+Claude Code peut également planifier des exécutions futures et maintenir la session active pour les traiter. Un panneau au-dessus du composeur affiche **"Session will continue · N scheduled tasks pending"** ; dépliez-le pour consulter chaque entrée :
+
+- L'heure de la prochaine exécution avec un compte à rebours en direct (**"in 5 min"**, **"firing now…"**).
+- Une étiquette de type — **Wakeup** pour une reprise ponctuelle ou **Scheduled** pour une exécution cron — ainsi qu'un badge **Recurring** lorsque la planification est récurrente.
+- Un résumé optionnel décrivant ce qui sera exécuté.
+
+Les réveils ponctuels disparaissent de la liste peu après leur déclenchement ; les planifications récurrentes restent affichées et passent à leur prochaine échéance. Ce panneau est en lecture seule.
+
+## Codex
+
+### Orienter une tâche en cours
+
+Vous pouvez également utiliser **Steer** pendant que Codex travaille. Définissez **Queued message behavior** sur **Guide**, ou choisissez **Steer** sur le premier message en file d'attente. Codex ajoute l'instruction au même tour actif au lieu de l'annuler ou de créer un nouveau tour Codex. Lody ne fait avancer la conversation qu'une fois que Codex a confirmé avoir validé l'orientation.
+
+Une orientation peut rester brièvement à l'état **Pending** le temps que Codex atteigne un point où il peut appliquer l'instruction. Elle utilise le modèle, le mode et la configuration du tour actif. Si le message en file d'attente demande des paramètres différents, Lody le laisse en attente afin que vous puissiez conserver ces paramètres et utiliser plutôt **Interrupt and send now**.
+
+### Commandes slash
+
+Codex peut également exposer des commandes slash grâce à la découverte des capacités. La liste disponible dépend de la version de Codex installée et de la configuration d'agent sélectionnée.
+
+<SlashCommandsPreview locale="fr" />
+
+### Fast Mode
+
+Le mode Fast Mode de Codex peut être activé ou désactivé depuis les contrôles de session lorsque la configuration Codex sélectionnée annonce cette option. Utilisez-le lorsque vous souhaitez un profil de réponse plus rapide pour une tâche.
+
+<FastModePreview locale="fr" />
+
+### Génération d'images
+
+Lorsque Codex produit une image générée, Lody importe l'image générée dans la conversation afin que le prompt, le résultat et la suite des échanges restent regroupés.
+
+<ImageOutputPreview locale="fr" />
+
+### Objectifs (Goals)
+
+Les objectifs Codex (Goals) permettent à une session d'afficher un objectif de tâche visible ainsi que son état d'avancement. Activez d'abord la fonctionnalité dans Codex avec :
+
+```bash
+codex features enable goals
+```
+
+Ensuite, Lody peut afficher le statut de l'objectif dans l'interface de conversation et de session. Chaque exécution d'objectif indique également le temps écoulé et la consommation de jetons, ce qui vous permet de voir en un coup d'œil les ressources consacrées à l'atteinte de l'objectif.
+
+<GoalPreview locale="fr" />

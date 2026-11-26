@@ -1,8 +1,9 @@
+import type { SiteLocale } from '@site/src/site-pages/shared';
 import { Check, Folder, Monitor } from 'lucide-react';
 import { GithubMark } from '../github-mark';
 import { WorktreeIcon } from '../landing-replica/icons';
 import { ReplicaPrIcon, ReplicaSpinner } from '../landing-replica/sidebar';
-import type { ReplicaPrStatus, ReplicaLocale } from '../landing-replica/types';
+import type { ReplicaPrStatus } from '../landing-replica/types';
 import { cn } from '../landing-replica/utils';
 
 /* Display-only docs preview of the sidebar session list. It copies the current
@@ -52,7 +53,7 @@ type DocsPreviewCopy = {
 const REPO = 'loro-dev/lody';
 const MACHINE = 'Mac Studio';
 
-const COPY: Record<ReplicaLocale, DocsPreviewCopy> = {
+const COPY: Record<SiteLocale, DocsPreviewCopy> = {
   en: {
     localProjects: 'Local Projects',
     chats: 'Chats',
@@ -96,9 +97,140 @@ const COPY: Record<ReplicaLocale, DocsPreviewCopy> = {
       secondGithub: '规划键盘快捷键设置',
     },
   },
+  'zh-hant': {
+    localProjects: '本機專案',
+    chats: '對話',
+    githubWorktrees: 'GitHub Worktrees',
+    repo: REPO,
+    folder: 'notes-app',
+    repositoryFact: '儲存庫',
+    worktreeFact: 'Worktree',
+    machineFact: '機器',
+    machine: MACHINE,
+    prOpen: '已開啟',
+    checksPassed: 'CI 已通過',
+    changes: '變更',
+    caption: '模擬資料示意。右側面板對應桌面應用程式中游標懸停於工作階段時顯示的工作階段資訊卡。',
+    rows: {
+      local: '修復路線圖時間戳記問題',
+      chat: '說明驗證權杖流程',
+      firstGithub: '新增健康檢查端點與版本測試',
+      secondGithub: '規劃鍵盤快捷鍵設定',
+    },
+  },
+  ja: {
+    localProjects: 'ローカルプロジェクト',
+    chats: 'チャット',
+    githubWorktrees: 'GitHub Worktrees',
+    repo: REPO,
+    folder: 'notes-app',
+    repositoryFact: 'リポジトリ',
+    worktreeFact: 'Worktree',
+    machineFact: 'マシン',
+    machine: MACHINE,
+    prOpen: 'オープン',
+    checksPassed: 'CI 合格',
+    changes: '変更',
+    caption:
+      'モックデータの表示例です。右側のパネルは、デスクトップアプリでセッションにカーソルを合わせたときに表示される情報カードに対応します。',
+    rows: {
+      local: 'ロードマップのタイムスタンプ不具合を修正',
+      chat: '認証トークンの流れを説明',
+      firstGithub: 'ヘルスチェック API とバージョンテストを追加',
+      secondGithub: 'キーボードショートカット設定を計画',
+    },
+  },
+  ko: {
+    localProjects: '로컬 프로젝트',
+    chats: '채팅',
+    githubWorktrees: 'GitHub Worktrees',
+    repo: REPO,
+    folder: 'notes-app',
+    repositoryFact: '저장소',
+    worktreeFact: 'Worktree',
+    machineFact: '머신',
+    machine: MACHINE,
+    prOpen: '열림',
+    checksPassed: 'CI 통과',
+    changes: '변경 사항',
+    caption:
+      '모의 데이터 예시입니다. 오른쪽 패널은 데스크톱 앱에서 세션에 마우스를 올렸을 때 표시되는 세션 정보 카드를 보여줍니다.',
+    rows: {
+      local: '로드맵 이슈 타임스탬프 수정',
+      chat: '인증 토큰 흐름 설명',
+      firstGithub: '헬스 엔드포인트 및 버전 테스트 추가',
+      secondGithub: '키보드 단축키 설정 계획',
+    },
+  },
+  es: {
+    localProjects: 'Proyectos locales',
+    chats: 'Chats',
+    githubWorktrees: 'Worktrees de GitHub',
+    repo: REPO,
+    folder: 'notes-app',
+    repositoryFact: 'Repositorio',
+    worktreeFact: 'Worktree',
+    machineFact: 'Máquina',
+    machine: MACHINE,
+    prOpen: 'Abierto',
+    checksPassed: 'CI superado',
+    changes: 'Cambios',
+    caption:
+      'Ilustración con datos de ejemplo. El panel de la derecha refleja la tarjeta de información de sesión que muestra la aplicación de escritorio al pasar el cursor sobre una sesión.',
+    rows: {
+      local: 'Corregir marcas de tiempo en el roadmap',
+      chat: 'Explicar el flujo de tokens de autenticación',
+      firstGithub: 'Añadir endpoint de estado y prueba de versión',
+      secondGithub: 'Planificar la configuración de atajos de teclado',
+    },
+  },
+  fr: {
+    localProjects: 'Projets locaux',
+    chats: 'Discussions',
+    githubWorktrees: 'Worktrees GitHub',
+    repo: REPO,
+    folder: 'notes-app',
+    repositoryFact: 'Dépôt',
+    worktreeFact: 'Worktree',
+    machineFact: 'Machine',
+    machine: MACHINE,
+    prOpen: 'Ouverte',
+    checksPassed: 'CI réussie',
+    changes: 'Modifications',
+    caption:
+      'Illustration avec des données factices. Le panneau de droite reproduit la carte d’informations affichée par l’application de bureau au survol d’une session.',
+    rows: {
+      local: 'Corriger les horodatages de la feuille de route',
+      chat: 'Expliquer le flux des jetons d’authentification',
+      firstGithub: 'Ajouter un point de terminaison de santé et un test de version',
+      secondGithub: 'Planifier les paramètres des raccourcis clavier',
+    },
+  },
+  ru: {
+    localProjects: 'Локальные проекты',
+    chats: 'Чаты',
+    githubWorktrees: 'GitHub Worktrees',
+    repo: REPO,
+    folder: 'notes-app',
+    repositoryFact: 'Репозиторий',
+    worktreeFact: 'Worktree',
+    machineFact: 'Машина',
+    machine: MACHINE,
+    prOpen: 'Открыт',
+    checksPassed: 'CI пройден',
+    changes: 'Изменения',
+    caption:
+      'Иллюстрация с демонстрационными данными. Панель справа соответствует карточке сведений о сессии, которая появляется в настольном приложении при наведении курсора.',
+    rows: {
+      local: 'Исправить метки времени в дорожной карте',
+      chat: 'Объяснить процесс работы токенов авторизации',
+      firstGithub: 'Добавить эндпоинт проверки состояния и тест версии',
+      secondGithub: 'Спланировать настройки горячих клавиш',
+    },
+  },
 };
 
-function buildRows(locale: ReplicaLocale): DocsSessionRow[] {
+function buildRows(locale: SiteLocale): DocsSessionRow[] {
   const { rows } = COPY[locale];
   return [
     {
@@ -301,7 +433,7 @@ function SessionGroup({ rows, selectedId }: { rows: DocsSessionRow[]; selectedId
  * takes only a locale and renders synthetic data, so the page never ships a
  * stale screenshot or real user content.
  */
-export function SessionListPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
+export function SessionListPreview({ locale = 'en' }: { locale?: SiteLocale }) {
   const copy = COPY[locale];
   const rows = buildRows(locale);
   const local = rows.filter((row) => row.kind === 'local');

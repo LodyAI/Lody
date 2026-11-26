@@ -1,0 +1,55 @@
+---
+title: "Menciones"
+description: "Usa @ para mencionar conversaciones, archivos, Issues y Pull Requests, y $ para mencionar Skills con el fin de inyectar contexto preciso en los prompts de Lody."
+---
+
+# Menciones
+
+Lody mejora el cuadro de entrada con soporte para menciones. Escribe `@` para abrir el menú de menciones,
+donde puedes elegir conversaciones, archivos, Issues, Pull Requests, Skills o Roles de agente. `$` sigue
+siendo un atajo directo para las Skills.
+
+## Menciones de conversaciones
+
+Escribe `@`, elige **Sesiones** y selecciona otra conversación para referenciarla. Pídele al agente actual
+que contacte esa sesión, lea el contexto relevante, intercambie hallazgos o solicite una revisión. Por ejemplo,
+menciona una sesión de implementación y pídele al agente actual que revise su último commit y devuelva
+sus hallazgos.
+
+La sesión referenciada puede usar otro agente o ejecutarse en otra máquina conectada. El acceso sigue
+respetando los permisos del espacio de trabajo y la máquina de destino debe estar en línea para ejecutar
+el trabajo. Una mención identifica la sesión; incluye una instrucción que describa qué contexto intercambiar
+o qué trabajo realizar.
+
+Consulta [Control de sesiones de agente](/es/docs/session-orchestration/) para ver las operaciones disponibles,
+o sigue la [guía de colaboración multiagente](/es/docs/agent-collaboration/) para intercambiar contexto y solicitar
+revisiones entre agentes y máquinas.
+
+## Menciones de archivos
+
+Escribe `@` y elige **Archivos**. Sigue escribiendo para buscar de forma aproximada por nombre o ruta de archivo.
+Usa las teclas de flecha arriba y abajo para seleccionar y luego presiona Enter para confirmar. Los archivos
+mencionados se envían al agente de programación como contexto del prompt con su ruta completa.
+
+<MentionPreview locale="es" kind="file" />
+
+## Menciones de Issues y Pull Requests
+
+Después de seleccionar un repositorio en la página de inicio, escribe `@` para abrir el menú de menciones y luego
+elige **Issues** o **Pull Requests** para mencionar uno del repositorio actual.
+
+<MentionPreview locale="es" kind="issue" />
+
+Usa las teclas de flecha arriba y abajo para seleccionar y luego presiona Enter para confirmar. Lody escribe el
+elemento seleccionado en el compositor como `#<number>` e inyecta su contexto en el prompt, para que el agente
+pueda encargarse de tareas como `Fix #12` o `Review the implementation in #56`.
+
+## Menciones de Skills
+
+Escribe `$` para explorar las Skills disponibles en el proyecto y la máquina de agente seleccionados. Sigue
+escribiendo para filtrar por nombre y luego selecciona una Skill con las teclas de flecha y `Enter`.
+
+Lody conserva un token legible `$skill-name` en el compositor. Cuando envías el mensaje, añade la ruta
+correspondiente de `SKILL.md` para que el agente pueda cargar y seguir esas instrucciones.
+
+Consulta [Skills](/es/docs/skills) para conocer las ubicaciones de descubrimiento, el alcance global y de proyecto, y el comportamiento sin conexión.

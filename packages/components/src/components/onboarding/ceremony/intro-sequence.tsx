@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { normalizeSupportedLanguage } from '@lody/shared/language';
 import * as stylex from '@stylexjs/stylex';
 import { cn } from '@/lib/utils';
 import queueCurrent from '@/assets/onboarding/intro/queue-current.png';
@@ -80,7 +81,8 @@ const LAST = INTRO_BEATS.length - 1;
 
 export const INTRO_SHOT_COUNT = INTRO_BEATS.length;
 
-const CJK_CEREMONY_FONT = "'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif";
+const CJK_CEREMONY_FONT =
+  "'Hiragino Sans GB', 'PingFang TC', 'Hiragino Sans', 'Apple SD Gothic Neo', 'Noto Sans CJK SC', 'Noto Sans CJK TC', 'Noto Sans CJK JP', 'Noto Sans CJK KR', 'Microsoft YaHei', sans-serif";
 
 const INTRO_EASE = 'cubic-bezier(.22,1,.36,1)';
 
@@ -293,7 +295,12 @@ export function IntroSequence({
   const [current, setCurrent] = useState(0);
   const handoffTimer = useRef<number | null>(null);
   const { t, i18n } = useTranslation();
-  const chinese = (i18n.resolvedLanguage ?? i18n.language) === 'zh_CN';
+  const resolvedLang = normalizeSupportedLanguage(i18n.resolvedLanguage ?? i18n.language) ?? 'en';
+  const chinese =
+    resolvedLang === 'zh_CN' ||
+    resolvedLang === 'zh_Hant' ||
+    resolvedLang === 'ja' ||
+    resolvedLang === 'ko';
   const [departing, setDeparting] = useState(false);
 
   // Remember the beat we came from so its sentence can fade out underneath the

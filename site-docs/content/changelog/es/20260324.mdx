@@ -1,0 +1,28 @@
+---
+title: "20260324"
+version: 0.41.0
+date: 2026-03-24
+description: "Se añadieron la exportación de sesiones, modelos personalizados para generar títulos, avisos de permisos, cambios en el selector de máquinas, correcciones para móviles y mejoras de estabilidad."
+---
+
+### Nuevas funciones y capacidades
+
+- Se añadió el nuevo comando `lody export` de la CLI para exportar datos de sesiones, incluidos JSON, Markdown, archivos adjuntos y estadísticas de uso. **La próxima semana cambiaremos a un nuevo backend de sincronización y los datos históricos anteriores no serán compatibles, así que exporta con antelación todo lo que quieras conservar**
+- Se añadió compatibilidad con modelos personalizados de generación de títulos para todos los agentes ACP
+- Los avisos de solicitud de permisos ahora permanecen fijados sobre el cuadro de entrada mientras una sesión espera aprobación, para que no se pierdan al desplazarte
+- El selector de máquinas ahora está separado del menú desplegable de Configuración del agente, lo que facilita elegir una máquina de forma independiente
+- Hacer clic en la ruta de un archivo en el chat ahora abre correctamente el archivo completo
+
+### Plataforma y experiencia de interfaz
+
+- Los botones de configuración de la sesión ya no se comprimen ni se recortan en pantallas estrechas
+- En dispositivos móviles, el área inferior de la entrada del chat ahora ajusta las líneas correctamente en lugar de apretar los botones entre sí
+- Los gráficos de uso y las tarjetas de estadísticas en dispositivos móviles ahora se adaptan a pantallas pequeñas sin desbordamiento horizontal
+
+### Correcciones y estabilidad
+
+- Los errores de ACP ahora muestran el motivo subyacente específico
+- Se corrigieron los fallos de autenticación en la aplicación de escritorio en entornos Linux distintos de GNOME, incluidos Sway, Hyprland y Niri, mediante la detección automática del backend de llavero disponible
+- Se corrigieron los fallos al crear worktrees para repositorios remotos vacíos
+- Se corrigieron los bloqueos de CPU causados por demasiadas operaciones `git show` simultáneas cuando cambiaba una gran cantidad de archivos
+- Se corrigió la reutilización de metadatos obsoletos de Issues y PR cuando las menciones con `#` no lograban actualizar la caché

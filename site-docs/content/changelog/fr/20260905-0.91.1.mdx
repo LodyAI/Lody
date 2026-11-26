@@ -1,0 +1,16 @@
+---
+title: "20260905-0.91.1"
+version: 0.91.1
+date: 2026-09-05
+description: "Ajout d'une jauge dédiée au quota hebdomadaire Claude Fable et correction des options de raisonnement Max et Ultra pour les modèles Codex."
+---
+
+Version 0.91.1
+
+### ✨ Nouveautés
+
+- Les panneaux d'utilisation de Claude affichent désormais le quota hebdomadaire dédié à Fable séparément des quotas partagés hebdomadaire et de cinq heures ([#407](https://github.com/LodyAI/Lody/pull/407), [Claude ACP #25](https://github.com/LodyAI/acp-extension-claude/pull/25), [Core #3](https://github.com/LodyAI/acp-extension-core/pull/3)).
+
+### 🐛 Corrections et améliorations
+
+- Correction des options de raisonnement Max et Ultra manquantes pour GPT-6 Astra. Les niveaux de raisonnement disponibles correspondent désormais aux capacités de chaque modèle, de sorte que Luna ne propose plus l'option Ultra non prise en charge ([#406](https://github.com/LodyAI/Lody/pull/406)).

@@ -108,9 +108,7 @@ export function useSessionMentionSource({
                 localProjectId: session.project.localProjectId,
               }
             : undefined,
-        githubRepoFullName: isLocalSession
-          ? linkedLocalGithubRepo
-          : repoFullName || undefined,
+        githubRepoFullName: isLocalSession ? linkedLocalGithubRepo : repoFullName || undefined,
         isPublic: !isLocalSession || linkedLocalGithubRepo ? isRepoPublic : undefined,
         issuePrEnabled: isLocalSession ? Boolean(linkedLocalGithubRepo) : isRepoLinked !== false,
       };

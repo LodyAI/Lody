@@ -1,0 +1,14 @@
+{
+  "title": "Conceptos fundamentales",
+  "pages": [
+    "concepts",
+    "session",
+    "session-tabs",
+    "local-project",
+    "github",
+    "worktrees",
+    "encrypted-workspaces",
+    "encrypted-workspaces-ledger",
+    "encrypted-workspaces-security-code"
+  ]
+}

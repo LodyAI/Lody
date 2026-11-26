@@ -59,21 +59,36 @@ describe('pickLocalizedReleaseNotes', () => {
     phase: 'downloaded',
     downloadedVersion: '1.1.0',
     releaseNotes: 'publisher notes',
-    releaseNotesByLocale: { en: 'English notes', zh_CN: '中文说明' },
+    releaseNotesByLocale: {
+      en: 'English notes',
+      zh_CN: '中文说明',
+      zh_Hant: '繁體說明',
+      ja: '日本語ノート',
+      ko: '한국어 노트',
+      es: 'Notas en español',
+      fr: 'Notes en français',
+      ru: 'Заметки на русском',
+    },
   });
 
-  it('picks the notes for the active language', () => {
-    expect(pickLocalizedReleaseNotes(notes, 'zh_CN')).toBe('中文说明');
+  it('picks the notes for each active language and BCP-47 alias', () => {
     expect(pickLocalizedReleaseNotes(notes, 'en')).toBe('English notes');
-  });
-
-  it('treats any Chinese tag as Simplified Chinese', () => {
-    expect(pickLocalizedReleaseNotes(notes, 'zh-TW')).toBe('中文说明');
+    expect(pickLocalizedReleaseNotes(notes, 'zh_CN')).toBe('中文说明');
+    expect(pickLocalizedReleaseNotes(notes, 'zh-Hans-CN')).toBe('中文说明');
+    expect(pickLocalizedReleaseNotes(notes, 'zh_Hant')).toBe('繁體說明');
+    expect(pickLocalizedReleaseNotes(notes, 'zh-TW')).toBe('繁體說明');
+    expect(pickLocalizedReleaseNotes(notes, 'zh-HK')).toBe('繁體說明');
+    expect(pickLocalizedReleaseNotes(notes, 'ja')).toBe('日本語ノート');
+    expect(pickLocalizedReleaseNotes(notes, 'ko-KR')).toBe('한국어 노트');
+    expect(pickLocalizedReleaseNotes(notes, 'es-ES')).toBe('Notas en español');
+    expect(pickLocalizedReleaseNotes(notes, 'fr-FR')).toBe('Notes en français');
+    expect(pickLocalizedReleaseNotes(notes, 'ru-RU')).toBe('Заметки на русском');
   });
 
   it('falls back to English when the active language has no notes', () => {
     const enOnly = state({ releaseNotesByLocale: { en: 'English notes' } });
     expect(pickLocalizedReleaseNotes(enOnly, 'zh_CN')).toBe('English notes');
+    expect(pickLocalizedReleaseNotes(enOnly, 'ja')).toBe('English notes');
   });
 
   it('falls back to the publisher notes when no localized notes exist', () => {

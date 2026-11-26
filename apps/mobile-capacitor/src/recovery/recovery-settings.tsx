@@ -11,6 +11,8 @@ import {
   MobileSettingsRow,
   MobileSettingsSection,
 } from '@lody/components/components/mobile/mobile-settings-row';
+import { toIntlLocaleOrEn } from '@lody/components/lib/intl-locale';
+import { normalizeSupportedLanguage } from '@lody/shared/language';
 import type { MobileRecoveryConfig } from './recovery-context';
 import type { MobileRecovery, MobileRecoverySummary, MobileSecurityEvent } from '../e2ee/recovery';
 import { mobileRecoveryCopy } from './recovery-copy';
@@ -49,8 +51,9 @@ export function MobileRecoverySettings({
   defaultLabel: MobileRecoveryConfig['defaultLabel'];
 }) {
   const { t, i18n } = useTranslation();
+  const activeLanguage = normalizeSupportedLanguage(i18n.resolvedLanguage ?? i18n.language) ?? 'en';
   const tr = (key: keyof typeof mobileRecoveryCopy.en, values = {}) =>
-    t(key, { defaultValue: mobileRecoveryCopy.en[key], ...values });
+    t(key, { defaultValue: mobileRecoveryCopy[activeLanguage][key], ...values });
   const [summary, setSummary] = useState<MobileRecoverySummary>();
   const [available, setAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -291,7 +294,11 @@ export function MobileRecoverySettings({
                   : event.kind === 'vault_replacement_finished'
                     ? 'e2ee.recovery.eventReplaced'
                     : 'e2ee.recovery.eventReplacing',
-                { time: new Date(event.occurredAt).toLocaleString(i18n.language.replace('_', '-')) }
+                {
+                  time: new Date(event.occurredAt).toLocaleString(
+                    toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language)
+                  ),
+                }
               )}
             />
           ))}

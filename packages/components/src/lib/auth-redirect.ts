@@ -34,7 +34,7 @@ export type SafeAuthRedirectOptions = {
  */
 export function isSafeAuthRedirect(
   candidate: string | null | undefined,
-  options: SafeAuthRedirectOptions,
+  options: SafeAuthRedirectOptions
 ): string | null {
   if (!candidate) return null;
 

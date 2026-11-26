@@ -1,0 +1,36 @@
+---
+title: "20260112"
+version: 0.28.0
+date: 2026-01-12
+description: "Se añadieron vistas de archivos y diffs en tiempo real, mejoras en la integración con GitHub y las notificaciones push, además de compatibilidad con proxy y acceso sin conexión a los chats."
+---
+
+### Vista de archivos / diffs
+
+- Ahora puedes ver la lista de archivos del espacio de trabajo en tiempo real
+- Al final de cada chat, Lody resume todos los cambios de archivos y las diferencias de líneas, y puedes hacer clic para ver el diff.
+  <img src="/_docs-assets/20260112-changelog.png" alt="" />
+
+### Integración con GitHub
+
+- La creación de PR ahora prioriza el uso de la identidad del usuario
+
+### Notificaciones push
+
+- Si las notificaciones están activadas en la configuración, se envía una notificación cuando finaliza un chat
+- Se envía una notificación cuando un agente necesita permisos
+- En la primera respuesta del agente, Lody pregunta si deseas activar las notificaciones push
+- Al invitar miembros a un equipo se envía un correo electrónico
+
+### Otros
+
+- Compatibilidad con proxy: la CLI ahora admite conexiones WebSocket a través de un proxy HTTP
+- Se añadió un cuadro de búsqueda/filtro en la integración con GitHub
+- Compatibilidad con acceso sin conexión a los chats
+
+## Correcciones
+
+- Corrección: problemas de compatibilidad con Claude Code ACP que podían hacer que las actualizaciones de sesión (planes/llamadas a herramientas) se mostraran o guardaran de forma incorrecta
+- Se corrigió el vencimiento de la integración con GitHub
+- Se corrigió un problema por el que el cambio de idioma no surtía efecto tras recargar
+- Se corrigieron varios problemas de la interfaz de usuario

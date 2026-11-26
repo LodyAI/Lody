@@ -17,6 +17,12 @@ export { usageSharingAllowed } from './usage-sharing';
 //   in-page instead of force-quitting) and "Copy error" (so they can share
 //   the raw error with us).
 
+import {
+  bcp47ToSupportedLanguage,
+  normalizeSupportedLanguage,
+  toBcp47Language,
+  type SupportedLanguage,
+} from '@lody/shared/language';
 import { STATUS_ILLUSTRATION_CSS, STATUS_ILLUSTRATIONS } from './status-illustrations';
 import { flushClientLog, installClientLog, recordClientError, recordClientLog } from './client-log';
 
@@ -455,8 +461,8 @@ type BootFailureCopy = {
   build: string;
 };
 
-// i18next has not run either, so the page carries its own two languages.
-const COPY: Record<'en' | 'zh_CN', BootFailureCopy> = {
+// i18next has not run either, so the page carries its own translations.
+const COPY: Record<SupportedLanguage, BootFailureCopy> = {
   en: {
     title: "Lody didn't start this time",
     loadFailedTitle: "Part of Lody didn't load",
@@ -490,6 +496,108 @@ const COPY: Record<'en' | 'zh_CN', BootFailureCopy> = {
     diagnostics: '诊断信息',
     build: '构建',
   },
+  zh_Hant: {
+    title: 'Lody 這次無法啟動',
+    loadFailedTitle: 'Lody 有部分內容未能載入',
+    recoveryTitle: 'Lody 視窗已停止',
+    loadFailed: '你的對話與檔案都沒有受影響，通常重新載入即可恢復。',
+    unknown: '你的對話與檔案都沒有受影響。通常重新載入即可恢復；如果不行，請複製錯誤並傳給我們。',
+    recovery:
+      '你的對話與檔案都沒有受影響。重新載入即可再次開啟；如果反覆出現，請複製錯誤並傳給我們。',
+    reload: '重新載入',
+    reloading: '正在重新載入…',
+    copy: '複製錯誤',
+    copied: '已複製',
+    copyFailed: '複製遭到阻擋。請改為直接選取下方的診斷資訊。',
+    diagnostics: '診斷資訊',
+    build: '建置',
+  },
+  ja: {
+    title: 'Lody を起動できませんでした',
+    loadFailedTitle: 'Lody の一部を読み込めませんでした',
+    recoveryTitle: 'Lody ウィンドウが停止しました',
+    loadFailed: 'セッションやファイルに影響はありません。通常は再読み込みで復旧します。',
+    unknown:
+      'セッションやファイルに影響はありません。通常は再読み込みで復旧します。解決しない場合はエラーをコピーして送信してください。',
+    recovery:
+      'セッションやファイルに影響はありません。再読み込みすると再度開けます。繰り返し発生する場合はエラーをコピーして送信してください。',
+    reload: '再読み込み',
+    reloading: '再読み込み中…',
+    copy: 'エラーをコピー',
+    copied: 'コピーしました',
+    copyFailed: 'コピーがブロックされました。下の診断情報を直接選択してください。',
+    diagnostics: '診断情報',
+    build: 'ビルド',
+  },
+  ko: {
+    title: '이번에 Lody를 시작하지 못했습니다',
+    loadFailedTitle: 'Lody의 일부를 불러오지 못했습니다',
+    recoveryTitle: 'Lody 창이 중지되었습니다',
+    loadFailed: '세션과 파일은 그대로 유지됩니다. 보통 새로고침하면 해결됩니다.',
+    unknown:
+      '세션과 파일은 그대로 유지됩니다. 보통 새로고침하면 다시 실행됩니다. 계속 실패하면 오류를 복사해 보내 주세요.',
+    recovery:
+      '세션과 파일은 그대로 유지됩니다. 새로고침하여 다시 여세요. 문제가 반복되면 오류를 복사해 보내 주세요.',
+    reload: '새로고침',
+    reloading: '새로고침 중…',
+    copy: '오류 복사',
+    copied: '복사됨',
+    copyFailed: '복사가 차단되었습니다. 아래 진단 정보를 직접 선택하세요.',
+    diagnostics: '진단 정보',
+    build: '빌드',
+  },
+  es: {
+    title: 'Lody no se pudo iniciar esta vez',
+    loadFailedTitle: 'Una parte de Lody no se cargó',
+    recoveryTitle: 'La ventana de Lody se detuvo',
+    loadFailed: 'Tus sesiones y archivos están intactos; recargar suele solucionar esto.',
+    unknown:
+      'Tus sesiones y archivos están intactos. Recargar suele poner todo en marcha; si no funciona, copia el error y envíanoslo.',
+    recovery:
+      'Tus sesiones y archivos están intactos. Recarga para volver a abrirla; si sigue ocurriendo, copia el error y envíanoslo.',
+    reload: 'Recargar',
+    reloading: 'Recargando…',
+    copy: 'Copiar error',
+    copied: 'Copiado',
+    copyFailed: 'Se bloqueó la copia. Selecciona el diagnóstico a continuación en su lugar.',
+    diagnostics: 'Diagnóstico',
+    build: 'Compilación',
+  },
+  fr: {
+    title: 'Lody n’a pas pu démarrer cette fois',
+    loadFailedTitle: 'Une partie de Lody n’a pas pu être chargée',
+    recoveryTitle: 'La fenêtre Lody s’est arrêtée',
+    loadFailed:
+      'Vos sessions et fichiers sont intacts — recharger résout généralement le problème.',
+    unknown:
+      'Vos sessions et fichiers sont intacts. Recharger règle généralement le problème ; sinon, copiez l’erreur et envoyez-la-nous.',
+    recovery:
+      'Vos sessions et fichiers sont intacts. Rechargez pour la rouvrir ; si cela se reproduit, copiez l’erreur et envoyez-la-nous.',
+    reload: 'Recharger',
+    reloading: 'Rechargement…',
+    copy: 'Copier l’erreur',
+    copied: 'Copié',
+    copyFailed: 'La copie a été bloquée. Sélectionnez plutôt les diagnostics ci-dessous.',
+    diagnostics: 'Diagnostics',
+    build: 'Build',
+  },
+  ru: {
+    title: 'Не удалось запустить Lody',
+    loadFailedTitle: 'Не удалось загрузить часть Lody',
+    recoveryTitle: 'Окно Lody остановлено',
+    loadFailed: 'Ваши сессии и файлы не пострадали — обычно помогает перезагрузка.',
+    unknown:
+      'Ваши сессии и файлы не пострадали. Обычно помогает перезагрузка; если проблема сохраняется, скопируйте ошибку и отправьте её нам.',
+    recovery:
+      'Ваши сессии и файлы не пострадали. Перезагрузите, чтобы открыть снова; если это повторяется, скопируйте ошибку и отправьте её нам.',
+    reload: 'Перезагрузить',
+    reloading: 'Перезагрузка…',
+    copy: 'Скопировать ошибку',
+    copied: 'Скопировано',
+    copyFailed: 'Копирование заблокировано. Выделите диагностические данные ниже вручную.',
+    diagnostics: 'Диагностика',
+    build: 'Сборка',
+  },
 };
 
 function readStorage(key: string): string | null {
@@ -507,18 +615,30 @@ function resolveForcedTheme(): 'light' | 'dark' | null {
 }
 
 /** The language setting (`atomWithStorage` stores it as JSON), else the OS locale. */
-export function resolveBootFailureLanguage(): 'en' | 'zh_CN' {
+export function resolveBootFailureLanguage(): SupportedLanguage {
   const stored = readStorage(LANGUAGE_STORAGE_KEY);
   if (stored) {
+    const direct = normalizeSupportedLanguage(stored);
+    if (direct) return direct;
     try {
       const parsed: unknown = JSON.parse(stored);
-      if (parsed === 'zh_CN' || parsed === 'en') return parsed;
+      const normalized = normalizeSupportedLanguage(parsed);
+      if (normalized) return normalized;
     } catch {
       // Not JSON; fall through to the OS locale.
     }
   }
-  const locale = typeof navigator === 'undefined' ? '' : (navigator.language ?? '');
-  return locale.toLowerCase().startsWith('zh') ? 'zh_CN' : 'en';
+  if (typeof navigator !== 'undefined') {
+    const primary = bcp47ToSupportedLanguage(navigator.language);
+    if (primary) return primary;
+    if (Array.isArray(navigator.languages)) {
+      for (const candidate of navigator.languages) {
+        const matched = bcp47ToSupportedLanguage(candidate);
+        if (matched) return matched;
+      }
+    }
+  }
+  return 'en';
 }
 
 function describeFailure(
@@ -577,7 +697,7 @@ export function renderBootFailure(
 
   const page = document.createElement('div');
   page.className = ROOT_CLASS;
-  page.setAttribute('lang', language === 'zh_CN' ? 'zh-CN' : 'en');
+  page.setAttribute('lang', toBcp47Language(language));
   const forcedTheme = resolveForcedTheme();
   if (forcedTheme) page.dataset.theme = forcedTheme;
 

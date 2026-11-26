@@ -65,5 +65,11 @@ export const Light: Story = { globals: { theme: 'light' } };
 export const Dark: Story = { globals: { theme: 'dark' } };
 
 const previewStyles = stylex.create({
-  panel: { width: '22rem', borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: uiColors.raisedBackground, boxShadow: uiShadow.popover },
+  panel: {
+    width: '22rem',
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    backgroundColor: uiColors.raisedBackground,
+    boxShadow: uiShadow.popover,
+  },
 });

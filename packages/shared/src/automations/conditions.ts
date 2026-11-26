@@ -154,9 +154,7 @@ export const automationSettingsSchema = z
      * Auto delivery for this Session's current pull request. Off unless enabled;
      * it ends when that pull request is merged. The Host owns the steps and limits.
      */
-    autoDeliver: z
-      .union([z.literal(false), autoDeliverOptionsSchema])
-      .optional(),
+    autoDeliver: z.union([z.literal(false), autoDeliverOptionsSchema]).optional(),
   })
   .strict();
 export type AutomationSettings = z.infer<typeof automationSettingsSchema>;

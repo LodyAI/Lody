@@ -72,7 +72,7 @@ tuning shortcut are in [`README.md`](README.md).
   The deployable static build output is `site-docs/out/client`; do not publish the
   SSR server bundle.
 - `src/routeTree.gen.ts`, `public/sitemap.xml`, `public/docs-search.json`, `public/llms.txt`,
-  `public/llms-full.txt`, `public/rss.xml`, `public/rss-zh.xml`,
+  `public/llms-full.txt`, `public/rss.xml`, `public/rss-*.xml`,
   `lib/blog-reading-time.generated.ts`, and `lib/docs-faq.generated.ts` are
   generated and ignored. `pretypecheck` runs `tsr generate`; `generate` writes
   the SEO files. Do not edit or format the generated route tree or generated
@@ -89,18 +89,19 @@ tuning shortcut are in [`README.md`](README.md).
   blog, changelog, and pricing `head()` titles go through `brandTitle` so they
   get `| Lody`; landing/download titles already include the brand and must not be
   double-suffixed. Visible `DocsTitle` stays unbranded.
-- Canonical page URLs should match Cloudflare Pages' directory form (`/`, `/zh/`,
-  `/docs/.../`, `/zh/docs/.../`); file URLs keep their extension. `/home` and
-  `/zh/home` are compatibility routes and should stay `noindex,follow`.
+- Canonical page URLs should match Cloudflare Pages' directory form (`/`, `/<locale>/`,
+  `/docs/.../`, `/<locale>/docs/.../`); file URLs keep their extension. `/home` and
+  `/<locale>/home` are compatibility routes and should stay `noindex,follow`.
 - Unmatched URLs must not SPA-fallback to the homepage: prerender `/404` to
   `out/client/404.html` (Cloudflare Pages serves that file with HTTP 404). The 404
   document is `noindex,follow` and must not canonicalize to `/`. Do not add a Vite
   `configurePreviewServer` 404 interceptor — TanStack prerender uses that
   preview server to fetch pages that do not exist on disk yet. Use
   `pnpm --filter @lody/site-docs preview:static` to emulate the static host.
-- Docs pages that have an MDX `## FAQ` / `## 常见问题` section emit FAQPage
-  JSON-LD through `pageHead` (`lib/docs-faq.ts`); do not duplicate that FAQ copy
-  in a second catalog.
+- Docs pages that have a localized MDX FAQ heading (`## FAQ`, `## 常见问题`, `## 常見問題`,
+  `## よくある質問`, `## 자주 묻는 질문`, `## Preguntas frecuentes`, `## Questions fréquentes`,
+  `## Часто задаваемые вопросы`) emit FAQPage JSON-LD through `pageHead` (`lib/docs-faq.ts`);
+  do not duplicate that FAQ copy in a second catalog.
 
 ## Product replica boundary
 

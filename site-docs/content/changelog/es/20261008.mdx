@@ -1,0 +1,78 @@
+---
+title: "20261008"
+version: 0.104.0
+date: 2026-10-08
+description: "Vistas previas del Simulador de iOS, memoria de roles, Devin integrado y cambios de PR, con mejoras en la configuración de modelos, edición de archivos, uso compartido y tareas programadas."
+---
+
+Versión 0.104.0
+
+### ✨ Nuevas funciones
+
+- Previsualiza y controla un Simulador de iOS en ejecución en tu Mac directamente desde una sesión, o pídele a un agente que inicie la vista previa.
+- Asocia roles de agente con identidades de memoria de Nowledge Mem y gestiónalas en la configuración.
+- Se agregó compatibilidad integrada con Devin.
+- Pi ahora puede usar un ejecutable personalizado.
+- Bifurca sesiones de DeepSeek Harness desde turnos de conversación completados para explorar enfoques alternativos.
+- Visualiza los cambios de código en el panel de PR, filtra por un único commit o un rango de commits y busca archivos modificados.
+- Visualiza las herramientas que proporciona un servidor en la configuración de MCP.
+- Los agentes que crean sesiones a través de MCP pueden especificar un modo de permisos y opciones de configuración compatibles con el agente de destino.
+- Escribe `￥` para abrir el selector de skills, lo que facilita invocar skills con un método de entrada chino.
+- Los mensajes delegados por un agente a otra sesión ahora muestran la identidad de agente o rol del remitente y ofrecen acceso a la sesión de origen.
+- Se agregó un paquete opcional de lenguajes de código para habilitar el resaltado en más lenguajes de programación.
+- Con los lenguajes extendidos habilitados, las vistas previas de archivos admiten el resaltado de sintaxis de Coq, Rocq y Lean.
+
+### 🐛 Correcciones y mejoras
+
+- Se corrigió la pérdida de los ajustes de Fast sin enviar al cambiar de pestaña de sesión.
+- Se corrigió que permanecieran opciones incompatibles tras cambiar el modelo de un rol, lo que impedía seleccionarlo correctamente.
+- Se corrigió que los modelos, roles y otros ajustes seleccionados se revirtieran mientras se preparaban archivos adjuntos o se enviaban mensajes.
+- Se restauró la compatibilidad con extensiones integradas de Pi, corrigiendo que la página de configuración pidiera repetidamente actualizar.
+- Se corrigió que la lista de modelos dejara de estar disponible tras seleccionar extensiones de Pi.
+- Se mejoraron los nombres de las extensiones de Pi usando sus nombres de paquete o directorio para distinguirlas.
+- Se corrigió que los fallos al limpiar credenciales ocultaran el error original de autenticación de Codex.
+- Se aceleró la carga de los atajos de prompt, reduciendo la espera al seleccionar uno por primera vez.
+- Se corrigió la pérdida de selecciones de atajos de prompt en dispositivos táctiles cuando el compositor recuperaba el foco.
+- Se corrigió el posicionamiento de los submenús de modelo y rol y se mejoraron la búsqueda y el desplazamiento en listas largas de modelos.
+- Se corrigió el manejo de Markdown, código y caracteres como guiones bajos en la búsqueda de sesiones para que coincidan el recuento de resultados y los resaltados.
+- Se mejoraron los estados vacíos en la búsqueda de menciones de sesiones para distinguir entre ausencia de sesiones y ausencia de resultados coincidentes.
+- Se muestra “Finalizando” después de que una respuesta termina de generarse en lugar de seguir mostrando “Pensando”.
+- Se corrigió que el desplazamiento rápido hacia abajo durante una respuesta en streaming se detuviera en un límite inferior desactualizado y no siguiera el contenido nuevo.
+- Se corrigieron actualizaciones repetidas al desplazar una conversación que podían provocar un error en la página.
+- Se mejoró el ajuste del tamaño de columnas en tablas Markdown para que las rutas o textos largos no compriman otras columnas.
+- Se mejoró el espaciado entre el texto del mensaje y los resúmenes de herramientas.
+- Se alineó el renderizado de contenido en los diálogos de subagentes con el de la conversación principal.
+- Se corrigió que las vistas previas de archivos adjuntos desaparecieran o parpadearan al pasar de estado de carga a enviado.
+- Las miniaturas de imágenes en el compositor ahora conservan sus colores originales antes de que finalice la carga.
+- Se corrigió que Todos los cambios usara una base de comparación incorrecta en algunas ramas, manteniendo la coherencia entre listas de archivos, estadísticas y diffs.
+- Se corrigió que el editor de archivos siguiera mostrando cambios sin guardar y advirtiendo al salir después de que deshacer restaurara el contenido guardado.
+- Se corrigió que el teclado móvil tapara el editor de archivos o dejara su diseño incorrecto tras cerrarse.
+- Se corrigieron problemas de interacción y foco en el visor de diffs móvil.
+- Se corrigieron el aislamiento del foco y los controles de teclado en las vistas previas de imágenes.
+- Exportar imágenes para compartir en dispositivos móviles ahora utiliza la hoja para compartir del sistema.
+- Se corrigió que los colores de las imágenes compartidas de chat y uso se vieran afectados por el tema de la aplicación.
+- Se mejoraron los mensajes de error al compartir para explicar límites como el tamaño de imagen.
+- Se corrigió que las entradas y vistas previas de tareas programadas únicas usaran zonas horarias inconsistentes.
+- Se mejoró el manejo de tareas programadas durante los cambios de horario de verano.
+- Se corrigió la conversión incorrecta de valores de configuración al guardar o ejecutar tareas programadas con interruptores como Fast y Plan.
+- Se corrigió que el editor móvil de tareas programadas no respetara las áreas seguras de la pantalla.
+- Se corrigió que la información de cuota se sobrescribiera o mezclara entre cuentas que usan el mismo proveedor de agente.
+- El indicador de cuota del compositor ahora prioriza la ventana de uso de cinco horas.
+- Los avisos de restablecimiento de Codex pueden mostrar las horas de restablecimiento programadas publicadas por la fuente de datos, distinguiendo entre horas indeterminadas y restablecimientos aún no confirmados.
+- Se corrigieron los límites UTC y las etiquetas que abarcan varios días en los gráficos de uso.
+- Se corrigió que los detalles de días anteriores se volvieran a abrir de forma inesperada o anularan una nueva selección tras cambiar el rango de fechas de uso.
+- Se corrigió que los PR de GitHub descubiertos no aparecieran cuando fallaba la asociación de PR.
+- Se mejoraron los reintentos tras fallos temporales en consultas a GitHub y se redujeron las solicitudes repetidas durante fallos persistentes.
+- Se corrigió que el servicio en segundo plano a veces reiniciara una versión anterior de la CLI tras una actualización.
+- Se mejoró la compatibilidad del túnel para compartir vistas previas en redes que restringen UDP.
+- Se redujeron los destellos en blanco durante el inicio de la aplicación y la navegación.
+- Se mejoraron la navegación de configuración y la disposición de botones en ventanas estrechas.
+- Se unificó el escalado de tamaño de fuente e interlineado para que el texto, el código, la salida de herramientas y los controles de configuración sigan de forma más coherente el ajuste de tamaño de fuente.
+- Se alinearon los controles de ventana de macOS con la barra lateral.
+- Se corrigió que los enlaces internos en los detalles de una skill navegarán fuera del documento actual.
+- Se corrigió que los enlaces de documentación del sitio web perdieran sus anclas de sección.
+- Se corrigió que la aplicación web mostrara el plan gratuito al volver del pago mientras la suscripción aún estaba confirmándose.
+- Se agregaron instrucciones de instalación mediante Homebrew.
+- Se aclararon la limpieza del directorio de trabajo, las copias de seguridad y la retención de ramas tras archivar una sesión.
+
+¡Gracias a Astro-Han, ladydd, Lampese, Pleasurecruise, samzong, scbizu, yayoinoyume y Zach677 por contribuir a esta actualización!

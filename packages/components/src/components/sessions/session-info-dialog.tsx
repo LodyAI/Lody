@@ -335,7 +335,11 @@ function SessionOwnerPicker({
                 title={disabledReason ?? member.email ?? member.name}
                 indicator="check"
                 indicatorSide="end"
-                endContent={isPending ? <Spinner className={stylex.props(themeStyles.glyph2).className} /> : undefined}
+                endContent={
+                  isPending ? (
+                    <Spinner className={stylex.props(themeStyles.glyph2).className} />
+                  ) : undefined
+                }
               >
                 <UserAvatar
                   user={{ id: member.userId, name: member.name, image: member.image }}
@@ -355,6 +359,11 @@ function SessionOwnerPicker({
 
 const themeStyles = stylex.create({
   layout: { flexShrink: 0 },
-  glyph: { maxHeight: 'calc(var(--spacing) * 72)', minWidth: '200px', maxWidth: '280px', overflowY: 'auto' },
+  glyph: {
+    maxHeight: 'calc(var(--spacing) * 72)',
+    minWidth: '200px',
+    maxWidth: '280px',
+    overflowY: 'auto',
+  },
   glyph2: { height: appSpace[3.5], width: appSpace[3.5], flexShrink: 0 },
 });

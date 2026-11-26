@@ -1,0 +1,35 @@
+---
+title: "20260917-0.96.0"
+version: 0.96.0
+date: 2026-09-17
+description: "Mejora las acciones de archivos, el inicio de sesión en escritorio, la recuperación de sesiones y la colaboración entre agentes."
+---
+
+Versión 0.96.0
+
+### ✨ Nuevas funciones
+
+- Se agregó un menú contextual para los enlaces a archivos Markdown en escritorio, con acciones para copiar la ruta, abrir el archivo, elegir una aplicación o mostrarlo en Finder.
+- Se agregó un panel de diagnóstico para desarrolladores en escritorio con métricas de ejecución y rendimiento.
+
+### 🐛 Correcciones y mejoras
+
+- Se limita de forma predeterminada el número de vistas previas de sesiones en proyectos locales, con una opción para mostrar todas las sesiones.
+- Se ocultan las tarjetas de solicitud de uso compartido después de su publicación.
+- Se corrigieron cargas repetidas en el navegador público durante redirecciones, navegación por el historial y navegación dentro del mismo documento.
+- Se conserva el texto al pegar contenido copiado desde Word, PowerPoint y aplicaciones similares.
+- Se muestra la migración de Pi únicamente en máquinas compatibles.
+- Se oculta la acción Bifurcar hasta que se complete la respuesta.
+- Se corrigió el fallo al cargar algunos complementos nativos de agentes en macOS.
+- Se mejoró la recuperación y los reintentos después de que falle la unión a una sesión local de Loro.
+- Se mejoró el contraste de los controles de selección múltiple en el archivo en temas oscuros.
+- Se vuelve a abrir la sesión secundaria exacta al abrirla desde una tarjeta de creación después de haber cerrado su pestaña.
+- Se mantiene la posición de lectura al expandir o contraer contenido completado.
+- Se mejoró la forma en que aparecen los subagentes de Devin en las conversaciones.
+- Los mensajes de seguimiento heredan el modelo y la configuración de ejecución de la sesión de destino.
+- Se mejoró el inicio de sesión mediante navegador en escritorio para evitar estados no válidos causados por devoluciones de llamada duplicadas.
+- Se actualizaron las versiones incluidas de los entornos de ejecución de agentes.
+
+### 🤝 Contribuciones de la comunidad
+
+- Agradecimiento especial al colaborador externo [@Astro-Han](https://github.com/Astro-Han) por [#767](https://github.com/LodyAI/Lody/pull/767), que mejora la visualización de los subagentes de Devin.

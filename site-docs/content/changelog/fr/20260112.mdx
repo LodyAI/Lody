@@ -1,0 +1,36 @@
+---
+title: "20260112"
+version: 0.28.0
+date: 2026-01-12
+description: "Ajout des vues de fichiers et de diffs en temps réel, amélioration de l'intégration GitHub et des notifications push, ainsi que prise en charge des proxys et accès hors ligne aux discussions."
+---
+
+### Vue des fichiers / diffs
+
+- Vous pouvez désormais consulter la liste des fichiers de l'espace de travail en temps réel
+- À la fin de chaque discussion, Lody récapitule toutes les modifications de fichiers et les écarts de lignes, et vous pouvez cliquer pour afficher le diff.
+  <img src="/_docs-assets/20260112-changelog.png" alt="" />
+
+### Intégration GitHub
+
+- La création de PR privilégie désormais l'utilisation de l'identité de l'utilisateur
+
+### Notifications push
+
+- Si les notifications sont activées dans les paramètres, une notification est envoyée lorsqu'une discussion se termine
+- Une notification est envoyée lorsqu'un agent a besoin d'autorisations
+- Lors de la première réponse de l'agent, Lody vous demande si vous souhaitez activer les notifications push
+- L'invitation de membres dans une équipe envoie un e-mail
+
+### Autres
+
+- Prise en charge des proxys : le CLI prend désormais en charge les connexions WebSocket via un proxy HTTP
+- Ajout d'un champ de recherche et de filtrage à l'intégration GitHub
+- Prise en charge de l'accès hors ligne aux discussions
+
+## Corrections
+
+- Correctif : problèmes de compatibilité ACP avec Claude Code pouvant entraîner un affichage ou une persistance incorrects des mises à jour de session (plan/appels d'outils)
+- Correction de l'expiration de l'intégration GitHub
+- Correction du changement de langue qui ne prenait pas effet après actualisation
+- Correction de plusieurs problèmes d'interface utilisateur

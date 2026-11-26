@@ -1,0 +1,20 @@
+---
+title: "20260907-0.92.1"
+version: 0.92.1
+date: 2026-09-07
+description: "Amélioration de la reprise de session et de la fiabilité de livraison, correction des écritures de session bloquées et des paramètres de polices de symboles, et réduction des retours de progression répétitifs."
+---
+
+Version 0.92.1
+
+### ✨ Nouveautés
+
+- Amélioration de la reprise d'exécution des sessions et des retours d'état pour des tâches de longue durée plus fiables.
+
+### 🐛 Corrections et améliorations
+
+- Correction des écritures de session bloquées par des échecs de validation dans des données historiques sans rapport.
+- Prévention de la réexécution des opérations terminées et suppression des mises à jour de progression inchangées.
+- Amélioration de la reprise après reconnexion des métadonnées afin d'éviter les tentatives répétées après un échec de connexion.
+- Exclusion des polices de symboles dans les paramètres d'apparence afin d'éviter d'appliquer des polices illisibles.
+- Merci au contributeur externe @Pleasure1234 pour le correctif de filtrage des polices de symboles.

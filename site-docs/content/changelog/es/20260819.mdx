@@ -1,0 +1,21 @@
+---
+title: "20260819"
+version: 0.83.0
+date: 2026-08-19
+description: "Se mejoró el agente Kimi Code, se añadió un nuevo flujo de incorporación en escritorio y configuración de MCP dirigida por agentes, y se corrigieron la restauración de sesiones sin conexión, el reporte de versión y la compatibilidad con dsh."
+---
+
+Versión 0.83.0
+
+### ✨ Novedades
+
+- Se mejoró Kimi Code, con compatibilidad para tareas en segundo plano, subagentes y seguimiento del consumo de tokens.
+- Un flujo de incorporación completamente nuevo en escritorio: el primer inicio ahora incluye una secuencia introductoria y un recorrido por el producto, te permite elegir el tema y el idioma, detecta los agentes ya instalados en tu equipo y te guía en tu primera sesión.
+- Ahora los agentes pueden configurar por ti los servidores MCP del espacio de trabajo.
+
+### 🐛 Correcciones y mejoras
+
+- Se corrigió un fallo al restaurar el worktree de una sesión cuando no había conexión o el repositorio remoto no era accesible.
+- Se corrigió que la CLI reportara una versión que no coincidía con la publicada.
+- Se corrigieron problemas de compatibilidad con dsh.
+- Se mejoró la forma en que el agente dsh presenta su razonamiento.

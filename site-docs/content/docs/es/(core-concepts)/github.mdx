@@ -1,0 +1,73 @@
+---
+title: "Integración con GitHub"
+description: "Conecta repositorios de GitHub a Lody para proyectos clonados, contexto de issues y PRs, sesiones con worktrees, estado de CI y sincronización de comentarios de revisión."
+---
+
+# Integración con GitHub
+
+Para mantener los flujos de trabajo fluidos tanto en escritorio como en dispositivos móviles, Lody integra GitHub como una parte central del producto. Después de instalar la GitHub App de Lody en tus repositorios, Lody puede clonar tus proyectos desde cualquier dispositivo, obtener el contexto de Issues y PRs, y ofrecer un flujo de trabajo más ágil.
+
+## Configuración
+
+Abre **Settings** -> **GitHub** -> **Manage** para ir a la página de instalación de la GitHub App.
+Selecciona los repositorios a los que quieres dar acceso a Lody y luego regresa a Lody. Los repositorios seleccionados aparecerán en **Repositories available to add to workspace**. Agrega los que necesites al espacio de trabajo actual.
+
+Lody permite compartir un mismo repositorio entre varios espacios de trabajo. En otros espacios de trabajo, los repositorios que ya tienen la GitHub App instalada pueden seleccionarse y agregarse directamente.
+
+### ¿No encuentras un repositorio en la lista de autorizados?
+
+Si un repositorio que autorizaste no aparece en **Authorized Repositories**, es probable que la instalación de la GitHub App no lo haya incluido (por ejemplo, hiciste clic en **Install** antes de seleccionarlo, o el repositorio pertenece a una organización que requiere aprobación del administrador).
+
+La solución más sencilla es reiniciar la autorización:
+
+1. Abre [github.com/settings/installations](https://github.com/settings/installations) (para repositorios personales) o la página **Settings → GitHub Apps → Lody → Configure** de tu organización.
+2. Desinstala la GitHub App de **Lody**.
+3. De vuelta en Lody, abre **Settings → GitHub → Manage** y vuelve a instalar la aplicación, esta vez seleccionando todos los repositorios a los que quieres que Lody tenga acceso.
+
+Cuando termine la reinstalación, regresa a la página Settings: los repositorios aparecerán en la lista y podrás agregarlos al espacio de trabajo.
+
+## Identidad personal de GitHub
+
+La instalación de la GitHub App otorga a Lody acceso a los repositorios. La identidad personal es independiente y opcional: actívala solo si deseas que los comentarios de PR, las acciones de revisión y los merges se realicen con tu propio usuario de GitHub. Para usarla, activa **Act as you for PRs, comments, and merges** en **Settings** -> **GitHub** y luego autoriza tu cuenta de GitHub.
+
+Tras la autorización, la página Settings mostrará la cuenta de GitHub conectada. Esto no cambia a qué repositorios puede acceder Lody; el acceso a los repositorios sigue dependiendo de la instalación de la GitHub App. Puedes desactivar esta opción más adelante si quieres que Lody vuelva a usar únicamente la identidad de la GitHub App del espacio de trabajo.
+
+## Seleccionar un repositorio para una conversación
+
+En la página principal, usa el selector de repositorios en la parte superior izquierda del compositor para elegir un repositorio que se haya agregado al espacio de trabajo. A continuación, Lody mostrará las ramas de ese repositorio para que elijas desde dónde empezar.
+
+<GithubRepoPickerPreview locale="es" />
+
+Después de crear una conversación, Lody clona e inicializa el repositorio en la máquina de la CLI y crea un nuevo [Worktree](/es/docs/worktrees) a partir de la rama que seleccionaste. Cada conversación se ejecuta en su propia rama y no afecta a las demás conversaciones.
+
+## Empezar desde un Issue o Pull Request
+
+Después de seleccionar un repositorio en la página principal, escribe `@` para abrir el menú de menciones y luego elige **Issues** o **Pull Requests** para mencionar uno del repositorio actual.
+
+<MentionPreview locale="es" kind="issue" />
+
+Usa las teclas de flecha arriba y abajo para seleccionar un elemento y presiona Enter para confirmar. Lody escribe el elemento seleccionado en el compositor como `#<number>` e inyecta su contexto en el prompt, para que el agente pueda encargarse de tareas como `Fix #12` o `Review the implementation in #56`.
+
+## Estado de PR y sincronización de CI
+
+Cuando una sesión está vinculada a un PR de GitHub, Lody muestra el número del PR, el estado open/closed/merged y el estado de CI en la interfaz de la sesión. Las comprobaciones en ejecución, aprobadas y fallidas se actualizan en Lody, por lo que no necesitas cambiar constantemente a GitHub solo para ver si la rama está lista.
+
+Si sigues trabajando en una rama que ya tiene un PR, Lody también intenta detectar ese PR y vincularlo automáticamente a la sesión.
+
+## Acciones de PR en Lody
+
+Haz clic en la insignia del PR en la parte superior de una sesión vinculada para abrir el panel del PR. Desde ahí puedes revisar el título, la descripción, la rama, la CI, los comentarios y las revisiones del PR sin salir de Lody.
+
+Los PRs en borrador muestran una acción **Ready for review** en el panel del PR. Cuando el PR esté listo y se pueda fusionar, también puedes hacer merge desde Lody y eliminar la rama después del merge si la rama sigue existiendo en GitHub.
+
+## Commit y push en sesiones con PR
+
+En las sesiones respaldadas por GitHub que están vinculadas a un PR, Lody revisa el espacio de trabajo después de cada turno del agente. Si hay cambios sin confirmar o commits locales que aún no se han enviado, Lody puede pedirle al agente que haga commit y push a la rama del PR.
+
+Aún puedes ejecutar **Commit & Push** manualmente desde la interfaz de la sesión, o usar **Fix PR Comments** cuando los comentarios de revisión requieran otra pasada.
+
+## Sincronización de comentarios de revisión
+
+En [Comentarios de diff](/es/docs/diff-comments), las sesiones vinculadas a un PR pueden publicar nuevos comentarios de línea de vuelta en GitHub activando **Sync to GitHub**.
+
+Los comentarios de línea existentes de revisiones de PR en GitHub también se muestran en los diffs de Lody, y las respuestas enviadas desde Lody se publican de vuelta en GitHub. Esto mantiene la revisión, la inspección del código y el trabajo de seguimiento del agente en un solo lugar.

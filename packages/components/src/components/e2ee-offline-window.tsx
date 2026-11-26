@@ -79,9 +79,7 @@ export function E2eeMachineWindowPillView(props: { window: E2eeOfflineWindow; no
   const left = props.window.executionUntilMs - props.now;
   const minutes = Math.max(0, Math.floor(left / 60_000));
   return (
-    <Badge
-      data-e2ee-machine-window={left > 0 ? 'active' : 'paused'}
-    >
+    <Badge data-e2ee-machine-window={left > 0 ? 'active' : 'paused'}>
       {left > 0
         ? t('e2ee.offline.machinePill', {
             time: `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`,

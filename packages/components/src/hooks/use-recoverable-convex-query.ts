@@ -257,7 +257,13 @@ export function useOptionalRecoverableConvexQuery<Query extends FunctionReferenc
   const queryKey = `${queryName}:${serializedArgs}`;
   const source = useMemo(
     () =>
-      getQuerySource(client, JSON.stringify([authSessionId, queryKey]), queryName, query, argsObject),
+      getQuerySource(
+        client,
+        JSON.stringify([authSessionId, queryKey]),
+        queryName,
+        query,
+        argsObject
+      ),
     // Match Convex's useQuery semantics: semantic argument equality owns the subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [client, authSessionId, queryKey]
@@ -331,7 +337,14 @@ export function useOptionalPublicConvexQuery<Query extends FunctionReference<'qu
   const serializedArgs = JSON.stringify(convexToJson(argsObject));
   const queryKey = `${queryName}:${serializedArgs}`;
   const source = useMemo(
-    () => getQuerySource(client, JSON.stringify(['__public__', queryKey]), queryName, query, argsObject),
+    () =>
+      getQuerySource(
+        client,
+        JSON.stringify(['__public__', queryKey]),
+        queryName,
+        query,
+        argsObject
+      ),
     // Match Convex's useQuery semantics: semantic argument equality owns the subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [client, queryKey]

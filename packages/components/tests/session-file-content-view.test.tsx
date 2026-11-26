@@ -831,12 +831,7 @@ describe('SessionFileContentView', () => {
         await act(async () => action!.click());
         expect(destinations).toEqual([uri, 'lody://session/legacy-target', actionUri]);
         await act(async () => schedule!.click());
-        expect(destinations).toEqual([
-          uri,
-          'lody://session/legacy-target',
-          actionUri,
-          scheduleUri,
-        ]);
+        expect(destinations).toEqual([uri, 'lody://session/legacy-target', actionUri, scheduleUri]);
 
         const guide = [...view.querySelectorAll('button')].find(
           (button) => button.textContent === 'Guide'
@@ -844,12 +839,7 @@ describe('SessionFileContentView', () => {
         expect(guide).toBeDefined();
         await act(async () => guide!.click());
         expect(vi.mocked(writeTextToClipboard).mock.lastCall?.[0]).toBe('./guide.md');
-        expect(destinations).toEqual([
-          uri,
-          'lody://session/legacy-target',
-          actionUri,
-          scheduleUri,
-        ]);
+        expect(destinations).toEqual([uri, 'lody://session/legacy-target', actionUri, scheduleUri]);
         expect(
           view.querySelector('a[href="https://example.com/guide"]')?.getAttribute('target')
         ).toBe('_blank');
@@ -873,12 +863,7 @@ describe('SessionFileContentView', () => {
           inertLegacy!.click();
           inertAction!.click();
         });
-        expect(destinations).toEqual([
-          uri,
-          'lody://session/legacy-target',
-          actionUri,
-          scheduleUri,
-        ]);
+        expect(destinations).toEqual([uri, 'lody://session/legacy-target', actionUri, scheduleUri]);
       } finally {
         window.removeEventListener(SESSION_DEEP_LINK_EVENT, onDeepLink);
       }

@@ -1,8 +1,5 @@
 import type { TFunction } from 'i18next';
-import {
-  PASSWORD_MIN_LENGTH,
-  type PasswordValidationFailure,
-} from '@lody/shared';
+import { PASSWORD_MIN_LENGTH, type PasswordValidationFailure } from '@lody/shared';
 
 export {
   PASSWORD_MIN_LENGTH,

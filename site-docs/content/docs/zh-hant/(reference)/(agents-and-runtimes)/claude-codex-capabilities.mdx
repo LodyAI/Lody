@@ -1,0 +1,94 @@
+---
+title: "Claude & Codex 能力"
+description: "Lody 為 Claude Code 與 Codex 提供的能力，包含引導執行中的任務、斜線指令、AskUserQuestion、Fast Mode、背景與排程任務、圖片生成以及 Goals。"
+---
+
+# Claude & Codex 能力
+
+Lody 會根據所選的 Agent Config 偵測執行環境能力，並將 Claude Code 與 Codex 支援的功能直接呈現在對話介面中。
+
+如果在調整 Agent 設定後未看到對應的能力，請前往 **設定** -> **Agent Config** 重新整理該 Agent Config 的能力，或在持有該設定的機器上執行 `lody agent-config refresh-capabilities <idOrName>`。
+
+## Claude Code
+
+### 引導執行中的任務（Steer）
+
+在 Claude Code 運作期間，你可以使用 **Steer** 調整方向，而不必停止目前的任務重新開始。將 **設定** -> **一般** -> **排隊訊息行為** 設為 **Guide**，即可在 Agent 忙碌時直接以新發送的訊息進行引導；或者在第一則排隊訊息上選擇 **Steer**。Lody 會讓該訊息保持等待狀態，直到 Claude Code 確認已套用新指示，接著再將回覆持續串流寫入引導後的輪次。
+
+引導主任務並不會自動取消 Claude Code 的背景任務。Claude Code 會自行判斷這些任務是否仍符合新方向，因此你可以重新導向主要工作，同時保留仍有價值的平行進度。
+
+### 斜線指令
+
+Claude Code 可以提供如 `/review`、`/compact` 或 `/undo` 等斜線指令。在輸入框開頭輸入 `/`，即可瀏覽目前設定可用的指令。
+
+<SlashCommandsPreview locale="zh-hant" />
+
+完整的互動細節請參閱[斜線指令](/zh-hant/docs/slash-commands)。
+
+### AskUserQuestion
+
+Claude Code 可以在任務執行過程中提出後續問題。Lody 會將這些請求渲染為互動卡片，支援單選、複選與自訂回答輸入，再將你的回答傳回給 Agent。
+
+<AskQuestionPreview locale="zh-hant" />
+
+### Fast Mode
+
+部分 Claude Code 設定會提供 Fast Mode 切換鈕——位於輸入框下方模式選擇器中的閃電（⚡）按鈕。開啟後可啟用加速回應模式；工具提示會說明其中的權衡（速度約快 2.5 倍，但每 token 成本較高）。只有當所選設定宣告支援此選項時，該切換鈕才會顯示；系統會依工作階段記住你的選擇，並在下一則發送的訊息生效。
+
+### 背景任務
+
+當 Claude Code 將工作分派至背景任務（子代理或背景 shell 指令）時，Lody 會在對話中內嵌顯示任務面板：
+
+- 任務執行期間，面板會保持展開並顯示載入動畫與 **"Waiting on N background tasks"** 標題，讓對話不會在等待期間遭到阻塞。
+- 每一列會顯示任務的執行主體（子代理類型、工作流程名稱，或 `Bash` / `Task`）、選填的說明，以及目前正在執行的工具。
+- 當所有任務都完成後，面板會收合為 **"N background tasks"** 摘要，你可以隨時展開檢視各項任務，包含其消耗的 token 與使用的工具數量。
+
+此面板僅用於回報進度，無法用來取消個別任務。
+
+### 排程任務
+
+Claude Code 也能排程未來的執行作業，並讓工作階段保持運作以處理它們。輸入框上方會顯示一個面板，內容為 **"Session will continue · N scheduled tasks pending"**；展開後即可查看每一個項目：
+
+- 下次觸發時間與即時倒數計時（**"in 5 min"**、**"firing now…"**）。
+- 類型標籤——一次性恢復為 **Wakeup**，cron 排程執行為 **Scheduled**——若排程會重複執行，還會顯示 **Recurring** 徽章。
+- 選填的摘要，說明即將執行的內容。
+
+一次性喚醒會在觸發後不久從清單中清除；週期性排程則會保留並更新至下一次觸發時間。此面板為唯讀。
+
+## Codex
+
+### 引導執行中的任務（Steer）
+
+在 Codex 運作期間，你同樣可以使用 **Steer**。將 **排隊訊息行為** 設為 **Guide**，或在第一則排隊訊息上選擇 **Steer**。Codex 會將這項指示加入同一個進行中的輪次，而不是取消該輪次或建立另一個獨立的 Codex 輪次。只有在 Codex 確認已提交此引導後，Lody 才會推進對話。
+
+在 Codex 到達可套用指示的時間點之前，引導訊息可能會短暫保持 **等待中**。引導會沿用目前進行中輪次的模型、模式與設定。如果排隊訊息要求不同的設定，Lody 會讓它維持等待狀態，方便你保留這些設定並改用 **中斷並立即發送**。
+
+### 斜線指令
+
+Codex 也能透過能力探索提供斜線指令。可用的指令清單取決於已安裝的 Codex 版本以及所選的 Agent Config。
+
+<SlashCommandsPreview locale="zh-hant" />
+
+### Fast Mode
+
+當所選的 Codex 設定宣告支援 Fast Mode 選項時，你可以從工作階段控制項中進行切換。當任務需要更快的回應速度時，即可開啟此模式。
+
+<FastModePreview locale="zh-hant" />
+
+### 圖片生成
+
+當 Codex 產生圖片生成輸出時，Lody 會將產生的圖片上傳回對話中，讓提示詞、結果與後續調整都保留在同一處。
+
+<ImageOutputPreview locale="zh-hant" />
+
+### Goals
+
+Codex Goals 讓工作階段可以呈現明確的任務目標與進度狀態。請先在 Codex 中使用以下指令啟用此功能：
+
+```bash
+codex features enable goals
+```
+
+啟用後，Lody 就能在對話與工作階段介面中顯示目標狀態。每次 Goal 執行還會回報所花費的時間與 token 用量，讓你一眼看出達成該目標所消耗的資源。
+
+<GoalPreview locale="zh-hant" />

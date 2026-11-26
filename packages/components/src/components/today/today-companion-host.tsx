@@ -29,15 +29,22 @@ export function TodayCompanionHost() {
     const open = (event: Event) => {
       const target = (event as CustomEvent<TodayDesktopTarget>).detail;
       const runtime = store.get(activeWorkspaceRuntimeAtom);
-      if (!target || !store.get(todayFeatureEnabledAtom) || !runtime ||
-          runtime.workspaceSlug !== target.workspace ||
-          runtime.workspaceId !== store.get(currentWorkspaceIdAtom)) return;
+      if (
+        !target ||
+        !store.get(todayFeatureEnabledAtom) ||
+        !runtime ||
+        runtime.workspaceSlug !== target.workspace ||
+        runtime.workspaceId !== store.get(currentWorkspaceIdAtom)
+      )
+        return;
       event.preventDefault();
       if (opening) return;
       opening = true;
       const stillBound = () =>
-        active && runtime === store.get(activeWorkspaceRuntimeAtom) &&
-        runtime.workspaceId === store.get(currentWorkspaceIdAtom) && store.get(todayFeatureEnabledAtom);
+        active &&
+        runtime === store.get(activeWorkspaceRuntimeAtom) &&
+        runtime.workspaceId === store.get(currentWorkspaceIdAtom) &&
+        store.get(todayFeatureEnabledAtom);
       void (async () => {
         const name = await app.prepareTodayCompanion(target);
         if (!name || !stillBound()) return;
@@ -49,15 +56,24 @@ export function TodayCompanionHost() {
           return;
         }
         ownedWindow = popup;
-        popup.addEventListener('pagehide', () => {
-          if (ownedWindow === popup) ownedWindow = null;
-          if (active) flushSync(() => setCompanion((value) => value?.window === popup ? null : value));
-        }, { once: true });
+        popup.addEventListener(
+          'pagehide',
+          () => {
+            if (ownedWindow === popup) ownedWindow = null;
+            if (active)
+              flushSync(() => setCompanion((value) => (value?.window === popup ? null : value)));
+          },
+          { once: true }
+        );
         setCompanion({ name, window: popup, runtime, target, Surface });
-      })().catch(async (error: unknown) => {
-        console.error(error);
-        if (stillBound()) await app.openTodayWindow(target).catch(console.error);
-      }).finally(() => { opening = false; });
+      })()
+        .catch(async (error: unknown) => {
+          console.error(error);
+          if (stillBound()) await app.openTodayWindow(target).catch(console.error);
+        })
+        .finally(() => {
+          opening = false;
+        });
     };
 
     const unmountBeforeHandoff = () => {
@@ -90,7 +106,11 @@ function BoundTodayCompanion({ companion }: { companion: Companion }) {
   if (!valid || companion.window.closed) return null;
   return createPortal(
     <WorkspaceRouteTargetProvider slug={companion.runtime.workspaceSlug}>
-      <companion.Surface name={companion.name} popup={companion.window} initialTarget={companion.target} />
+      <companion.Surface
+        name={companion.name}
+        popup={companion.window}
+        initialTarget={companion.target}
+      />
     </WorkspaceRouteTargetProvider>,
     companion.window.document.body
   );

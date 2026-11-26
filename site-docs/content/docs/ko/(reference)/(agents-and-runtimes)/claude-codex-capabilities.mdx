@@ -1,0 +1,94 @@
+---
+title: "Claude 및 Codex 기능"
+description: "실행 중인 작업 방향 조정(Steer), 슬래시 명령어, AskUserQuestion, Fast Mode, 백그라운드 및 예약 작업, 이미지 생성, Goals 등 Lody가 Claude Code와 Codex에 제공하는 기능을 살펴봅니다."
+---
+
+# Claude 및 Codex 기능
+
+Lody는 선택한 Agent Config에서 런타임 기능을 감지하여 지원되는 Claude Code 및 Codex 기능을 대화 UI에 직접 제공합니다.
+
+에이전트 설정을 변경한 후 기능이 보이지 않는다면, **Settings** -> **Agent Config**에서 해당 Agent Config의 기능을 새로 고치거나, 해당 설정을 소유한 머신에서 `lody agent-config refresh-capabilities <idOrName>`을 실행하세요.
+
+## Claude Code
+
+### 실행 중인 작업 방향 조정(Steer)
+
+Claude Code가 작업하는 동안 **Steer**를 사용하면 활성 작업을 중지하고 처음부터 다시 시작하지 않고도 방향을 바꿀 수 있습니다. 에이전트가 작업 중일 때 보낸 메시지로 방향을 조정하려면 **Settings** -> **General** -> **Queued message behavior**를 **Guide**로 설정하거나, 대기열의 첫 번째 메시지에서 **Steer**를 선택하세요. Lody는 Claude Code가 새 지시를 적용했음을 확인할 때까지 메시지를 대기 상태로 유지한 뒤, 방향이 조정된 턴으로 응답 스트리밍을 이어갑니다.
+
+메인 작업의 방향을 조정해도 Claude Code의 백그라운드 작업이 자동으로 취소되지는 않습니다. Claude Code가 해당 작업들이 새로운 방향에 여전히 맞는지 판단하므로, 유용한 병렬 작업의 진행 상황을 잃지 않고 메인 작업을 전환할 수 있습니다.
+
+### 슬래시 명령어
+
+Claude Code는 `/review`, `/compact`, `/undo` 같은 슬래시 명령어를 제공할 수 있습니다. 입력창 맨 앞에 `/`를 입력하면 현재 설정에서 사용할 수 있는 명령어 목록을 탐색할 수 있습니다.
+
+<SlashCommandsPreview locale="ko" />
+
+전체 사용 방법은 [슬래시 명령어](/ko/docs/slash-commands)를 참고하세요.
+
+### AskUserQuestion
+
+Claude Code는 작업이 실행되는 도중에 후속 질문을 할 수 있습니다. Lody는 이러한 요청을 단일 선택, 다중 선택, 직접 입력이 가능한 대화형 카드로 렌더링한 뒤, 사용자의 답변을 에이전트에 다시 전달합니다.
+
+<AskQuestionPreview locale="ko" />
+
+### Fast Mode
+
+일부 Claude Code 설정에서는 컴포저 아래의 모드 선택기에 번개 아이콘(⚡) 버튼인 Fast Mode 토글이 표시됩니다. 응답 속도를 높인 프로필을 사용하려면 켜세요. 툴팁에서 트레이드오프(토큰당 비용은 더 높지만 약 2.5배 빠름)를 확인할 수 있습니다. 이 토글은 선택한 설정이 해당 옵션을 지원한다고 알릴 때만 나타나며, 선택한 상태는 세션별로 기억되어 다음에 보내는 메시지부터 적용됩니다.
+
+### 백그라운드 작업
+
+Claude Code가 서브에이전트나 백그라운드 셸 명령어 같은 작업을 백그라운드로 분리해 실행하면, Lody는 대화창 안에 인라인 작업 패널을 표시합니다.
+
+- 작업이 실행되는 동안에는 패널이 스피너와 **"Waiting on N background tasks"** 헤더와 함께 펼쳐진 상태로 유지되므로, 백그라운드 작업이 진행되는 동안에도 채팅이 차단되지 않습니다.
+- 각 행에는 작업의 주체(서브에이전트 유형, 워크플로 이름 또는 `Bash` / `Task`), 선택적 설명, 그리고 현재 실행 중인 도구가 표시됩니다.
+- 모든 작업이 끝나면 패널은 **"N background tasks"** 요약 형태로 접히며, 이를 펼쳐서 사용된 토큰과 도구를 포함한 각 작업 내역을 확인할 수 있습니다.
+
+이 패널은 진행 상황만 보고하며 개별 작업을 취소하는 기능은 제공하지 않습니다.
+
+### 예약 작업
+
+Claude Code는 향후 실행을 예약하고 이를 처리할 수 있도록 세션을 활성 상태로 유지할 수도 있습니다. 컴포저 위의 패널에 **"Session will continue · N scheduled tasks pending"**이 표시되며, 이를 펼치면 각 항목을 확인할 수 있습니다.
+
+- 실시간 카운트다운이 포함된 다음 실행 시각(**"in 5 min"**, **"firing now…"**)
+- 유형 레이블(일회성 재개는 **Wakeup**, cron 실행은 **Scheduled**)과 반복 예약일 경우 표시되는 **Recurring** 배지
+- 실행될 작업을 설명하는 선택적 요약
+
+일회성 재개(Wakeup)는 실행된 직후 목록에서 사라지며, 반복 예약은 목록에 남아 다음 실행 시각으로 갱신됩니다. 이 패널은 읽기 전용입니다.
+
+## Codex
+
+### 실행 중인 작업 방향 조정(Steer)
+
+Codex가 작업하는 동안에도 **Steer**를 사용할 수 있습니다. **Queued message behavior**를 **Guide**로 설정하거나, 대기열의 첫 번째 메시지에서 **Steer**를 선택하세요. Codex는 활성 턴을 취소하거나 별도의 Codex 턴을 새로 만드는 대신 현재 실행 중인 같은 턴에 지시를 추가합니다. Lody는 Codex가 방향 조정을 커밋했음을 확인한 후에만 대화를 다음으로 진행합니다.
+
+Codex가 지시를 적용할 수 있는 시점에 도달할 때까지 방향 조정 요청은 잠시 **Pending** 상태로 남을 수 있습니다. 이때 활성 턴의 모델, 모드, 설정이 그대로 사용됩니다. 대기열의 메시지가 다른 설정을 요청하는 경우, Lody는 해당 설정을 유지하고 대신 **Interrupt and send now**를 사용할 수 있도록 메시지를 대기 상태로 남겨 둡니다.
+
+### 슬래시 명령어
+
+Codex 역시 기능 탐색(capability discovery)을 통해 슬래시 명령어를 제공할 수 있습니다. 사용 가능한 명령어 목록은 설치된 Codex 버전과 선택한 Agent Config에 따라 달라집니다.
+
+<SlashCommandsPreview locale="ko" />
+
+### Fast Mode
+
+선택한 Codex 설정이 해당 옵션을 지원한다고 알리면 세션 컨트롤에서 Codex Fast Mode를 켜고 끌 수 있습니다. 작업에 더 빠른 응답 프로필이 필요할 때 사용하세요.
+
+<FastModePreview locale="ko" />
+
+### 이미지 생성
+
+Codex가 이미지 생성 결과를 출력하면, Lody가 생성된 이미지를 대화에 다시 업로드하여 프롬프트, 결과물, 후속 작업이 한곳에 함께 남도록 합니다.
+
+<ImageOutputPreview locale="ko" />
+
+### Goals
+
+Codex Goals를 사용하면 세션에 눈에 보이는 작업 목표와 진행 상태를 함께 유지할 수 있습니다. 먼저 다음 명령으로 Codex에서 이 기능을 활성화하세요.
+
+```bash
+codex features enable goals
+```
+
+이후 Lody는 대화 및 세션 UI에 목표 상태를 표시할 수 있습니다. 각 Goal 실행은 경과 시간과 토큰 사용량도 함께 보고하므로, 목표를 달성하는 데 얼마나 소요되었는지 한눈에 확인할 수 있습니다.
+
+<GoalPreview locale="ko" />

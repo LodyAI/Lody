@@ -1,0 +1,148 @@
+---
+title: "你的第一個工作階段"
+description: "完整執行一次小型 Lody 工作階段——啟動工作階段、引導 Agent、檢視 diff，並決定如何處理結果。"
+---
+
+# 你的第一個工作階段
+
+[快速入門](/zh-hant/docs/quickstart)會帶你完成 Lody 的安裝與連線。本頁則涵蓋其中未介紹的部分：一次完整的工作階段，從空白的輸入框開始，直到取得並檢視完畢的結果。這裡的所有操作都可以在本機專案上完成，不需要 GitHub，也不需要同時執行多個 Agent。
+
+<Callout type="info" title="開始之前">
+- 你已安裝並登入 Lody。如果尚未完成，請先參閱[快速入門](/zh-hant/docs/quickstart)。
+- 你已新增一個專案——一般的本機目錄即可。請參閱[本機專案](/zh-hant/docs/local-project)。
+- 你已設定好一個在該機器上通過 **Test** 測試的 Agent Config。請參閱 [Agent Config](/zh-hant/docs/quickstart)。
+</Callout>
+
+## 挑選一個夠小、能在單一工作階段完成的任務
+
+工作階段是與單一 Agent 針對單一任務進行的一段對話。當任務規模夠小時，你可以快速檢視結果，而 Agent 也擁有足夠的上下文來完成它。適合當作第一步的任務如下：
+
+- 「新增一個回傳應用程式版本的 `/health` 端點。」
+- 「修復 `src/parser.test.ts` 中失敗的測試並說明原因。」
+- 「在整個套件中將 `fetchUser` 重新命名為 `getUser`，並更新所有呼叫端。」
+
+避免在第一個工作階段就要求完成整個功能領域。當任務超出單一工作階段的範圍時，[推薦工作流程](/zh-hant/docs/workflow)會說明如何拆解工作。
+
+<Callout title="一個工作階段，一個任務" type="idea">
+後續所有文件都建立在這個習慣之上。如果某個工作階段開始同時處理兩件不相關的事，請停止它並另外開啟第二個工作階段，而不要把第一個工作階段越拉越長。
+</Callout>
+
+## 完整走過一次工作階段
+
+<Steps>
+<Step>
+
+### 1. 從首頁輸入框開始
+
+開啟 Lody 並使用首頁上的輸入框。在送出之前，請先選擇：
+
+- **專案**（如果是 Git 專案，也請選擇分支）；
+- **Agent Config** 與**模型**；
+- 你覺得安心的**權限範圍**。
+
+接著寫下任務內容，包含你在意的檔案或行為，以及你將如何判斷任務是否成功。
+
+```text
+新增一個 /health 端點，回傳 { "status": "ok", "version": <package version> }。
+補上一個測試來斷言 status 與 version 欄位。不要修改其他路由。
+```
+
+</Step>
+<Step>
+
+### 2. 觀察這一輪的進度
+
+Lody 會建立工作階段並即時串流呈現 Agent 的工作過程。一個**輪次（round）**就是一次 Agent 回覆加上它產生的檔案變更。在輪次進行期間，你可以：
+
+- 傳送後續指示來[**引導（steer）**](/zh-hant/docs/claude-codex-capabilities#steer-a-running-task)進行中的任務，而不必等待它結束；
+- 當 Agent 支援原生 fork 時，在[**側邊對話（Side Chat）**](/zh-hant/docs/session#right-sidebar-browser-and-side-chat)中提問，而不會打斷主任務；
+- 如果 Agent 朝錯誤方向前進，隨時停止這一輪。
+
+</Step>
+<Step>
+
+### 3. 檢視 diff
+
+當這一輪結束時，回覆會顯示變更的檔案以及新增和刪除的行數。點擊任一檔案即可在 [diff 分頁](/zh-hant/docs/diff-viewer)中開啟，也可以使用 **Files** 與 **Changes** 側邊欄瀏覽整個對話的變更。
+
+</Step>
+<Step>
+
+### 4. 請求下一輪處理
+
+在同一個工作階段中繼續進行。每次後續指示都只聚焦在一件事上：
+
+```text
+測試通過了，但版本號是在收到請求時才從 package.json 讀取的。
+請改為在模組常數中只讀取一次，並保持回應結構不變。
+```
+
+你可以依任務需求重複「觀察、檢視、追問」的循環任意多次。如果對話變得太長，或 Agent 開始抓不到脈絡，建議改用簡短摘要另開一個新的工作階段。
+
+</Step>
+<Step>
+
+### 5. 決定如何處理結果
+
+當變更看起來符合預期時，你有幾種選擇：
+
+- **保留分支。** 從工作階段複製目前的分支名稱，在自己的編輯器中測試或推送。
+- **在本機開啟。** 在桌面版上，使用 **Open in** 在你的編輯器中開啟該 worktree。
+- **建立 Pull Request。** 針對 GitHub 工作階段，使用對話上方的 **Create PR**。Lody 會將 PR 關聯回該工作階段並同步 CI 狀態。這也是[推薦工作流程](/zh-hant/docs/workflow)的起點。
+- **封存工作階段。** 工作完成後，從側邊欄將其封存。封存會回收 worktree，但保留分支與對話記錄，方便日後隨時還原。請參閱[封存工作階段](/zh-hant/docs/session#archive-sessions)。
+
+</Step>
+</Steps>
+
+## 第一次工作階段的常見錯誤
+
+<Accordions>
+<Accordion title="一次要求太多內容">
+冗長且包含多個部分的提示詞會讓 Agent 與檢視工作都變得更困難。請將工作拆分成多個工作階段，讓每個工作階段只產出一項可檢視的變更。請參閱[平行 Coding Agents](/zh-hant/docs/parallel-agents)。
+</Accordion>
+<Accordion title="未選擇專案或 Agent Config">
+未選擇或選錯專案代表 Agent 會在錯誤的目錄中工作。送出前請先確認輸入框中的專案、分支、Agent Config 與模型。
+</Accordion>
+<Accordion title="直到最後才檢視">
+單輪層級的 diff 閱讀成本低，也容易留下意見。每輪都進行檢視，能避免錯誤方向一路擴散到整個變更中。
+</Accordion>
+<Accordion title="從不封存">
+已完成的工作階段仍會保留其 worktree。當工作合併或放棄後，請將其封存，好讓機器回收磁碟空間。
+</Accordion>
+</Accordions>
+
+## 常見問題
+
+### 第一次工作階段需要 GitHub 嗎？
+
+不需要。GitHub 會帶來 Pull Request、CI 狀態與審查留言同步等功能，但本機專案工作階段本身就能獨立完成對話、編輯檔案、顯示 diff 與檢視變更。請參閱[本機專案](/zh-hant/docs/local-project)。
+
+### 什麼是「輪次（round）」？
+
+輪次就是一次 Agent 回覆加上該回合中產生的檔案變更。Lody 會為每一輪整理出 diff 摘要，讓你能夠持續檢視，而不必在最後一次閱讀整份龐大的 diff。請參閱 [Diff 檢視器](/zh-hant/docs/diff-viewer)。
+
+### 如果 Agent 修改了我沒有要求修改的內容，該怎麼辦？
+
+開啟該檔案的 diff，留下意見或在同一個工作階段中傳送後續指示，讓 Agent 修正。如果該變更與任務無關，請要求 Agent 將其還原，並讓工作階段保持聚焦。
+
+### 我可以停止正在執行的工作階段嗎？
+
+可以。使用輸入框中的停止控制項來取消目前正在執行的輪次。已停止的工作階段仍會留在清單中，你可以透過發送新訊息繼續進行。
+
+### 封存後的工作階段會去哪裡？
+
+它會移至側邊欄右下角的封存清單。對話與分支都會保留下來，當你還原該工作階段時會重新建立 worktree。請參閱[封存工作階段](/zh-hant/docs/session#archive-sessions)。
+
+## 下一步
+
+<Cards>
+  <Card href="/zh-hant/docs/concepts" title="概念與詞彙表">
+    了解工作階段、Agent Config、角色、執行環境與 worktree 背後的物件概念。
+  </Card>
+  <Card href="/zh-hant/docs/workflow" title="推薦工作流程">
+    將單一工作階段轉化為可重複執行的「從構想到 PR」工作流程。
+  </Card>
+  <Card href="/zh-hant/docs/diff-viewer" title="Diff 檢視器">
+    詳細檢視單輪層級與整個對話的變更內容。
+  </Card>
+</Cards>

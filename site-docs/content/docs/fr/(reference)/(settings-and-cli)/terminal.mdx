@@ -1,0 +1,56 @@
+---
+title: "Terminal intégré"
+description: "Ouvrez et gérez des onglets de terminal interactifs dans les sessions locales de Lody sur ordinateur, avec des répertoires de travail liés à la session et des thèmes synchronisés avec l'application."
+---
+
+# Terminal intégré
+
+L'application de bureau Lody inclut un terminal interactif pour les sessions locales. Il s'ouvre dans
+l'espace de travail de la session en cours, afin que vous puissiez exécuter des tests, inspecter
+l'état Git ou utiliser les outils du projet sans passer par un terminal externe.
+
+## Disponibilité
+
+Le terminal intégré prend actuellement en charge :
+
+- l'application de bureau Electron
+- les sessions appartenant à la machine locale
+- les sessions locales actives et inactives dont le répertoire d'espace de travail est disponible
+
+Les sessions distantes, les clients mobiles et l'application web ne proposent pas actuellement de terminal interactif.
+Les sessions archivées ou supprimées ne peuvent pas en ouvrir un.
+
+## Ouvrir et gérer les terminaux
+
+Utilisez la commande de terminal dans la barre inférieure, ou appuyez sur `Ctrl+\`` ou `Cmd/Ctrl+J`. Vous pouvez ouvrir jusqu'à
+8 onglets de terminal dans une même session.
+
+- Cliquez sur `+` pour ouvrir un autre terminal.
+- Changez d'onglet depuis la barre des terminaux en bas.
+- Fermez un onglet individuel pour arrêter son processus shell.
+- Faites glisser le séparateur du panneau pour ajuster sa hauteur.
+
+Lorsque le terminal a le focus, `Alt+N` ouvre un autre onglet de terminal. Ce même raccourci crée un nouvel
+onglet de session lorsque le terminal n'a pas le focus.
+
+## Répertoire de travail et cycle de vie
+
+Lody résout le répertoire de travail à partir de la session au lieu d'accepter un chemin arbitraire depuis
+l'interface. Pour une session de projet, il s'agit du worktree de la session ou du répertoire du projet.
+
+Les processus du terminal restent disponibles tant que le démon Lody CLI est en cours d'exécution, y compris lorsque vous
+changez de session ou rechargez l'interface. Ils sont fermés lorsque la session est archivée ou supprimée,
+ou lorsque le démon s'arrête. L'historique du terminal n'est pas conservé entre les redémarrages du démon.
+
+## Thème et barre inférieure
+
+Le terminal suit le mode clair/sombre actuel de Lody, y compris pour les couleurs ANSI. La barre inférieure contient également le contrôle d'état du CLI ; cliquez dessus pour afficher ou masquer la sortie
+du CLI. La sortie du CLI et le terminal actif partagent le même emplacement d'ancrage et s'affichent un à la
+fois.
+
+## Polices
+
+Sur ordinateur, ouvrez **Paramètres** -> **Apparence** pour choisir une police système pour l'interface de Lody et
+une autre pour le terminal intégré. La police de l'interface s'applique à l'ensemble de l'application de bureau ; la police du terminal
+s'applique uniquement aux onglets de terminal. Sélectionnez **Par défaut** pour réinitialiser l'un ou l'autre de ces réglages sur la pile
+de polices intégrée de Lody.

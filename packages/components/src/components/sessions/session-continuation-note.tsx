@@ -409,12 +409,7 @@ export function SessionAutomationNoteNudge({
   dataAttributes,
 }: SessionAutomationNoteNudgeProps) {
   return (
-    <div
-      {...dataAttributes}
-      {...stylex.props(styles.nudge)}
-      role="status"
-      aria-live="polite"
-    >
+    <div {...dataAttributes} {...stylex.props(styles.nudge)} role="status" aria-live="polite">
       <span {...stylex.props(styles.icon, styles.iconAttention)} aria-hidden="true">
         <Icon size={13} strokeWidth={2} />
       </span>
@@ -742,12 +737,7 @@ export function SessionContinuationNote({
       popoverFooter={
         <>
           {canAskAgent ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="mini"
-              onClick={() => onAskAgent?.(view)}
-            >
+            <Button type="button" variant="ghost" size="mini" onClick={() => onAskAgent?.(view)}>
               <MessageCircle size={14} strokeWidth={1.8} />
               {t('sessions.continuation.askAgent', '请 Agent 检查')}
             </Button>

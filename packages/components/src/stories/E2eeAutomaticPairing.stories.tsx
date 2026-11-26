@@ -268,7 +268,13 @@ export const AddDeviceCard: Story = { args: { mode: 'addDevice', form: 'desktop'
 
 const themeStyles = stylex.create({
   copy: { minHeight: '100dvh', backgroundColor: uiColors.background, color: uiColors.label },
-  row: { display: 'flex', height: 'calc(var(--spacing) * 16)', alignItems: 'center', gap: 'calc(var(--spacing) * 6)', paddingInline: 'calc(var(--spacing) * 6)' },
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 16)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 6)',
+    paddingInline: 'calc(var(--spacing) * 6)',
+  },
   layout: { fontWeight: 600 },
   hint: { marginTop: 'calc(var(--spacing) * 3)', color: uiColors.secondaryLabel },
 });

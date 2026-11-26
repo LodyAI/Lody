@@ -57,7 +57,7 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   Runtime heap is approximate; only the startup override enables precise readings.
 
 - Generic update metadata may carry localized Markdown under
-  `vendor.lodyChangelog.locales.{en,zh_CN}` in addition to the standard English
+  `vendor.lodyChangelog.locales.{en,zh_CN,zh_Hant,ja,ko,es,fr,ru}` in addition to the standard English
   `releaseNotes` fallback. Main validates and bounds those remote strings before
   exposing them through `ElectronUpdaterState`; renderer code must use the shared
   safe Markdown renderer rather than raw HTML.

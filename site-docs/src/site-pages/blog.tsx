@@ -2,11 +2,20 @@ import { BlogIndexPage, BlogPostPage } from '@site/components/blog';
 import type { BlogEntry, BlogLocale } from '@site/lib/blog';
 import { brandTitle, pageHead } from '@site/lib/metadata';
 import type { SiteHead } from '@site/lib/metadata';
-import { localeCode } from './shared';
+import { buildLocaleAlternates, localeCode, SITE_LOCALES } from './shared';
 
 const SITE_URL = 'https://lody.ai';
 
-const indexCopy = {
+const indexCopy: Record<
+  BlogLocale,
+  {
+    title: string;
+    description: string;
+    feedTitle: string;
+    feedPath: string;
+    path: string;
+  }
+> = {
   en: {
     title: 'Blog',
     description: 'Product announcements, engineering notes, and stories from the Lody team.',
@@ -21,7 +30,51 @@ const indexCopy = {
     feedPath: '/rss-zh.xml',
     path: '/zh/blog',
   },
-} as const;
+  'zh-hant': {
+    title: '部落格',
+    description: '來自 Lody 團隊的產品發布、工程實踐與故事。',
+    feedTitle: 'Lody 部落格',
+    feedPath: '/rss-zh-hant.xml',
+    path: '/zh-hant/blog',
+  },
+  ja: {
+    title: 'ブログ',
+    description: 'Lody チームからの製品発表、エンジニアリングノート、ストーリー。',
+    feedTitle: 'Lody ブログ',
+    feedPath: '/rss-ja.xml',
+    path: '/ja/blog',
+  },
+  ko: {
+    title: '블로그',
+    description: 'Lody 팀의 제품 소식, 엔지니어링 노트 및 이야기.',
+    feedTitle: 'Lody 블로그',
+    feedPath: '/rss-ko.xml',
+    path: '/ko/blog',
+  },
+  es: {
+    title: 'Blog',
+    description: 'Anuncios de producto, notas de ingeniería e historias del equipo de Lody.',
+    feedTitle: 'Blog de Lody',
+    feedPath: '/rss-es.xml',
+    path: '/es/blog',
+  },
+  fr: {
+    title: 'Blog',
+    description: 'Annonces produit, notes d’ingénierie et récits de l’équipe Lody.',
+    feedTitle: 'Blog Lody',
+    feedPath: '/rss-fr.xml',
+    path: '/fr/blog',
+  },
+  ru: {
+    title: 'Блог',
+    description: 'Анонсы продуктов, инженерные заметки и истории команды Lody.',
+    feedTitle: 'Блог Lody',
+    feedPath: '/rss-ru.xml',
+    path: '/ru/blog',
+  },
+};
+
+const blogIndexAlternates = buildLocaleAlternates('/blog');
 
 /** Matches the canonical directory form emitted by `pageHead`. */
 function absolute(path: string): string {
@@ -41,6 +94,13 @@ function feedLink(locale: BlogLocale) {
   };
 }
 
+function allFeedLinks(activeLocale: BlogLocale) {
+  return [
+    feedLink(activeLocale),
+    ...SITE_LOCALES.filter((candidate) => candidate !== activeLocale).map(feedLink),
+  ];
+}
+
 export function blogIndexHead(locale: BlogLocale, entries: BlogEntry[] = []): SiteHead {
   const text = indexCopy[locale];
 
@@ -49,11 +109,8 @@ export function blogIndexHead(locale: BlogLocale, entries: BlogEntry[] = []): Si
     description: text.description,
     path: text.path,
     locale: localeCode(locale),
-    alternates: [
-      { lang: 'en-US', path: '/blog' },
-      { lang: 'zh-CN', path: '/zh/blog' },
-    ],
-    links: [feedLink(locale)],
+    alternates: blogIndexAlternates,
+    links: allFeedLinks(locale),
     jsonLd: {
       '@context': 'https://schema.org',
       '@type': 'Blog',
@@ -91,11 +148,8 @@ export function blogPostHead(locale: BlogLocale, data: BlogEntry): SiteHead {
     type: 'article',
     publishedTime: data.date,
     image: data.image,
-    alternates: [
-      { lang: 'en-US', path: `/blog/${data.slug}` },
-      { lang: 'zh-CN', path: `/zh/blog/${data.slug}` },
-    ],
-    links: [feedLink(locale)],
+    alternates: buildLocaleAlternates(`/blog/${data.slug}`),
+    links: allFeedLinks(locale),
     jsonLd: {
       '@context': 'https://schema.org',
       '@type': 'BlogPosting',

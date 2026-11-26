@@ -58,6 +58,7 @@ import {
   redirectToElectronDeepLink,
 } from '@/lib/electron-oauth';
 import { signOutWithoutRedirect } from '@/lib/auth';
+import { getSiteLocalizedUrl } from '@/lib/lody-urls';
 import { useAuthClient } from '../providers/convex-provider';
 import {
   getAppCurrentPathWithSearch,
@@ -658,10 +659,10 @@ export function LoginPage({
   });
   const canUseEmailPasswordLogin =
     !isElectronRendererLogin || isDevElectronEmailPasswordLoginEnabled;
-  const isChinese = i18n.resolvedLanguage?.startsWith('zh') ?? false;
+  const currentLanguage = i18n.resolvedLanguage ?? i18n.language;
   const legalLinksOrigin = getLegalLinksOrigin();
-  const termsUrl = new URL(isChinese ? '/zh/terms' : '/terms', legalLinksOrigin).toString();
-  const privacyUrl = new URL(isChinese ? '/zh/privacy' : '/privacy', legalLinksOrigin).toString();
+  const termsUrl = getSiteLocalizedUrl('/terms', currentLanguage, legalLinksOrigin);
+  const privacyUrl = getSiteLocalizedUrl('/privacy', currentLanguage, legalLinksOrigin);
   const emailAuthCallbackURL = getEmailAuthCallbackURL(electronOAuthQuery);
   const isNativeApp = isNativeAppShell();
   const {

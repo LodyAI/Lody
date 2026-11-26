@@ -1,0 +1,35 @@
+---
+title: "20260206"
+version: 0.31.0
+date: 2026-02-06
+description: "Se añadió compatibilidad con nuevos modelos, menciones en el chat, integración con espacios de trabajo locales y un flujo de autenticación de CLI actualizado."
+---
+
+### Opus 4.6 y gpt-5.3-code
+
+<img src="/_docs-assets/20260206-new-model.png" style={{ maxHeight: '400px' }} />
+
+### Menciones en el chat
+
+- Usa `@` para mencionar archivos con búsqueda aproximada
+- Usa `#` para mencionar Issues y PR de GitHub
+
+<img src="/_docs-assets/20260206-mention.png" alt="mention" />
+
+### Integración con espacio de trabajo local
+
+- Si trabajas en la misma máquina con la CLI, ahora puedes abrir el IDE directamente desde el chat sin fricciones
+
+<img src="/_docs-assets/20260206-open-in.png" style={{ maxHeight: '300px' }} />
+
+### Nuevo esquema de autenticación de la CLI
+
+- La CLI ahora admite solicitudes de chat para todos los espacios de trabajo del usuario
+
+## Correcciones
+
+- El modo de clave API ahora carga correctamente las variables de entorno al reanudar sesiones
+- Se corrigieron varios problemas del editor y de entrada de texto
+- Se corrigieron casos extremos en la interfaz de espacios de trabajo y sesiones
+- Se corrigió la visualización de detalles de errores en el chat móvil para facilitar la resolución de problemas
+- Se mejoró la estabilidad del backend y del entorno de ejecución

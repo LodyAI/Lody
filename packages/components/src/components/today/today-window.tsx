@@ -68,10 +68,15 @@ export function TodayWindow(props: { memberId?: string; anchorDate?: string; bin
         onDayReady={onDayReady}
         pinned={onTop}
         onTogglePin={() => {
-          void getIpcServices()?.app.setTodayWindowAlwaysOnTop(!onTop).then(setOnTop).catch(console.error);
+          void getIpcServices()
+            ?.app.setTodayWindowAlwaysOnTop(!onTop)
+            .then(setOnTop)
+            .catch(console.error);
         }}
         onOpenSession={(link) => {
-          void getIpcServices()?.app.openSessionInMainWindow(buildSessionLink(link)).catch(console.error);
+          void getIpcServices()
+            ?.app.openSessionInMainWindow(buildSessionLink(link))
+            .catch(console.error);
         }}
       />
     </TodayWindowFrame>
@@ -80,7 +85,9 @@ export function TodayWindow(props: { memberId?: string; anchorDate?: string; bin
 
 export function TodayWindowFrame({ children }: { children: ReactNode }) {
   return (
-    <div className={getWebWorkspaceLayoutRootClassName({ settingsRoute: true, surface: 'sidebar' })}>
+    <div
+      className={getWebWorkspaceLayoutRootClassName({ settingsRoute: true, surface: 'sidebar' })}
+    >
       <WindowDragStrip />
       <WorkspaceCard anchored={false}>{children}</WorkspaceCard>
     </div>

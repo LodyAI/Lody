@@ -1,0 +1,100 @@
+---
+title: "Sessions"
+description: "Découvrez les sessions Lody : configuration, fork, discussions parallèles (Side Chat), sélection du dépôt et du modèle, liste des sessions, onglets, archivage, restauration et suppression."
+---
+
+# Sessions
+
+Une session est le concept le plus fondamental dans Lody. Vous démarrez une nouvelle session depuis l'éditeur de la page d'accueil. Cela équivaut à une conversation dans la CLI Claude Code / Codex.
+
+Avant de commencer, vous pouvez configurer la session via les menus autour de l'éditeur :
+
+- dépôt et branche
+- configuration de l'agent
+- modèle
+- portée des permissions
+
+Lody lance la session en fonction de ces choix.
+
+Une session peut également contenir plusieurs onglets : la discussion principale, les discussions enfants, les aperçus de fichiers et les vues de diff peuvent tous rester au sein de la même session. Si vous souhaitez continuer à discuter tout en lisant du code, ou diviser une tâche en plusieurs fils de révision, consultez [Onglets de session](/fr/docs/session-tabs).
+
+Pour inviter un coéquipier dans une session existante afin qu'il poursuive la même conversation, les mêmes diffs et le même worktree, consultez [Partager une session d'agent de code](/fr/docs/session-handoff). Le fork, décrit ci-dessous, démarre une nouvelle session pour vous — il n'ajoute personne à la session d'origine.
+
+## Forker une session
+
+Lorsque votre agent prend en charge le fork natif de session, la dernière réponse terminée de l'agent affiche un bouton **Fork session** sous la réponse. Le fork crée une nouvelle session contenant l'historique de la conversation jusqu'à cette réponse, puis vous permet de poursuivre dans une autre direction sans modifier la session d'origine.
+
+Codex et Claude Code peuvent également effectuer un fork à partir d'une réponse terminée antérieure de l'agent.
+
+Sur une session adossée à Git qui propose le fork de worktree, **Fork session** offre deux destinations :
+
+- **Current workspace** — un nouvel onglet qui partage les fichiers et les modifications non validées avec la source
+- **New worktree** — une nouvelle session indépendante à partir du dernier `HEAD` validé ; les fichiers non validés et non suivis restent sur la source
+
+Si **New worktree** n'est pas proposé, le fork reste sur l'espace de travail actuel. Side Chat utilise toujours le chemin du répertoire partagé.
+
+Le fork n'est disponible que lorsque l'agent actif signale une prise en charge native de cette fonctionnalité.
+
+## Barre latérale droite : Navigateur et Side Chat
+
+La barre latérale droite permet de garder des outils à côté de la conversation principale. Ouvrez **Browser** depuis la barre d'outils de la session pour consulter une page, ou utilisez le menu `+` dans la barre latérale pour ajouter des panneaux.
+
+**Side Chat** crée un fork de la dernière réponse éligible de l'agent et l'ouvre dans une discussion distincte dans la barre latérale droite. C'est pratique pour poser une question complémentaire ou de révision tout en conservant la session principale intacte. Vous pouvez créer plusieurs Side Chats, basculer entre eux dans la barre latérale et en fermer un avec son bouton `X` lorsqu'il n'est plus nécessaire. Side Chat est disponible lorsque l'agent actif prend en charge le fork natif de session.
+
+Consultez [Lody Preview](/fr/docs/preview) pour plus de détails sur l'accès aux URL et aux ports distants.
+
+## Liste des sessions
+
+Dans la barre latérale gauche, Lody affiche les conversations issues des discussions, des worktrees GitHub et des projets locaux. Vous pouvez utiliser l'organisation par projet par défaut ou passer en mode **Updated** pour tout regrouper par récence : Aujourd'hui, Cette semaine et Plus ancien.
+
+Chaque session comporte un titre sémantique généré par l'IA ainsi que son statut actuel. Survolez une session pour afficher son dépôt, sa branche, le statut de la pull request et les modifications de lignes par rapport à la branche de base dans la fiche d'information de la session.
+
+<SessionListPreview locale="fr" />
+
+Survolez une ligne de dépôt et utilisez la poignée de glissement à droite pour réorganiser les groupes de dépôts.
+
+## Actions de session
+
+Faites un clic droit sur une session dans la barre latérale pour ouvrir son menu contextuel. Vous pouvez alors la renommer, l'épingler, l'archiver, copier l'URL de la session ou copier le nom de la branche actuelle.
+
+Les sessions épinglées restent en haut de leur liste afin que les tâches importantes ou de longue durée restent faciles à retrouver. Dans l'application web, effectuez un clic du milieu ou Cmd/Ctrl-clic sur une tâche de la barre latérale pour l'ouvrir dans un nouvel onglet du navigateur.
+
+La barre d'actions de la conversation et les contrôles d'information de la session regroupent les actions pertinentes pour la tâche en cours, notamment les actions liées au projet, à la branche, à l'aperçu, à la pull request et aux modifications de code lorsqu'elles sont disponibles. Les actions courantes de GitHub et du projet restent ainsi directement à côté de la conversation, sans nécessiter de vue séparée.
+
+## Session rapide sur ordinateur
+
+Appuyez sur `Cmd/Ctrl+Shift+N` pour ouvrir la fenêtre autonome de session rapide. Il s'agit d'un raccourci système sur ordinateur, qui fonctionne donc même lorsque Lody n'a pas le focus. Utilisez l'éditeur compact pour choisir un projet, un agent et un modèle, puis démarrez la session sans ouvrir d'abord la fenêtre principale.
+
+Ce raccourci peut être modifié sous **Settings** -> **Keyboard**. Consultez [Palette de commandes et raccourcis clavier](/fr/docs/keyboard-shortcuts).
+
+## Ouvrir l'espace de travail dans un éditeur
+
+Dans l'en-tête de session de l'application de bureau, utilisez **Open in** pour ouvrir le worktree actuel ou le répertoire du projet. Les lanceurs intégrés incluent les éditeurs pris en charge tels que VS Code, Xcode et Sublime Text.
+
+Sous **Settings** -> **General** -> **Path launchers**, vous pouvez choisir le lanceur par défaut ou ajouter une commande shell personnalisée. Les modèles personnalisés doivent utiliser `{path}` comme argument pour le dossier de session et ne sont stockés que sur l'ordinateur actuel.
+
+L'ouverture d'un projet déjà ouvert dans l'éditeur place la fenêtre existante au premier plan au lieu d'en ouvrir une nouvelle (par exemple dans Zed).
+
+## Archiver des sessions
+
+Survolez une session dans la liste (ou appuyez dessus sur mobile) pour faire apparaître le bouton d'archivage en bas à droite. Cliquez dessus pour archiver la session.
+
+Les sessions archivées sont déplacées dans la liste des archives et conservent leur historique de conversation. La machine propriétaire peut récupérer un répertoire de worktree géré par Lody avant sa suppression définitive, en conservant la branche locale et en committant d'abord les modifications non ignorées en attente. Les fichiers ignorés peuvent être supprimés, et un script de nettoyage peut modifier des fichiers avant la sauvegarde. Enregistrez les fichiers nécessaires en dehors du worktree avant d'archiver. Consultez [Rétention et récupération des worktrees](/fr/docs/worktrees#automatic-cleanup) pour connaître les délais, les conditions de récupération et les limites de protection. Les sessions exécutées directement dans un répertoire de projet local ne voient pas ce répertoire supprimé par le nettoyage des worktrees gérés.
+
+## Désarchiver des sessions
+
+En bas à droite de la barre latérale gauche, cliquez sur le bouton de la liste des archives pour ouvrir les sessions archivées. Utilisez la recherche et le tri pour retrouver une session, puis cliquez sur son bouton de restauration pour la replacer dans la liste active et reprendre la conversation à tout moment.
+
+<img src="/_docs-assets/cancel-archive.png" alt="" />
+
+## Supprimer des sessions
+
+En bas à droite de la barre latérale gauche, cliquez sur le bouton de la liste des archives pour ouvrir les sessions archivées. Cliquez sur le bouton de suppression à côté d'une session pour la supprimer définitivement ainsi que son historique de conversation. Cette action est irréversible. Tout worktree géré restant demeure éligible au nettoyage selon la [même règle de sauvegarde](/fr/docs/worktrees#automatic-cleanup) ; la branche Git locale et les commits sont conservés.
+
+Pour les sessions sans projet sélectionné, la suppression supprime également le répertoire de travail de discussion géré par Lody et tous les fichiers qu'il contient, sans sauvegarde ni récupération possible ; l'archivage ne récupère que les répertoires vides.
+
+<img src="/_docs-assets/delete-archive.png" alt="" />
+
+## Restauration et suppression en masse
+
+Survolez une conversation et cochez la case au début de la ligne pour passer en mode sélection multiple. Cliquez ensuite sur plus d'actions pour la sélection par lot, puis choisissez la restauration ou la suppression en masse depuis les contrôles en haut à droite.

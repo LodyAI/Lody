@@ -113,6 +113,40 @@ function writeChangelog(changelogRoot, locale, name, { version, date, body, draf
   )
 }
 
+void test('loads all 8 localized changelogs when present', (t) => {
+  const { repoRoot, changelogRoot } = createFixture()
+  t.after(() => rmSync(repoRoot, { recursive: true, force: true }))
+  const localizedDirs = [
+    ['en', 'en', '- English notes'],
+    ['zh_CN', 'zh', '- 简体中文说明'],
+    ['zh_Hant', 'zh-hant', '- 繁體中文說明'],
+    ['ja', 'ja', '- 日本語ノート'],
+    ['ko', 'ko', '- 한국어 노트'],
+    ['es', 'es', '- Notas en español'],
+    ['fr', 'fr', '- Notes en français'],
+    ['ru', 'ru', '- Заметки на русском']
+  ]
+  for (const [, dir, body] of localizedDirs) {
+    mkdirSync(path.join(changelogRoot, dir), { recursive: true })
+    writeChangelog(changelogRoot, dir, dir, {
+      version: '1.2.3',
+      date: '2026-08-10',
+      body
+    })
+  }
+
+  assert.deepEqual(loadElectronUpdateReleaseInfo({ repoRoot, version: '1.2.3' }), {
+    releaseNotes: '- English notes',
+    releaseDate: '2026-08-10',
+    vendor: {
+      lodyChangelog: {
+        contentVersion: '1.2.3',
+        locales: Object.fromEntries(localizedDirs.map(([locale, , body]) => [locale, body]))
+      }
+    }
+  })
+})
+
 void test('loads exact-version localized notes for a prerelease package', (t) => {
   const { repoRoot, changelogRoot } = createFixture()
   t.after(() => rmSync(repoRoot, { recursive: true, force: true }))

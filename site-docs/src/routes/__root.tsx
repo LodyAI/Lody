@@ -1,6 +1,7 @@
 import '@site/app/global.css';
 import { SiteRootProvider } from '@site/components/site-root-provider';
 import { SiteNotFound } from '@site/src/site-pages/not-found';
+import { detectSiteLocaleFromPath, htmlLangForLocale } from '@site/src/site-pages/shared';
 import { createRootRoute, HeadContent, Outlet, Scripts, useLocation } from '@tanstack/react-router';
 
 const description =
@@ -85,7 +86,7 @@ export const Route = createRootRoute({
 
 function RootDocument() {
   const location = useLocation();
-  const lang = location.pathname === '/zh' || location.pathname.startsWith('/zh/') ? 'zh-CN' : 'en';
+  const lang = htmlLangForLocale(detectSiteLocaleFromPath(location.pathname));
 
   return (
     <html lang={lang} suppressHydrationWarning>

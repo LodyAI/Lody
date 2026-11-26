@@ -1,0 +1,28 @@
+---
+title: "20260223"
+version: 0.32.3
+date: 2026-02-23
+description: "新增 Sonnet 4.6 與 gpt-5.3-code-spark 支援、本機專案、CLI 啟動體驗改善與效能修復。"
+---
+
+### 支援 Sonnet 4.6 與 gpt-5.3-code-spark
+
+### 本機專案支援
+
+- 匯入任意本機目錄並保持即時同步
+
+<img src="/_docs-assets/20260223-local-project.png" width="300px" />
+
+### 改善 CLI 啟動與登入體驗
+
+- 精簡 CLI 啟動流程，實現一鍵啟動
+- 移除 Docker 模式
+- 新增 `project` 指令群組以管理本機專案
+  - `npx lody project add [path]` 將本機專案新增至 lody
+  - `npx lody project list` 列出本機專案
+  - `npx lody project delete` 以互動方式刪除本機專案
+
+### 效能與可靠性修復
+
+- 修復開啟檔案差異時介面卡頓的問題
+- 修復部分情境下的身分驗證流程異常問題

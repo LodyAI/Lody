@@ -99,9 +99,7 @@ export function enrichAgentMessageAuthorModel(
   if (runtimeId) {
     const runtimeName = short(modelInfo?.name);
     const existingSameModelName =
-      author.model?.id === runtimeId &&
-      author.model.name &&
-      author.model.name !== author.model.id
+      author.model?.id === runtimeId && author.model.name && author.model.name !== author.model.id
         ? author.model.name
         : undefined;
     const resolvedName =

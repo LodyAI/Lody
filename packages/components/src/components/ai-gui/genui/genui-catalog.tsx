@@ -180,9 +180,7 @@ const SVG_TEXT: ReadonlySet<string> = new Set([
 
 /** `aria-*` keeps kebab case; other attributes camelize for React. */
 const camelAttr = (name: string) =>
-  name.startsWith('aria-')
-    ? name
-    : name.replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase());
+  name.startsWith('aria-') ? name : name.replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase());
 
 function pickSvgProps(
   props: Record<string, unknown>,
@@ -213,11 +211,7 @@ type SvgTag =
 
 function svgElement(tag: SvgTag, allowed: ReadonlySet<string>): GenuiRenderer {
   return ({ children, ...rest }) =>
-    createElement(
-      tag as 'svg',
-      pickSvgProps(rest, allowed) as SVGProps<SVGSVGElement>,
-      children
-    );
+    createElement(tag as 'svg', pickSvgProps(rest, allowed) as SVGProps<SVGSVGElement>, children);
 }
 
 const svgRect = new Set([...SVG_PAINT, 'x', 'y', 'width', 'height', 'rx', 'ry']);

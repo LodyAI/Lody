@@ -13,8 +13,7 @@ import {
 } from '../../style/theme-scale.stylex';
 import { useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
-import { enUS } from 'date-fns/locale/en-US';
-import { zhCN } from 'date-fns/locale/zh-CN';
+import { getDateFnsLocale } from '@/lib/date-fns-locale';
 import { getServerNow, type AgentConfigId, type SessionContextWindowUsage } from '@lody/shared';
 import { Spinner } from '@lody/ui/spinner';
 
@@ -456,7 +455,7 @@ const resetTimeStyles = stylex.create({
 function ResetTime({ epochSeconds }: { epochSeconds: number }) {
   const { t, i18n } = useTranslation();
   const [absolute, setAbsolute] = useState(false);
-  const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const locale: Locale = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
   const date = new Date(epochSeconds * 1_000);
   const time = absolute
     ? new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language), {
@@ -464,7 +463,8 @@ function ResetTime({ epochSeconds }: { epochSeconds: number }) {
         timeStyle: 'short',
       }).format(date)
     : formatDistance(date, new Date(getServerNow()), { addSuffix: true, locale });
-  const resetTime = locale === zhCN && /^\d/.test(time) ? ` ${time}` : time;
+  const resetTime =
+    (locale.code === 'zh-CN' || locale.code === 'zh-TW') && /^\d/.test(time) ? ` ${time}` : time;
   const toggleLabel = absolute
     ? t('sessions.usage.showRelativeTime', 'Show relative time')
     : t('sessions.usage.showAbsoluteTime', 'Show absolute time');

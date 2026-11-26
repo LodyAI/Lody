@@ -14,6 +14,9 @@ import type {
   LocalMachineRpcRequest as LocalMachineRpcRequestFromModule,
   LocalMachineRpcResponse as LocalMachineRpcResponseFromModule,
 } from './local-machine-rpc';
+import type { SupportedLanguage } from './language';
+
+export type DevicePairingNotificationLanguage = SupportedLanguage | 'zh';
 
 export type CliOutputEvent = {
   runId: string;
@@ -518,10 +521,7 @@ export type ElectronUpdaterState = {
    * `releaseNotes` blob. Optional: a build whose main process does not publish
    * localized notes keeps falling back to `releaseNotes`.
    */
-  releaseNotesByLocale?: {
-    en?: string;
-    zh_CN?: string;
-  };
+  releaseNotesByLocale?: Partial<Record<SupportedLanguage, string>>;
   percent?: number;
   bytesPerSecond?: number;
   transferred?: number;

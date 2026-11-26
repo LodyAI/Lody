@@ -132,7 +132,11 @@ export function offsetFromPoint(
   const text = modelText(element);
   const rect = element.getBoundingClientRect();
   const lineY = y === 'top' ? rect.top + 6 : y === 'bottom' ? rect.bottom - 6 : y;
-  const point = caretFromPoint(element.ownerDocument, x, Math.min(Math.max(lineY, rect.top + 1), rect.bottom - 1));
+  const point = caretFromPoint(
+    element.ownerDocument,
+    x,
+    Math.min(Math.max(lineY, rect.top + 1), rect.bottom - 1)
+  );
   const offset = point ? stringOffset(element, point, x) : null;
   if (offset === null) return y === 'top' ? 0 : text.length;
   return snapToGrapheme(text, Math.min(offset, text.length));
@@ -162,7 +166,8 @@ export function caretEdgeLines(root: HTMLElement): {
     return { first: true, last: true, caretX: caret?.left ?? 0 };
   }
   const box = root.getBoundingClientRect();
-  const lineHeight = Number.parseFloat(document.defaultView?.getComputedStyle(root).lineHeight ?? '') || 20;
+  const lineHeight =
+    Number.parseFloat(document.defaultView?.getComputedStyle(root).lineHeight ?? '') || 20;
   const lastRect = rects[rects.length - 1] ?? caret;
   return {
     first: caret.top - box.top < lineHeight * 0.75,

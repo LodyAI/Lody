@@ -1,0 +1,116 @@
+---
+title: "Worktrees"
+description: "Découvrez comment Lody utilise les worktrees Git pour isoler les tâches simultanées des agents de code, synchroniser les modifications et éviter les collisions."
+---
+
+# Worktrees
+
+Les worktrees sont au cœur de la manière dont Lody isole et gère les tâches simultanées.
+
+## Qu'est-ce qu'un worktree ?
+
+Un worktree Git est une copie de travail liée de votre dépôt. Chaque worktree dispose de son propre répertoire de travail avec une branche extraite distincte, tout en partageant le même historique Git avec votre dépôt principal.
+
+## Comment Lody utilise les worktrees
+
+Lorsque vous créez une tâche dans Lody, celui-ci effectue automatiquement les opérations suivantes :
+
+1. **Création d'une nouvelle branche** - Le nom par défaut est `session/<shortSessionId>` (les 8 premiers caractères de `sessionId` ; vous pouvez la renommer)
+2. **Configuration d'un worktree** - Un répertoire isolé dans lequel l'agent travaille (un par session)
+3. **Exécution du script de configuration** - Commandes optionnelles au niveau du projet, comme l'installation des dépendances ou la copie de modèles de variables d'environnement
+4. **Synchronisation des modifications** - Mises à jour en temps réel visibles dans l'interface web
+
+```
+~/.lody/repos/<repoId>/
+├── bare.git/                # Dépôt Git nu (historique partagé)
+├── cache/                   # Cache de build, etc.
+└── worktrees/
+    ├── <sessionId-1>/       # Worktree pour la session 1
+    └── <sessionId-2>/       # Worktree pour la session 2
+```
+
+## Avantages
+
+### Exécution en parallèle
+
+Chaque tâche dispose de son propre worktree, de sorte que les agents n'écrasent jamais les modifications les uns des autres.
+
+### Isolation propre
+
+- Aucun mélange de modifications non validées entre les tâches
+- Révision, approbation ou suppression faciles pour chaque tâche individuellement
+- Création simple d'une PR par tâche
+
+### Nettoyage automatique
+
+L'archivage rend le worktree géré par Lody d'une session racine éligible au nettoyage. La conversation reste dans la liste des archives jusqu'à sa suppression définitive ; le répertoire de travail peut être supprimé plus tôt.
+
+| Ressource | Après archivage et nettoyage | Après suppression définitive de la session |
+| --- | --- | --- |
+| Historique de la conversation | Conservé ; la session peut être restaurée | Supprimé ; la suppression d'une session est irréversible |
+| Répertoire de worktree géré par Lody | Supprimé par la machine propriétaire | Éligible au nettoyage s'il est encore présent |
+| Branche Git locale et commits | Conservés, y compris le commit de sauvegarde | Conservés ; la suppression ne récupère pas la branche |
+| Modifications en attente non ignorées | Indexées et commitées localement avant la suppression | La même règle de sauvegarde s'applique aux worktrees restants |
+| Fichiers ignorés, tels que `.env`, les dépendances et les artefacts de build | Peuvent être supprimés avec le répertoire | Aucune garantie de récupération |
+| Répertoire d'origine du projet local | Hors du périmètre de nettoyage des worktrees gérés | Hors du périmètre de nettoyage des worktrees gérés |
+
+Le démon propriétaire nettoie uniquement les worktrees situés dans son répertoire de données Lody une fois les métadonnées de l'espace de travail complètes et l'environnement d'exécution de la session libéré. Le nettoyage peut être retardé si cette machine est hors ligne ou si une suppression échoue. Les propriétaires actifs ou inconnus ne sont pas touchés ; l'archivage d'un onglet enfant seul ne supprime pas le worktree partagé de sa session racine. Si le dépôt ne peut pas être résolu ou si un commit de sauvegarde échoue, le répertoire est conservé pour une nouvelle tentative.
+
+La sauvegarde est un commit Git local, et non un push distant ni une sauvegarde complète du répertoire. Un script de nettoyage configuré s'exécute avant la sauvegarde, de sorte que les fichiers qu'il supprime ou modifie échappent à cette protection ; l'échec du script n'empêche pas la suppression. Sauvegardez les fichiers ignorés nécessaires ainsi que tout fichier affecté par le script en dehors du worktree avant d'archiver.
+
+Lorsque vous restaurez et poursuivez une session dont le worktree a été supprimé, Lody le recrée à partir de la branche locale conservée et exécute à nouveau le script de configuration. Les fichiers ignorés doivent être recréés séparément. La récupération nécessite que le dépôt propriétaire et la branche existent toujours ; un projet local supprimé doit être ajouté à nouveau. La suppression manuelle des données du dépôt Lody supprime également ces branches locales et ces sauvegardes : elle n'équivaut donc pas à l'archivage ou à la suppression d'une session.
+
+## Scripts de configuration et de nettoyage des worktrees
+
+Les scripts au niveau du projet vous permettent de préparer chaque nouvelle session de manière cohérente.
+
+Utilisez un **script de configuration** pour les commandes qui doivent s'exécuter après que Lody a créé le worktree et avant que l'agent ne reçoive le premier prompt, par exemple :
+
+```bash
+cp .env.example .env
+pnpm install
+```
+
+Utilisez un **script de nettoyage** pour les commandes qui doivent s'exécuter lorsqu'une conversation est archivée, avant que Lody ne supprime le worktree du disque, par exemple :
+
+```bash
+rm -rf node_modules
+```
+
+### Configurer les scripts
+
+1. Ouvrez **Settings** -> **Projects**.
+2. Sélectionnez un projet local ou un dépôt GitHub.
+3. Ouvrez **Worktree setup** et **Worktree cleanup**.
+4. Ajoutez les commandes pour le shell requis par votre projet, puis quittez l'éditeur pour enregistrer.
+
+Pour les projets locaux, Lody affiche le shell utilisé par la machine de ce projet. Windows utilise PowerShell ; macOS, Linux et WSL utilisent Bash. Pour les dépôts GitHub, vous pouvez renseigner à la fois Bash et PowerShell afin que les sessions fonctionnent sur différentes machines.
+
+Les scripts s'exécutent dans le répertoire du worktree. Les variables d'environnement exportées à l'intérieur du script n'existent que pour le processus de ce script ; si l'agent lui-même a besoin d'une variable d'environnement, définissez-la dans [Configuration des agents](/fr/docs/quickstart).
+
+### Variables d'environnement disponibles
+
+Lody définit ces variables d'environnement pour les scripts de configuration comme pour les scripts de nettoyage :
+
+| Variable                     | Description                                                       |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `LODY_WORKSPACE_ID`          | ID de l'espace de travail actuel                                  |
+| `LODY_SESSION_ID`            | ID de la conversation/session actuelle                            |
+| `LODY_WORKTREE_PATH`         | Chemin absolu vers le worktree de la session                      |
+| `LODY_WORKTREE_BRANCH`       | Branche extraite dans le worktree                                 |
+| `LODY_WORKTREE_SCRIPT_PHASE` | `setup` ou `cleanup`                                              |
+| `LODY_GITHUB_REPO`           | Nom complet du dépôt GitHub, uniquement pour les projets GitHub   |
+| `LODY_LOCAL_PROJECT_ID`      | ID du projet local, uniquement pour les projets locaux            |
+
+Le processus du script démarre également avec son répertoire de travail courant défini sur `LODY_WORKTREE_PATH`, de sorte que les commandes peuvent utiliser soit `pwd`, soit la variable d'environnement explicite :
+
+```bash
+echo "$LODY_SESSION_ID"
+echo "$LODY_WORKTREE_PATH"
+pnpm install
+```
+
+## Étapes suivantes
+
+- [Configurer les agents](/fr/docs/quickstart) - Configurez votre agent de code IA préféré
+- [Agents de code en parallèle](/fr/docs/parallel-agents) - Plusieurs sessions, des worktrees isolés et une visibilité d'équipe

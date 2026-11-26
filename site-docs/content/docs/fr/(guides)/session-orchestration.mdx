@@ -1,0 +1,84 @@
+---
+title: "Contrôle de session par l'agent"
+description: "Permettez à un agent de créer, inspecter, suivre et coordonner d'autres conversations Lody pour des tâches en plusieurs étapes."
+---
+
+# Contrôle de session par l'agent
+
+Les agents Lody peuvent utiliser les outils MCP Lody intégrés pour travailler sur plusieurs conversations. Vous pouvez ainsi demander à un agent de découper une tâche en conversations ciblées, de vérifier leur progression, d'envoyer des instructions de suivi et de ramener les résultats terminés dans la conversation d'origine.
+
+Le démarrage manuel de plusieurs sessions — worktrees isolés, combinaison de modèles, visibilité d'équipe — est présenté dans [Agents de code en parallèle](/fr/docs/parallel-agents). Cette page décrit la voie de pilotage : un agent coordonne les autres.
+
+Pour un guide pas à pas avec un agent principal, Kimi, Codex et Grok — incluant les mentions de conversation et le travail multi-machines — consultez [Workflows de collaboration entre agents](/fr/docs/agent-collaboration/).
+
+<Callout title="De quelle page ai-je besoin ?">
+  - Démarrer plusieurs tâches vous-même → [Agents de code en parallèle](/fr/docs/parallel-agents) -
+  Demander à un agent de créer et de piloter d'autres conversations → cette page - Transférer une
+  session en cours à un coéquipier → [Partager une session d'agent de code](/fr/docs/session-handoff)
+</Callout>
+
+## L'utiliser dans une conversation
+
+Décrivez le résultat attendu et la répartition du travail dans un prompt ordinaire. Par exemple :
+
+```text
+Créez deux conversations de revue pour ce projet : une pour l'exactitude et une pour la couverture de tests.
+Une fois les deux terminées, résumez les conclusions ici.
+```
+
+L'agent peut créer ou réutiliser des conversations, consulter leur statut et leur historique borné, transmettre une instruction de suivi ou annuler un tour en cours lorsque cela est approprié. Les résultats reviennent dans la conversation demandeuse une fois que le travail demandé atteint un état terminal.
+
+Lors de la création d'une nouvelle session, l'agent peut également choisir parmi les options de modèle et de raisonnement compatibles disponibles sur la machine cible. Précisez ces préférences dans votre prompt lorsqu'elles sont importantes, par exemple :
+
+```text
+Créez une session de revue avec Codex en utilisant le niveau de raisonnement élevé, puis résumez les conclusions ici.
+```
+
+## Coordonner des PR, des issues et des correctifs inter-dépôts
+
+### Utiliser Claude Code comme coordinateur
+
+Demandez à Claude Code d'inspecter un ensemble de PR ou d'issues, d'identifier les dépendances, puis d'attribuer des tâches ciblées à d'autres agents tels que Kimi, Codex ou Grok. Chaque agent travaille dans sa propre conversation, et le coordinateur peut assurer le suivi et collecter les résultats. L'accès aux dépôts utilise les outils et les identifiants disponibles pour les agents.
+
+```text
+Parcourez ces PR et issues, regroupez les tâches liées et identifiez les dépendances.
+Déléguez les correctifs indépendants à Kimi et les revues à Codex dans des conversations distinctes.
+Collectez leurs conclusions et indiquez quelles modifications sont prêtes pour ma revue.
+```
+
+### Corriger un bug sur plusieurs dépôts
+
+Lorsqu'un bug s'étend à un client, un SDK et un serveur, créez une conversation pour chaque dépôt concerné. Les agents peuvent mener l'investigation et implémenter les modifications indépendantes en parallèle, échanger leurs découvertes sur le contrat partagé et coordonner les modifications dépendantes.
+
+```text
+Enquêtez sur ce bug dans les dépôts du client, du SDK et du serveur.
+Démarrez une conversation d'agent ciblée pour chaque dépôt. Faites-leur échanger leurs découvertes
+et s'accorder sur les modifications d'interface avant d'implémenter les correctifs dépendants.
+Collectez les correctifs et les résultats de vérification ici.
+```
+
+### Exécuter une boucle de revue et de correction entre agents
+
+Les agents peuvent envoyer des messages et déléguer du travail à d'autres conversations Lody accessibles. Vous pouvez également demander à un agent d'envoyer directement un message à un autre : faites inspecter un commit précis par un relecteur, envoyez ses conclusions à l'agent chargé de l'implémentation, puis faites relire le commit mis à jour après le correctif.
+
+```text
+Demandez à l'agent de revue d'inspecter le commit actuel de l'agent d'implémentation sans le modifier.
+Envoyez les conclusions exploitables à l'agent d'implémentation et demandez-lui de les corriger.
+Faites vérifier le commit mis à jour par le relecteur. Arrêtez après deux tours, ou plus tôt s'il ne reste aucune remarque,
+et résumez-moi le résultat.
+```
+
+Ces exemples décrivent des workflows que vous pouvez demander, et non des pipelines préconfigurés. Rendez explicites les dépôts cibles, le périmètre, les critères d'achèvement et la limite de revues. Le travail en parallèle nécessite toujours des vérifications d'intégration avant que ses modifications soient prêtes à être fusionnées.
+
+## À quoi s'attendre
+
+- Chaque conversation reste une tâche indépendante avec son propre historique et son propre tour actif.
+- Le travail peut s'exécuter en parallèle lorsque la machine cible est en ligne.
+- Lody préserve le lien avec la conversation demandeuse, afin que l'agent puisse poursuivre une fois le travail délégué terminé.
+- Les conversations temporaires peuvent être archivées depuis la liste des sessions une fois leur travail terminé.
+
+## Limites
+
+Le contrôle de session est volontairement encadré : un agent ne peut inspecter que les données de conversation gérées par Lody et ne peut pas l'utiliser comme un planificateur d'arrière-plan sans limite. Une tâche déléguée peut se terminer après l'échéance demandée ; sa sortie reste dans cette conversation même lorsque le demandeur a déjà reçu un résultat de dépassement de délai.
+
+Pour transférer une session en cours à un coéquipier au lieu de coordonner d'autres agents, consultez [Partager une session d'agent de code](/fr/docs/session-handoff).

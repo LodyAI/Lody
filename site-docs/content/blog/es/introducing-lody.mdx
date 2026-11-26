@@ -1,0 +1,69 @@
+---
+title: "Presentamos Lody"
+date: 2026-01-09
+author: Lody Team
+authorLink: https://lody.ai
+description: "Hoy lanzamos Lody, una nueva forma de ejecutar agentes de programación con IA en worktrees aislados con sincronización en tiempo real y acceso móvil."
+image: /lody-intro-en.png
+tag: "Anuncio"
+sidebar: false
+aside: false
+---
+
+Hoy nos entusiasma anunciar el lanzamiento de Lody — una nueva plataforma diseñada para ayudar a los desarrolladores a ejecutar agentes de programación con IA en cualquier lugar, en paralelo y junto con sus equipos.
+
+## El problema
+
+A medida que los asistentes de programación con IA se vuelven más potentes, los desarrolladores enfrentan nuevos desafíos:
+
+- **Colisiones de contexto** — Ejecutar múltiples agentes sobre la misma base de código genera conflictos y confusión.
+- **Falta de visibilidad** — Es difícil hacer seguimiento en tiempo real de los cambios que están realizando los agentes.
+- **Atado al escritorio** — No puedes revisar ni aprobar cambios desde tu teléfono.
+- **Experiencia en solitario** — Compartir el contexto de los agentes con compañeros de equipo resulta engorroso.
+
+## Nuestra solución
+
+Lody aborda estos desafíos con un enfoque sencillo pero potente:
+
+### Aislamiento con worktrees
+
+Cada tarea obtiene su propio worktree de Git aislado. Esto significa que puedes ejecutar múltiples agentes en paralelo — cada uno trabajando en una funcionalidad o corrección de errores distinta — sin colisiones.
+
+```bash
+npx lody start
+```
+
+Eso es todo lo que necesitas para empezar. Lody se encarga automáticamente de la creación del worktree, la orquestación de los agentes y la sincronización.
+
+### Sincronización en tiempo real
+
+Observa cada edición en el momento en que ocurre. Cada respuesta del agente incluye un diff en contexto, para que puedas revisar los cambios sin volver a tu IDE. El árbol de archivos se mantiene sincronizado en tiempo real, dándote visibilidad total de lo que está pasando.
+
+### Prioridad móvil
+
+Lody incluye aplicaciones nativas para iOS y Android, diseñadas para dispositivos móviles. Recibe notificaciones push cuando se completen las tareas, revisa diffs desde tu teléfono y aprueba cambios desde cualquier lugar. El vibe coding no tiene por qué detenerse cuando dejas tu escritorio.
+
+### Espacios de trabajo en equipo
+
+Comparte agentes, skills y contexto de conversación con tu equipo. Todos se mantienen alineados y el conocimiento se acumula en toda la organización.
+
+## Próximos pasos
+
+Apenas estamos empezando. Esto es lo que está en nuestra hoja de ruta:
+
+- **Soporte para más agentes** — Estamos añadiendo soporte para más agentes de programación con IA más allá de Claude Code, Codex y Gemini CLI.
+- **Skills personalizadas** — Define skills reutilizables que los agentes pueden aprender y aplicar.
+- **Integración con CI/CD** — Conecta Lody con tus flujos de trabajo existentes.
+
+## Empieza ahora
+
+¿Listo para probar Lody? Únete a nuestra comunidad de Discord y empieza hoy mismo:
+
+- [Únete a Discord](https://discord.gg/E8mZtMu38s)
+- [Abrir aplicación](https://lody.ai/login)
+
+Estamos deseando ver lo que construyes.
+
+---
+
+*El equipo de Lody*

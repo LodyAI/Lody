@@ -521,4 +521,3 @@ describe('the prompt diff on an edit proposal card', () => {
     expect(diffPromptLines('same\ntext', 'same\ntext')).toBe(null);
   });
 });
-

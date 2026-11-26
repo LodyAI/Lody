@@ -213,5 +213,10 @@ export const RestoreInProgress: Story = {
 };
 
 const themeStyles = stylex.create({
-  glyph: { width: '100%', maxWidth: '640px', backgroundColor: uiColors.background, padding: 'calc(var(--spacing) * 4)' },
+  glyph: {
+    width: '100%',
+    maxWidth: '640px',
+    backgroundColor: uiColors.background,
+    padding: 'calc(var(--spacing) * 4)',
+  },
 });

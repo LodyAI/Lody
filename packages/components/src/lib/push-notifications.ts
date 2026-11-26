@@ -1,3 +1,4 @@
+import { toPushLanguage } from '@lody/shared/language';
 import {
   initOneSignal,
   isOneSignalSupported,
@@ -392,7 +393,7 @@ const oneSignalClient: typeof client = {
         localStorage.setItem(enabledKey, 'true');
       await sdk.login(id);
       if (epoch !== generation) return;
-      await sdk.User.setLanguage(language === 'zh' ? 'zh' : 'en');
+      await sdk.User.setLanguage(toPushLanguage(language));
       if (!enabled()) await sdk.User.PushSubscription.optOut();
       else if ((await getOneSignalPermissionState(sdk)) === 'granted')
         await sdk.User.PushSubscription.optIn();
@@ -406,7 +407,7 @@ const oneSignalClient: typeof client = {
       language = value;
       await oneSignalCommand(async () => {
         const sdk = await initOneSignal();
-        await sdk?.User.setLanguage(value === 'zh' ? 'zh' : 'en');
+        await sdk?.User.setLanguage(toPushLanguage(value));
       });
     },
     PushSubscription: {

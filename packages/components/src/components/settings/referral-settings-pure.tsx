@@ -565,12 +565,17 @@ export function ReferralCreditNotice({
   );
 }
 
-function ReferralComparedValue({ previous, children }: { previous?: string; children?: ReactNode }) {
+function ReferralComparedValue({
+  previous,
+  children,
+}: {
+  previous?: string;
+  children?: ReactNode;
+}) {
   if (!previous) return <>{children}</>;
   return (
     <>
-      <s {...stylex.props(styles.amountMuted)}>{previous}</s>{' '}
-      <strong>{children}</strong>
+      <s {...stylex.props(styles.amountMuted)}>{previous}</s> <strong>{children}</strong>
     </>
   );
 }

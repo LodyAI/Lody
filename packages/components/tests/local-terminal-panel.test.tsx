@@ -67,7 +67,11 @@ vi.mock('@xterm/xterm', () => ({
     linkProvider?: ILinkProvider;
     registerLinkProvider(provider: ILinkProvider) {
       this.linkProvider = provider;
-      return { dispose: () => { this.linkProvider = undefined; } };
+      return {
+        dispose: () => {
+          this.linkProvider = undefined;
+        },
+      };
     }
     loadAddon() {}
     open() {}

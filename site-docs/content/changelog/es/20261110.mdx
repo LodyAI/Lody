@@ -1,0 +1,39 @@
+---
+title: "20261110"
+version: 0.111.0
+date: 2026-11-10
+description: "Comprobaciones externas y automatizaciones entre sesiones, adjuntos locales, diagramas Mermaid integrados y mejoras en la configuración de agentes, detección de modelos, estado de sesiones y experiencia de escritorio."
+---
+
+Versión 0.111.0
+
+### ✨ Novedades
+
+- Las automatizaciones de sesión pueden comprobar URL o ejecutar comandos locales y luego continuar una tarea cuando se cumple una condición externa.
+- Los agentes pueden gestionar automatizaciones entre sesiones registrando, inspeccionando o cancelando una espera en la sesión de destino.
+- Los diagramas Mermaid ahora aparecen integrados directamente en la conversación.
+- Los adjuntos utilizados en la misma máquina permanecen locales: los agentes pueden leer los archivos originales y el envío de imágenes ya no requiere esperar primero a una carga remota.
+- Previsualiza imágenes locales directamente en la computadora de origen. En otro dispositivo, descarga adjuntos locales desde esa computadora y consulta por qué un archivo no está disponible, incluso cuando la computadora está sin conexión.
+- Los agentes pueden identificar su sesión actual, su rol, su sesión principal y su sesión de origen para navegar la colaboración con mayor precisión.
+- Los adaptadores de Claude, Kimi, Pi y DeepSeek Harness admiten prompts del sistema de sesión ACP estándar, incluidas instrucciones añadidas y anulaciones.
+
+### 🐛 Correcciones y mejoras
+
+- Cuando un proveedor elimina el modelo fijado o el modo de permisos de un rol, este muestra por qué no está disponible en lugar de fallar únicamente tras seleccionarlo.
+- Los resúmenes de roles ahora incluyen etiquetas de capacidades para identificar más fácilmente las funciones compatibles.
+- Se restauró el inicio de sesión de proveedores locales y la introducción de claves de API para endpoints de servicio personalizados.
+- Se mejoró la configuración de Lody Agent: los métodos de inicio de sesión seleccionados llegan a la máquina de destino, los endpoints personalizados se pueden configurar antes de completar la instalación y cancelar el inicio de sesión finaliza la espera de inmediato.
+- Los catálogos de modelos inesperadamente vacíos activan una nueva comprobación, conservan el modelo seleccionado e informan de que no hay modelos utilizables disponibles en lugar de superar la verificación de forma incorrecta.
+- Se corrigió que los agentes conocidos dejaran de estar disponibles en una nueva pestaña mientras la información de presencia de la máquina aún se está actualizando.
+- Se corrigió que los resultados de la herramienta advisor de Claude no se completaran correctamente.
+- Se actualizó el entorno de ejecución integrado de Codex a 0.166.0 y el de Claude Code a 2.1.321.
+- Se actualizó el entorno de ejecución integrado de Devin a 3000.12.28 y DeepSeek Harness a 0.2.2-rc.1.
+- Los pensamientos de DeepSeek se contraen de forma predeterminada para facilitar la lectura de respuestas largas.
+- La actividad de la sesión se mantiene precisa mientras las tareas en segundo plano de un agente siguen ejecutándose, lo que reduce los indicadores prematuros de finalización.
+- El contexto de la sesión se conserva cuando falla el inicio, lo que facilita los reintentos.
+- Finalizar una sesión de agente ya no cierra las terminales que hayas abierto manualmente.
+- Se corrigió que las instantáneas obsoletas de escritorio sobrescribieran el estado actual y que se produjeran cambios de estado repetidos durante las actualizaciones de conversaciones.
+- La pantalla de inicio marca explícitamente como no leídas las sesiones completadas sin leer y utiliza un icono distinto para las pull requests en borrador.
+- La barra lateral muestra las ramas locales de la sesión y oculta información engañosa de rama independiente en las sesiones que comparten un directorio.
+- Las pestañas en conversaciones relacionadas se desplazan horizontalmente en lugar de comprimirse cuando hay muchas pestañas.
+- Se mejoró la confirmación y cancelación al salir de la aplicación de escritorio para reducir las esperas y se corrigió que los recursos no se liberaran de inmediato tras cerrar paneles laterales y terminales.

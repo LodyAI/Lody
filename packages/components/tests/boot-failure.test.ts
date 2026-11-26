@@ -92,6 +92,26 @@ describe('renderBootFailure', () => {
     expect(root.querySelector('h1')?.textContent).toBe('Lody 窗口停下来了');
     expect(buttons()[0]?.textContent).toBe('重新加载');
   });
+
+  it.each([
+    ['zh_Hant', 'zh-Hant', 'Lody 這次無法啟動', '重新載入'],
+    ['ja', 'ja', 'Lody を起動できませんでした', '再読み込み'],
+    ['ko', 'ko', '이번에 Lody를 시작하지 못했습니다', '새로고침'],
+    ['es', 'es', 'Lody no se pudo iniciar esta vez', 'Recargar'],
+    ['fr', 'fr', 'Lody n’a pas pu démarrer cette fois', 'Recharger'],
+    ['ru', 'ru', 'Не удалось запустить Lody', 'Перезагрузить'],
+  ] as const)(
+    'renders localized boot failure copy for %s',
+    (stored, expectedLang, title, reload) => {
+      window.localStorage.setItem('lody-language', JSON.stringify(stored));
+      renderBootFailure(root, new Error('boom'));
+
+      const page = root.querySelector<HTMLElement>('.lody-boot-failure')!;
+      expect(page.getAttribute('lang')).toBe(expectedLang);
+      expect(root.querySelector('h1')?.textContent).toBe(title);
+      expect(buttons()[0]?.textContent).toBe(reload);
+    }
+  );
 });
 
 describe('boot failure telemetry boundary', () => {
