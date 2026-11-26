@@ -50,6 +50,7 @@ const deletedEncryptedWorkspacesAtom = atom<{ accountId: string; ids: ReadonlySe
 
 const inFlightSetActiveRequests = new Map<string, Promise<void>>();
 let completedUnobservedSetActiveRequestKey: string | null = null;
+let organizationSwitchSeq = 0;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object';
@@ -607,6 +608,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       if (!user?.id) {
         throw new Error('User not available');
       }
+      const seq = ++organizationSwitchSeq;
       const currentWorkspaceId = resolvedActiveOrganization?.id as WorkspaceId | undefined;
       if (currentWorkspaceId === organizationId) {
         return;
@@ -616,7 +618,9 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         return;
       }
       await setActiveOrganizationOnce(authClient, user.id, organizationId);
-      setSelectedEncryptedWorkspace(null);
+      if (organizationSwitchSeq === seq) {
+        setSelectedEncryptedWorkspace(null);
+      }
     },
     [
       authClient,

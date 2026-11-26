@@ -21,6 +21,8 @@ import {
 } from '@lody/shared';
 import type { AgentConfigId, MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
 import { createWorkspacePendingSends } from './workspace-pending-sends';
+import { preserveHeldSendTextDrafts } from '../lib/session-text-draft-cache';
+import { clearSessionImageCache } from '../lib/session-image-cache';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { createSessionSendResources } from '@/lib/session-send-resources';
 import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
@@ -6445,6 +6447,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       await closeStep('pending-input', () => pendingSends.dispose());
       // Cancel and join send I/O while its cache, transport and repo still exist.
       await closeStep('send-resources', () => sendResources.dispose());
+      clearSessionImageCache();
       await closeStep('listeners', () => {
         cancelDelayedBackgroundSyncStart?.();
         cancelDelayedBackgroundSyncStart = null;
@@ -6697,6 +6700,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       jotaiStore.set(rpcDeliveredTurnsAtom, (previous) =>
         addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, turnId))
       ),
+    onDisposeHeld: preserveHeldSendTextDrafts,
     accountId: deps.accountId ?? `local:${workspaceId}`,
     workspaceId,
     ...(protectedContent ? { localIdentity: deps.e2eeLocalIdentity } : {}),

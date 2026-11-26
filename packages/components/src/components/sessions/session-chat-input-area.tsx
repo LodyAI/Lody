@@ -1,4 +1,10 @@
 import { SessionMetaIdentityMarker } from './automation/session-meta-identity-marker';
+import {
+  sessionTextDraftsCache as sessionDraftsCache,
+  setSessionChatInputTextDraft,
+} from '../../lib/session-text-draft-cache';
+export { setSessionChatInputTextDraft };
+
 import { McpDefaultsRecovery } from '../chat/mcp-defaults-recovery';
 import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
 export { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
@@ -173,8 +179,6 @@ import {
   getComposerText,
   setComposerSelection,
 } from '@/ui/mention/composer-input';
-
-const sessionDraftsCache = new Map<SessionId, string>();
 
 const styles = stylex.create({
   mobileUsage: { height: 'calc(var(--spacing) * 8)' },
@@ -408,19 +412,6 @@ const revokeImagePreviewUrls = (
   for (const image of images) {
     image.abort?.abort();
     URL.revokeObjectURL(image.previewUrl);
-  }
-};
-
-/**
- * Seed the composer text draft for a session that has not mounted yet. The
- * composer hydrates from this cache on mount, so callers can hand text across
- * a tab promotion without holding a ref to the future component.
- */
-export const setSessionChatInputTextDraft = (sessionId: SessionId, text: string): void => {
-  if (text) {
-    sessionDraftsCache.set(sessionId, text);
-  } else {
-    sessionDraftsCache.delete(sessionId);
   }
 };
 

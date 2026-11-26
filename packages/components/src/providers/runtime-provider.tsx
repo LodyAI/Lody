@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { clearSessionImageCache } from '../lib/session-image-cache';
 import { roostHistoryDatabase } from '../lib/roost-history-cache';
 import { subscribeAttachmentWorkspaceMode } from '@/lib/attachment-workspace-access';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
@@ -711,6 +712,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const handleMemberRemoval = (reason: E2eeAccessLoss) => {
       if (disposed || retired) return;
       removed = true;
+      clearSessionImageCache();
       try {
         if (removalScope) retainEncryptedWorkspaceCleanup(removalScope);
       } catch (error) {
@@ -1581,7 +1583,21 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     keyCheckGenerationRef.current += 1;
     setCheckingKey(false);
     setKeyCheckError(false);
-  }, [openKeyWait, effectiveWorkspaceId, accountId]);
+  }, [openKeyWait, keyReceptionWait, effectiveWorkspaceId, accountId]);
+  const triggerKeyCheckAgain = () => {
+    if (checkingKey) return;
+    const generation = ++keyCheckGenerationRef.current;
+    setCheckingKey(true);
+    setKeyCheckError(false);
+    void retryKeyUpdateRef
+      .current()
+      .catch(() => {
+        if (keyCheckGenerationRef.current === generation) setKeyCheckError(true);
+      })
+      .finally(() => {
+        if (keyCheckGenerationRef.current === generation) setCheckingKey(false);
+      });
+  };
   const saveKeyNotice =
     keyReceptionWait &&
     keyReceptionWait.phase === 'save' &&
@@ -1594,9 +1610,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       <WorkspaceKeyReceptionNotice
         workspaceId={effectiveWorkspaceId}
         waiting={keyReceptionWait}
-        onCheckAgain={() => {
-          void retryKeyUpdateRef.current().catch(() => {});
-        }}
+        checking={checkingKey}
+        checkError={keyCheckError}
+        onCheckAgain={triggerKeyCheckAgain}
       />
     ) : null;
 

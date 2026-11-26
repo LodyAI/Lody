@@ -8,15 +8,17 @@ import {
   WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
 } from './workspace-mode-admission';
 
+export const WORKSPACE_MODE_PREFETCH_CONCURRENCY = 4;
+
 /** After the account's session is confirmed, retain a mode proof for every listed
  * workspace that lacks one, so a later offline open of any of them is admitted
- * from local evidence instead of provisionally. Best effort and sequential: a
- * failed read is left for the next listing change or launch, and runtime
- * admission remains the authority for whichever workspace is opened. The routed
- * workspace is skipped (its runtime reads the mode itself), as are workspaces
- * listed as encrypted, which always wait for authoritative admission. A proof is
- * saved only after the device host reports no encrypted identity for the
- * workspace, the same check runtime admission applies to a fresh answer.
+ * from local evidence instead of provisionally. Best effort with bounded
+ * concurrency: a failed read is left for the next listing change or launch, and
+ * runtime admission remains the authority for whichever workspace is opened. The
+ * routed workspace is skipped (its runtime reads the mode itself), as are
+ * workspaces listed as encrypted, which always wait for authoritative admission.
+ * A proof is saved only after the device host reports no encrypted identity for
+ * the workspace, the same check runtime admission applies to a fresh answer.
  */
 export function useWorkspaceModeProofPrefetch(
   platform: PlatformProvider,
@@ -48,14 +50,20 @@ export function useWorkspaceModeProofPrefetch(
     if (!workspaces || !accountId || !authenticated || !listed) return undefined;
     const entries = JSON.parse(listed) as [string, string][];
     let cancelled = false;
+    let hostUnavailable = false;
     const abort = new AbortController();
-    void (async () => {
-      for (const [workspaceId, slug] of entries) {
-        if (cancelled) return;
+    let nextIndex = 0;
+    const workerCount = Math.min(WORKSPACE_MODE_PREFETCH_CONCURRENCY, entries.length);
+    const runWorker = async () => {
+      while (!cancelled && !hostUnavailable) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= entries.length) return;
+        const [workspaceId, slug] = entries[index]!;
         try {
           if (readWorkspaceModeEvidence(localStorage, accountId, workspaceId).descriptor) continue;
           const descriptor = await workspaces.describe({ workspaceId });
-          if (cancelled) return;
+          if (cancelled || hostUnavailable) return;
           if (descriptor.workspaceId !== workspaceId) continue;
           // A retained host identity records its marker and throws; any host
           // failure also throws, so no plaintext proof is saved without the host.
@@ -69,7 +77,7 @@ export function useWorkspaceModeProofPrefetch(
             deadlineMs: WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
             failFast: true,
           });
-          if (cancelled) return;
+          if (cancelled || hostUnavailable) return;
           retainWorkspaceModeProof(localStorage, accountId, slug, descriptor);
         } catch (error) {
           // Unreadable or conflicting local evidence and failed reads are handled
@@ -77,10 +85,15 @@ export function useWorkspaceModeProofPrefetch(
           console.info('Workspace mode prefetch skipped', { workspaceId, error });
           // A temporarily unavailable host affects every remaining workspace alike;
           // the next listing change or launch prefetches again.
-          if (error instanceof HostIdentityUnavailableError) return;
+          if (error instanceof HostIdentityUnavailableError) {
+            hostUnavailable = true;
+            abort.abort();
+            return;
+          }
         }
       }
-    })();
+    };
+    void Promise.all(Array.from({ length: workerCount }, () => runWorker()));
     return () => {
       cancelled = true;
       abort.abort();

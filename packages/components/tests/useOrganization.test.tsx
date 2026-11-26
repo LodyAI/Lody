@@ -855,4 +855,72 @@ describe('useOrganization list recovery', () => {
     expect(latestOrganizationState?.activeOrganization?.id).toBe('workspace-first-login');
     expect(latestOrganizationState?.error).toBeNull();
   });
+
+  it('prevents a slow ordinary workspace switch from clobbering a newer encrypted workspace selection', async () => {
+    const ordinaryB = createOrganization('ordinary-b', 'ordinary-b', 'Ordinary B');
+    const encryptedA = {
+      id: 'encrypted-a',
+      name: 'Encrypted A',
+      slug: 'encrypted-a',
+      contentMode: 'e2ee' as const,
+      contentModeVersion: 1 as const,
+      cryptoOrgId: '11'.repeat(32),
+      genesisHash: '11'.repeat(32),
+      role: 'owner',
+      members: [
+        {
+          id: 'm1',
+          userId: 'user-1',
+          role: 'owner',
+          user: { id: 'user-1', name: 'User', email: 'user@example.com' },
+        },
+      ],
+    };
+    let resolveOrdinarySwitch!: (value: { data: TestOrganization; error: null }) => void;
+    const ordinarySwitchPromise = new Promise<{ data: TestOrganization; error: null }>(
+      (resolve) => {
+        resolveOrdinarySwitch = resolve;
+      }
+    );
+    organizationMocks.encryptedWorkspaces = [encryptedA];
+    organizationMocks.setActive.mockImplementation(() => ordinarySwitchPromise);
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useListOrganizations: () => ({
+        data: [ordinaryB],
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: null,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    const raceStore = createStore();
+    await act(async () => {
+      if (!container) {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+      }
+      root?.render(createElement(TestApp, { targetSlug: '', renderVersion: 0, store: raceStore }));
+    });
+    // Start switching to ordinary B (in-flight async), then immediately switch to encrypted A.
+    const ordinarySwitch = latestOrganizationState!.activateOrganization('ordinary-b');
+    await act(async () => {
+      await latestOrganizationState!.activateOrganization('encrypted-a');
+    });
+    expect(latestOrganizationState?.activeOrganization?.id).toBe('encrypted-a');
+
+    // Now the stale ordinary B switch resolves; it must NOT clear the encrypted A selection.
+    await act(async () => {
+      resolveOrdinarySwitch({ data: ordinaryB, error: null });
+      await ordinarySwitch;
+    });
+    expect(latestOrganizationState?.activeOrganization?.id).toBe('encrypted-a');
+  });
 });

@@ -658,7 +658,8 @@ it.each(['image', 'file'] as const)(
     expect(
       turn!.items.filter((item) => item.type === 'image' || item.type === 'file')
     ).toHaveLength(2);
-    expect(server.requests).toHaveLength(3);
+    // 1 succeeded attachment + 3 transient-503 attempts (initial + 2 retries) + 1 manual retry.
+    expect(server.requests).toHaveLength(5);
     expect(server.parts.size).toBe(2);
     expect(local.files).toEqual([]);
   }
@@ -752,6 +753,134 @@ it('preserves the original workspace draft across an unknown-mode wait and works
   expect(local.files).toEqual([]);
   expect(f.runtime.pendingSends!.getSnapshot()).toEqual([]);
   expect(f.session.historyWriter.readStored()).toEqual([]);
+});
+
+import {
+  preserveHeldSendTextDrafts,
+  sessionTextDraftsCache,
+} from '../src/lib/session-text-draft-cache';
+import {
+  protectedAttachmentChunks,
+  uploadProtectedAttachment,
+} from '../src/lib/encrypted-session-attachment';
+import {
+  readEncryptedLocalIdentity,
+  retainEncryptedLocalIdentity,
+} from '../src/lib/e2ee-local-data';
+
+it('retries transient 503 attachment chunks, clears rejected token cache, and preserves held send drafts on dispose', async () => {
+  // P0-3: corrupt local identity JSON is cleared safely, while valid identity is preserved.
+  const validIdentity = {
+    accountId: 'account-p03',
+    workspaceId: 'ws-p03',
+    genesisHash: '11'.repeat(32),
+    signingPublicKey: '22'.repeat(32),
+  };
+  retainEncryptedLocalIdentity(validIdentity);
+  expect(readEncryptedLocalIdentity('account-p03', 'ws-p03')).toEqual(validIdentity);
+  localStorage.setItem(
+    `lody-e2ee-local-instance:${JSON.stringify(['account-p03', 'ws-corrupt'])}`,
+    '{bad-json'
+  );
+  expect(readEncryptedLocalIdentity('account-p03', 'ws-corrupt')).toBeNull();
+  expect(
+    localStorage.getItem(
+      `lody-e2ee-local-instance:${JSON.stringify(['account-p03', 'ws-corrupt'])}`
+    )
+  ).toBeNull();
+
+  // P1-3: held send drafts survive workspace disposal.
+  const draftSessionId = 'session-held-draft' as SessionId;
+  sessionTextDraftsCache.delete(draftSessionId);
+  preserveHeldSendTextDrafts([
+    {
+      sessionId: draftSessionId,
+      entry: { items: [{ type: 'text', text: 'Unsent message while uploading' }] },
+    },
+  ]);
+  expect(sessionTextDraftsCache.get(draftSessionId)).toBe('Unsent message while uploading');
+  sessionTextDraftsCache.delete(draftSessionId);
+
+  // P1-3: transient 503 upload chunk retries and rejected token promise is cleared for next attempt.
+  vi.useFakeTimers();
+  try {
+    let tokenCalls = 0;
+    let uploadAttempts = 0;
+    const attachmentToken = async () => {
+      tokenCalls += 1;
+      if (tokenCalls === 1) throw new Error('temporary token failure');
+      return `tok-${tokenCalls}`;
+    };
+    vi.stubGlobal('fetch', async () => {
+      uploadAttempts += 1;
+      if (uploadAttempts === 1) return new Response('unavailable', { status: 503 });
+      return new Response(
+        JSON.stringify({
+          file: {
+            type: 'file',
+            fileId: 'part-1',
+            fileName: 'attachment.bin',
+            mimeType: 'application/octet-stream',
+            sizeBytes: 16,
+            sha256: '00'.repeat(32),
+            textPreview: false,
+            transport: 'r2',
+            uploadedAt: Date.now(),
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    });
+    const file = new File([new Uint8Array([1, 2, 3, 4])], 'doc.bin', {
+      type: 'application/octet-stream',
+    });
+    await expect(
+      uploadProtectedAttachment({
+        workspaceId: 'ws-retry' as WorkspaceId,
+        sessionId: 'sess-retry' as SessionId,
+        file,
+        kind: 'file',
+        attachmentToken,
+      })
+    ).rejects.toThrow('temporary token failure');
+
+    const uploadPromise = uploadProtectedAttachment({
+      workspaceId: 'ws-retry' as WorkspaceId,
+      sessionId: 'sess-retry' as SessionId,
+      file,
+      kind: 'file',
+      attachmentToken,
+    });
+    await vi.advanceTimersByTimeAsync(150);
+    const uploaded = await uploadPromise;
+    expect(uploadAttempts).toBe(2);
+    expect(uploaded.encryption.parts).toEqual(['part-1']);
+
+    // Download retries transient failures and clears failed token cache on retry.
+    let downloadTokenCalls = 0;
+    const chunks = protectedAttachmentChunks({
+      workspaceId: 'ws-retry' as WorkspaceId,
+      sessionId: 'sess-retry' as SessionId,
+      encryption: uploaded.encryption,
+      attachmentToken: async () => {
+        downloadTokenCalls += 1;
+        throw new Error(`download token failed ${downloadTokenCalls}`);
+      },
+    });
+    const iter = chunks[Symbol.asyncIterator]();
+    const nextOutcome = iter.next().then(
+      () => null,
+      (error) => error
+    );
+    await vi.advanceTimersByTimeAsync(150 + 450);
+    const downloadError = await nextOutcome;
+    expect(downloadError).toBeInstanceOf(Error);
+    // Token cache was cleared after each rejection so retries re-invoked attachmentToken.
+    expect(downloadTokenCalls).toBe(3);
+  } finally {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
 });
 
 it('keeps image/file count and size limits at the real draft hooks', async () => {

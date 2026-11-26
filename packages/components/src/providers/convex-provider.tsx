@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { ConvexProviderWithAuth, ConvexReactClient } from 'convex/react';
 import { LodyAuthClient, signOutWithAuthClient } from '../lib/auth';
+import { clearSessionImageCache } from '../lib/session-image-cache';
 import { RecoverableConvexBetterAuthProvider } from './recoverable-convex-better-auth-provider';
 
 /**
@@ -65,7 +66,10 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const ConvexAuthRestartContext = createContext<(() => void) | null>(null);
 
 export const AuthProvider = ({ authClient, children }: ConvexProviderProps) => {
-  const signOut = useCallback(() => signOutWithAuthClient(authClient), [authClient]);
+  const signOut = useCallback(async () => {
+    clearSessionImageCache();
+    await signOutWithAuthClient(authClient);
+  }, [authClient]);
   const value = useMemo<AuthContextValue>(
     () => ({
       authClient,
