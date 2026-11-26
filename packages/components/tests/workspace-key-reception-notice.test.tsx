@@ -169,4 +169,69 @@ describe('workspace key reception notice', () => {
     await advance(4_999);
     expect(container.querySelector('[role="status"]')).toBeNull();
   });
+
+  it('surfaces inline error when check-again fails and avoids token invalidation storms on redundant ready refreshes', async () => {
+    const waiting = { workspaceId: 'A' };
+    await act(async () => {
+      root.render(
+        <WorkspaceKeyReceptionNotice
+          workspaceId="A"
+          waiting={waiting}
+          clock={clock}
+          checkError
+          checking
+          onCheckAgain={() => {}}
+        />
+      );
+    });
+    await advance(20_000);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Couldn’t check for keys right now. Check your connection and try again.'
+    );
+    const button = container.querySelector('button');
+    expect(button?.disabled).toBe(true);
+
+    // Token provider uses real timers for its internal release/fetch scheduling.
+    vi.useRealTimers();
+    // Redundant ready refreshes at the same epoch must not invalidate active Streams tokens.
+    let tokenFetches = 0;
+    const access = createDesktopE2eeContent({
+      workspaceId: 'A',
+      genesisHash: '11'.repeat(32),
+      epoch: 1,
+      authToken: () => 'jwt',
+      runtime: {
+        contentStreamsToken: async () => {
+          tokenFetches += 1;
+          return {
+            token: `tok-${tokenFetches}`,
+            bucketId: 'bucket-e2ee',
+            gatewayBaseUrl: 'https://streams.example.com',
+            expiresIn: 600,
+          };
+        },
+      } as unknown as E2eeWorkspaceRuntime,
+    });
+    const controller = new AbortController();
+    const provider = access.e2ee.createTokenProvider(controller.signal);
+    try {
+      await provider.getToken();
+      expect(tokenFetches).toBe(1);
+      // Same epoch, already ready -> cached token stays valid.
+      access.updateStatus({ epoch: 1, hasCurrentKey: true, rotationRequired: false });
+      await provider.getToken();
+      expect(tokenFetches).toBe(1);
+
+      // Actual epoch bump -> invalidates and mints fresh token.
+      access.updateStatus({ epoch: 2, hasCurrentKey: false, rotationRequired: false });
+      await access.transition({
+        install: async () => ({ epoch: 2, hasCurrentKey: true, rotationRequired: false }),
+      });
+      await provider.getToken();
+      expect(tokenFetches).toBe(2);
+    } finally {
+      await provider.close();
+      await access.close();
+    }
+  });
 });

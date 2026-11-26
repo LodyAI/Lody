@@ -28,11 +28,15 @@ export function WorkspaceKeyReceptionNotice({
   waiting,
   clock = systemClock,
   onCheckAgain,
+  checking = false,
+  checkError = false,
 }: {
   workspaceId: string | null | undefined;
   waiting: KeyReceptionWait | null;
   clock?: KeyReceptionNoticeClock;
   onCheckAgain?: () => void;
+  checking?: boolean;
+  checkError?: boolean;
 }) {
   const { t } = useTranslation();
   const [visible, setVisible] = useState<{ wait: KeyReceptionWait; slow: boolean } | null>(null);
@@ -52,16 +56,27 @@ export function WorkspaceKeyReceptionNotice({
   if (!waiting || visible?.wait !== waiting || waiting.workspaceId !== workspaceId) return null;
   return (
     <div {...stylex.props(styles.notice)}>
-      <Alert.Root tone="neutral" role="note">
+      <Alert.Root tone={checkError ? 'warning' : 'neutral'} role="note">
         <div {...stylex.props(styles.row)}>
           <Spinner size="small" role="presentation" aria-hidden="true" />
           <Alert.Description role="status">
             {t(visible.slow ? 'e2ee.content.receivingNewKeySlow' : 'e2ee.content.receivingNewKey')}
           </Alert.Description>
         </div>
+        {checkError && (
+          <Alert.Description role="alert">
+            {t('e2ee.access.waitingKey.checkFailed')}
+          </Alert.Description>
+        )}
         {visible.slow && onCheckAgain && (
           <Alert.Actions>
-            <Button type="button" size="small" variant="secondary" onClick={onCheckAgain}>
+            <Button
+              type="button"
+              size="small"
+              variant="secondary"
+              disabled={checking}
+              onClick={onCheckAgain}
+            >
               {t('e2ee.content.retryHostIdentity')}
             </Button>
           </Alert.Actions>

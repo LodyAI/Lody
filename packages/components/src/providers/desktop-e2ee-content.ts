@@ -175,11 +175,21 @@ export function createE2eeContent(input: {
       reception = undefined;
     }));
   const tokens = new Set<ReturnType<typeof createLoroStreamsTokenProviderLegacy>>();
+  let lastPhase: WorkspaceEpochPhase | 'initial-non-ready' = input.rotationRequired
+    ? 'initial-non-ready'
+    : 'ready';
+  let lastReadyEpoch = input.epoch;
   const transition = createWorkspaceEpochTransitionLegacy({
     epoch: input.epoch,
     rotationRequired: input.rotationRequired,
     onPhase: (phase) => {
-      if (phase === 'ready') for (const token of tokens) token.invalidate();
+      const previousPhase = lastPhase;
+      lastPhase = phase;
+      const currentEpoch = transition.epoch();
+      if (phase === 'ready' && (previousPhase !== 'ready' || currentEpoch !== lastReadyEpoch)) {
+        lastReadyEpoch = currentEpoch;
+        for (const token of tokens) token.invalidate();
+      }
       input.onPhase?.(phase);
       if (phase !== 'ready' && phase !== 'closed') input.onKeyUpdateRequired?.();
     },
