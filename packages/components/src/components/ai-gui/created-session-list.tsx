@@ -49,8 +49,6 @@ export function getCreatedSessionCards(message: SessionHistoryParsed): Card[] | 
 const styles = stylex.create({
   header: { display: 'grid', minWidth: 0 },
   headerLabel: { flexGrow: 1, textAlign: 'start' },
-  // No overscroll containment: at either edge, and when the rows fit, the
-  // wheel must keep scrolling the conversation around the list.
   list: { minWidth: 0, scrollbarGutter: 'stable' },
   bounded: {
     // Five compact control rows, with four separators.

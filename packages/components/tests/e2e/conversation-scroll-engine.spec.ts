@@ -750,7 +750,6 @@ for (const width of [375, 1280]) {
       .poll(() => conversation.evaluate((element) => element.scrollHeight - element.clientHeight))
       .toBeGreaterThan(40);
     for (const direction of [1, -1]) {
-      // Leave room to move in the wheel's direction, with the list in view.
       const start = await conversation.evaluate((element, down) => {
         element.scrollTop = down ? 0 : element.scrollHeight;
         return element.scrollTop;
