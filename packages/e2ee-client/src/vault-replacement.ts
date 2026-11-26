@@ -1,6 +1,6 @@
 /** Whole-vault replacement: every workspace proves its new R before any old R is
  * revoked, and the old vault retires last. No product flow calls this yet. */
-import { Effect } from 'effect';
+import { Cause, Effect, Result } from 'effect';
 import {
   Bytes,
   type RecoveryCredentialRegistration,
@@ -10,6 +10,55 @@ import {
 } from '@lody/e2ee-core';
 import { hashRecordBytes } from '@lody/e2ee-core/protocol';
 import { fromHex, toHex } from './bytes';
+
+const ACCESS_LOSS_CODES = new Set([
+  'e2ee_device_revoked',
+  'e2ee_member_removed',
+  'device_revoked',
+  'member_removed',
+  'revoked',
+  'removed',
+  'unauthorized',
+]);
+const ACCESS_LOSS_REASONS = new Set(['unauthorized', 'revoked', 'removed']);
+
+/** True only when an error proves this device lost access to the workspace (revoked,
+ * removed or unauthorized), never for transient network/503/storage failures. */
+export const isVaultWorkspaceAccessLoss = (error: unknown): boolean => {
+  const queue: unknown[] = [error];
+  for (let seen = 0; queue.length > 0 && seen < 64; seen++) {
+    const current = queue.shift();
+    if (!current) continue;
+    if (
+      current instanceof Error &&
+      (current.message === 'e2ee_device_revoked' || current.message === 'e2ee_member_removed')
+    )
+      return true;
+    if (typeof current === 'object') {
+      const record = current as {
+        _tag?: unknown;
+        code?: unknown;
+        reason?: unknown;
+        cause?: unknown;
+      };
+      if (record._tag === 'PersonalAccessLoss') return true;
+      if (record._tag !== 'BackendError') {
+        if (typeof record.code === 'string' && ACCESS_LOSS_CODES.has(record.code)) return true;
+        if (typeof record.reason === 'string' && ACCESS_LOSS_REASONS.has(record.reason))
+          return true;
+      }
+      if (Cause.isCause(current)) {
+        for (const reason of current.reasons) {
+          if (Cause.isFailReason(reason)) queue.push(reason.error);
+          else if (Cause.isDieReason(reason)) queue.push(reason.defect);
+        }
+      } else if ('cause' in record && record.cause !== undefined) {
+        queue.push(record.cause);
+      }
+    }
+  }
+  return false;
+};
 
 /** One workspace's recovery owner, bound to the new vault. */
 export interface VaultReplacementWorkspace {
@@ -51,19 +100,45 @@ export const replaceAccountVault = Effect.fnUntraced(function* (input: {
     step,
     workspace,
   });
+  const skipped = new Set<VaultReplacementWorkspace>();
   if (input.compromised)
     for (const workspace of input.workspaces) {
-      const result = yield* workspace.revokeOtherRecoveryDevices({ compromised: true });
-      if (result.outcome !== 'Committed') return pending('revoke', workspace.name);
+      const attempt = yield* Effect.result(
+        workspace.revokeOtherRecoveryDevices({ compromised: true })
+      );
+      if (Result.isFailure(attempt)) {
+        if (isVaultWorkspaceAccessLoss(attempt.failure)) {
+          skipped.add(workspace);
+          continue;
+        }
+        return yield* Effect.fail(attempt.failure);
+      }
+      if (attempt.success.outcome !== 'Committed') return pending('revoke', workspace.name);
     }
   for (const workspace of input.workspaces) {
-    const result = yield* workspace.setup();
-    if (result.outcome !== 'Committed' || !result.status.recoverable)
+    if (skipped.has(workspace)) continue;
+    const attempt = yield* Effect.result(workspace.setup());
+    if (Result.isFailure(attempt)) {
+      if (isVaultWorkspaceAccessLoss(attempt.failure)) {
+        skipped.add(workspace);
+        continue;
+      }
+      return yield* Effect.fail(attempt.failure);
+    }
+    if (attempt.success.outcome !== 'Committed' || !attempt.success.status.recoverable)
       return pending('setup', workspace.name);
   }
   for (const workspace of input.workspaces) {
-    const result = yield* workspace.revokeOtherRecoveryDevices();
-    if (result.outcome !== 'Committed') return pending('revoke', workspace.name);
+    if (skipped.has(workspace)) continue;
+    const attempt = yield* Effect.result(workspace.revokeOtherRecoveryDevices());
+    if (Result.isFailure(attempt)) {
+      if (isVaultWorkspaceAccessLoss(attempt.failure)) {
+        skipped.add(workspace);
+        continue;
+      }
+      return yield* Effect.fail(attempt.failure);
+    }
+    if (attempt.success.outcome !== 'Committed') return pending('revoke', workspace.name);
   }
   yield* input.finish();
   return { outcome: 'Committed' } satisfies VaultReplacementResult as VaultReplacementResult;
@@ -80,8 +155,12 @@ export const abandonVaultReplacement = Effect.fnUntraced(function* (input: {
   readonly abandon: () => Effect.Effect<void, unknown>;
 }) {
   for (const workspace of input.workspaces) {
-    const result = yield* workspace.revokeOwnRecoveryDevice();
-    if (result.outcome !== 'Committed')
+    const attempt = yield* Effect.result(workspace.revokeOwnRecoveryDevice());
+    if (Result.isFailure(attempt)) {
+      if (isVaultWorkspaceAccessLoss(attempt.failure)) continue;
+      return yield* Effect.fail(attempt.failure);
+    }
+    if (attempt.success.outcome !== 'Committed')
       return {
         outcome: 'Pending',
         step: 'revoke',

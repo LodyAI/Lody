@@ -55,7 +55,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it('keeps a partial key restore unready and offered until a later restore installs the current key', async () => {
+it('advances a partial key restore pin to ready while reporting partialEpochKey and allowing later key completion', async () => {
   const f = await load();
   await f.commitStagedEpoch({ publish: false });
   const first = await f.portRestore();
@@ -72,16 +72,18 @@ it('keeps a partial key restore unready and offered until a later restore instal
   expect(first.observed).toEqual(
     expect.arrayContaining(first.restored.outcome === 'restored' ? [...first.restored.results] : [])
   );
-  expect(await f.pinPhase('A')).toBe('pending');
-  expect((await f.portPlan()).uncovered.map((row) => row.id)).toEqual(['A', 'B', 'C']);
+  expect(await f.pinPhase('A')).toBe('ready');
+  expect((await f.portPlan()).uncovered).toEqual([]);
+  expect((await f.portPlan()).covered.map((row) => row.id)).toEqual(['A', 'B', 'C']);
   expect(await f.openStatus('A')).toMatchObject({ hasCurrentKey: false });
 
   f.publishStagedEpoch();
-  const second = await f.portRestore();
-  expect(second.restored).toEqual({
-    outcome: 'restored',
-    results: ['A', 'B', 'C'].map((id) => ({ workspaceId: id, name: id, outcome: 'Committed' })),
-  });
+  const second = await f.execute()(
+    f.controller().restore({ file: new Uint8Array(f.fileBytes()) }, ['A', 'B', 'C'])
+  );
+  expect(second).toEqual(
+    ['A', 'B', 'C'].map((id) => ({ workspaceId: id, name: id, outcome: 'Committed' }))
+  );
   expect(await f.pinPhase('A')).toBe('ready');
   expect((await f.portPlan()).uncovered).toEqual([]);
   expect(await f.openStatus('A')).toMatchObject({ hasCurrentKey: true });
@@ -128,15 +130,15 @@ it('finishes a partial restore of a revoked device on the same replacement ident
   expect(partial.restored).toMatchObject({
     results: [{ workspaceId: 'A', outcome: 'Committed', partialEpochKey: true }],
   });
-  expect(await f.pinPhase('A')).toBe('pending');
+  expect(await f.pinPhase('A')).toBe('ready');
   const replacement = signingKey(await f.openStatus('A'));
   expect(replacement).not.toBe(revoked);
 
   f.publishStagedEpoch();
-  const done = await f.portRestore();
-  expect(done.restored).toMatchObject({
-    results: [{ workspaceId: 'A', outcome: 'Committed' }],
-  });
+  const done = await f.execute()(
+    f.controller().restore({ file: new Uint8Array(f.fileBytes()) }, ['A'])
+  );
+  expect(done).toMatchObject([{ workspaceId: 'A', outcome: 'Committed' }]);
   expect(await f.pinPhase('A')).toBe('ready');
   expect(await f.openStatus('A')).toEqual({ signingPublicKey: replacement, hasCurrentKey: true });
 }, 60_000);
@@ -167,17 +169,34 @@ it('replaces a partially restored identity that is revoked before its restore fi
   const f = await load();
   await f.commitStagedEpoch({ publish: false });
   await f.portRestore();
-  expect(await f.pinPhase('A')).toBe('pending');
+  expect(await f.pinPhase('A')).toBe('ready');
   const [revoked] = await f.revokePersonalDevices('A');
   f.publishStagedEpoch();
-  const again = await f.portRestore();
-  expect(again.restored).toMatchObject({
-    results: expect.arrayContaining([{ workspaceId: 'A', name: 'A', outcome: 'Committed' }]),
-  });
+  const again = await f.execute()(
+    f.controller().restore({ file: new Uint8Array(f.fileBytes()) }, ['A'])
+  );
+  expect(again).toMatchObject([{ workspaceId: 'A', name: 'A', outcome: 'Committed' }]);
   const after = await f.openStatus('A');
   expect(after).toMatchObject({ hasCurrentKey: true });
   expect(signingKey(after)).not.toBe(revoked);
   expect(await f.pinPhase('A')).toBe('ready');
+}, 60_000);
+
+it('retires a revoked pending ordinary pin during recovery instead of failing with conflict', async () => {
+  const f = await load();
+  const [revoked] = await f.seedRevokedPendingOrdinaryPin('A');
+  expect(await f.pinPhase('A')).toBe('pending');
+  expect((await f.portPlan()).uncovered.map((row) => row.id)).toContain('A');
+
+  const recovered = await f.portRestore();
+  expect(recovered.restored).toEqual({
+    outcome: 'restored',
+    results: ['A', 'B', 'C'].map((id) => ({ workspaceId: id, name: id, outcome: 'Committed' })),
+  });
+  expect(await f.pinPhase('A')).toBe('ready');
+  const after = await f.openStatus('A');
+  expect(after).toMatchObject({ hasCurrentKey: true });
+  expect(signingKey(after)).not.toBe(revoked);
 }, 60_000);
 
 it('ingests appendRecord historyPage to skip redundant history refresh, falls back on gap, and narrows key distribution to the recovery device', async () => {

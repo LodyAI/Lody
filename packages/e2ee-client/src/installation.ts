@@ -219,7 +219,8 @@ const signRequest = Effect.fnUntraced(function* (
 export const preparePersonalIdentity = Effect.fnUntraced(function* (
   source: PersonalPairingOffer,
   replacement = false,
-  existingOnly = false
+  existingOnly = false,
+  verifiedLost = false
 ) {
   const platform = yield* PersonalHostPlatform,
     store = yield* ClientInstallationStore,
@@ -379,7 +380,8 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
               if (!sameBinding(binding, current.binding) && !settled)
                 return yield* fail('conflict');
               if (sameBinding(binding, current.binding)) {
-                if (!settled && !approved) return yield* fail('conflict');
+                if (!settled && !approved && !(replacement && verifiedLost))
+                  return yield* fail('conflict');
                 // The current identity's credential stays pinned to its own offer. A
                 // replacement gets a new device and credential bound to its own offer
                 // (a new approver, or a new membership after removal); scope and genesis

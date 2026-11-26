@@ -9,7 +9,6 @@ import {
 } from '@lody/e2ee-client';
 import {
   readRecoveryHistory,
-  recoveryRestoreIncomplete,
   restoreOutcome,
   type VaultWorkspaceRestoreResult,
 } from '@lody/e2ee-client/recovery-restore';
@@ -502,8 +501,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           const usable = yield* Effect.exit(
             Effect.gen(function* () {
               const pin = yield* pins.read(options.accountId, workspace.id);
-              if (pin?.phase !== 'ready') return false;
-              return !(yield* recoveryRestoreIncomplete(local, workspace.id));
+              return pin?.phase === 'ready';
             })
           );
           const row = { id: workspace.id, name: workspace.name };

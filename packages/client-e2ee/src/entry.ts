@@ -326,7 +326,7 @@ export function personalEntry(options: PersonalEntryOptions) {
      * never opens, so it has no status, ledger verdict or credential. Retirement drains in
      * the background; the next acquisition waits for it.
      */
-    const lose = async (entry: RecordEntry, accountId: string) => {
+    const lose = async (entry: RecordEntry, accountId: string, allowPending = false) => {
       const definite = () => {
         const state = session.get();
         return !closed && state.status === 'authenticated' && state.user.id === accountId;
@@ -334,18 +334,28 @@ export function personalEntry(options: PersonalEntryOptions) {
       if (!definite()) return false;
       try {
         const pin = await execute(options.pins.read(accountId, entry.workspaceId));
-        if (!pin || pin.phase === 'pending' || !sameOffer(pin.offer, entry.offer) || !definite())
+        if (
+          !pin ||
+          (!allowPending && pin.phase === 'pending') ||
+          !sameOffer(pin.offer, entry.offer) ||
+          !definite()
+        )
           return false;
-        await execute(options.pins.retire(accountId, entry.offer));
+        await execute(options.pins.retire(accountId, entry.offer, allowPending));
       } catch {
         return false;
       }
       void retire(entry).catch(() => {});
       return true;
     };
-    const project = async (entry: RecordEntry, accountId: string, error: unknown) => {
+    const project = async (
+      entry: RecordEntry,
+      accountId: string,
+      error: unknown,
+      allowPending = false
+    ) => {
       const loss = failureLoss(error);
-      if (loss && (await lose(entry, accountId))) throw new Error(loss);
+      if (loss && (await lose(entry, accountId, allowPending))) throw new Error(loss);
       throw error;
     };
     const get = async (
@@ -1219,11 +1229,11 @@ export function personalEntry(options: PersonalEntryOptions) {
         const commands = personalRuntimeRecovery(opened.runtime);
         if (!commands) throw fail('unsupported');
         const result = await execute(commands.restore(input)).catch((error: unknown) =>
-          project(opened.entry, opened.accountId, error)
+          project(opened.entry, opened.accountId, error, true)
         );
         check(opened.accountId);
         if (opened.entry.retired) throw fail('closed');
-        if (result.outcome === 'Committed' && result.partialEpochKey !== true) {
+        if (result.outcome === 'Committed') {
           await execute(options.pins.finish(opened.accountId, result.offer, 'ready'));
           check(opened.accountId);
           if (opened.entry.retired) throw fail('closed');
