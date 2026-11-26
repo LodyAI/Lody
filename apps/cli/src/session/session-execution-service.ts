@@ -3284,6 +3284,7 @@ export class SessionExecutionService {
     if (!session.agentClient?.isCreated() || !session.acpSessionId) return false;
     const mounted = session.getMcpMount();
     if (
+      mounted?.fingerprint !== undefined &&
       sessionMcpAuthRevisionsChanged(
         mounted,
         sessionManager.readMcpAuthRevisions(selectedIds, requesterUserId)

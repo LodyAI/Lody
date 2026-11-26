@@ -1083,6 +1083,42 @@ describe('SessionExecutionService', () => {
     }
   );
 
+  it('retires a degraded MCP mount only once its catalog becomes readable', async () => {
+    const deps = createBaseDeps();
+    let fingerprint: string | undefined;
+    Object.assign(deps.sessionManager, {
+      readMcpConfigurationFingerprint: async () => fingerprint,
+      readMcpAuthRevisions: (ids: readonly string[]) =>
+        Object.fromEntries(ids.map((id) => [id, 1])),
+    });
+    const service = new SessionExecutionService(deps) as unknown as {
+      hasMcpConfigurationChanged(
+        session: unknown,
+        input: { mcpServerIds: McpServerId[] },
+        userId: string
+      ): Promise<boolean>;
+    };
+    const changed = (mount: { fingerprint: string | undefined; authRevisions: object }) =>
+      service.hasMcpConfigurationChanged(
+        {
+          agentClient: { isCreated: () => true },
+          acpSessionId: 'acp-degraded' as ACPSessionId,
+          getMcpServerIds: () => ['server-a'],
+          getMcpMount: () => mount,
+        },
+        { mcpServerIds: ['server-a' as McpServerId] },
+        'user-1'
+      );
+
+    await expect(changed({ fingerprint: undefined, authRevisions: {} })).resolves.toBe(false);
+    fingerprint = 'config-a';
+    await expect(changed({ fingerprint: undefined, authRevisions: {} })).resolves.toBe(true);
+    await expect(changed({ fingerprint: 'config-a', authRevisions: {} })).resolves.toBe(true);
+    await expect(
+      changed({ fingerprint: 'config-a', authRevisions: { 'server-a': 1 } })
+    ).resolves.toBe(false);
+  });
+
   it.each(['before', 'during-build'] as const)(
     'promotes a user-Stop steer before provider submission (Stop: %s)',
     async (cancelStage) => {
