@@ -258,6 +258,8 @@ function encryptedRefusalMessage(
 const TURN_FINALIZATION_STAGE_WARN_MS = 5_000;
 /** Trailing history rows searched for the last assistant turn and its user input. */
 const DEAD_TURN_SCAN_ROWS = 64;
+const automationCancelKey = (sessionId: SessionId, turnId: string): string =>
+  `${sessionId}\0${turnId}`;
 // Renderer, local IPC, and Machine RPC wait at most 300s for the complete
 // authentication workflow. Keep the post-login capability proof inside that
 // envelope and leave a small delivery margin for the final response.
@@ -1206,7 +1208,36 @@ export class SessionExecutionService {
       return result.success;
     }
     await this.abandonInboxInput(sessionId, turnId);
+    const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
+    if (!releaseConflict) {
+      this.automationCancelRequests.add(automationCancelKey(sessionId, turnId));
+      return true;
+    }
+    try {
+      await this.cancelUnstartedAutomationTurn(sessionId, turnId);
+    } finally {
+      releaseConflict();
+    }
     return true;
+  }
+
+  private readonly automationCancelRequests = new Set<string>();
+
+  private async cancelUnstartedAutomationTurn(sessionId: SessionId, turnId: string): Promise<void> {
+    this.automationCancelRequests.delete(automationCancelKey(sessionId, turnId));
+    const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const read = await (await createSessionBackend(sessionDoc)).readTurn(turnId);
+    if (read.state !== 'ready' || read.turn.role !== 'user') return;
+    if (read.turn.status === 'pending' || read.turn.status === 'seen')
+      await this.setTerminalUserTurnStatus(sessionId, sessionDoc, turnId, 'canceled');
+    else if (read.turn.status !== 'canceled') return;
+    if (this.liveTurnId(sessionId) != null) return;
+    const meta = await this.getSessionMeta(sessionId);
+    if (meta?.processingUserMsgId === turnId || meta?.latestUserMsgId === turnId)
+      await this.upsertSessionMeta(sessionId, {
+        lastHandledUserMsgId: turnId,
+        ...(meta.processingUserMsgId === turnId ? { processingUserMsgId: undefined } : {}),
+      });
   }
 
   async acceptAutomationInput(args: {
@@ -4996,16 +5027,28 @@ export class SessionExecutionService {
           return 'execution-deferred';
         }
         // Unverified input never reaches a rule; the start claim refuses it visibly.
-        if (
-          evidence === 'verified' &&
-          (!invocation.requesterUserId ||
-            !(await this.acceptAutomationInput({
+        const admitted =
+          evidence !== 'verified' ||
+          (!!invocation.requesterUserId &&
+            (await this.acceptAutomationInput({
               sessionId,
               turnId: invocation.sourceTurnId,
               userId: invocation.requesterUserId,
               config: invocation.inputConfig,
-            })))
+            })));
+        if (
+          this.automationCancelRequests.has(automationCancelKey(sessionId, invocation.sourceTurnId))
         ) {
+          try {
+            await this.abandonInboxInput(sessionId, invocation.sourceTurnId);
+            await this.cancelUnstartedAutomationTurn(sessionId, invocation.sourceTurnId);
+          } finally {
+            releaseConflict();
+          }
+          span.end({ outcome: 'automation-input-cancelled' });
+          return 'automation-input-cancelled';
+        }
+        if (!admitted) {
           releaseConflict();
           span.end({ outcome: 'automation-admission-blocked' });
           return 'automation-admission-blocked';

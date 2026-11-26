@@ -48,7 +48,10 @@ Automation 账本此前把几乎所有可查询字段都塞进 JSON `payload` �
 持久拒绝要收敛，而不是无限期重验。`admit` 在派发时复查每条排队输入：携带
 `terminalState` 的 `no`、`guard:` 判定、或命中持久集合的 reason（被撤销的
 grant/授权、已删除目标、已终结或不匹配的 pending work）会把收据推入
-`cancelling`，由引擎的取消路径移除队列行并终结它。行仍存活的 queued 收据在
+`cancelling`，由引擎的取消路径移除队列行并终结它。已提升进历史的输入也在那里
+取消：`cancelInput` 到达 Session 执行 owner，由它把尚未启动的 Turn 标为
+`canceled`（直接写入，或交给持有回合启动租约的进行中派发），使其既不再派发，也不再
+交给 dispatch watcher 重试。行仍存活的 queued 收据在
 重新发信号前会在 `reconcile` 里做同一检查。停止与归档目标保持瞬态——两者
 都可由用户恢复——按设计维持重试的 `queued`/`blocked`。被替代的等价方案是
 "准入被拒"的布尔值配定时器重试，正是它在死输入上制造了大量
