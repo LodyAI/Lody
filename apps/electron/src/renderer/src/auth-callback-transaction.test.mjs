@@ -8,6 +8,8 @@ import { electron } from '@better-auth/electron'
 import { crossDomainClient } from '@convex-dev/better-auth/client/plugins'
 import { createDesktopAuthFetch } from '../../main/auth-fetch.ts'
 import { DesktopLogin, readDesktopLoginCallback } from '../../main/services/desktop-login.ts'
+import { createAuthQueryStore } from './auth-query-generation.ts'
+import { acquireAuthSessionStore } from '../../../../../packages/components/src/lib/auth-session-store.ts'
 
 const session = { session: { token: 'synthetic-session' }, user: { id: 'synthetic-user' } }
 
@@ -331,4 +333,100 @@ void test('a callback after process restart asks for a fresh login and validates
   assert.equal(readDesktopLoginCallback('https://auth/callback#token=abc'), null)
   assert.equal(readDesktopLoginCallback('lody://other/callback#token=abc'), null)
   assert.equal(readDesktopLoginCallback('lody://auth/callback?unexpected=1#token=abc'), null)
+})
+
+void test('desktop session query store exposes $store.atoms.session for shared external session consumers', async () => {
+  const initialGate = deferred()
+  const refetchGate = deferred()
+  const committedResponses = []
+  let requests = 0
+
+  const sessionStore = createAuthQueryStore(
+    'getSession',
+    async () => {
+      requests += 1
+      return requests === 1 ? await initialGate.promise : await refetchGate.promise
+    },
+    {
+      onCommit: (response) => committedResponses.push(response)
+    }
+  )
+
+  const adapter = {
+    $store: {
+      atoms: {
+        session: sessionStore.atom
+      }
+    }
+  }
+
+  const convexConsumer = acquireAuthSessionStore(adapter)
+  const stableConsumer = acquireAuthSessionStore(adapter)
+
+  assert.equal(requests, 0)
+  assert.equal(convexConsumer.getSnapshot().isPending, true)
+  assert.equal(convexConsumer.getSnapshot().data, null)
+  assert.equal(convexConsumer.getSnapshot(), stableConsumer.getSnapshot())
+
+  const convexNotifications = []
+  const stableNotifications = []
+  const stopConvexListen = convexConsumer.subscribe(() => {
+    convexNotifications.push(convexConsumer.getSnapshot())
+  })
+  const stopStableListen = stableConsumer.subscribe(() => {
+    stableNotifications.push(stableConsumer.getSnapshot())
+  })
+
+  convexConsumer.start()
+  stableConsumer.start()
+  assert.equal(requests, 1)
+  assert.equal(convexNotifications.length, 0)
+
+  initialGate.resolve({ data: null, error: null })
+  await initialGate.promise
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(convexConsumer.getSnapshot().isPending, false)
+  assert.equal(convexConsumer.getSnapshot().data, null)
+  assert.equal(stableConsumer.getSnapshot(), convexConsumer.getSnapshot())
+  assert.equal(committedResponses.length, 1)
+
+  sessionStore.beginPending()
+  assert.equal(convexConsumer.getSnapshot().isPending, true)
+  assert.equal(convexConsumer.getSnapshot().data, null)
+
+  const authenticated = {
+    session: { id: 'session-nightly', token: 'desktop-token' },
+    user: { id: 'user-nightly' }
+  }
+  sessionStore.commitResponse({ data: authenticated, error: null })
+  assert.equal(convexConsumer.getSnapshot().isPending, false)
+  assert.deepEqual(convexConsumer.getSnapshot().data, authenticated)
+  assert.equal(stableConsumer.getSnapshot().data, convexConsumer.getSnapshot().data)
+
+  sessionStore.beginPending()
+  assert.equal(convexConsumer.getSnapshot().isPending, true)
+  sessionStore.releasePending()
+  assert.equal(convexConsumer.getSnapshot().isPending, false)
+  assert.deepEqual(convexConsumer.getSnapshot().data, authenticated)
+
+  const refreshed = {
+    session: { id: 'session-refreshed', token: 'desktop-token-2' },
+    user: { id: 'user-nightly' }
+  }
+  const pendingRefetch = convexConsumer.refetch()
+  assert.equal(convexConsumer.getSnapshot().isRefetching, true)
+  refetchGate.resolve({ data: refreshed, error: null })
+  await pendingRefetch
+  assert.deepEqual(convexConsumer.getSnapshot().data, refreshed)
+  assert.equal(convexConsumer.getSnapshot().isRefetching, false)
+
+  sessionStore.reset()
+  assert.equal(convexConsumer.getSnapshot().data, null)
+  assert.equal(convexConsumer.getSnapshot().isPending, false)
+
+  stopConvexListen()
+  stopStableListen()
+  convexConsumer.stop()
+  stableConsumer.stop()
 })

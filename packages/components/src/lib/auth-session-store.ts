@@ -2,7 +2,7 @@ import type { LodyAuthClient } from './auth';
 
 export type AuthSessionSnapshot = ReturnType<LodyAuthClient['useSession']>;
 
-type AuthSessionAtom = {
+export type AuthSessionAtom = {
   get: () => AuthSessionSnapshot;
   listen: (listener: (value: AuthSessionSnapshot) => void) => () => void;
 };
@@ -25,13 +25,21 @@ export type AuthSessionStore = {
 
 const entries = new WeakMap<object, AuthSessionEntry>();
 
+function readAuthSessionAtom(authClient: LodyAuthClient): AuthSessionAtom {
+  const store = (authClient as { $store?: { atoms?: { session?: AuthSessionAtom } } }).$store;
+  const atom = store?.atoms?.session;
+  if (!atom || typeof atom.get !== 'function' || typeof atom.listen !== 'function') {
+    throw new Error('Auth client is missing $store.atoms.session');
+  }
+  return atom;
+}
+
 function getEntry(authClient: LodyAuthClient): AuthSessionEntry {
   const key = authClient as object;
   const existing = entries.get(key);
   if (existing) return existing;
 
-  const atom = (authClient.$store as unknown as { atoms: { session: AuthSessionAtom } }).atoms
-    .session;
+  const atom = readAuthSessionAtom(authClient);
   const entry: AuthSessionEntry = {
     atom,
     snapshot: atom.get(),
