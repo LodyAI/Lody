@@ -42,8 +42,11 @@ export const isVaultWorkspaceAccessLoss = (error: unknown): boolean => {
         cause?: unknown;
       };
       if (record._tag === 'PersonalAccessLoss') return true;
-      if (typeof record.code === 'string' && ACCESS_LOSS_CODES.has(record.code)) return true;
-      if (typeof record.reason === 'string' && ACCESS_LOSS_REASONS.has(record.reason)) return true;
+      if (record._tag !== 'BackendError') {
+        if (typeof record.code === 'string' && ACCESS_LOSS_CODES.has(record.code)) return true;
+        if (typeof record.reason === 'string' && ACCESS_LOSS_REASONS.has(record.reason))
+          return true;
+      }
       if (Cause.isCause(current)) {
         for (const reason of current.reasons) {
           if (Cause.isFailReason(reason)) queue.push(reason.error);
@@ -108,7 +111,7 @@ export const replaceAccountVault = Effect.fnUntraced(function* (input: {
           skipped.add(workspace);
           continue;
         }
-        return pending('revoke', workspace.name);
+        return yield* Effect.fail(attempt.failure);
       }
       if (attempt.success.outcome !== 'Committed') return pending('revoke', workspace.name);
     }
@@ -120,7 +123,7 @@ export const replaceAccountVault = Effect.fnUntraced(function* (input: {
         skipped.add(workspace);
         continue;
       }
-      return pending('setup', workspace.name);
+      return yield* Effect.fail(attempt.failure);
     }
     if (attempt.success.outcome !== 'Committed' || !attempt.success.status.recoverable)
       return pending('setup', workspace.name);
@@ -133,7 +136,7 @@ export const replaceAccountVault = Effect.fnUntraced(function* (input: {
         skipped.add(workspace);
         continue;
       }
-      return pending('revoke', workspace.name);
+      return yield* Effect.fail(attempt.failure);
     }
     if (attempt.success.outcome !== 'Committed') return pending('revoke', workspace.name);
   }
@@ -155,11 +158,7 @@ export const abandonVaultReplacement = Effect.fnUntraced(function* (input: {
     const attempt = yield* Effect.result(workspace.revokeOwnRecoveryDevice());
     if (Result.isFailure(attempt)) {
       if (isVaultWorkspaceAccessLoss(attempt.failure)) continue;
-      return {
-        outcome: 'Pending',
-        step: 'revoke',
-        workspace: workspace.name,
-      } satisfies VaultReplacementResult as VaultReplacementResult;
+      return yield* Effect.fail(attempt.failure);
     }
     if (attempt.success.outcome !== 'Committed')
       return {

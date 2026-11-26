@@ -517,20 +517,40 @@ describe('vault replacement resilience under per-workspace access loss', () => {
     expect(abandonedResult).toEqual({ outcome: 'Committed' });
     expect({ bAbandoned, abandoned }).toEqual({ bAbandoned: 1, abandoned: 1 });
 
-    // (c) transient 503 returns Pending and does NOT skip or finish/abandon
+    // (c) transient 503 fails without skipping or finishing/abandoning; Pending stays Pending
     let finishCalledOn503 = 0,
       abandonCalledOn503 = 0;
+    const replaceFailed = await Effect.runPromise(
+      Effect.result(
+        replaceAccountVault({
+          workspaces: [
+            {
+              name: 'A',
+              setup: () => Effect.fail(new Error('503 Service Unavailable')),
+              revokeOtherRecoveryDevices: () => Effect.succeed({ outcome: 'Committed' }),
+            },
+            {
+              name: 'B',
+              setup: () => Effect.succeed({ outcome: 'Committed', status: { recoverable: true } }),
+              revokeOtherRecoveryDevices: () => Effect.succeed({ outcome: 'Committed' }),
+            },
+          ],
+          finish: () =>
+            Effect.sync(() => {
+              finishCalledOn503++;
+            }),
+        })
+      )
+    );
+    expect(Result.isFailure(replaceFailed)).toBe(true);
+    expect(finishCalledOn503).toBe(0);
+
     const replacePending = await Effect.runPromise(
       replaceAccountVault({
         workspaces: [
           {
             name: 'A',
-            setup: () => Effect.fail(new Error('503 Service Unavailable')),
-            revokeOtherRecoveryDevices: () => Effect.succeed({ outcome: 'Committed' }),
-          },
-          {
-            name: 'B',
-            setup: () => Effect.succeed({ outcome: 'Committed', status: { recoverable: true } }),
+            setup: () => Effect.succeed({ outcome: 'Pending', status: { recoverable: false } }),
             revokeOtherRecoveryDevices: () => Effect.succeed({ outcome: 'Committed' }),
           },
         ],
@@ -543,21 +563,23 @@ describe('vault replacement resilience under per-workspace access loss', () => {
     expect(replacePending).toEqual({ outcome: 'Pending', step: 'setup', workspace: 'A' });
     expect(finishCalledOn503).toBe(0);
 
-    const abandonPending = await Effect.runPromise(
-      abandonVaultReplacement({
-        workspaces: [
-          {
-            name: 'A',
-            revokeOwnRecoveryDevice: () => Effect.fail(new Error('503 Service Unavailable')),
-          },
-        ],
-        abandon: () =>
-          Effect.sync(() => {
-            abandonCalledOn503++;
-          }),
-      })
+    const abandonFailed = await Effect.runPromise(
+      Effect.result(
+        abandonVaultReplacement({
+          workspaces: [
+            {
+              name: 'A',
+              revokeOwnRecoveryDevice: () => Effect.fail(new Error('503 Service Unavailable')),
+            },
+          ],
+          abandon: () =>
+            Effect.sync(() => {
+              abandonCalledOn503++;
+            }),
+        })
+      )
     );
-    expect(abandonPending).toEqual({ outcome: 'Pending', step: 'revoke', workspace: 'A' });
+    expect(Result.isFailure(abandonFailed)).toBe(true);
     expect(abandonCalledOn503).toBe(0);
   });
 });

@@ -588,11 +588,7 @@ export const continueAccountVaultReplacement = (
         )
         if (Result.isFailure(opened)) {
           if (isVaultWorkspaceAccessLoss(opened.failure)) continue
-          return {
-            outcome: 'Pending' as const,
-            step: 'setup' as const,
-            workspace: target.name
-          }
+          return yield* Effect.fail(opened.failure)
         }
         workspaces.push({ name: target.name, ...opened.success })
       }
@@ -635,11 +631,7 @@ export const abandonAccountVaultReplacement = (
         )
         if (Result.isFailure(opened)) {
           if (isVaultWorkspaceAccessLoss(opened.failure)) continue
-          return {
-            outcome: 'Pending' as const,
-            step: 'revoke' as const,
-            workspace: target.name
-          }
+          return yield* Effect.fail(opened.failure)
         }
         workspaces.push({ name: target.name, ...opened.success })
       }
