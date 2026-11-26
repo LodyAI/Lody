@@ -735,6 +735,11 @@ describe('single history writer', () => {
       author: { v: 1, kind: 'human', userId: 'editor' },
     }));
     expect(mirror.getState().history[0]?.author).toEqual({ v: 1, kind: 'human', userId: 'editor' });
+    const namedHuman = { v: 1, kind: 'human', userId: 'editor', name: 'Alice Chen' } as const;
+    mirror.historyWriter.updateEntry('turn', (turn) => ({ ...turn, author: namedHuman }));
+    const reopened = new Loro();
+    reopened.import(doc.export({ mode: 'snapshot' }));
+    expect(open(reopened).getState().history[0]?.author).toEqual(namedHuman);
   });
 
   it('prefers human-readable model names, upgrades configured assistant authors on reopen, and formats legacy/gateway IDs safely', () => {

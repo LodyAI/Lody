@@ -16,7 +16,7 @@ import {
   useArchiveConfirmationRequest,
   useArchiveSessionWithConfirmation,
 } from './session-sub-conversation-confirmation';
-import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
+import { buildDraftUserHistoryEntry, ownDisplayName } from '@/lib/session-attachment-draft';
 import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
@@ -2832,6 +2832,7 @@ const SessionDetail = ({
         const pendingHistoryEntry = buildDraftUserHistoryEntry(
           {
             userId: draftUserId,
+            userName: ownDisplayName(user, draftUserId),
             inputBlocks: payload.inputBlocks,
             timestamp: new Date().toISOString(),
             inputConfig: payload.inputConfig,

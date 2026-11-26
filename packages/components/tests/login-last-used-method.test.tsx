@@ -190,8 +190,7 @@ describe('login page last-used method', () => {
       });
       expect(document.activeElement).toBe(password);
 
-      // Drive the 320ms LoginViewSlot transition synchronously via Framer Motion's
-      // manual frame clock so shared-jsdom real rAF scheduling never races it.
+      // Motion's manual frame clock drives the 320ms transition, so real rAF never races it.
       await act(async () => {
         for (let i = 0; i < 12; i++) {
           stepFrame(40);
