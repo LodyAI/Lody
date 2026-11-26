@@ -316,7 +316,7 @@ export const surface = stylex.create({
     fontSize: popup.text,
     fontWeight: 400,
     letterSpacing: text.controlTracking,
-    lineHeight: 1,
+    lineHeight: text.subheadlineLeading,
     cursor: 'default',
     userSelect: 'none',
     whiteSpace: 'nowrap',

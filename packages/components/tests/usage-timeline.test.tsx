@@ -86,7 +86,9 @@ describe('usage timeline presentation', () => {
         const hour = String(date.getHours()).padStart(2, '0');
         return date.getMinutes() ? `${hour}:${String(date.getMinutes()).padStart(2, '0')}` : hour;
       });
-    expect([...axis.children].map((cell) => cell.textContent).filter(Boolean)).toEqual(expectedTicks);
+    expect([...axis.children].map((cell) => cell.textContent).filter(Boolean)).toEqual(
+      expectedTicks
+    );
     const peak = cells[23]!;
     const peakStartMs = data.buckets[23]!.bucketStartMs;
     expect(peak.querySelector('span')!.style.height).toBe('100%');
@@ -106,7 +108,9 @@ describe('usage timeline presentation', () => {
     );
     expect(peak).not.toBeNull();
     expect(peak?.getAttribute('aria-colindex')).toBe(String(peakDate.getHours() + 1));
-    const dates = new Set(data.buckets.map(({ bucketStartMs }) => new Date(bucketStartMs).toDateString()));
+    const dates = new Set(
+      data.buckets.map(({ bucketStartMs }) => new Date(bucketStartMs).toDateString())
+    );
     expect(container.querySelectorAll('[role="row"]')).toHaveLength(dates.size);
     expect(container.querySelectorAll('[role="gridcell"]')).toHaveLength(data.buckets.length);
   });
@@ -230,8 +234,7 @@ describe('usage day selection across ranges', () => {
   async function selectCell(index: number, range?: 'day' | 'week') {
     const cells = [...container.querySelectorAll<HTMLButtonElement>('[role="gridcell"]')];
     const cell = cells.filter(
-      (item) =>
-        !range || (item.title && item.title.includes(' – ') === (range === 'day'))
+      (item) => !range || (item.title && item.title.includes(' – ') === (range === 'day'))
     )[index]!;
     await act(async () => cell.click());
     return cell;

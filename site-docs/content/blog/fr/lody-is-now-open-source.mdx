@@ -1,0 +1,45 @@
+---
+title: "Lody est désormais open source : un espace de travail partagé pour les équipes et les agents de codage"
+date: 2026-08-26
+author: Lody Team
+authorLink: https://lody.ai
+description: "Lody aide les équipes à comprendre le contexte derrière les décisions logicielles. Nous faisons évoluer Lody vers une approche local-first, avec l'objectif de rendre ce contexte durable, portable et, à terme, sous le contrôle de l'équipe"
+image: /lody-open-source.jpg
+tag: "Annonce"
+sidebar: false
+aside: false
+---
+
+Lody est un espace de travail collaboratif pour les agents de codage. Il réunit en un seul endroit les conversations, l'état d'exécution et les modifications de code dispersés entre les membres de l'équipe, les agents et les machines. Les membres d'une équipe peuvent ouvrir les conversations les uns des autres et poursuivre la discussion. Ils peuvent également lancer une tâche sur une machine en ligne depuis un navigateur ou un téléphone, et ajouter des instructions pendant son exécution.
+
+La CLI et le client de bureau local de Lody sont désormais open source. Le code source est disponible sur [github.com/lodyai/lody](https://github.com/lodyai/lody).
+
+Mais le problème que nous voulons résoudre va au-delà de cela.
+
+La complexité d'un système logiciel ne réside pas uniquement dans son code. Un morceau de code peut provenir d'une règle métier, d'un incident de production, d'une exigence de compatibilité pour un client important ou d'une limitation technique qui a disparu depuis. À mesure qu'un projet évolue, ces décisions s'accumulent couche par couche pour former le système tel qu'il existe aujourd'hui. Le code conserve le résultat, mais il ne conserve pas toujours les raisons qui l'ont produit.
+
+Ces raisons sont dispersées entre les documents de conception, les pull requests, les issues, les réunions, les conversations avec les agents et la mémoire des membres de l'équipe. Lorsqu'une personne reprend un module, relit une modification ou prépare un refactoring, le plus difficile n'est souvent pas simplement de lire le code. C'est de reconstituer les règles métier, les concepts du domaine, les compromis de conception et les décisions historiques qui se cachent derrière.
+
+Nous voulons que Lody devienne une couche de compréhension partagée pour les équipes logicielles et les agents de codage : en reliant conversations, code, tâches, documents et décisions passées afin que les équipes puissent retracer pourquoi un système est devenu ce qu'il est aujourd'hui et déterminer quelles contraintes existantes une nouvelle modification risque d'affecter.
+
+La conversation n'est que le point de départ pour comprendre un projet. Lody développera la gestion des tâches, la documentation et la revue de code autour de cette compréhension. À l'avenir, nous voulons explorer des plugins permettant aux utilisateurs de définir des outils adaptés à leurs équipes, de relier les données de ces outils au reste du contexte du projet et de les garder synchronisées à l'échelle de l'équipe.
+
+## Comment fonctionne la synchronisation dans Lody
+
+Lody utilise un moteur de synchronisation local-first construit sur la Loro Stack. La majeure partie de l'état de collaboration est représentée avec [Loro](https://loro.dev/) et [Flock](https://www.npmjs.com/package/@loro-dev/flock-wasm), et synchronisée entre les appareils via Loro Streams. Loro et Flock reposent sur des CRDT, ce qui permet aux réplicas d'évoluer indépendamment et de fusionner après reconnexion.
+
+Nous avons choisi les CRDT avant tout parce que nous voulons que le contexte du projet soit [local-first](https://www.inkandswitch.com/essay/local-first/) : chaque appareil dispose d'une copie locale qu'il peut utiliser directement, et synchronise les modifications une fois le réseau rétabli.
+
+Les applications peuvent être remplacées, mais les données doivent survivre à l'application. Les agents et les outils continueront d'évoluer ; le contexte de projet accumulé par une équipe ne doit pas disparaître avec eux. Des formats de données et des implémentations ouverts réduisent également le risque que ce contexte reste enfermé dans une seule application.
+
+Les structures de données génériques de Loro permettent également de représenter l'état collaboratif requis par les commentaires, les documents en texte enrichi, les tableaux blancs et d'autres outils. Cela donne au même moteur de synchronisation le potentiel de prendre en charge différentes formes d'interaction et fournit un socle de données partagé pour de futurs plugins communautaires.
+
+Lody ne prend pas encore en charge le chiffrement de bout en bout, et la collaboration multi-appareils dépend toujours du service de synchronisation hébergé par Lody. Nous avons terminé la première conception des espaces de travail chiffrés de bout en bout.
+
+Notre orientation est que le contexte de projet accumulé par les équipes et les agents reste, à terme, sous le contrôle de l'équipe.
+
+## Pour commencer
+
+Vous pouvez [télécharger Lody](/fr/download) ici.
+
+Nous recherchons des équipes logicielles de vingt personnes ou moins pour essayer Lody et nous aider à l'améliorer. Si la façon dont les équipes peuvent comprendre, relire et poursuivre le travail d'un agent vous intéresse, [discutez avec nous](https://calendar.notion.so/meet/remch183/hqic3xqu?utm_source=blog).

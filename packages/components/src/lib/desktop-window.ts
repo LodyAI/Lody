@@ -33,16 +33,29 @@ export function isTodayWindow(): boolean {
   return sessionStorage.getItem('lody:todayWindow') === '1';
 }
 
-/** Opens (or raises) the workspace's standalone Today window. */
-export function openTodayWindow(target: {
-  workspace: string;
-  member?: string;
-  date?: string;
-}): boolean {
+export type TodayDesktopTarget = { workspace: string; member?: string; date?: string };
+export const OPEN_TODAY_COMPANION = 'lody:open-today-companion';
+
+export function openTodayWindow(target: TodayDesktopTarget): boolean {
   const services = getIpcServices();
   if (!isElectronRenderer() || !services) return false;
-  void services.app.openTodayWindow(target).catch(console.error);
+  const request = new CustomEvent(OPEN_TODAY_COMPANION, { detail: target, cancelable: true });
+  if (window.dispatchEvent(request)) void services.app.openTodayWindow(target).catch(console.error);
   return true;
+}
+
+export function closeTodayWindow(): void {
+  const services = getIpcServices();
+  if (!services) {
+    window.close();
+    return;
+  }
+  void services.app.closeTodayWindow().catch(console.error);
+}
+
+export function revealTodayWindow(bindingId: number): void {
+  if (!isTodayWindow()) return;
+  void getIpcServices()?.app.revealTodayWindow(bindingId).catch(console.error);
 }
 
 // Preserve the primary window's existing drafts and navigation. Auxiliary

@@ -217,4 +217,3 @@ describe('applying an edit proposal', () => {
     expect(apply(editedAgain, 'edit')?.title).toBe('Daily');
   });
 });
-

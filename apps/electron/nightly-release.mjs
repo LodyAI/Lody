@@ -189,25 +189,27 @@ async function main() {
   const api = githubApi(process.env.GH_TOKEN)
   let result
   const store = createNightlyR2Store()
-  const minimumStableVersion = await verifyNightlyStablePrerequisite({
+  const minimumStableVersion = process.env.NIGHTLY_MINIMUM_STABLE_VERSION
+  const publishedStableVersion = await verifyNightlyStablePrerequisite({
     store,
-    minimumVersion: process.env.NIGHTLY_MINIMUM_STABLE_VERSION,
+    minimumVersion: minimumStableVersion,
     manifestUrl: process.env.STABLE_ELECTRON_VERSION_URL
   })
   const options = {
     minimumStableVersion,
     candidate,
-    baseVersion: JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'))
-      .version,
     api,
     store,
     allowBootstrap: process.env.NIGHTLY_ALLOW_BOOTSTRAP === 'true'
   }
-  if (command === 'prepare') result = await prepareNightlyBuild(options)
+  if (command === 'prepare')
+    result = await prepareNightlyBuild({ ...options, baseVersion: publishedStableVersion })
   else if (command === 'publish')
     result = await publishNightlyRelease({
       ...options,
       directory,
+      baseVersion: JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'))
+        .version,
       displayVersion: process.env.LODY_NIGHTLY_VERSION,
       baseUrl: process.env.VITE_ELECTRON_UPDATE_URL,
       publicKey: process.env.SPARKLE_ED_PUBLIC_KEY

@@ -1,0 +1,77 @@
+---
+title: "20261105"
+version: 0.110.0
+date: 2026-11-05
+description: "Projets multi-dépôts, vues de PR par dépôt, importation Magpie via la CLI, suggestions pour le prompt suivant, connexion MCP locale, page Planifications repensée, onglets de tâches catégorisés, collaboration de Rôles multi-machines, prise en charge d'iPhone Duo, messages planifiés, poursuite après réinitialisation du quota Claude, gestion des plugins DeepSeek Harness, heures de réinitialisation d'utilisation commutables et téléchargement de fichiers distants plus volumineux, ainsi qu'une série de correctifs et d'améliorations."
+---
+
+Version 0.110.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Annotations d'images : dessinez, ajoutez du texte et laissez des notes dans l'aperçu d'image, puis envoyez l'image annotée à un Agent en pièce jointe.
+- Poursuite automatique des conversations : reprenez les tâches lorsque certaines conditions sont remplies, avec des options par conversation pour reprendre après récupération du quota, archiver après la fusion d'une PR et compacter le contexte en cas d'inactivité.
+- Aperçu de l'émulateur Android : un nouveau panneau d'aperçu et de contrôle avec saisie tactile, collage de texte, rotation, captures d'écran, bascule entre mode clair et sombre et options de qualité d'image.
+- Méthodes de connexion des Agents : voyez quelles méthodes de connexion un Agent prend en charge avant de vous connecter.
+- Mise à jour de Pi : mise à niveau du Pi intégré vers la version 1.4.0, ajoutant la prise en charge du protocole Streamable HTTP MCP.
+- Aperçus iOS et Android côte à côte : faites glisser un onglet d'aperçu d'appareil sur un autre pour afficher les deux écrans simultanément. Faites glisser le séparateur pour ajuster leurs largeurs, ou double-cliquez dessus pour rétablir la répartition par défaut.
+- Citer le texte d'une conversation : ajoutez un extrait de message sélectionné à l'éditeur pour poser une question de suivi avec le texte d'origine en contexte.
+- PR empilées : le panneau des PR affiche l'ordre de la pile enregistré sur GitHub, le statut de chaque PR et la position de la PR actuelle dans la pile. Les PR liées sont également affichées dans la barre latérale.
+- Tâches planifiées plus souples : les prompts prennent désormais en charge les mentions, et les intervalles de répétition peuvent être définis sur un nombre personnalisé de minutes ou d'heures.
+- Restauration directe des conversations archivées : un nouveau bouton de restauration dans l'éditeur rouvre la conversation tout en conservant votre brouillon.
+- Pilotage d'Agent multi-machines : envoyez des instructions de suivi à une conversation en cours sur une autre machine. Si le pilotage en direct n'est pas disponible, les instructions sont mises en file d'attente.
+- Claude peut désormais découvrir les modèles proposés par les passerelles compatibles Anthropic pour chaque conversation.
+- Gestion de la file d'attente par les Agents : les Agents peuvent inspecter les messages en attente dans une conversation cible et retirer ou remplacer les instructions en file d'attente qu'ils ont envoyées.
+- État de collaboration plus complet : les Agents peuvent interroger les outils actifs d'une conversation, l'heure de la dernière sortie et la longueur de la file d'attente, ainsi que les informations disque de la machine et le quota restant.
+- Références de messages avec attribution : les Agents peuvent référencer le message d'origine lors de la transmission d'instructions, y compris les informations sur l'auteur qui y sont associées.
+- Appairage d'appareils disponible par défaut : l'appairage d'appareils au niveau du compte ne nécessite plus le mode développeur ni d'option de test.
+- Archivage groupé de conversations : les Agents peuvent archiver plusieurs conversations en un seul appel MCP.
+- Deux fenêtres de quota sur la page d'accueil : consultez les pourcentages d'utilisation et les heures de réinitialisation pour les quotas à court terme et hebdomadaires.
+- Noms de groupes de conversations indépendants : renommez séparément les groupes de conversations de la barre latérale et les onglets individuels, sans qu'ils s'affectent mutuellement.
+- Échecs de collaboration plus clairs : MCP renvoie les motifs d'échec précis, les heures de réinitialisation de quota et d'autres détails. Une nouvelle tentative réussie efface désormais l'état d'échec précédent.
+
+### 🐛 Correctifs et améliorations
+
+- L'invite de quota Claude épuisé propose désormais d'activer la poursuite automatique de la conversation. Lody revérifie et poursuit l'exécution dès que le quota est rétabli ou que l'heure de réinitialisation est atteinte.
+- Les messages planifiés affichent désormais leur texte intégral, peuvent être modifiés dans la conversation actuelle et indiquent l'heure d'envoi dans le fuseau horaire local de l'utilisateur.
+- Correction du blocage de la livraison des messages planifiés lorsqu'une conversation attend des tâches déléguées ou lorsque la boîte de réception de messages ne démarre pas.
+- Amélioration de la récupération des services en arrière-plan, des files d'attente de messages et des listes MCP après de brèves coupures de connexion, réduisant ainsi les conversations bloquées.
+- Correction de l'écrasement des paramètres de conversation, tels que le modèle et l'effort de raisonnement, par des saisies ou des brouillons antérieurs.
+- Amélioration du fork des conversations Pi et du chargement des commandes slash, empêchant les listes de commandes de fuiter entre les conversations.
+- Correction des importations d'images, des détails de liste et de l'affichage des erreurs de démarrage pour l'historique DeepSeek.
+- Ajout de la compatibilité avec les modèles Magpie qui ne déclarent pas leurs capacités d'entrée.
+- Amélioration de l'inertie de défilement dans les conversations sur iOS, de la réactivité des boutons sur la page d'historique, du redimensionnement de la barre latérale et de l'alignement des pages sur ordinateur.
+- Amélioration de la sélection de police par défaut, en privilégiant SF Pro Display lorsqu'elle est disponible.
+- Correction d'un problème où l'échec du chargement des informations d'abonnement faisait échouer tout l'espace de travail, et amélioration de la récupération du cache des widgets de l'écran d'accueil.
+- Mise à niveau de Claude Code intégré vers la version 2.1.316.
+- Rétablissement de la configuration de conversation et du comportement d'envoi de messages précédents, corrigeant les échecs de livraison de messages avec d'anciens services en arrière-plan. Suppression de l'entrée précédente indiquant que les paramètres de conversation n'étaient plus écrasés par des saisies ou des brouillons antérieurs.
+- Les commandes de poursuite automatique reflètent désormais les capacités réelles de la machine cible, évitant les actions indisponibles avec d'anciens services en arrière-plan.
+- Déplacement des options de qualité de l'aperçu Android dans le menu « Plus » pour libérer de l'espace dans la barre d'outils.
+- Correction d'erreurs causées par le chargement des informations d'organisation avant que l'authentification ne soit prête.
+- Amélioration de la collaboration multi-Agents : les réponses incluent désormais l'état de livraison du message et les motifs d'échec précis, identifient la source des messages d'Agent et attendent la réponse finale après un pilotage au lieu de ne renvoyer qu'un résultat intermédiaire.
+- MCP accepte désormais les identifiants de conversation courts non ambigus et prend en charge la lecture de l'historique par rôle, par heure et par direction, réduisant ainsi le contexte inutile.
+- Réduction de l'utilisation de la mémoire lors de la lecture de longs historiques de conversation et de l'exécution des processus MCP internes, et amélioration de l'accès à l'historique pendant le streaming.
+- Correction de la file de poursuite automatique qui ne se réveillait pas rapidement, et ajout d'états clairs pour la connexion en cours, le mode hors ligne et l'indisponibilité.
+- Correction du chargement de l'historique qui écrasait l'état après la sortie du mode plan, et de la désynchronisation du statut des PR entre la barre d'informations et la barre latérale.
+- Plusieurs onglets d'une même conversation partagent désormais la même association de simulateur, évitant la sélection répétée de l'appareil.
+- Amélioration des titres des cartes de questions et du rendu Markdown, et ajout de la compatibilité avec les formulaires de questions Droid.
+- Correction des images annotées dépassant les limites de pièces jointes, de l'ajustement du zoom du panneau PDF et de la mise en page des cartes de partage dans WebKit.
+- Les images des PR se chargent désormais à la demande. Correction de la barre de défilement des onglets de la barre latérale qui ne pouvait pas être glissée, et de l'alignement du texte dans l'éditeur de message et la file d'attente.
+- Les tâches planifiées reportent désormais leur exécution lorsque le quota est épuisé et qu'une heure de réinitialisation est connue, évitant ainsi les échecs répétés ou une rafale d'exécutions lorsque le quota est rétabli.
+- Lorsqu'une conversation se termine, seuls le raisonnement et l'activité des outils sont repliés ; tout le texte de la réponse reste visible. L'activité dépliée s'affiche dans son ordre d'origine.
+- Les suggestions de prompt utilisées sont masquées après l'envoi d'un message, empêchant la réapparition d'anciennes suggestions.
+- Correction du clavier recouvrant les champs de connexion sur téléphone, et de la barre d'état recouvrant les boutons de retour sur certaines pages.
+- Correction de l'échec d'ouverture de l'explorateur de dossiers lorsqu'un enregistrement de projet n'a pas de chemin.
+- Correction des envois d'instantanés via la CLI pouvant attendre indéfiniment, et amélioration des nouvelles tentatives après des échecs d'initialisation.
+- Uniformisation des graisses de police dans l'éditeur, le bouton d'envoi et les libellés des pièces jointes.
+- Affichage des PR dans la barre latérale : rétablissement de l'icône d'état d'origine pour une PR unique. Suppression de l'entrée précédente concernant les PR liées dans la barre latérale ; les PR empilées restent disponibles dans le panneau des PR.
+- Les cartes de la page d'accueil se réorganisent désormais selon l'état des tâches. L'éditeur de nouvelle conversation reste utilisable si le chargement des cartes échoue.
+- Correction des conversations épinglées qui perdaient leur hiérarchie liée, et du décalage des icônes de la barre latérale lorsqu'une PR est affichée comme prête à être fusionnée.
+- Amélioration de la compatibilité avec les méthodes de connexion des Agents et du retour d'information sur la progression de l'authentification, et ajout du suivi d'utilisation manquant pour les Agents ACP personnalisés.
+- Correction des machines saines marquées à tort comme hors ligne lors de brèves erreurs de synchronisation.
+- Optimisation de l'indexation des fichiers pour les grands projets en ignorant les répertoires ignorés et les caches, réduisant les blocages de la CLI et les fichiers marqués à tort comme supprimés.
+- Correction du calcul des diffs Git lorsqu'aucune base de comparaison n'est enregistrée, en utilisant à la place la branche par défaut du dépôt distant.
+- Les aperçus navigateur peuvent désormais être ouverts directement sur mobile sans saisir manuellement d'adresse. Correction d'une incohérence de thème le long du bord intérieur du cadre du simulateur iOS.
+- Mise à jour du repli des réponses : les mises à jour de progression explicitement marquées par l'Agent sont désormais repliées avec le reste de l'activité, tandis que les réponses finales restent visibles. Ceci remplace l'indication précédente selon laquelle tout le texte de la réponse restait visible.
+
+Merci aux contributeurs externes Innei, Astro-Han, delete-cloud, liyown, dreaifekks, ox01024, Dante-dan et boris-w pour leur contribution à cette mise à jour !

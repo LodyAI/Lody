@@ -31,6 +31,42 @@ const LABELS = {
     files: '文件',
     category: { code: '代码', doc: '文档', test: '测试', dev: '开发' },
   },
+  'zh-hant': {
+    title: '變更',
+    types: '類型',
+    files: '檔案',
+    category: { code: '程式碼', doc: '文件', test: '測試', dev: '開發' },
+  },
+  ja: {
+    title: '変更',
+    types: '種類',
+    files: 'ファイル',
+    category: { code: 'コード', doc: 'ドキュメント', test: 'テスト', dev: '開発' },
+  },
+  ko: {
+    title: '변경 사항',
+    types: '유형',
+    files: '파일',
+    category: { code: '코드', doc: '문서', test: '테스트', dev: '개발' },
+  },
+  es: {
+    title: 'Cambios',
+    types: 'Tipos',
+    files: 'Archivos',
+    category: { code: 'Código', doc: 'Docs', test: 'Pruebas', dev: 'Dev' },
+  },
+  fr: {
+    title: 'Modifications',
+    types: 'Types',
+    files: 'Fichiers',
+    category: { code: 'Code', doc: 'Docs', test: 'Tests', dev: 'Dev' },
+  },
+  ru: {
+    title: 'Изменения',
+    types: 'Типы',
+    files: 'Файлы',
+    category: { code: 'Код', doc: 'Доки', test: 'Тесты', dev: 'Инфра' },
+  },
 } satisfies Record<
   ReplicaLocale,
   { title: string; types: string; files: string; category: Record<ChangeCategory, string> }

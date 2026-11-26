@@ -25,3 +25,23 @@ Data model and undo: `packages/shared/src/today-outline.ts` (a mention is one ma
 [decision](../../../../../.agents/notes/implemented/architecture/2026-11-20-today-inline-mentions.md)); identity and links:
 `packages/shared/src/today-types.ts`, `packages/shared/src/session-link.ts`; page stores:
 `src/lib/today/today-page-store.ts`, `src/providers/today-page-store-cache.ts`.
+
+Desktop window cold-open phases: `src/lib/today/today-window-boot-timeline.ts`; main logs them with its own
+milestones as one `[today-window] boot timeline` JSON line per open.
+
+The top day opens from the workspace's local page store as soon as the matching runtime is ready.
+The local standalone window starts the conversation metadata scan after the first day paints.
+Mentions use the projection as it becomes available. Earlier days acquire their page stores
+near the viewport.
+
+The local desktop can retain one previously opened Today renderer while another product window
+remains. The hidden window goes to the root route and releases its workspace runtime. Reopening
+binds a new day and shows the window once its local outline or retry UI commits. If the binding
+times out, main replaces the renderer with a cold open. Cloud windows use the normal close path.
+
+The local primary window can open a [same-renderer companion](../../../../../.agents/notes/implemented/architecture/2026-11-25-today-shared-renderer.md).
+The companion mounts the note surface in a second native window and shares the primary runtime's
+page cache. The standalone route handles opens without that runtime and can take over when
+the primary window closes or reloads. Both window types use the same saved position and size.
+The global toggle raises or closes the existing window of either type. When no Today window
+is open, it opens the standalone route for the active workspace.

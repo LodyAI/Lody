@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  GLOBAL_SHORTCUT_DEFAULTS,
   bindingToElectronAccelerator,
   CliRuntimeStateSchema,
   isDevEmailPasswordLoginEnabled,
@@ -11,6 +12,15 @@ import {
 } from '../src/electron-ipc';
 
 describe('bindingToElectronAccelerator', () => {
+  it('converts every built-in global shortcut default into a valid Electron accelerator', () => {
+    expect(bindingToElectronAccelerator(GLOBAL_SHORTCUT_DEFAULTS['app.focus'])).toBe(
+      'CommandOrControl+Shift+L'
+    );
+    expect(bindingToElectronAccelerator(GLOBAL_SHORTCUT_DEFAULTS['today.toggleWindow'])).toBe(
+      'Alt+Shift+N'
+    );
+  });
+
   it('allows a global shortcut to be unset', () => {
     expect(bindingToElectronAccelerator(null)).toBeNull();
   });

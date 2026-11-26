@@ -12,7 +12,9 @@ function DesktopCheckoutReturnCallback() {
 
   useEffect(() => {
     const checkout = new URLSearchParams(window.location.search).get('checkout');
-    setCheckoutResult(checkout === 'success' ? 'success' : checkout === 'canceled' ? 'canceled' : null);
+    setCheckoutResult(
+      checkout === 'success' ? 'success' : checkout === 'canceled' ? 'canceled' : null
+    );
     const url = `lody://checkout-return${window.location.search}`;
     setDeepLink(url);
     window.location.href = url;

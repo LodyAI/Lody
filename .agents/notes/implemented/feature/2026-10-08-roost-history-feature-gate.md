@@ -40,12 +40,12 @@ legacy metadata without a discriminator resolves to Loro. The card receives the
 existing row data rather than subscribing to settings or loading history.
 The display contract is recorded in [session history writes](../../../../specs/session-history-writes.md).
 
-The CLI pins the published `@loro-dev/roost@0.3.1` npm package. Its lockfile uses
+The CLI pins the published `@loro-dev/roost@0.3.2` npm package. Its lockfile uses
 registry integrity instead of a sibling source directory. Only the pinned browser,
 native main and six matching platform package versions are exempt from the
 seven-day release-age policy. The [native runtime integration](../../proposed/architecture/2026-10-09-roost-native-runtime.md)
 replaces the separately staged owner executable with the published
-`@loro-dev/roost-node@0.3.1` package, while preserving this session-selection gate.
+`@loro-dev/roost-node@0.3.2` package, while preserving this session-selection gate.
 
 ## Verification
 

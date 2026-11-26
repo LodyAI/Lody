@@ -35,6 +35,7 @@ const fixture = vi.hoisted(() => ({
     contentMode?: 'e2ee';
   } | null,
   creationEnabled: false,
+  cancelPreparation: false,
   referralLead: false,
   referralListeners: new Set<() => void>(),
   createOrganization: undefined as unknown as (name: string, slug: string) => Promise<unknown>,
@@ -70,11 +71,10 @@ vi.mock('jotai', async (importOriginal) => ({
 vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => null }));
 const platform = vi.hoisted(() => ({
   e2eeWorkspaces: {
-    prepareCreation: async (input: { requestId: string; name: string; slug: string }) => ({
-      ...input,
-      genesisRecordHex: 'aa',
-      genesisHashHex: 'bb'.repeat(32),
-    }),
+    prepareCreation: async (input: { requestId: string; name: string; slug: string }) => {
+      if (fixture.cancelPreparation) throw new Error('e2ee_creation_cancelled');
+      return { ...input, genesisRecordHex: 'aa', genesisHashHex: 'bb'.repeat(32) };
+    },
     create: (request: Parameters<PlatformE2eeWorkspaces['create']>[0]) => fixture.create(request),
     describe: async () => {
       throw new Error('unused');
@@ -187,6 +187,7 @@ beforeEach(() => {
   fixture.organizations = [];
   fixture.activeOrganization = null;
   fixture.creationEnabled = false;
+  fixture.cancelPreparation = false;
   fixture.referralLead = false;
   fixture.serverWorkspaces = new Set();
   stable.availability.canCreateFree = true;
@@ -231,6 +232,33 @@ const byArchive = (accountId = 'account') =>
   listPendingE2eeWorkspacesByArchive(localStorage, accountId);
 
 describe('create workspace route with a saved encrypted request', () => {
+  it('returns to the editable form when device confirmation is cancelled before submission', async () => {
+    fixture.creationEnabled = true;
+    fixture.cancelPreparation = true;
+    await render();
+    await typeInto('workspace-name', 'Private');
+    await typeInto('workspace-slug', 'private');
+    await act(async () =>
+      container!.querySelector<HTMLButtonElement>('[data-testid="e2ee-workspace-create"]')!.click()
+    );
+    await click('organization.createWorkspace');
+    expect(byArchive()).toEqual({ active: [], archived: [] });
+    expect(input('workspace-name').disabled).toBe(false);
+    expect(input('workspace-name').value).toBe('Private');
+    expect(container!.textContent).not.toContain('e2ee.create.failed');
+    expect(fixture.create).not.toHaveBeenCalled();
+    expect(fixture.createOrganization).not.toHaveBeenCalled();
+  });
+
+  it('keeps an existing request when its result may already be committed', async () => {
+    fixture.cancelPreparation = true;
+    savePendingE2eeWorkspace(localStorage, pending);
+    await render();
+    await click('e2ee.create.resume');
+    expect(byArchive()).toEqual({ active: [pending], archived: [] });
+    expect(container!.textContent).not.toContain('e2ee.create.failed');
+  });
+
   it('lets a user set a saved request aside and create a regular workspace with the toggle off', async () => {
     savePendingE2eeWorkspace(localStorage, pending);
     await render();

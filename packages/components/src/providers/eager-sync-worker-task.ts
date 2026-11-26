@@ -1,5 +1,6 @@
 import { requirePlaintextWorkspaceStreamsContent } from '@lody/shared/workspace-streams-content';
 import { createStreamsCrdt } from '@lody/shared/streams-crdt-factory';
+import { configureLoroWasmBudget } from '@lody/shared/loro-wasm-budget';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import { base64ToBytes } from '@lody/shared/local-loro-data-plane';
 import {
@@ -20,6 +21,12 @@ import {
 } from './eager-sync-snapshot-cache';
 import { coveredEagerSyncCursor } from './eager-sync-checkpoint';
 import type { EagerSyncAuthContext, EagerSyncWorkerInput } from './eager-sync-worker-protocol';
+
+declare const __LODY_ELECTRON_RENDERER__: boolean;
+
+if (typeof __LODY_ELECTRON_RENDERER__ !== 'undefined' && __LODY_ELECTRON_RENDERER__) {
+  configureLoroWasmBudget();
+}
 
 export async function runEagerSyncWorkerTask(
   request: Extract<EagerSyncWorkerInput, { type: 'start' }>,

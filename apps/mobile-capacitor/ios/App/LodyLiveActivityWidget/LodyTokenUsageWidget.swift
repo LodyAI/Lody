@@ -1,8 +1,27 @@
 import SwiftUI
 import WidgetKit
 
+private func tokenWidgetLproj(for locale: String) -> String {
+    let parts = locale
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+        .split(whereSeparator: { $0 == "-" || $0 == "_" })
+    guard let base = parts.first else { return "en" }
+    switch base {
+    case "zh":
+        let traditional: Set<Substring> = ["hant", "tw", "hk", "mo"]
+        return parts.dropFirst().contains(where: { traditional.contains($0) }) ? "zh-Hant" : "zh-Hans"
+    case "ja": return "ja"
+    case "ko": return "ko"
+    case "es": return "es"
+    case "fr": return "fr"
+    case "ru": return "ru"
+    default: return "en"
+    }
+}
+
 private func tokenWidgetLocalized(_ key: String, locale: String? = nil) -> String {
-    let language = locale.map { $0.lowercased().hasPrefix("zh") ? "zh-Hans" : "en" }
+    let language = locale.map(tokenWidgetLproj(for:))
     let bundle = language.flatMap { Bundle.main.path(forResource: $0, ofType: "lproj") }
         .flatMap { Bundle(path: $0) } ?? .main
     return NSLocalizedString(key, tableName: "Localizable", bundle: bundle, comment: "")
@@ -16,7 +35,7 @@ struct LodyTokenWidgetEntry: TimelineEntry {
 func lodyTokenWidgetPreviewEntry(now: Date = Date(), locale: String? = nil) -> LodyTokenWidgetEntry {
     let endMs = floor(now.timeIntervalSince1970 * 1000)
     let startMs = floor(endMs / 86_400_000) * 86_400_000
-    let chinese = (locale ?? Bundle.main.preferredLocalizations.first ?? "en").hasPrefix("zh")
+    let resolvedLproj = tokenWidgetLproj(for: locale ?? Bundle.main.preferredLocalizations.first ?? "en")
     let total = 2_517_300.0
     let weights: [Double] = [1, 2, 4, 3, 1, 0, 0, 0, 2, 4, 5, 9, 6, 4, 8, 11, 6, 4, 8, 7, 3, 5, 8, 9]
     let currentHour = Int((endMs - startMs) / 3_600_000)
@@ -27,13 +46,34 @@ func lodyTokenWidgetPreviewEntry(now: Date = Date(), locale: String? = nil) -> L
             tokens: index <= currentHour ? total * weight / weightSum : 0
         )
     }
+    let previewLocale: String
+    let totalLabel: String
+    let firstModelLabel: String
+    let secondModelLabel: String
+    switch resolvedLproj {
+    case "zh-Hans":
+        previewLocale = "zh-CN"
+        totalLabel = "251.7万"
+        firstModelLabel = "170万"
+        secondModelLabel = "81.7万"
+    case "zh-Hant":
+        previewLocale = "zh-Hant"
+        totalLabel = "251.7萬"
+        firstModelLabel = "170萬"
+        secondModelLabel = "81.7萬"
+    default:
+        previewLocale = resolvedLproj
+        totalLabel = "2.5M"
+        firstModelLabel = "1.7M"
+        secondModelLabel = "817K"
+    }
     let summary = LodyTokenWidgetSummary(
         userId: "preview", workspaceId: "preview", workspaceName: "Workspace",
-        locale: chinese ? "zh-CN" : "en", period: .utcDay, startMs: startMs, endMs: endMs,
-        total: .init(tokens: total, label: chinese ? "251.7万" : "2.5M"),
+        locale: previewLocale, period: .utcDay, startMs: startMs, endMs: endMs,
+        total: .init(tokens: total, label: totalLabel),
         models: [
-            .init(name: "gpt-6-sol", value: .init(tokens: 1_700_000, label: chinese ? "170万" : "1.7M")),
-            .init(name: "claude-opus", value: .init(tokens: 817_300, label: chinese ? "81.7万" : "817K")),
+            .init(name: "gpt-6-sol", value: .init(tokens: 1_700_000, label: firstModelLabel)),
+            .init(name: "claude-opus", value: .init(tokens: 817_300, label: secondModelLabel)),
         ],
         breakdown: nil,
         buckets: buckets

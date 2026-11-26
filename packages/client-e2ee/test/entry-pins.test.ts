@@ -1,10 +1,22 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { Effect, Result } from 'effect';
+import { Effect, Layer, Result } from 'effect';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { Bytes, signGenesisRecord } from '@lody/e2ee-core/protocol';
 import { importBrowserDevice } from '@lody/e2ee-core/adapters/browser-crypto';
-import type { PersonalPairingOffer } from '@lody/e2ee-client';
+import { makePersonalWorkspaceRuntime, type PersonalPairingOffer } from '@lody/e2ee-client';
+import { createStore, type PlatformSessionState } from '@lody/platform';
+import { personalEntry } from '../src/entry';
 import { personalEntryPins } from '../src/entry-pins';
+
+vi.mock('@lody/e2ee-client', async (original) => ({
+  ...(await original<typeof import('@lody/e2ee-client')>()),
+  makePersonalWorkspaceRuntime: vi.fn(),
+}));
+afterEach(() => vi.mocked(makePersonalWorkspaceRuntime).mockReset());
+const signedIn = (id: string): PlatformSessionState => ({
+  status: 'authenticated',
+  user: { id, name: id, email: 'a@example.test', image: null },
+});
 
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory());
@@ -64,4 +76,90 @@ it('an approving device finds every workspace it is ready in for the signed-in a
   expect(ready.map((pin) => pin.offer.workspaceId).sort()).toEqual(['workspace-1', 'workspace-2']);
   expect(ready.find((pin) => pin.offer.workspaceId === 'workspace-2')?.offer).toEqual(w2);
   await expect(run(pins.listReady('account-C'))).resolves.toEqual([]);
+});
+
+it.each(['authenticated', 'unauthenticated', 'switched'] as const)(
+  'recordCreated waits for cold session resolution and handles %s',
+  async (outcome) => {
+    const session = createStore<PlatformSessionState>({ status: 'loading' });
+    const pins = personalEntryPins('creation-pins');
+    const offer = await offerFor('workspace-A', 10);
+    const owner = personalEntry({
+      run: Effect.runPromise,
+      pins,
+      ports: () => Layer.effectContext(Effect.die('must not acquire a host')),
+      ledgerRecords: () => () => Effect.succeed([]),
+      recordCreated: async ({ accountId, workspaceId, genesisHash }) => {
+        expect({ workspaceId, genesisHash }).toEqual({
+          workspaceId: offer.workspaceId,
+          genesisHash: offer.genesisHash,
+        });
+        await Effect.runPromise(pins.prepare(accountId, offer));
+        await Effect.runPromise(pins.finish(accountId, offer, 'ready'));
+        if (outcome === 'switched') session.set(signedIn('account-B'));
+      },
+    });
+    try {
+      const runtime = owner.createRuntime({ session })!;
+      const recording = runtime.recordCreated!({
+        workspaceId: offer.workspaceId,
+        genesisHash: offer.genesisHash,
+      });
+      const settled = recording.then(
+        () => null,
+        (error: unknown) => error
+      );
+      expect(await Effect.runPromise(pins.read('account-A', offer.workspaceId))).toBeNull();
+      session.set(
+        outcome === 'unauthenticated' ? { status: 'unauthenticated' } : signedIn('account-A')
+      );
+      if (outcome === 'authenticated') expect(await settled).toBeNull();
+      else expect(await settled).toMatchObject({ code: 'scope-mismatch' });
+      expect((await Effect.runPromise(pins.read('account-A', offer.workspaceId)))?.phase).toBe(
+        outcome === 'unauthenticated' ? undefined : 'ready'
+      );
+      expect(await Effect.runPromise(pins.read('account-B', offer.workspaceId))).toBeNull();
+    } finally {
+      await owner.close();
+    }
+  }
+);
+
+it('forwards recovery-only confirmation to the runtime before removing the last device', async () => {
+  const session = createStore<PlatformSessionState>(signedIn('account-A'));
+  const pins = personalEntryPins('revoke-pins');
+  const offer = await offerFor('workspace-A', 10);
+  await Effect.runPromise(pins.prepare('account-A', offer));
+  await Effect.runPromise(pins.finish('account-A', offer, 'ready'));
+  const devices = new Set([offer.endorser]);
+  vi.mocked(makePersonalWorkspaceRuntime).mockReturnValue(
+    Effect.succeed({
+      revokeDevice: async (
+        id: string,
+        device: string,
+        confirmation?: { confirmedRecoveryOnly: true }
+      ) => {
+        expect(id).toBe(offer.workspaceId);
+        if (confirmation?.confirmedRecoveryOnly !== true) throw new Error('confirmation required');
+        devices.delete(device);
+      },
+    } as unknown as Effect.Success<ReturnType<typeof makePersonalWorkspaceRuntime>>)
+  );
+  const owner = personalEntry({
+    run: Effect.runPromise,
+    pins,
+    ports: () => Layer.effectContext(Effect.die('synthetic runtime owns the device')),
+    ledgerRecords: () => () => Effect.succeed([]),
+  });
+  try {
+    const runtime = owner.createRuntime({ session })!;
+    await expect(runtime.revokeDevice!(offer.workspaceId, offer.endorser)).rejects.toThrow(
+      'confirmation required'
+    );
+    expect(devices.size).toBe(1);
+    await runtime.revokeDevice!(offer.workspaceId, offer.endorser, { confirmedRecoveryOnly: true });
+    expect(devices.size).toBe(0);
+  } finally {
+    await owner.close();
+  }
 });

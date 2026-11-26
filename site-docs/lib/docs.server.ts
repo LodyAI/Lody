@@ -1,7 +1,7 @@
-import type { DocsRouteData, SiteLocale } from '@site/src/site-pages/shared';
+import { localizeSitePath, type DocsRouteData, type SiteLocale } from '@site/src/site-pages/shared';
 import { notFound } from '@tanstack/react-router';
 import { renderToString } from 'react-dom/server.edge';
-import { sourceEn, sourceZh } from './source';
+import { docsSources } from './source';
 
 function slugFromSplat(splat: string | undefined): string[] | undefined {
   const segments = splat?.split('/').filter((segment) => segment.length > 0) ?? [];
@@ -9,12 +9,8 @@ function slugFromSplat(splat: string | undefined): string[] | undefined {
 }
 
 function docsPath(locale: SiteLocale, slug?: string[]) {
-  const basePath = locale === 'zh' ? '/zh/docs' : '/docs';
-  return slug && slug.length > 0 ? `${basePath}/${slug.join('/')}` : basePath;
-}
-
-function getDocsSource(locale: SiteLocale) {
-  return locale === 'zh' ? sourceZh : sourceEn;
+  const enPath = slug && slug.length > 0 ? `/docs/${slug.join('/')}` : '/docs';
+  return localizeSitePath(enPath, locale);
 }
 
 export async function loadDocsRouteData(
@@ -22,7 +18,7 @@ export async function loadDocsRouteData(
   splat: string | undefined
 ): Promise<DocsRouteData> {
   const slug = slugFromSplat(splat);
-  const source = getDocsSource(locale);
+  const source = docsSources[locale];
   const page = source.getPage(slug);
   if (!page) throw notFound();
 

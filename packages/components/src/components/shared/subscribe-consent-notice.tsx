@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+import { getSiteLocalizedUrl } from '@/lib/lody-urls';
 import { openExternalUrl } from '@/lib/native-browser';
 import { withClassName } from '@/lib/stylex';
 import { sharedSurface } from './surface';
@@ -13,9 +14,11 @@ import { sharedSurface } from './surface';
  */
 export function SubscribeConsentNotice({ className }: { className?: string }) {
   const { t, i18n } = useTranslation();
-  const termsUrl = i18n.language?.startsWith('zh')
-    ? 'https://lody.ai/zh/terms'
-    : 'https://lody.ai/terms';
+  const termsUrl = getSiteLocalizedUrl(
+    '/terms',
+    i18n.resolvedLanguage ?? i18n.language,
+    'https://lody.ai'
+  );
   // Split the localized sentence around the {{terms}} slot (via a sentinel
   // that never occurs naturally) so the Terms link renders inline.
   const sentinel = String.fromCharCode(0);

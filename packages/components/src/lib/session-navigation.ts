@@ -76,11 +76,7 @@ export const resolveOpenedByNavigationTarget = (
   }
 ): SessionNavigationTarget | null => {
   const tabSessionId = session.openedBySessionId;
-  if (
-    !tabSessionId ||
-    !context.metadataReady ||
-    context.openerSession?.id !== tabSessionId
-  ) {
+  if (!tabSessionId || !context.metadataReady || context.openerSession?.id !== tabSessionId) {
     return null;
   }
 

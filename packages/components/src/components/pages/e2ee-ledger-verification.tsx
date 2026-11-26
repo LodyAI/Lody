@@ -8,6 +8,7 @@ import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 import jsQR from 'jsqr';
 import QRCode from 'qrcode';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { getSiteLocalizedUrl } from '@/lib/lody-urls';
 import { openExternalUrl } from '@/lib/native-browser';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy, ScanLine, X } from 'lucide-react';
@@ -488,10 +489,11 @@ function VerifyDialog(props: {
 
 /** Public docs section that explains how the security code works. */
 export function securityCodeDocsUrl(language: string | undefined): string {
-  const path = language?.toLowerCase().startsWith('zh')
-    ? '/zh/docs/encrypted-workspaces-security-code'
-    : '/docs/encrypted-workspaces-security-code';
-  return `https://lody.ai${path}`;
+  return getSiteLocalizedUrl(
+    '/docs/encrypted-workspaces-security-code',
+    language,
+    'https://lody.ai'
+  );
 }
 
 /** The ledger's verification code: what members compare out of band. */

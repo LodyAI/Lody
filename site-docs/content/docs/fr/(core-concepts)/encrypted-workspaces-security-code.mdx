@@ -1,0 +1,66 @@
+---
+title: "Code de sécurité"
+description: "Fonctionnement du code de sécurité dans les espaces de travail chiffrés de bout en bout de Lody : à partir de quoi il est calculé, ce que signifie une correspondance ou une divergence, et ce qu'il ne peut pas prouver."
+---
+
+# Code de sécurité
+
+Le code de sécurité est une suite de chiffres qui confirme que **vous et un coéquipier disposez du même [registre des permissions](/fr/docs/encrypted-workspaces-ledger)** : les mêmes membres, les mêmes appareils et les mêmes autorisations.
+
+Si votre code correspond à celui affiché par les autres membres et par vos autres appareils, les informations sur les membres et les autorisations de l'espace de travail sont cohérentes.
+
+## Pourquoi il existe
+
+Chaque enregistrement du registre est signé ; le serveur ne peut donc pas en falsifier un. Il pourrait toutefois **présenter à différentes personnes différentes versions du registre**, par exemple en vous cachant l'enregistrement qui a révoqué un appareil. Vous ne pouvez pas le détecter en consultant uniquement votre propre copie.
+
+Comparer les codes que deux personnes calculent indépendamment permet de le révéler.
+
+## À partir de quoi il est calculé
+
+Le code est une empreinte calculée sur l'ensemble des éléments suivants :
+
+- La version et l'usage du protocole
+- L'espace de travail et son premier enregistrement (genèse)
+- La position actuelle du registre (le nombre d'enregistrements) et son dernier enregistrement
+- **L'état complet des autorisations actuelles** : chaque membre, rôle, appareil et clé publique
+
+Comparer uniquement le dernier enregistrement ne suffit pas : un état altéré peut s'accompagner d'un dernier enregistrement d'apparence correcte. C'est pourquoi l'état réel des autorisations fait partie du calcul du code.
+
+Le code QR contient également la position du registre, de sorte qu'un scan permet d'identifier quel côté est en retard.
+
+## Ce que signifie chaque résultat
+
+| Résultat | Signification | Que faire |
+| --- | --- | --- |
+| Ils correspondent | Vous avez accepté les mêmes membres, appareils et autorisations à la même position | Rien |
+| Un côté n'est pas à jour | Un registre est plus ancien ; tout ce qui précède ce point est identique | Actualisez tous les deux et comparez de nouveau |
+| Ils diffèrent | Même position, contenu différent | N'invitez et n'approuvez personne ; prévenez le propriétaire de l'espace de travail |
+
+Une position différente n'est pas une attaque ; en général, l'un des côtés ne s'est tout simplement pas encore synchronisé.
+
+## Ce qu'il ne peut pas prouver
+
+- **Qui est l'autre personne** : il montre seulement que vos enregistrements concordent. Assurez-vous de comparer avec le coéquipier que vous connaissez.
+- **Que chaque modification passée était raisonnable** : il montre que vous avez accepté le même état, et non que chaque étape y menant aurait dû avoir lieu.
+- **Que vous êtes en sécurité à partir de maintenant** : il couvre cette position à cet instant précis. Dès que de nouveaux enregistrements arrivent, le code change ; comparez de nouveau lorsque cela compte.
+- **Grand-chose, si vous ne comparez qu'avec la personne qui vous a invité** : si cette personne et le serveur se sont entendus, une correspondance avec elle ne prouve pas grand-chose. Comparez avec au moins un autre membre.
+
+## Comment comparer
+
+<Steps>
+<Step>
+
+Ouvrez tous les deux « Code de sécurité et historique » dans la console de chiffrement et actualisez.
+
+</Step>
+<Step>
+
+Choisissez « Comparer avec un coéquipier » et scannez le code QR sur son écran, ou lisez les groupes de chiffres à voix haute.
+
+</Step>
+<Step>
+
+Agissez en fonction du résultat. En personne, en visioconférence ou par téléphone, tout convient ; ne vous envoyez pas le code uniquement via Lody.
+
+</Step>
+</Steps>

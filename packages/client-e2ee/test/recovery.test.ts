@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { Effect, Layer, ManagedRuntime } from 'effect';
+import { Cause, Effect, Exit, Layer, ManagedRuntime } from 'effect';
 import { TestClock } from 'effect/testing';
 import { ConvexHttpClient } from 'convex/browser';
+import { ConvexError } from 'convex/values';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { makeClientRecovery } from '../src/recovery';
 import { makeRecoveryWorkspaces, type RecoveryWorkspaceProgress } from '../src/recovery-workspaces';
@@ -131,6 +132,105 @@ function fixture() {
     },
   };
 }
+it.each([
+  [new ConvexError({ code: 'e2ee_recovery_conflict' }), 'e2ee_recovery_conflict'],
+  [new ConvexError({ code: 'authentication' }), 'e2ee_recovery_authentication'],
+  [new TypeError('Failed to fetch'), 'e2ee_recovery_unavailable'],
+])(
+  'reports the recovery service failure without requesting a backup file',
+  async (failure, code) => {
+    const f = fixture();
+    f.setIntercept((path) =>
+      path === 'e2eeRecoveryVault:hasAccountVault' ? Promise.reject(failure) : undefined
+    );
+    await expect(
+      Effect.runPromise(
+        f.service.create(async () => {
+          throw new Error('should not ask the user to save a file');
+        })
+      )
+    ).rejects.toThrow(code);
+    expect(f.paths).toEqual(['e2eeRecoveryVault:hasAccountVault']);
+  }
+);
+
+for (const surface of ['vault', 'workspaces'] as const) {
+  it.each([
+    ['transient', null, undefined],
+    ['logout', null, 'e2ee_recovery_cancelled'],
+    ['403', new Error('HTTP 403'), 'e2ee_recovery_failed'],
+    ['ConvexError', new ConvexError('HTTP 503 business refusal'), 'e2ee_recovery_failed'],
+    ['560', new Error('HTTP 560'), 'e2ee_recovery_failed'],
+    ['exhausted', null, 'e2ee_recovery_unavailable'],
+    [
+      'unavailable',
+      new ConvexError({ code: 'e2ee_recovery_unavailable' }),
+      'e2ee_recovery_unavailable',
+    ],
+    ['conflict', new ConvexError({ code: 'e2ee_recovery_conflict' }), 'e2ee_recovery_conflict'],
+  ] as const)(`${surface} handles %s in Web recovery`, async (scenario, refusal, code) => {
+    const f = fixture();
+    const workspaces = makeRecoveryWorkspaces({
+      ...f.options,
+      commands: {
+        restore: async () => {
+          throw new Error('unexpected restore');
+        },
+        setup: async () => {
+          throw new Error('unexpected setup');
+        },
+      },
+    });
+    const clock = ManagedRuntime.make(TestClock.layer({ warningDelay: '1 hour' }));
+    try {
+      await clock.context();
+      const started = Promise.withResolvers<void>();
+      const path =
+        surface === 'vault'
+          ? 'e2eeRecoveryVault:hasAccountVault'
+          : 'e2eeRecoveryVault:replacementState';
+      let attempts = 0;
+      f.setIntercept((requested) => {
+        if (requested !== path) return undefined;
+        if (++attempts > 2 && scenario !== 'exhausted') return undefined;
+        started.resolve();
+        return Promise.reject(refusal ?? new Error('HTTP 503'));
+      });
+      let fileSaved = false;
+      const work: Effect.Effect<unknown, unknown> =
+        surface === 'vault'
+          ? f.service.create(async (bytes) => {
+              fileSaved = true;
+              return bytes.slice();
+            })
+          : workspaces.plan();
+      const pending = clock.runPromiseExit(work);
+      await started.promise;
+      if (scenario === 'logout') f.logout();
+      await clock.runPromise(TestClock.adjust(210));
+      const exit = await pending;
+      if (code) {
+        if (Exit.isSuccess(exit)) throw new Error('expected recovery to fail');
+        expect(Cause.squash(exit.cause)).toMatchObject({ message: code });
+        expect(attempts).toBe(scenario === 'exhausted' ? 3 : 1);
+        expect(fileSaved).toBe(false);
+      } else {
+        expect(exit).toMatchObject({
+          _tag: 'Success',
+          value:
+            surface === 'vault'
+              ? { workspaces: 0, vaultId: expect.any(String) }
+              : { hasVault: false, uncovered: [{ id: 'w1', name: 'Alpha' }] },
+        });
+        expect(attempts).toBe(3);
+        expect(fileSaved).toBe(surface === 'vault');
+      }
+    } finally {
+      await clock.dispose();
+    }
+  });
+}
+
 it('first browser login creates an empty vault after file readback, and the saved file reopens it', async () => {
   const f = fixture();
   let file = new Uint8Array();
@@ -209,7 +309,7 @@ it('bounds hung vault and workspace recovery RPCs at 90s while preserving 30s Un
     ]);
     expect(early).toBe('waiting');
     await clock.runPromise(TestClock.adjust(1));
-    await expect(hungList).rejects.toThrow('e2ee_recovery_failed');
+    await expect(hungList).rejects.toThrow('e2ee_recovery_unavailable');
 
     f.setIntercept(undefined);
     expect(await clock.runPromise(f.service.list({ file }))).toEqual({
@@ -292,9 +392,36 @@ it('sets, rotates and removes the vault password wrap from a browser login, keep
     const first = 'correct horse battery';
     const second = 'staple orbit lantern';
     await Effect.runPromise(f.service.setPassword({ file }, first));
-    expect(await Effect.runPromise(f.service.list({ password: first }))).toMatchObject({
-      workspaces: 0,
-    });
+    const clock = ManagedRuntime.make(TestClock.layer({ warningDelay: '1 hour' }));
+    try {
+      await clock.context();
+      const started = Promise.withResolvers<void>();
+      let interrupted = false;
+      const lookupStart = f.paths.length;
+      f.setIntercept((path) => {
+        if (path === 'e2eeRecoveryVault:readEntries')
+          return Promise.reject(
+            new ConvexError('Could not find public function e2eeRecoveryVault:readEntries')
+          );
+        if (path === 'e2eeRecoveryVault:readEntry' && !interrupted) {
+          interrupted = true;
+          started.resolve();
+          return Promise.reject(new Error('HTTP 503'));
+        }
+        return undefined;
+      });
+      const opened = clock.runPromiseExit(f.service.list({ password: first }));
+      await started.promise;
+      await clock.runPromise(TestClock.adjust(60));
+      const exit = await opened;
+      expect(Exit.isSuccess(exit) && exit.value.workspaces).toBe(0);
+      expect(
+        f.paths.slice(lookupStart).filter((path) => path === 'e2eeRecoveryVault:readEntries')
+      ).toHaveLength(1);
+    } finally {
+      f.setIntercept(undefined);
+      await clock.dispose();
+    }
     expect(await Effect.runPromise(f.service.methods(vaultId))).toMatchObject({
       hasFile: true,
       hasPassword: true,

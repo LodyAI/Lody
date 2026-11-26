@@ -1,5 +1,4 @@
 /** @vitest-environment jsdom */
-/** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   captureBootFailedBeacon,
@@ -93,6 +92,26 @@ describe('renderBootFailure', () => {
     expect(root.querySelector('h1')?.textContent).toBe('Lody 窗口停下来了');
     expect(buttons()[0]?.textContent).toBe('重新加载');
   });
+
+  it.each([
+    ['zh_Hant', 'zh-Hant', 'Lody 這次無法啟動', '重新載入'],
+    ['ja', 'ja', 'Lody を起動できませんでした', '再読み込み'],
+    ['ko', 'ko', '이번에 Lody를 시작하지 못했습니다', '새로고침'],
+    ['es', 'es', 'Lody no se pudo iniciar esta vez', 'Recargar'],
+    ['fr', 'fr', 'Lody n’a pas pu démarrer cette fois', 'Recharger'],
+    ['ru', 'ru', 'Не удалось запустить Lody', 'Перезагрузить'],
+  ] as const)(
+    'renders localized boot failure copy for %s',
+    (stored, expectedLang, title, reload) => {
+      window.localStorage.setItem('lody-language', JSON.stringify(stored));
+      renderBootFailure(root, new Error('boom'));
+
+      const page = root.querySelector<HTMLElement>('.lody-boot-failure')!;
+      expect(page.getAttribute('lang')).toBe(expectedLang);
+      expect(root.querySelector('h1')?.textContent).toBe(title);
+      expect(buttons()[0]?.textContent).toBe(reload);
+    }
+  );
 });
 
 describe('boot failure telemetry boundary', () => {
@@ -114,7 +133,11 @@ describe('boot failure telemetry boundary', () => {
     });
     const error = new Error('PRIVATE_MESSAGE');
     error.name = 'PRIVATE_PATH';
-    captureBootFailedBeacon(error);
+    window.localStorage.setItem('lody:usage-sharing', 'off');
+    captureBootFailedBeacon();
+    expect(bodies).toHaveLength(0);
+    window.localStorage.removeItem('lody:usage-sharing');
+    captureBootFailedBeacon();
     expect(bodies).toHaveLength(1);
     const wire = await new Promise<string>((resolve) => {
       const reader = new FileReader();
@@ -122,10 +145,17 @@ describe('boot failure telemetry boundary', () => {
       reader.readAsText(bodies[0]!);
     });
     expect(wire).not.toContain('PRIVATE_');
-    expect(JSON.parse(wire).properties.error_type).toBe('Error');
+    expect(JSON.parse(wire).properties).toEqual({
+      $process_person_profile: false,
+      platform: 'web',
+    });
     expect(collectBootDiagnostics(error).message).toContain('PRIVATE_MESSAGE');
+    window.localStorage.setItem('lody:usage-sharing', 'off');
+    captureBootFailedBeacon();
+    expect(bodies).toHaveLength(1);
+    window.localStorage.setItem('lody:usage-sharing', `on:${Date.now()}`);
     vi.stubEnv('VITE_LODY_PLATFORM', 'local');
-    captureBootFailedBeacon(error);
+    captureBootFailedBeacon();
     expect(bodies).toHaveLength(1);
   });
 });

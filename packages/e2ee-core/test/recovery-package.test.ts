@@ -865,4 +865,153 @@ describe('recovery admission during an undelivered epoch', () => {
       )
     );
   });
+
+  it('bounds vault reads and diagnostic journal flushes during setup while keeping read-after-write and CAS conflict safety', async () => {
+    const { envelopeFixture } = await import('./keys/fixture');
+    const { makeWorkspaceRecovery } = await import('../src/internal/recovery/workspace');
+    const { Bytes, hashRecordBytes, verifyLedger, prepareEpochEnvelope } =
+      await import('@lody/e2ee-core/protocol');
+    const { copyEpochKeyBytes } = await import('../src/internal/foundation/epoch-key');
+    const ok = Result.getOrThrow;
+    const f = envelopeFixture();
+    const records: Uint8Array[] = [...f.records()];
+    const view = () =>
+      ok(
+        verifyLedger({
+          anchor: f.context.genesis,
+          records,
+          checkpoint: { head: hashRecordBytes(records.at(-1)!), length: records.length },
+        })
+      );
+    const stores = memoryStores();
+    let entryReads = 0;
+    let indexReads = 0;
+    let journalWrites = 0;
+    const baseStore = stores.store;
+    const baseLocal = stores.local;
+    const countedStore: RecoveryVaultStore = {
+      ...baseStore,
+      readEntry: (vaultId, entryId) =>
+        Effect.suspend(() => {
+          entryReads++;
+          return baseStore.readEntry(vaultId, entryId);
+        }),
+      readIndex: (vaultId) =>
+        Effect.suspend(() => {
+          indexReads++;
+          return baseStore.readIndex(vaultId);
+        }),
+      compareAndSwapIndex: (vaultId, expected, next, refs) =>
+        Effect.gen(function* () {
+          const current = yield* baseStore.readIndex(vaultId);
+          const matches =
+            expected === null
+              ? current === null
+              : current !== null &&
+                current.revision === expected.revision &&
+                ciphertextDigest(current) === expected.digest;
+          if (!matches) return 'Conflict' as const;
+          return yield* baseStore.compareAndSwapIndex(vaultId, expected, next, refs);
+        }),
+    };
+    const countedLocal: RecoveryVaultLocalStore = {
+      ...baseLocal,
+      compareAndSwap: (key, expected, next) =>
+        Effect.suspend(() => {
+          if (key.includes('/workspace/')) journalWrites++;
+          return baseLocal.compareAndSwap(key, expected, next);
+        }),
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { vault, recoveryFile } = yield* createRecoveryVault({
+            locator: 'synthetic',
+            store: countedStore,
+            local: countedLocal,
+          });
+          recoveryFile.fill(0);
+          entryReads = 0;
+          indexReads = 0;
+          journalWrites = 0;
+          const installed = new Map<number, Uint8Array>();
+          const workflow = yield* makeWorkspaceRecovery({
+            vault,
+            local: countedLocal,
+            genesis: f.context.genesis,
+            membershipId: ok(Bytes.membershipId(new Uint8Array(16).fill(10))),
+            personalSigner: f.owner.signer,
+            ledger: () => Effect.sync(view),
+            trust: {
+              source: 'synthetic',
+              genesisRecord: records[0]!,
+              head: Buffer.from(view().head.toBytes()).toString('hex'),
+              length: view().length,
+            },
+            submitOriginal: (record) =>
+              Effect.sync(() => {
+                records.push(record);
+                return { outcome: 'Committed' as const, record };
+              }),
+            fetchCurrentEnvelope: (recipient, epoch, _identity, credential) =>
+              Effect.gen(function* () {
+                credential.fill(0);
+                const frame = yield* prepareEpochEnvelope({
+                  context: { ...f.context, epoch: ok(Bytes.epochNumber(epoch)), recipient },
+                  key: f.secret,
+                  signer: f.owner.signer,
+                  ledger: () => Effect.sync(view),
+                });
+                return { sender: f.owner.publicKey, frame };
+              }),
+            installed: {
+              saveAndReload: (epoch, key) =>
+                Effect.sync(() => {
+                  installed.set(epoch, copyEpochKeyBytes(key));
+                }),
+              read: (epoch) => Effect.sync(() => ok(Bytes.epochKey(installed.get(epoch)!))),
+            },
+          });
+          const result = yield* workflow.setup();
+          expect(result.outcome).toBe('Committed');
+          expect(result.status.recoverable).toBe(true);
+          expect(entryReads).toBe(3);
+          expect(indexReads).toBe(2);
+          expect(journalWrites).toBe(5);
+
+          const staleBefore = yield* vault.readIndex();
+          const competing = yield* generateRecoveryPackage({
+            genesis: Buffer.from(new Uint8Array(32).fill(0x22)).toString('hex'),
+            membershipId: '22'.repeat(16),
+            generation: 0,
+            trust: {
+              source: 'synthetic',
+              genesisRecord: records[0]!,
+              head: Buffer.from(view().head.toBytes()).toString('hex'),
+              length: view().length,
+            },
+          });
+          const competingRef = yield* vault.upload(competing);
+          wipeRecoveryPackage(competing);
+          expect((yield* vault.reserve(competingRef)).outcome).toBe('Committed');
+
+          const nextPkg = yield* generateRecoveryPackage({
+            genesis: Buffer.from(new Uint8Array(32).fill(0x33)).toString('hex'),
+            membershipId: '33'.repeat(16),
+            generation: 0,
+            trust: {
+              source: 'synthetic',
+              genesisRecord: records[0]!,
+              head: Buffer.from(view().head.toBytes()).toString('hex'),
+              length: view().length,
+            },
+          });
+          const nextRef = yield* vault.upload(nextPkg);
+          wipeRecoveryPackage(nextPkg);
+          const conflict = yield* vault.reserve(nextRef, staleBefore);
+          expect(conflict.outcome).toBe('Conflict');
+        })
+      )
+    );
+  });
 });

@@ -1,47 +1,128 @@
 import { Link as RouterLink, useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { RootProvider } from 'fumadocs-ui/provider/tanstack';
 import type { ComponentProps, ReactNode } from 'react';
+import {
+  detectSiteLocaleFromPath,
+  SITE_LOCALE_META,
+  SITE_LOCALES,
+  switchSiteLocalePath,
+  type SiteLocale,
+} from '@site/src/site-pages/shared';
 
 import { isSitePageHref, SITE_URL, siteHref } from '../lib/site-url.mjs';
 import { OptionalEnhancement } from './optional-enhancement';
+import { CookieConsentBanner } from './cookie-consent-banner';
 import { DocsSearchDialog } from './docs-search-dialog';
 import { MarketingAtmosphereHost } from './marketing-atmosphere';
 
-type SiteLocale = 'en' | 'zh';
+const locales = SITE_LOCALES.map((locale) => ({
+  locale,
+  name: SITE_LOCALE_META[locale].label,
+}));
 
-const locales = [
-  { locale: 'en', name: 'English' },
-  { locale: 'zh', name: '简体中文' },
-];
-
-const zhTranslations = {
-  chooseLanguage: '选择语言',
-  search: '搜索文档',
-  searchNoResult: '没有找到相关内容',
-  toc: '本页目录',
-};
-
-function getCurrentLocale(pathname: string): SiteLocale {
-  return pathname === '/zh' || pathname.startsWith('/zh/') ? 'zh' : 'en';
-}
-
-function normalizePath(pathname: string) {
-  return pathname.replace(/\/$/u, '') || '/';
-}
-
-function getLocalizedPath(pathname: string, targetLocale: string) {
-  const cleanPath = normalizePath(pathname);
-
-  if (targetLocale === 'zh') {
-    if (cleanPath === '/') return '/zh';
-    if (cleanPath === '/zh' || cleanPath.startsWith('/zh/')) return cleanPath;
-    return `/zh${cleanPath}`;
+const translationsByLocale: Record<
+  SiteLocale,
+  {
+    chooseLanguage: string;
+    search: string;
+    searchNoResult: string;
+    toc: string;
+    tocNoHeadings: string;
+    lastUpdate: string;
+    nextPage: string;
+    previousPage: string;
+    chooseTheme: string;
   }
-
-  if (cleanPath === '/zh') return '/';
-  if (cleanPath.startsWith('/zh/')) return cleanPath.replace(/^\/zh/u, '') || '/';
-  return cleanPath;
-}
+> = {
+  en: {
+    chooseLanguage: 'Choose language',
+    search: 'Search',
+    searchNoResult: 'No results found',
+    toc: 'On this page',
+    tocNoHeadings: 'No headings',
+    lastUpdate: 'Last updated on',
+    nextPage: 'Next',
+    previousPage: 'Previous',
+    chooseTheme: 'Theme',
+  },
+  zh: {
+    chooseLanguage: '选择语言',
+    search: '搜索文档',
+    searchNoResult: '没有找到相关内容',
+    toc: '本页目录',
+    tocNoHeadings: '无标题',
+    lastUpdate: '最后更新于',
+    nextPage: '下一页',
+    previousPage: '上一页',
+    chooseTheme: '主题',
+  },
+  'zh-hant': {
+    chooseLanguage: '選擇語言',
+    search: '搜尋文件',
+    searchNoResult: '找不到相關內容',
+    toc: '本頁目錄',
+    tocNoHeadings: '沒有標題',
+    lastUpdate: '最後更新於',
+    nextPage: '下一頁',
+    previousPage: '上一頁',
+    chooseTheme: '佈景主題',
+  },
+  ja: {
+    chooseLanguage: '言語を選択',
+    search: 'ドキュメントを検索',
+    searchNoResult: '一致する結果が見つかりません',
+    toc: '目次',
+    tocNoHeadings: '見出しはありません',
+    lastUpdate: '最終更新日',
+    nextPage: '次のページ',
+    previousPage: '前のページ',
+    chooseTheme: 'テーマ',
+  },
+  ko: {
+    chooseLanguage: '언어 선택',
+    search: '문서 검색',
+    searchNoResult: '검색 결과가 없습니다',
+    toc: '이 페이지의 목차',
+    tocNoHeadings: '제목 없음',
+    lastUpdate: '마지막 업데이트',
+    nextPage: '다음 페이지',
+    previousPage: '이전 페이지',
+    chooseTheme: '테마',
+  },
+  es: {
+    chooseLanguage: 'Elegir idioma',
+    search: 'Buscar en la documentación',
+    searchNoResult: 'No se encontraron resultados',
+    toc: 'En esta página',
+    tocNoHeadings: 'Sin encabezados',
+    lastUpdate: 'Última actualización el',
+    nextPage: 'Siguiente',
+    previousPage: 'Anterior',
+    chooseTheme: 'Tema',
+  },
+  fr: {
+    chooseLanguage: 'Choisir la langue',
+    search: 'Rechercher dans la documentation',
+    searchNoResult: 'Aucun résultat trouvé',
+    toc: 'Sur cette page',
+    tocNoHeadings: 'Aucun titre',
+    lastUpdate: 'Dernière mise à jour le',
+    nextPage: 'Suivant',
+    previousPage: 'Précédent',
+    chooseTheme: 'Thème',
+  },
+  ru: {
+    chooseLanguage: 'Выбрать язык',
+    search: 'Поиск по документации',
+    searchNoResult: 'Ничего не найдено',
+    toc: 'На этой странице',
+    tocNoHeadings: 'Нет заголовков',
+    lastUpdate: 'Последнее обновление',
+    nextPage: 'Далее',
+    previousPage: 'Назад',
+    chooseTheme: 'Тема',
+  },
+};
 
 /**
  * Paths `lody.ai` serves from the Lody web app instead of from this site. The
@@ -89,7 +170,7 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const pathname = location.pathname;
-  const locale = getCurrentLocale(pathname);
+  const locale = detectSiteLocaleFromPath(pathname);
 
   return (
     <RootProvider
@@ -99,9 +180,11 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
       i18n={{
         locale,
         locales,
-        translations: locale === 'zh' ? zhTranslations : undefined,
+        translations: translationsByLocale[locale],
         onLocaleChange: (targetLocale) => {
-          void navigate({ to: getLocalizedPath(pathname, targetLocale) as never });
+          void navigate({
+            to: switchSiteLocalePath(pathname, targetLocale as SiteLocale) as never,
+          });
         },
       }}
     >
@@ -110,6 +193,7 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
         <MarketingAtmosphereHost />
       </OptionalEnhancement>
       {children}
+      <CookieConsentBanner locale={locale} />
     </RootProvider>
   );
 }

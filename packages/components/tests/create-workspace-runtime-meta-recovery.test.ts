@@ -16,9 +16,11 @@ const mocks = vi.hoisted(() => {
   const setTransportAdapter = vi.fn(async () => {});
   // Mirrors loro-repo: addTransport connects the adapter before resolving, so
   // the in-flight-attach dispose test can gate on the adapter's connect().
-  const addTransport = vi.fn(async (_id: string, adapter?: { connect?: () => Promise<void> }, _options?: unknown) => {
-    await adapter?.connect?.();
-  });
+  const addTransport = vi.fn(
+    async (_id: string, adapter?: { connect?: () => Promise<void> }, _options?: unknown) => {
+      await adapter?.connect?.();
+    }
+  );
   const removeTransport = vi.fn(async () => {});
   const refreshTransportRoutes = vi.fn(async () => {});
   const transportRooms = vi.fn(() => []);
@@ -1649,7 +1651,10 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         enabled: true;
         url: string;
         authPoolKey: string;
-        auth?: (context: { reason: 'connect' | 'initial' | 'reauth' | 'renew'; previousToken?: string }) => Promise<string>;
+        auth?: (context: {
+          reason: 'connect' | 'initial' | 'reauth' | 'renew';
+          previousToken?: string;
+        }) => Promise<string>;
       };
     };
 

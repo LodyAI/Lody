@@ -1,0 +1,22 @@
+---
+title: "20260829"
+version: 0.88.1
+date: 2026-08-29
+description: "Ajout des mentions de session limitées au projet et de la sélection obligatoire de la machine avant de choisir un agent, et correction de la remise des messages dans les onglets enfants, du chevauchement de panneaux, de l'isolation des données d'intégration, de la fuite de variables d'environnement dans le terminal et des traductions manquantes."
+---
+
+Version 0.88.1
+
+### ✨ Nouveautés
+
+- Les résultats de session dans le menu de mention `@` se limitent désormais par défaut au projet actuel, avec un basculement temporaire vers tous les projets si besoin, facilitant la recherche de sessions pertinentes ([#109](https://github.com/LodyAI/Lody/pull/109)).
+- L'application de bureau impose désormais de sélectionner une machine avant de pouvoir choisir un agent, avec un accompagnement plus clair tout au long du parcours ([#151](https://github.com/LodyAI/Lody/pull/151)).
+
+### 🐛 Corrections et améliorations
+
+- Correction d'un problème où le premier message dans un onglet enfant pouvait être perdu, rester bloqué sur « Syncing » ou empêcher la fermeture de l'onglet ([#141](https://github.com/LodyAI/Lody/pull/141)).
+- Correction du chevauchement entre les conversations latérales et les aperçus de fichiers ou de diffs ([#135](https://github.com/LodyAI/Lody/pull/135)).
+- Amélioration de l'isolation des données dans la visite guidée de prise en main sur ordinateur afin que la démo ne puisse pas accéder accidentellement aux données réelles de l'espace de travail ([#136](https://github.com/LodyAI/Lody/pull/136)).
+- Les terminaux de projet n'héritent plus des variables d'environnement internes utilisées par le démarrage d'Electron et le proxy d'identifiants ([#122](https://github.com/LodyAI/Lody/pull/122)).
+- Ajout des traductions manquantes en anglais et en chinois pour le statut de la cible, l'enregistrement des tâches et les diagnostics Git sous Windows, et rétablissement du nom d'agent manquant ([#59](https://github.com/LodyAI/Lody/pull/59)).
+- Merci à [@27Aaron](https://github.com/27Aaron), [@ImSingee](https://github.com/ImSingee) et [@natsustan](https://github.com/natsustan) pour leurs contributions publiques à cette version.

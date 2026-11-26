@@ -1,17 +1,16 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SITE_LOCALES } from './site-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outFile = path.join(packageRoot, 'lib', 'blog-reading-time.generated.ts');
 
-const LOCALES = ['en', 'zh'];
-
-/** Words per minute for latin prose, characters per minute for CJK. */
-const LATIN_WPM = 200;
+/** Words per minute for word-spaced prose (en/es/fr/ru), characters per minute for CJK (zh/zh-hant/ja/ko). */
+const WORD_WPM = 200;
 const CJK_CPM = 400;
 
-const CJK = /[㐀-䶿一-鿿豈-﫿぀-ヿ]/gu;
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
 
 /**
  * Strip everything a reader does not read at prose speed: frontmatter, fenced
@@ -31,17 +30,17 @@ function toProse(source) {
 function readingMinutes(source) {
   const prose = toProse(source);
   const cjkCount = (prose.match(CJK) ?? []).length;
-  const latinCount = prose
+  const wordCount = prose
     .replace(CJK, ' ')
     .split(/\s+/u)
     .filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
 
-  const minutes = cjkCount / CJK_CPM + latinCount / LATIN_WPM;
+  const minutes = cjkCount / CJK_CPM + wordCount / WORD_WPM;
   return Math.max(1, Math.round(minutes));
 }
 
 const table = {};
-for (const locale of LOCALES) {
+for (const locale of SITE_LOCALES) {
   const dir = path.join(packageRoot, 'content', 'blog', locale);
   table[locale] = {};
   if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) continue;
@@ -65,5 +64,5 @@ export const blogReadingMinutes: Record<string, Record<string, number>> = ${JSON
 
 writeFileSync(outFile, body, 'utf8');
 
-const total = LOCALES.reduce((sum, locale) => sum + Object.keys(table[locale]).length, 0);
+const total = SITE_LOCALES.reduce((sum, locale) => sum + Object.keys(table[locale]).length, 0);
 process.stdout.write(`Generated lib/blog-reading-time.generated.ts for ${total} blog posts\n`);

@@ -3,7 +3,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionContinuationNote } from '../src/components/sessions/session-continuation-note';
-import { SessionAutoDeliveryNote } from '../src/components/sessions/session-auto-delivery';
+import {
+  autoDeliveryStatusLabel,
+  SessionAutoDeliveryNote,
+} from '../src/components/sessions/session-auto-delivery';
 import type { SessionContinuationView } from '../src/components/sessions/session-continuation';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
@@ -142,5 +145,43 @@ describe('SessionContinuationNote', () => {
       turnOff?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onTurnOff).toHaveBeenCalledTimes(1);
+  });
+
+  it('formats blocked Auto delivery labels for localized, unknown, and omitted block reasons', () => {
+    const localizedI18n = createTestI18n({ language: 'zh-CN' });
+    localizedI18n.addResourceBundle('zh-CN', 'translation', {
+      'sessions.autoDelivery.state.stalled': '停住了，等你：{{reason}}',
+      'sessions.autoDelivery.reason.request_blocked': '请求被阻塞，暂无法下发',
+      'sessions.autoDelivery.blockReason.permission_denied': '已失去该会话的编辑权限',
+    });
+    const t = localizedI18n.t.bind(localizedI18n);
+
+    expect(
+      autoDeliveryStatusLabel(
+        {
+          state: 'stalled',
+          reason: 'request_blocked',
+          blockReason: 'permission_denied',
+          updatedAt: NOW,
+        },
+        t
+      )
+    ).toBe('停住了，等你：已失去该会话的编辑权限');
+
+    expect(
+      autoDeliveryStatusLabel(
+        {
+          state: 'stalled',
+          reason: 'request_blocked',
+          blockReason: 'custom_block_code',
+          updatedAt: NOW,
+        },
+        t
+      )
+    ).toBe('停住了，等你：请求被阻塞，暂无法下发 (custom_block_code)');
+
+    expect(
+      autoDeliveryStatusLabel({ state: 'stalled', reason: 'request_blocked', updatedAt: NOW }, t)
+    ).toBe('停住了，等你：请求被阻塞，暂无法下发');
   });
 });

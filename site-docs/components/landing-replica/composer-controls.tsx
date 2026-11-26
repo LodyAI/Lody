@@ -47,6 +47,17 @@ export function ReplicaMachineMenuTrigger({ label }: { label: string }) {
   );
 }
 
+const CONTROL_COPY: Record<ReplicaLocale, { selectProject: string; branch: string }> = {
+  en: { selectProject: 'Select a project', branch: 'Branch' },
+  zh: { selectProject: '选择项目', branch: '分支' },
+  'zh-hant': { selectProject: '選擇專案', branch: '分支' },
+  ja: { selectProject: 'プロジェクトを選択', branch: 'ブランチ' },
+  ko: { selectProject: '프로젝트 선택', branch: '브랜치' },
+  es: { selectProject: 'Seleccionar proyecto', branch: 'Rama' },
+  fr: { selectProject: 'Choisir un projet', branch: 'Branche' },
+  ru: { selectProject: 'Выбрать проект', branch: 'Ветка' },
+};
+
 /** `UnifiedProjectSelectorView` chip trigger. `label` is ignored for `none`. */
 export function ReplicaProjectSelectorTrigger({
   label,
@@ -94,7 +105,7 @@ export function ReplicaProjectSelectorTrigger({
           {icon}
         </span>
         <span className="min-w-0 flex-1 truncate text-left">
-          {kind === 'none' ? (locale === 'zh' ? '选择项目' : 'Select a project') : label}
+          {kind === 'none' ? CONTROL_COPY[locale].selectProject : label}
         </span>
       </button>
     </div>
@@ -125,9 +136,7 @@ export function ReplicaBranchWorktreePill({
         >
           <span className="flex min-w-0 flex-1 items-center gap-2">
             <GitBranch className="h-4 w-4 shrink-0 opacity-70" />
-            <span className="truncate font-medium">
-              {branch ?? (locale === 'zh' ? '分支' : 'Branch')}
-            </span>
+            <span className="truncate font-medium">{branch ?? CONTROL_COPY[locale].branch}</span>
           </span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
         </Button>

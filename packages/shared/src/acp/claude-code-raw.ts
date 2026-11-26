@@ -195,4 +195,3 @@ export const getClaudeCodeToolName = (meta: unknown): string | undefined => {
   if (!parsed.success) return undefined;
   return parsed.data.claudeCode?.toolName;
 };
-

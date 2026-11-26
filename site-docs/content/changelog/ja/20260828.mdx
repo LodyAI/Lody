@@ -1,0 +1,26 @@
+---
+title: "20260828"
+version: 0.88.0
+date: 2026-08-28
+description: "会話アウトラインに予測ホバー判定を追加し、プロバイダーのセットアップと公開サイトを改善しました。また、未配信メッセージ、ワークスペース同期、会話内の操作、デスクトップの信頼性に関する不具合を修正しました。"
+---
+
+バージョン 0.88.0
+
+### ✨ 新機能
+
+- 会話アウトラインに予測ホバー判定を追加し、意図せず開いてしまうのを抑えながら長い会話をより移動しやすくしました ([#51](https://github.com/LodyAI/Lody/pull/51), [#97](https://github.com/LodyAI/Lody/pull/97), [#113](https://github.com/LodyAI/Lody/pull/113))。
+- プロバイダーのセットアップで進捗状況がより分かりやすく表示されるようになり、DeepSeek の委任モデルで追加コストが発生する可能性がある場合に警告を表示するようにしました ([#66](https://github.com/LodyAI/Lody/pull/66), [#81](https://github.com/LodyAI/Lody/pull/81))。
+- 公開ブログに英語と中国語の RSS フィード、読了時間の目安、前後の記事へのナビゲーションを追加しました。ランディングページのデモと背景アニメーションの表示もより滑らかになりました ([#84](https://github.com/LodyAI/Lody/pull/84), [#85](https://github.com/LodyAI/Lody/pull/85))。
+- 公開ソースとコントリビューション先を LodyAI/Lody に移行し、構造化された Issue / PR テンプレート、自動チェック、およびコントリビューター向けのより明確なフィードバックを整備しました ([#39](https://github.com/LodyAI/Lody/pull/39), [#63](https://github.com/LodyAI/Lody/pull/63), [#69](https://github.com/LodyAI/Lody/pull/69), [#80](https://github.com/LodyAI/Lody/pull/80), [#91](https://github.com/LodyAI/Lody/pull/91))。
+
+### 🐛 修正と改善
+
+- 未配信のメッセージが明確に表示されるようになり、確認後に再送信できるようにすることで、メッセージの欠落や重複実行を防止しました ([#48](https://github.com/LodyAI/Lody/pull/48), [#74](https://github.com/LodyAI/Lody/pull/74))。
+- ワークスペースの切り替えと同期を改善し、サイドバーの内容が現在のワークスペース内に留まるようにするとともに、新旧クライアント間の互換性を高めました ([#49](https://github.com/LodyAI/Lody/pull/49), [#55](https://github.com/LodyAI/Lody/pull/55), [#96](https://github.com/LodyAI/Lody/pull/96), [#108](https://github.com/LodyAI/Lody/pull/108))。
+- 中国語翻訳の欠落、タスクツールの設定、セッションタブの名前変更、IME の確定操作、幅の狭いメッセージ列での編集、キュー済みメッセージによるステアリング、およびエージェントの質問機能の互換性に関する不具合を修正しました ([#40](https://github.com/LodyAI/Lody/pull/40), [#42](https://github.com/LodyAI/Lody/pull/42), [#43](https://github.com/LodyAI/Lody/pull/43), [#44](https://github.com/LodyAI/Lody/pull/44), [#52](https://github.com/LodyAI/Lody/pull/52), [#99](https://github.com/LodyAI/Lody/pull/99), [#101](https://github.com/LodyAI/Lody/pull/101))。
+- Mermaid 図の軽量化、Windows トレイアイコンの左クリック時の挙動、ローカルファイルプレビューとセッション操作の復元、およびより安全なウィンドウ遷移により、デスクトップ版の信頼性を向上させました ([#45](https://github.com/LodyAI/Lody/pull/45), [#46](https://github.com/LodyAI/Lody/pull/46), [#50](https://github.com/LodyAI/Lody/pull/50), [#71](https://github.com/LodyAI/Lody/pull/71), [#75](https://github.com/LodyAI/Lody/pull/75), [#77](https://github.com/LodyAI/Lody/pull/77))。
+- 小画面における利用状況カレンダーについて直近週の表示位置や視覚的な細部を改善し、Markdown の番号付きリストのマーカー位置ずれを修正しました ([#53](https://github.com/LodyAI/Lody/pull/53), [#62](https://github.com/LodyAI/Lody/pull/62), [#78](https://github.com/LodyAI/Lody/pull/78), [#82](https://github.com/LodyAI/Lody/pull/82), [#83](https://github.com/LodyAI/Lody/pull/83))。
+- ローカルプロジェクトを削除する際、先に関連するセッションをアーカイブし、オフラインのデバイスを待機している間は項目を表示したままにし、未コミットの変更があるものや削除に失敗した worktree を残しつつ Lody が作成した worktree を安全にクリーンアップできるようになりました ([#105](https://github.com/LodyAI/Lody/pull/105), [#119](https://github.com/LodyAI/Lody/pull/119))。
+- リポジトリパス、中国語版セッションガイドのリンク、Node.js の前提要件、および公開パッケージのメタデータを修正しました ([#57](https://github.com/LodyAI/Lody/pull/57), [#60](https://github.com/LodyAI/Lody/pull/60), [#64](https://github.com/LodyAI/Lody/pull/64))。
+- このリリースへの公開コントリビューションについて、[@clanzhang](https://github.com/clanzhang)、[@tommy0103](https://github.com/tommy0103)、[@lawvs](https://github.com/lawvs)、[@Innei](https://github.com/Innei)、[@hyoban](https://github.com/hyoban)、[@wibus-wee](https://github.com/wibus-wee)、[@limichange](https://github.com/limichange)、[@27Aaron](https://github.com/27Aaron)、[@hcz-czh](https://github.com/hcz-czh)、[@Pleasurecruise](https://github.com/Pleasurecruise)、[@frostming](https://github.com/frostming)、[@natsustan](https://github.com/natsustan)、および [@zxch3n](https://github.com/zxch3n) の皆さんに感謝いたします。

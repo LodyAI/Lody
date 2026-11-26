@@ -1,0 +1,37 @@
+---
+title: "Contexto, tokens y cuota"
+description: "Haz seguimiento del uso de la ventana de contexto, del consumo y costo de tokens, y de la cuota de suscripción en la configuración de Lody y en el chat de la sesión."
+---
+
+# Contexto, tokens y cuota
+
+Lody ofrece una forma unificada de hacer seguimiento del uso de la ventana de contexto, el consumo y costo de tokens, y la cuota de suscripción.
+
+## Capacidad restante de la ventana de contexto
+
+En el chat de la sesión, cada respuesta de la IA puede mostrar el porcentaje restante de la ventana de contexto.
+
+Usa este indicador para:
+
+- evitar el desbordamiento del contexto,
+- decidir cuándo resumir o iniciar una nueva sesión,
+- mantener estables las tareas de larga duración.
+
+<Callout type="warn" title="Compresión de contexto">
+
+Puedes ejecutar manualmente el comando integrado `/compact` en Claude Code o Codex para comprimir el contexto, pero Lody actualmente no admite la actualización de interfaz relacionada, por lo que no verás ninguna respuesta del agente.
+
+</Callout>
+
+## Uso de tokens y costo estimado
+
+En **Configuración** -> **Estadísticas**, puedes ver las tendencias de uso de tokens y el costo estimado de las últimas 24
+horas, 7 días, 30 días o de todo el historial disponible. El resumen también muestra los miembros activos y los modelos
+utilizados, mientras que los gráficos desglosan el uso por modelo y por miembro. Selecciona un elemento de la leyenda del gráfico para enfocarte
+en esa serie.
+
+<UsagePreview locale="es" />
+
+## Visibilidad de la cuota de suscripción
+
+En **Configuración** -> **Configuración de agente** -> **Máquinas**, Lody muestra la cuota restante y los horarios de renovación para las ventanas de suscripción compatibles (por ejemplo, ventanas de 5 horas y de 7 días).

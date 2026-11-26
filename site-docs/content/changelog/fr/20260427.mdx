@@ -1,0 +1,31 @@
+---
+title: "20260427"
+version: 0.47.1
+date: 2026-04-27
+description: "Ajout de la prise en charge de GPT-5.5, refonte des paramètres Agent, introduction d'un préréglage DeepSeek et amélioration de la barre latérale, de l'actualisation automatique des fichiers et de la stabilité générale."
+---
+
+### Expérience Agent
+
+- Ajout de la prise en charge de GPT-5.5
+- Refonte de la page des paramètres Agent avec une nouvelle barre latérale par catégorie et un flux d'actualisation des capacités
+- Ajout d'un préréglage DeepSeek vous permettant de coller un jeton et de terminer rapidement la configuration
+- Amélioration de la stabilité de connexion et de la détection des capacités pour les agents tels que Claude Code et Codex
+- Correction d'un problème sous macOS où l'utilisation de Codex pouvait déclencher une fenêtre d'erreur `ComputerUse`
+
+### Expérience sur ordinateur
+
+- La barre latérale gauche peut désormais être repliée, redimensionnée par glissement et affichée ou masquée à l'aide de raccourcis clavier
+- Les sections Projets locaux, Worktrees GitHub et Chat sont plus claires, avec des interactions plus cohérentes dans la barre latérale
+- Les listes de fichiers locaux dans les sessions s'actualisent désormais automatiquement, ce qui facilite la relecture des modifications en temps réel
+
+### Expérience de conversation
+
+- Les blocs de code en streaming ne scintillent plus entre le rendu avec coloration syntaxique et le texte brut
+- L'initialisation et le changement de session sont plus stables, ce qui réduit les confusions occasionnelles lors du chargement
+
+### Autres correctifs
+
+- Les projets distants ne déclenchent plus à tort la détection locale
+- L'état en ligne des machines et la synchronisation en temps réel sont désormais plus précis
+- Correction de l'espacement inférieur dans la zone de sortie CLI au sein d'Electron

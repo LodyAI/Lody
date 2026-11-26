@@ -566,3 +566,245 @@ describe('Shortcut token attempt ownership', () => {
     b.instance.dispose();
   });
 });
+
+describe('PromptShortcutSync workspace-index replica checkpoints', () => {
+  function createFakeStreamsServer() {
+    const batches: Uint8Array[] = [];
+    const requests: Array<{ method: string; pathname: string; offset: string | null }> = [];
+    const tail = () =>
+      String(batches.reduce((sum, batch) => sum + batch.length, 0)).padStart(20, '0');
+    const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      const method = init?.method ?? 'GET';
+      requests.push({
+        method,
+        pathname: url.pathname,
+        offset: url.searchParams.get('offset'),
+      });
+      if (method === 'POST') {
+        batches.push(new Uint8Array(await new Response(init?.body).arrayBuffer()));
+        return new Response(null, {
+          headers: {
+            'Stream-Next-Offset': tail(),
+            'Stream-Up-To-Date': 'true',
+            'Producer-Epoch': new Headers(init?.headers).get('Producer-Epoch') ?? '0',
+            'Producer-Seq': new Headers(init?.headers).get('Producer-Seq') ?? '0',
+          },
+        });
+      }
+      if (method === 'PUT') {
+        return new Response(null, { status: 201, headers: { 'Stream-Next-Offset': tail() } });
+      }
+      if (url.pathname.endsWith('/bootstrap')) {
+        return new Response(
+          '--bytes\r\nContent-Type: application/octet-stream\r\n\r\n\r\n--bytes--\r\n',
+          {
+            headers: {
+              'Content-Type': 'multipart/mixed; boundary=bytes',
+              'Stream-Snapshot-Offset': '-1',
+              'Stream-Next-Offset': '-1',
+              'Stream-Up-To-Date': String(batches.length === 0),
+            },
+          }
+        );
+      }
+      const offsetParam = url.searchParams.get('offset');
+      const offsetBytes =
+        offsetParam && /^\d+$/.test(offsetParam) ? Number.parseInt(offsetParam, 10) : 0;
+      const all = Buffer.concat(batches);
+      return new Response(all.subarray(offsetBytes), {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Stream-Next-Offset': tail(),
+          'Stream-Up-To-Date': 'true',
+        },
+      });
+    };
+    return { fetchImpl, requests, tail };
+  }
+
+  it('persists workspace-index checkpoint across restart without re-bootstrapping and recovers cleanly after persist failure', async () => {
+    const { indexedDB, IDBKeyRange } = await import('fake-indexeddb');
+    vi.stubGlobal('indexedDB', indexedDB);
+    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+    const { LoroRepo: RealLoroRepo } =
+      await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const { IndexedDBStorageAdaptor: RealIdbStorage } = await vi.importActual<
+      typeof import('loro-repo/storage/indexeddb')
+    >('loro-repo/storage/indexeddb');
+    const { PromptShortcutCatalog } = await import('../../shared/src/prompt-shortcuts/catalog');
+    const { getWorkspaceShortcutIndexStreamId } =
+      await import('../../shared/src/prompt-shortcuts/access');
+
+    const server = createFakeStreamsServer();
+    vi.stubGlobal('fetch', server.fetchImpl);
+
+    const workspaceId = 'ws-checkpoint';
+    const streamId = getWorkspaceShortcutIndexStreamId(workspaceId);
+    const resource = { kind: 'workspace-index', workspaceId } as const;
+    const grant = async () => ({
+      token: 'synthetic',
+      expiresIn: 300,
+      gatewayBaseUrl: 'https://gateway.test',
+      streamId,
+    });
+
+    const entry1 = {
+      v: 1 as const,
+      id: 'sc-1',
+      workspaceId,
+      ownerUserId: 'user-a',
+      name: 'First',
+      slug: 'first',
+      bodyDocId: 'sc-1',
+      dependencySummary: [],
+      scope: {},
+      revision: 'rev-1',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const entry2 = {
+      v: 1 as const,
+      id: 'sc-2',
+      workspaceId,
+      ownerUserId: 'user-a',
+      name: 'Second',
+      slug: 'second',
+      bodyDocId: 'sc-2',
+      dependencySummary: [],
+      scope: {},
+      revision: 'rev-2',
+      createdAt: 200,
+      updatedAt: 200,
+    };
+
+    const writerRepo = await RealLoroRepo.create({});
+    const writerSync = new ActualShortcutSync({
+      content: { mode: 'plaintext' },
+      repo: writerRepo,
+      workspaceId,
+      now: () => 0,
+      grant,
+    });
+    try {
+      // Seed entry 1 on the fake Streams server.
+      const wFlock = await writerRepo.acquireFlockDoc(streamId);
+      new PromptShortcutCatalog(wFlock.flock).put(entry1);
+      await wFlock.release();
+      const wLease = await writerSync.acquire(resource, true);
+      await wLease.sync();
+
+      // Cold start on durable IndexedDB repo: bootstraps and persists checkpoint.
+      const dbName = `shortcut-checkpoint-warm-${Date.now()}`;
+      const repo1 = await RealLoroRepo.create({
+        storageAdapter: new RealIdbStorage({ dbName }),
+      });
+      const sync1 = new ActualShortcutSync({
+        content: { mode: 'plaintext' },
+        repo: repo1,
+        workspaceId,
+        now: () => 0,
+        grant,
+      });
+      server.requests.length = 0;
+      const lease1 = await sync1.acquire(resource, false);
+      await lease1.sync();
+      const coldFlock = await repo1.acquireFlockDoc(streamId);
+      expect(new PromptShortcutCatalog(coldFlock.flock).list().map((e) => e.id)).toEqual(['sc-1']);
+      await coldFlock.release();
+      expect(server.requests.some((r) => r.pathname.endsWith('/bootstrap'))).toBe(true);
+      const offsetAfterCold = server.tail();
+      await lease1.release();
+      await sync1.dispose();
+      await repo1.destroy();
+
+      // Push entry 2 while client is offline.
+      const wFlock2 = await writerRepo.acquireFlockDoc(streamId);
+      new PromptShortcutCatalog(wFlock2.flock).put(entry2);
+      await wFlock2.release();
+      await wLease.sync();
+      await wLease.release();
+
+      // Warm restart on the same IndexedDB: must resume from persisted offset without /bootstrap.
+      const repo2 = await RealLoroRepo.create({
+        storageAdapter: new RealIdbStorage({ dbName }),
+      });
+      const sync2 = new ActualShortcutSync({
+        content: { mode: 'plaintext' },
+        repo: repo2,
+        workspaceId,
+        now: () => 0,
+        grant,
+      });
+      server.requests.length = 0;
+      const lease2 = await sync2.acquire(resource, false);
+      await lease2.sync();
+      expect(server.requests.some((r) => r.pathname.endsWith('/bootstrap'))).toBe(false);
+      expect(server.requests.some((r) => r.offset === offsetAfterCold)).toBe(true);
+      const warmFlock = await repo2.acquireFlockDoc(streamId);
+      expect(
+        new PromptShortcutCatalog(warmFlock.flock)
+          .list()
+          .map((e) => e.id)
+          .sort()
+      ).toEqual(['sc-1', 'sc-2']);
+      await warmFlock.release();
+      await lease2.release();
+      await sync2.dispose();
+      await repo2.destroy();
+
+      // Persistence failure barrier: checkpoint must not advance when persistFlockDocNow rejects,
+      // so reopening recovers the full catalog.
+      const failDbName = `shortcut-checkpoint-fail-${Date.now()}`;
+      const failRepo = await RealLoroRepo.create({
+        storageAdapter: new RealIdbStorage({ dbName: failDbName }),
+      });
+      const persistSpy = vi
+        .spyOn(failRepo, 'persistFlockDocNow')
+        .mockRejectedValueOnce(new Error('disk full'));
+      const failSync = new ActualShortcutSync({
+        content: { mode: 'plaintext' },
+        repo: failRepo,
+        workspaceId,
+        now: () => 0,
+        grant,
+      });
+      const failLease = await failSync.acquire(resource, false);
+      await expect(failLease.sync()).rejects.toThrow();
+      persistSpy.mockRestore();
+      await failLease.release();
+      await failSync.dispose();
+      await failRepo.destroy();
+
+      const recoveredRepo = await RealLoroRepo.create({
+        storageAdapter: new RealIdbStorage({ dbName: failDbName }),
+      });
+      const recoveredSync = new ActualShortcutSync({
+        content: { mode: 'plaintext' },
+        repo: recoveredRepo,
+        workspaceId,
+        now: () => 0,
+        grant,
+      });
+      server.requests.length = 0;
+      const recoveredLease = await recoveredSync.acquire(resource, false);
+      await recoveredLease.sync();
+      expect(server.requests.some((r) => r.pathname.endsWith('/bootstrap'))).toBe(true);
+      const recoveredFlock = await recoveredRepo.acquireFlockDoc(streamId);
+      expect(
+        new PromptShortcutCatalog(recoveredFlock.flock)
+          .list()
+          .map((e) => e.id)
+          .sort()
+      ).toEqual(['sc-1', 'sc-2']);
+      await recoveredFlock.release();
+      await recoveredLease.release();
+      await recoveredSync.dispose();
+      await recoveredRepo.destroy();
+    } finally {
+      await writerSync.dispose();
+      await writerRepo.destroy();
+      vi.unstubAllGlobals();
+    }
+  });
+});

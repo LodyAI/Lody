@@ -4,7 +4,12 @@ export const RPC_SECRET_PUBLIC_KEY_TYPE = 'rpc-secret-public-key-v1';
 export const RPC_SECRET_ENVELOPE_TYPE = 'rpc-secret-envelope-v1';
 export const RPC_SECRET_ALGORITHM = 'ECDH-P256-AES-256-GCM';
 
-const Base64UrlSchema = z.string().trim().min(1).max(16_384).regex(/^[A-Za-z0-9_-]+$/);
+const Base64UrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(16_384)
+  .regex(/^[A-Za-z0-9_-]+$/);
 
 export const RpcSecretEcPublicJwkSchema = z
   .object({

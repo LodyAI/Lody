@@ -34,7 +34,7 @@ const styles = stylex.create({
     minWidth: 0,
     maxWidth: '100%',
     fontSize: text.footnoteSize,
-    lineHeight: 1,
+    lineHeight: text.footnoteLeading,
   },
   muted: { color: colors.secondaryLabel },
   pairs: {

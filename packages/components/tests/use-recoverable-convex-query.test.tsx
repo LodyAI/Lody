@@ -15,6 +15,8 @@ import {
 import {
   useRecoverableConvexQuery,
   useOptionalRecoverableConvexQuery,
+  usePublicConvexQuery,
+  useOptionalPublicConvexQuery,
 } from '../src/hooks/use-recoverable-convex-query';
 import { ErrorBoundary } from '../src/components/error-boundary';
 
@@ -358,7 +360,7 @@ describe('useRecoverableConvexQuery', () => {
     expect(mocks.activeWatches).toBe(1);
   });
 
-  it('hands a persistent failure to the boundary after three retries, despite changing IDs', async () => {
+  it('contains a persistent failure after three retries without tripping the error boundary', async () => {
     vi.useFakeTimers();
     await act(async () => renderWithBoundary());
     await deliver(serverError('synthetic-0'));
@@ -367,22 +369,57 @@ describe('useRecoverableConvexQuery', () => {
       await advance(delay);
       await deliver(serverError(`synthetic-${index + 1}`));
     }
-    expect(container.textContent).toBe('ordinary fallback');
-    expect(mocks.activeWatches).toBe(0);
+    expect(container.textContent).toBe('local loading');
+    expect(unmounts).toBe(0);
     await advance(60_000);
-    expect(container.textContent).toBe('ordinary fallback');
+    expect(container.textContent).toBe('local loading');
     expect(mocks.subscriptions).toBe(4);
   });
 
-  it('does not retry structured application errors even if their message looks transient', async () => {
+  it('does not retry structured ConvexError application errors and never crashes render', async () => {
     vi.useFakeTimers();
     const error = new ConvexError('Permission denied');
     error.message = serverError().message;
     mocks.queryResult = error;
     await act(async () => renderWithBoundary());
-    expect(container.textContent).toBe('ordinary fallback');
+    expect(container.textContent).toBe('local loading');
+    expect(unmounts).toBe(0);
     await advance(60_000);
     expect(mocks.subscriptions).toBe(1);
+  });
+
+  it('contains public query failures without crashing render and retries transient errors', async () => {
+    vi.useFakeTimers();
+    const publicQuery = makeFunctionReference<'query', { slug: string }, { available: boolean }>(
+      'auth:isWorkspaceSlugAvailable'
+    );
+    function PublicConsumer() {
+      const value = usePublicConvexQuery(publicQuery, { slug: 'demo' });
+      const state = useOptionalPublicConvexQuery(publicQuery, { slug: 'demo' });
+      return (
+        <div>
+          {value
+            ? `ok:${String(value.available)}`
+            : state.error
+              ? 'public error'
+              : 'public loading'}
+        </div>
+      );
+    }
+    mocks.queryResult = new ConvexError('backend unavailable');
+    await act(async () =>
+      root.render(
+        <TestErrorBoundary>
+          <PublicConsumer />
+        </TestErrorBoundary>
+      )
+    );
+    expect(container.textContent).toBe('public error');
+    expect(container.textContent).not.toContain('ordinary fallback');
+    expect(mocks.subscriptions).toBe(1);
+
+    await deliver({ available: true });
+    expect(container.textContent).toBe('ok:true');
   });
 
   it('does not reset the retry budget on a brief successful result or auth skip', async () => {
@@ -403,7 +440,11 @@ describe('useRecoverableConvexQuery', () => {
     await deliver(serverError('synthetic-3'));
     await advance(4_000);
     await deliver(serverError('synthetic-4'));
-    expect(container.textContent).toBe('ordinary fallback');
+    expect(container.textContent).toBe('local loading');
+    expect(unmounts).toBe(0);
+    const settledSubscriptions = mocks.subscriptions;
+    await advance(60_000);
+    expect(mocks.subscriptions).toBe(settledSubscriptions);
   });
 
   it('does not resurrect stale authorization data when auth drops during server recovery', async () => {

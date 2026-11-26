@@ -7,9 +7,15 @@ import {
 } from '../src/lib/posthog-analytics';
 
 describe('PostHog analytics helpers', () => {
-  it('removes sensitive event properties while keeping opaque analytics ids', () => {
+  it('removes sensitive event properties while keeping opaque ids and minimal distribution enums', () => {
     expect(
       sanitizePostHogProperties({
+        user_id: 'user_123',
+        platform: 'electron',
+        cli_type: 'builtin',
+        agent_type: 'claude',
+        is_new_user: true,
+        outcome: 'success',
         workspace_id: 'workspace_123',
         $current_url: 'https://app.lody.ai/acme/session/session_123',
         $pathname: '/acme/session/session_123',
@@ -25,12 +31,22 @@ describe('PostHog analytics helpers', () => {
         },
       })
     ).toEqual({
-      workspace_id: 'workspace_123',
-      session_id: 'session_123',
-      machine_id: 'machine_123',
-      nested: {
-        ok: true,
-      },
+      user_id: 'user_123',
+      platform: 'electron',
+      cli_type: 'builtin',
+      agent_type: 'claude',
+      is_new_user: true,
+      outcome: 'success',
+    });
+
+    expect(
+      sanitizePostHogProperties({
+        cli_type: 'custom',
+        agent_type: 'my-private-internal-agent',
+      })
+    ).toEqual({
+      cli_type: 'custom',
+      agent_type: 'other',
     });
   });
 
@@ -57,9 +73,6 @@ describe('PostHog analytics helpers', () => {
       failure_reason: 'unknown',
     });
 
-    expect(capture).toHaveBeenCalledWith('session/start_failed', {
-      workspace_id: 'workspace_123',
-      failure_reason: 'unknown',
-    });
+    expect(capture).toHaveBeenCalledWith('session/start_failed', {});
   });
 });

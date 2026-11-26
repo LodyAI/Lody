@@ -183,7 +183,6 @@ export interface BranchSelectorProps {
   disableClientFilter?: boolean;
   onReachEnd?: () => void;
   footer?: ReactNode;
-
 }
 
 /**
@@ -210,7 +209,6 @@ export function BranchSelector({
   disableClientFilter = false,
   onReachEnd,
   footer,
-
 }: BranchSelectorProps) {
   const showTriggerLoading = loading && options.length === 0 && !value;
   return (

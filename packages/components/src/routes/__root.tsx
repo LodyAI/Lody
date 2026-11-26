@@ -78,6 +78,7 @@ import { resolveDesktopCheckoutReturnDeepLinkPath } from '@/lib/desktop-checkout
 import { resolveDesktopGitHubInstallDeepLinkPath } from '@/lib/desktop-github-install-deep-link';
 import { LodyPostHogProvider } from '../providers/posthog-provider';
 import { AppLaunchAnalyticsTracker } from '@/components/app-launch-analytics-tracker';
+import { WebCookieConsentBanner } from '@/components/web-cookie-consent-banner';
 import { ReferralLeadAttacher } from '@/components/referral-lead-attacher';
 import { ShortcutAnalyticsTracker } from '@/components/commands/shortcut-analytics-tracker';
 import { ERROR_BOUNDARY_PROBE_EVENT, consumeErrorBoundaryProbe } from '@/lib/error-boundary-probe';
@@ -97,6 +98,7 @@ import { isLocalAppPlatform, useAppCapability } from '@/lib/app-platform';
 import { getLocalPlatformProvider } from '../providers/local-platform-provider';
 import { LocalPlatformAuthProvider } from '../providers/local-platform-auth-provider';
 import { CloudPlatformProvider } from '../providers/cloud-platform-provider';
+import { TodayCompanionHost } from '@/components/today/today-companion-host';
 import { useOpenToday } from '@/components/today/use-open-today';
 
 const PENDING_MACHINE_PAIRING_KEY = 'lody:pending-machine-pairing-request';
@@ -241,7 +243,7 @@ function RootApp() {
 
   return (
     <LodyPostHogProvider>
-      {telemetryEnabled && <AppLaunchAnalyticsTracker isElectron={isElectron} />}
+      {telemetryEnabled && <AppLaunchAnalyticsTracker />}
       {telemetryEnabled && <ShortcutAnalyticsTracker />}
       <SessionDeepLinkRouter />
       <ReferralLeadAttacher
@@ -269,8 +271,10 @@ function RootApp() {
                 <ErrorBoundary name="RootRuntime" variant="page" propagateAuthErrors={false}>
                   <RuntimeProvider>
                     <RootOutletBoundary />
+                    {isElectron && isLocalAppPlatform() && <TodayCompanionHost />}
                   </RuntimeProvider>
                 </ErrorBoundary>
+                {telemetryEnabled && !isElectron && <WebCookieConsentBanner />}
                 {/* <TanStackRouterDevtools /> */}
               </>
             </LanguageProvider>

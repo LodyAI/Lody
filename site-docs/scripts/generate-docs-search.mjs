@@ -1,14 +1,16 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { slugFromMdxFile } from './site-paths.mjs';
+import { localePrefix, SITE_LOCALES, slugFromMdxFile } from './site-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const docsRoot = path.join(packageRoot, 'content', 'docs');
 const outputPath = path.join(packageRoot, 'public', 'docs-search.json');
 
 function listMdxFiles(dir) {
+  if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) return [];
+
   return readdirSync(dir, { withFileTypes: true })
     .flatMap((entry) => {
       const entryPath = path.join(dir, entry.name);
@@ -50,12 +52,12 @@ function searchableText(body) {
     .trim();
 }
 
-const entries = ['en', 'zh'].flatMap((locale) => {
+const entries = SITE_LOCALES.flatMap((locale) => {
   const localeRoot = path.join(docsRoot, locale);
+  const baseUrl = `${localePrefix(locale)}/docs`;
   return listMdxFiles(localeRoot).map((file) => {
     const { frontmatter, body } = parseMdx(file);
     const slug = slugFromMdxFile(file, localeRoot);
-    const baseUrl = locale === 'zh' ? '/zh/docs' : '/docs';
     const url = slug.length === 0 ? baseUrl : `${baseUrl}/${slug}`;
 
     return {

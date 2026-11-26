@@ -20,6 +20,8 @@ import {
 export type GlobalShortcutDefinition = {
   id: GlobalShortcutId
   handler: () => void
+  /** Defaults to true; set false for feature-gated shortcuts registered on opt-in. */
+  enabled?: boolean
 }
 
 type GlobalShortcutsServiceOptions = {
@@ -73,6 +75,7 @@ export class GlobalShortcutsService {
   )
 
   private readonly handlers = new Map<GlobalShortcutId, () => void>()
+  private readonly enabled = new Map<GlobalShortcutId, boolean>()
   /** id -> the Electron accelerator currently registered for it. */
   private readonly registered = new Map<GlobalShortcutId, string>()
   /** While true the OS accelerators are unregistered (used during shortcut recording). */
@@ -84,12 +87,14 @@ export class GlobalShortcutsService {
   ) {
     for (const def of definitions) {
       this.handlers.set(def.id, def.handler)
+      this.enabled.set(def.id, def.enabled ?? true)
     }
   }
 
-  /** Register every shortcut at its effective binding. Call once after `app.whenReady`. */
+  /** Register every enabled shortcut at its effective binding. Call once after `app.whenReady`. */
   registerAll(): void {
     for (const def of this.definitions) {
+      if (!this.isEnabled(def.id)) continue
       const binding = this.effectiveBinding(def.id)
       if (binding === null) continue
       const accelerator = bindingToElectronAccelerator(binding)
@@ -99,6 +104,32 @@ export class GlobalShortcutsService {
       }
       this.safeRegister(def.id, accelerator)
     }
+  }
+
+  /** Enable or disable a feature-gated global shortcut, registering or unregistering immediately. */
+  setShortcutEnabled(id: GlobalShortcutId, enabled: boolean): void {
+    if (!this.handlers.has(id)) return
+    if (this.isEnabled(id) === enabled) return
+    this.enabled.set(id, enabled)
+
+    if (!enabled) {
+      const previousAccelerator = this.registered.get(id)
+      if (previousAccelerator) {
+        globalShortcut.unregister(previousAccelerator)
+        this.registered.delete(id)
+      }
+      return
+    }
+
+    const binding = this.effectiveBinding(id)
+    if (binding === null) return
+    const accelerator = bindingToElectronAccelerator(binding)
+    if (!accelerator) return
+    if (this.suspended) {
+      this.registered.set(id, accelerator)
+      return
+    }
+    this.safeRegister(id, accelerator)
   }
 
   /** Current + default binding for each shortcut (for the settings UI). */
@@ -119,6 +150,14 @@ export class GlobalShortcutsService {
     if (!this.handlers.has(input.id)) return { ok: false, error: 'invalid' }
 
     const nextBinding = input.binding
+    if (!this.isEnabled(input.id)) {
+      if (nextBinding !== null && !bindingToElectronAccelerator(nextBinding)) {
+        return { ok: false, error: 'invalid' }
+      }
+      this.persistOverride(input.id, nextBinding)
+      return { ok: true, binding: nextBinding }
+    }
+
     const previousAccelerator = this.registered.get(input.id)
 
     if (nextBinding === null) {
@@ -164,12 +203,17 @@ export class GlobalShortcutsService {
       return
     }
     for (const [id, accelerator] of this.registered) {
+      if (!this.isEnabled(id)) continue
       // A rebind during suspension may already have re-registered one of these.
       if (globalShortcut.isRegistered(accelerator)) continue
       if (!this.safeRegister(id, accelerator)) {
         console.warn('[Electron] Error resuming global shortcut', id, accelerator)
       }
     }
+  }
+
+  private isEnabled(id: GlobalShortcutId): boolean {
+    return this.enabled.get(id) ?? true
   }
 
   /** Unregister everything. Call on `will-quit`. */

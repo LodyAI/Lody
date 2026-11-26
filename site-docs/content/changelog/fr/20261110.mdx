@@ -1,0 +1,39 @@
+---
+title: "20261110"
+version: 0.111.0
+date: 2026-11-10
+description: "Vérifications externes et automatisations inter-sessions, pièces jointes locales, diagrammes Mermaid intégrés et améliorations de la configuration des agents, de la découverte des modèles, de l'état des sessions et de l'expérience sur ordinateur."
+---
+
+Version 0.111.0
+
+### ✨ Nouveautés
+
+- Les automatisations de session peuvent vérifier des URL ou exécuter des commandes locales, puis poursuivre une tâche lorsqu'une condition externe est remplie.
+- Les agents peuvent gérer des automatisations entre plusieurs sessions en enregistrant, inspectant ou annulant une attente dans la session cible.
+- Les diagrammes Mermaid s'affichent désormais directement au fil de la conversation.
+- Les pièces jointes utilisées sur la même machine restent locales : les agents peuvent lire les fichiers d'origine, et l'envoi d'images ne nécessite plus d'attendre d'abord un téléversement distant.
+- Prévisualisez les images locales directement sur l'ordinateur d'origine. Sur un autre appareil, téléchargez les pièces jointes locales depuis cet ordinateur et voyez pourquoi un fichier est indisponible, y compris lorsque l'ordinateur est hors ligne.
+- Les agents peuvent identifier leur session actuelle, leur Rôle, leur session parente et leur session d'origine afin de collaborer avec plus de précision.
+- Les adaptateurs Claude, Kimi, Pi et DeepSeek Harness prennent en charge les prompts système de session ACP standard, y compris l'ajout d'instructions et les remplacements.
+
+### 🐛 Corrections et améliorations
+
+- Lorsqu'un fournisseur supprime le modèle épinglé ou le mode d'autorisation d'un Rôle, le Rôle indique pourquoi il est indisponible au lieu d'échouer uniquement après sa sélection.
+- Les résumés de Rôle incluent désormais des étiquettes de capacité pour identifier plus facilement les fonctionnalités prises en charge.
+- Rétablissement de la connexion aux fournisseurs locaux et de la saisie de clé API pour les points de terminaison de service personnalisés.
+- Amélioration de la configuration de Lody Agent : les méthodes de connexion sélectionnées sont bien transmises à la machine cible, les points de terminaison personnalisés peuvent être configurés avant la fin de l'installation et l'annulation de la connexion met immédiatement fin à l'attente.
+- Les catalogues de modèles inopinément vides déclenchent une nouvelle détection, conservent le modèle sélectionné et signalent qu'aucun modèle utilisable n'est disponible au lieu de réussir la vérification à tort.
+- Correction d'un problème où des agents connus devenaient indisponibles dans un nouvel onglet pendant la mise à jour des informations de présence de la machine.
+- Correction d'un problème où les résultats de l'outil conseiller de Claude ne se finalisaient pas correctement.
+- Mise à jour de l'environnement d'exécution intégré Codex vers la version 0.166.0 et de Claude Code vers la version 2.1.321.
+- Mise à jour de l'environnement d'exécution intégré Devin vers la version 3000.12.28 et de DeepSeek Harness vers la version 0.2.2-rc.1.
+- Les réflexions de DeepSeek sont repliées par défaut afin de faciliter la lecture des réponses longues.
+- L'activité de session reste exacte tant que les tâches d'arrière-plan d'un agent sont en cours d'exécution, ce qui réduit les indicateurs de fin prématurés.
+- Le contexte de session est conservé après un échec de démarrage, facilitant ainsi les nouvelles tentatives.
+- La fermeture d'une session d'agent ne ferme plus les terminaux que vous avez ouverts manuellement.
+- Correction d'un problème où des instantanés obsolètes de l'application de bureau écrasaient l'état actuel et provoquaient des changements d'état répétés lors des mises à jour de conversation.
+- L'écran d'accueil marque explicitement les sessions terminées et non lues comme non lues, et utilise une icône distincte pour les pull requests en brouillon.
+- La barre latérale affiche les branches locales des sessions et masque les informations trompeuses de branche indépendante pour les sessions partageant un même répertoire.
+- Les onglets des conversations associées défilent horizontalement au lieu d'être compressés lorsqu'ils sont nombreux.
+- Amélioration de la confirmation et de l'annulation de la fermeture sur l'application de bureau afin de réduire l'attente, et correction des ressources qui n'étaient pas libérées rapidement après la fermeture des panneaux latéraux et des terminaux.

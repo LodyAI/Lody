@@ -1,0 +1,745 @@
+---
+title: "CLI 指令"
+description: "Lody CLI 指令參考手冊，涵蓋登入、Daemon 模式、工作區、GitHub 儲存庫、專案、工作階段、機器與 Agent 設定。"
+---
+
+# CLI 指令
+
+`lody` 同時扮演兩種角色：
+
+- 透過 `lody start` 或 `lody daemon start` 啟動的本機執行時期處理程序
+- 用於管理工作區、GitHub 儲存庫、工作階段、機器與 Agent 設定的單次執行 CLI 工具
+
+如果您是第一次接觸 Lody，建議先閱讀[快速開始](/zh-hant/docs/quickstart)、[工作階段](/zh-hant/docs/session)、
+[Agent 設定](/zh-hant/docs/quickstart)與 [CLI 執行時期類型](/zh-hant/docs/cli-runtimes)。
+
+## 說明與參數查詢
+
+內建的說明輸出是查詢確切旗標與位置參數的權威來源。
+
+```bash
+lody --help
+lody session --help
+lody session create --help
+lody agent-config update --help
+```
+
+任何指令都可以套用以下模式：
+
+| 範圍       | 指令                               |
+| ---------- | ---------------------------------- |
+| 頂層總覽   | `lody --help`                      |
+| 指令群組   | `lody <group> --help`              |
+| 特定子指令 | `lody <group> <subcommand> --help` |
+
+## 指令總覽
+
+| 指令群組                              | 用途                                      | 說明指令                   | 文件                                    |
+| ------------------------------------- | ----------------------------------------- | -------------------------- | --------------------------------------- |
+| `lody` / `login` / `logout` / `start` | 登入、檢視 CLI、在前景執行本機執行時期    | `lody --help`              | [核心指令](#核心指令)                   |
+| `daemon`                              | 啟動、停止、檢視背景 Daemon 並讀取紀錄檔  | `lody daemon --help`       | [Daemon 模式](#daemon-模式)             |
+| `workspace`                           | 查詢可存取的工作區 ID 與 slug             | `lody workspace --help`    | [Workspace 指令](#workspace-指令)       |
+| `github`                              | 列出已連結至工作區的 GitHub 儲存庫        | `lody github --help`       | [GitHub 指令](#github-指令)             |
+| `project`                             | 管理本機專案註冊                          | `lody project --help`      | [Project 指令](#project-指令)           |
+| `app`                                 | 開啟桌面應用程式，或在卡住時重設其本機快取 | `lody app --help`          | [桌面應用程式指令](#桌面應用程式指令)   |
+| `session`                             | 建立、對話、檢視、封存、還原與刪除工作階段 | `lody session --help`      | [Session 指令](#session-指令)           |
+| `machine`                             | 檢視已註冊於工作區的機器                  | `lody machine --help`      | [Machine 指令](#machine-指令)           |
+| `agent-config`                        | 管理 Agent 設定並重新整理執行時期能力     | `lody agent-config --help` | [Agent Config 指令](#agent-config-指令) |
+
+## 核心指令
+
+| 指令          | 用途                      | 說明指令             |
+| ------------- | ------------------------- | -------------------- |
+| `lody`        | 顯示頂層說明與可用指令    | `lody --help`        |
+| `lody login`  | 登入並註冊目前機器        | `lody login --help`  |
+| `lody logout` | 清除本機登入憑證          | `lody logout --help` |
+| `lody start`  | 在目前終端機執行 Lody CLI | `lody start --help`  |
+
+直接與本機執行時期通訊的指令通常需要前景正在執行 `lody start`，或背景正在執行 `lody daemon start`：
+
+- `lody session create`
+- `lody session chat`
+- `lody session cancel`
+- `lody agent-config refresh-capabilities`
+
+### 使用 `--auth` 進行非互動式登入
+
+預設情況下，`lody login` 會在瀏覽器中開啟裝置授權流程。在無頭機器
+（CI runner、遠端伺服器、容器）上，您可以改為傳入預先建立的 CLI Token 來略過瀏覽器操作：
+
+```bash
+lody login --auth <token>
+lody start --auth <token>          # 一步完成登入並啟動執行時期
+```
+
+- `--auth <token>` 會使用從桌面或網頁應用程式的
+  **設定 → 帳戶 → CLI Token** 產生的 **CLI Token** 進行驗證。點擊 **Create token**，填寫簡短備註
+  （例如 `CI runner`、`home server`），並在關閉對話方塊前複製該 Token——它只會顯示一次。
+- 您隨時可以在同一個面板中撤銷 Token。撤銷後，所有使用該 Token 的 CLI 會立即失效。
+- `--auth` 支援與互動式登入相同的 `--machine-name <name>` 旗標，方便您覆寫預設的主機名稱。
+- 若在執行 `lody login` 時省略 `--auth`，指令會退回互動式裝置授權流程；若在沒有現有工作階段的環境中執行
+  `lody start` 時省略 `--auth`，執行時期會提示您另外登入。
+
+請將 Token 保存在私密位置（例如密鑰管理工具或 `LODY_AUTH` 環境變數）。它對您所屬工作區授予與互動式登入相同的存取權限。
+
+## 產品分析
+
+雲端介面（桌面端、網頁端、行動端與 CLI）預設會分享最精簡的產品使用次數統計與經過遮罩處理的錯誤資訊，並由 **設定 → 關於 → 分享應用程式使用資料** 中的單一帳號層級開關統一控制。關閉後，系統會停止在桌面端、網頁端、行動端、帳號端分析以及已登入的雲端 CLI 處理程序中收集資料。
+
+對於任何雲端 CLI 處理程序，您也可以在環境變數中設定 `LODY_DISABLE_USAGE_SHARING=1`（或 `DO_NOT_TRACK=1`），作為本機強制覆寫以維持停用分析。
+
+本機建置版本會停用 PostHog。當雲端 CLI 啟用分析時，只會傳送經過精簡的已註冊事件名稱、事件時間、隨機處理程序識別碼、概略的 `platform` / `cli_type` / 標準化內建 `agent_type` 中繼資料（自訂 Agent 歸類為 `other`），以及程式庫中繼資料，且不會建立使用者剖析資料。自動回報的錯誤僅包含固定類型與錯誤碼。指令參數、機器 ID、儲存庫路徑、自訂 Agent 名稱與錯誤訊息內容均會從這些請求中排除。
+
+## Daemon 模式
+
+`lody daemon start` 會在背景執行 Lody CLI，並讓桌面端、網頁端與行動端用戶端隨時保持可用，無需一直開啟終端機視窗。這同時也是連接遠端機器的指令：透過 SSH 在伺服器或另一台工作站上執行它，該機器就會加入您的工作區。
+
+進入背景之前，`lody daemon start` 會先驗證能否連線至 Lody，以及這台機器是否已登入：
+
+- 已登入且可連線：啟動 Daemon。
+- 尚未登入（或儲存的憑證遭拒絕）：啟動裝置授權流程，在瀏覽器中開啟登入連結（若沒有瀏覽器則會印出連結），並等待您完成登入後再進入 Daemon 模式。若沒有附加的終端機——例如 CI 或腳本化的 SSH 指令——它不會等待瀏覽器操作，而是直接失敗並要求使用 `lody login` 或 `--auth <cli_token>`。
+- 無法連線至 Lody：直接以連線錯誤停止，避免留下無法同步的 Daemon。您可以傳入 `--skip-auth-check` 強制啟動，或傳入 `--auth <cli_token>` 進行非互動式登入。
+
+| 指令                  | 用途                                   |
+| --------------------- | -------------------------------------- |
+| `lody daemon start`   | 啟動背景 Daemon                        |
+| `lody daemon status`  | 顯示執行時期、機器與連線狀態           |
+| `lody daemon logs`    | 印出最近紀錄檔，預設為 50 行           |
+| `lody daemon stop`    | 停止背景 Daemon                        |
+| `lody daemon restart` | 若 Daemon 正在執行則先停止，再重新啟動 |
+
+常見範例：
+
+```bash
+lody daemon start
+lody daemon status
+lody daemon logs --lines 100
+lody daemon restart
+lody daemon stop
+```
+
+Daemon 紀錄檔會寫入 `~/.lody/logs` 目錄下。當啟動失敗或介面無法連線至 CLI 時，請使用 `lody daemon logs`。若您想在除錯時直接查看即時的前景輸出，請改用 `lody start`。
+
+## Workspace 指令
+
+當後續指令需要確切的工作區 ID 或 slug 時，請使用 Workspace 指令。
+
+| 指令                  | 用途                 | 說明指令                     |
+| --------------------- | -------------------- | ---------------------------- |
+| `lody workspace list` | 列出您可存取的工作區 | `lody workspace list --help` |
+
+### workspace list
+
+`lody workspace list` 會印出包含 `ID`、`Name` 與 `Slug` 的表格。在執行接受 `--workspace <idOrSlug>` 的指令前，可先使用此指令查詢。
+
+```bash
+lody workspace list
+lody workspace list --json
+```
+
+## GitHub 指令
+
+使用 GitHub 指令來檢視哪些儲存庫已從 **設定 → GitHub** 連結至工作區。
+
+| 指令               | 用途                               | 說明指令                  |
+| ------------------ | ---------------------------------- | ------------------------- |
+| `lody github list` | 列出已連結至工作區的 GitHub 儲存庫 | `lody github list --help` |
+
+### github list
+
+`lody github list` 會印出已新增至工作區的儲存庫。它不會顯示 GitHub App 有權存取的所有儲存庫，僅會顯示目前已連結至該工作區的儲存庫。
+
+```bash
+lody github list --workspace my-team
+lody github list --workspace my-team --json
+```
+
+主要參數：
+
+- `--workspace <idOrSlug>`：選擇目標工作區
+- 預設輸出為適合閱讀的表格，包含儲存庫 ID、完整名稱與可見性
+- `--json`：回傳結構化的儲存庫資料，方便自動化處理
+
+查詢確切旗標：
+
+```bash
+lody github list --help
+```
+
+## Project 指令
+
+Project 指令用於管理本機專案註冊，註冊後即可在建立工作階段時選用。
+
+| 指令                      | 用途               | 說明指令                     |
+| ------------------------- | ------------------ | ---------------------------- |
+| `lody project add [path]` | 註冊本機專案目錄   | `lody project add --help`    |
+| `lody project list`       | 列出已註冊本機專案 | `lody project list --help`   |
+| `lody project delete`     | 刪除已註冊本機專案 | `lody project delete --help` |
+
+未指定選擇器時，`lody project list` 會透過本機 Daemon 讀取目前機器。若想在不於用戶端執行 Daemon 的情況下，檢視工作區機器上已註冊的專案，請使用雲端目錄路徑：
+
+```bash
+lody project list --workspace <id|slug|name> [--machine <id|name>] --json
+```
+
+若未指定 `--machine`，工作區目錄會包含各台已授權機器上的本機專案以及已啟用的 GitHub 儲存庫。使用 `--kind local` 或 `--kind github` 可篩選單一類型；`--machine` 則會將結果限制為該機器上的本機專案。`--catalog` 可在不顯式指定工作區選擇器的情況下選取工作區目錄。開源本機平台模式不執行雲端 I/O，因此無法使用遠端列表功能。
+
+### 資源探索與分頁
+
+工作區機器、專案、Agent 設定、角色與 MCP 列表預設回傳 20 筆項目。
+可使用 `--limit`（1–100）、`--query`，搭配相同篩選條件傳入 `--cursor` 進行分頁，或使用 `--all-pages`。
+JSON 格式會回傳 `items`、`hasMore`、可選的 `nextCursor`，以及資源專屬的陣列別名。
+這些皆為安全摘要，不會包含 MCP 連線值與 Agent 啟動憑證。
+
+```bash
+lody agent-role list --workspace my-team --all-pages --json
+lody agent-role get ROLE_ID --workspace my-team --json
+lody agent-config get AGENT_ID --workspace my-team --json
+lody mcp list --workspace my-team --json
+lody operation list --workspace my-team --session SESSION_ID --state active --json
+lody session list --workspace my-team --query parser --machine-id MACHINE_ID --agent-config-id AGENT_ID --agent-role-id ROLE_ID
+```
+
+角色詳細資訊包含提示詞前綴（prompt prefix）；列表會保留可讀取但不可用的角色並附帶原因。
+Operation 列表會讀取本機儲存體，範圍限定為請求方工作階段與已驗證使用者，支援 `--state`、`--limit` 與 `--cursor`，且不會彙總其他機器的儲存體。
+工作階段的角色篩選條件會比對建立來源。Lody MCP 提供對應的唯讀 `lody_catalog` 操作（`machines`、`projects`、`agent_configs`、
+`agent_roles`、`mcp_servers`）與 `lody_operation` 工具。
+
+若要查詢確切的現行旗標，請務必檢視內建說明：
+
+```bash
+lody project add --help
+lody project list --help
+lody project delete --help
+```
+
+## 建立與更新 Agent 角色
+
+CLI 與 MCP 可提議建立新角色，或變更您擁有的角色。提案會以審查卡片的形式顯示在進行中的對話中。在 Lody 中點擊 **儲存** 即可套用，或關閉卡片讓目錄維持不變。指令執行成功代表已產生待處理提案，而非角色已儲存。
+
+```bash
+lody agent-role create --name "Reviewer" --description "Review code" \
+  --prompt-prefix "Find actionable bugs" \
+  --machine-id MACHINE_ID --agent-config-id CONFIG_ID --session SESSION_ID
+
+lody agent-role update ROLE_ID --name "Code reviewer" \
+  --description "" --prompt-prefix "Focus on correctness" --session SESSION_ID
+```
+
+| 選項                     | 建立 | 更新                |
+| ------------------------ | ---- | ------------------- |
+| `--name <name>`          | 必填 | 選填                |
+| `--description <text>`   | 選填 | 選填；`""` 表示清空 |
+| `--prompt-prefix <text>` | 選填 | 選填；`""` 表示清空 |
+| `--machine-id <id>`      | 必填 | 不支援              |
+| `--agent-config-id <id>` | 必填 | 不支援              |
+
+更新至少須提供一個欄位，未指定的欄位將保持不變。新建立的角色預設為私人，並採用所綁定 Agent 的預設執行設定。模型、權限、分享與其他設定可在角色編輯器中變更。
+
+使用 `--session` 或設定 `LODY_SESSION_ID` 來選取進行中的對話；當工作區不明確時，請加上 `--workspace <id-or-slug>`。重試時請搭配相同的輸入內容與 `--request-id <id>`，結果會回報既有提案的處理狀態。
+
+同時也支援 JSON 檔案：
+
+```bash
+lody agent-role create --file role.json --session SESSION_ID
+lody agent-role update ROLE_ID --file patch.json --session SESSION_ID
+```
+
+建立用的檔案包含 `name`、`machineId`、`agentConfigId`，以及選填的 `description` 與 `promptPrefix`。更新用的檔案僅包含要變更的 `name`、`description` 或 `promptPrefix`。`--file` 不可與直接指定角色欄位的選項混用。若指令儲存在 Markdown 檔案中，請改為傳入 `--prompt-prefix "$(cat reviewer.md)"`。
+
+`role.json`:
+
+```json
+{
+  "name": "Reviewer",
+  "machineId": "MACHINE_ID",
+  "agentConfigId": "CONFIG_ID",
+  "description": "Review code",
+  "promptPrefix": "Check correctness.\
+Report actionable bugs."
+}
+```
+
+`patch.json`:
+
+```json
+{
+  "description": "",
+  "promptPrefix": "Focus on correctness.\
+Explain each finding."
+}
+```
+
+檔案必須包含單一 UTF-8 編碼的 JSON 物件，並使用上方所示的 camelCase 鍵名。
+更新檔案本身即為修補內容：請勿將其包裝在 `patch` 底下，角色 ID 請作為指令的位置參數傳入，重試 ID 請透過 `--request-id` 傳入。JSON 字串請使用 `\
+` 表示換行；註解與尾隨逗號皆非有效 JSON。
+
+所有欄位值皆為字串。建立時必須提供 `name`、`machineId` 與 `agentConfigId`；更新時至少須包含一個支援的欄位。更新時省略的欄位會維持原值；`""` 會清空描述或預設指令，而 `null` 則會被拒絕。名稱在去除前後空白後不可為空、必須相容於 `@` 提及格式且不得超過 60 個字元；描述最多允許 140 個 Unicode 碼位；預設指令在去除前後空白前最多允許 32,768 個字元。機器與設定 ID 在去除前後空白後不可為空，且不得超過 128 個字元。不支援的欄位將被拒絕。
+
+MCP 透過 `lody_agent_role` 的 `create` 與 `update` 操作提供相同的確認流程。`create` 會接收 `requestId` 以及上述建立欄位；`update` 則接收 `requestId`、`roleId` 與包含已變更文字欄位的 `patch`。關於已儲存角色的使用方式，請參閱 [Agent 角色](/zh-hant/docs/agent-roles)。
+
+## 桌面應用程式指令
+
+| 指令                   | 用途                                             | 說明指令                      |
+| ---------------------- | ------------------------------------------------ | ----------------------------- |
+| `lody app [path]`      | 開啟桌面應用程式，並在備妥指定目錄的新對話中啟動 | `lody app --help`             |
+| `lody app reset-cache` | 設定桌面應用程式在下次啟動時清除本機快取         | `lody app reset-cache --help` |
+
+### 修復無回應的桌面應用程式視窗
+
+如果桌面應用程式視窗停止回應——或在重新啟動後仍回到同樣的異常狀態——問題可能出在本機快取，且您此時也無法前往 **設定 → 清除快取** 進行修復。請改在終端機中設定相同的修復動作：
+
+```bash
+lody app reset-cache          # 清除可復原的快取；維持登入狀態
+lody app reset-cache --hard   # 清除所有本機資料並登出
+lody app reset-cache --cancel # 取消上述任一操作
+```
+
+此指令只會記錄該請求，應用程式會在下次啟動時套用，因此請**結束桌面應用程式後再重新開啟**。它不會將任何資料傳送至外部，也不需要登入或執行中的 Daemon。
+
+`lody app reset-cache` 會保留您的帳號、設定與尚未送出的 Shortcut 草稿，並從工作區重新下載對話紀錄。僅在執行後視窗依然卡住時才使用 `--hard`：它還會一併移除已登入的工作階段與本機偏好設定。從未套用的請求會在一天後過期失效。
+
+## Session 指令
+
+Session 指令是 Lody 主要的非網頁工作流程。
+
+使用前請注意：
+
+- `session create`、`session chat` 與 `session cancel` 需要在目前機器上執行 `lody start` 或 `lody daemon start`
+- `session list`、`history`、`observe`、`show`、`rename`、`archive`、`restore` 與 `delete` 僅需登入並具備工作區存取權限即可使用
+- 若需要查詢工作區 ID 或 slug，請使用 [`lody workspace list`](#workspace-指令)
+- `sessionId` 可作為位置參數傳入，或透過 `LODY_SESSION_ID` 設定
+
+| 子指令                 | 用途                                | 需要本機執行時期 | 說明指令                      |
+| ---------------------- | ----------------------------------- | ---------------- | ----------------------------- |
+| `lody session create`  | 在目前機器上建立新的工作階段        | 是               | `lody session create --help`  |
+| `lody session chat`    | 向現有本機工作階段傳送新一輪輸入    | 是               | `lody session chat --help`    |
+| `lody session cancel`  | 取消本機工作階段上正在執行的輪次    | 是               | `lody session cancel --help`  |
+| `lody session list`    | 列出工作區中的工作階段              | 否               | `lody session list --help`    |
+| `lody session history` | 讀取使用者可見的對話紀錄            | 否               | `lody session history --help` |
+| `lody session observe` | 檢視並持續追蹤持久化的 Session 狀態 | 否               | `lody session observe --help` |
+| `lody session show`    | 顯示工作階段中繼資料                | 否               | `lody session show --help`    |
+| `lody session rename`  | 重新命名工作階段                    | 否               | `lody session rename --help`  |
+| `lody session archive` | 將工作階段移出使用中列表            | 否               | `lody session archive --help` |
+| `lody session restore` | 還原已封存的工作階段                | 否               | `lody session restore --help` |
+| `lody session delete`  | 永久刪除已封存的工作階段            | 否               | `lody session delete --help`  |
+
+### session create
+
+建立關聯至 GitHub 儲存庫或已註冊本機專案的工作階段。
+
+```bash
+lody session create --workspace my-team --agent-config codex --repo owner/repo "Fix the failing test"
+```
+
+主要參數：
+
+- `--workspace <idOrSlug>`：選擇目標工作區
+- `--agent-config <idOrName>`：從 [Agent 設定](/zh-hant/docs/quickstart)選擇 Agent 設定
+- `--agent-role <idOrName>`：從工作區 Agent 角色建立；角色的機器、Agent 設定與執行設定會覆寫 `--machine`、`--agent`/`--agent-config`、`--mode`、`--model` 與 `--config-option`（系統會以警告列出被忽略的旗標）
+- `--repo <owner/repo>`：關聯 GitHub 儲存庫
+- `--local-project <id|name|path>`：關聯先前已註冊的本機專案
+- `--repo` 與 `--local-project` 互斥，不可同時使用
+- `--branch <name>`：選擇起始分支
+- `--mode <modeId>` 與 `--model <modelId>`：覆寫 ACP 選擇
+- `--env KEY=VALUE`：可重複傳入，並會隨工作階段一併儲存以供後續恢復使用
+- 提示詞輸入可來自位置文字、`--prompt`、`--prompt-file` 或 stdin
+
+查詢確切旗標：
+
+```bash
+lody session create --help
+```
+
+### session chat
+
+向目前機器上的現有工作階段傳送另一輪使用者輸入。
+
+```bash
+lody session chat <sessionId> "continue from the last patch"
+LODY_SESSION_ID=<sessionId> lody session chat --prompt "continue from the last patch"
+```
+
+主要參數：
+
+- `sessionId` 可來自位置參數或 `LODY_SESSION_ID`
+- 提示詞輸入可來自位置文字、`--prompt`、`--prompt-file` 或 stdin
+- `--mode <modeId>` 與 `--model <modelId>`：覆寫此輪使用的 ACP 選擇
+
+查詢確切旗標：
+
+```bash
+lody session chat --help
+```
+
+### 輸入附件
+
+`create` 與 `chat` 皆接受可重複傳入的 `--attach <path>`：
+
+```bash
+lody session create --machine remote --prompt "Analyze the data" --attach ./data.csv
+lody session chat <sessionId> --prompt "Use this screenshot too" --attach ./screen.png
+```
+
+路徑會從執行指令的機器上讀取，並相對於其目前目錄。
+所有附件必須完成準備後才會送出訊息；任何失敗都會中止本次傳送。最多支援 8 個非空檔案，每個上限 100 MiB。
+在圖片大小限制內的受支援圖片會保留視覺輸入；超過大小限制的圖片則以一般檔案處理。
+附帶附件時文字可為選填。`--prompt-file` 仍會用於讀取提示詞文字。
+重新執行獨立的 CLI 指令將會送出另一則新訊息。
+
+### session cancel
+
+取消本機工作階段目前正在執行的輪次。
+
+```bash
+lody session cancel <sessionId>
+```
+
+若取消失敗，指令會以非零結束碼結束。查詢確切旗標：
+
+```bash
+lody session cancel --help
+```
+
+### session list
+
+列出工作區中的工作階段。預設僅顯示使用中的工作階段。
+
+```bash
+lody session list --workspace my-team
+lody session list --workspace my-team --archived
+lody session list --workspace my-team --all --limit 50 --json
+```
+
+主要參數：
+
+- `--archived`：僅顯示已封存的工作階段
+- `--all`：同時包含使用中與已封存的工作階段
+- `--limit <count>`：限制回傳結果數量
+- 預設輸出為適合閱讀的表格；`--json` 回傳結構化資料
+
+查詢確切旗標：
+
+```bash
+lody session list --help
+```
+
+### session history
+
+讀取單一工作階段的可見對話紀錄。此指令會刻意隱藏內部推理、工具呼叫以及其他非使用者可見項目。
+
+```bash
+lody session history <sessionId> --limit 20
+lody session history <sessionId> --all --reverse
+lody session history <sessionId> --jsonl
+```
+
+主要參數：
+
+- `--limit <count>`：回傳最新的 N 輪可見對話
+- `--all`：回傳完整的可見對話紀錄
+- `--reverse`：由最新到最舊排序輸出
+- `--json` 與 `--jsonl` 適合用於自動化
+
+查詢確切旗標：
+
+```bash
+lody session history --help
+```
+
+### session observe
+
+在不傳送任務或變更未讀狀態的情況下，附著至現有的 Session。
+此指令目前使用雲端登入與工作區存取權限；尚不支援純本機 Daemon 附著。
+
+```bash
+lody session observe <sessionId> --json
+lody session observe <sessionId> --jsonl --follow
+lody session observe --workspace my-team --all --jsonl --follow
+```
+
+未指定 `--follow` 時，會印出快照後結束。`--follow` 必須搭配 `--jsonl`。與 `history --jsonl` 不同，它會保持附著以追蹤後續輪次。工作區模式必須同時指定 `--workspace` 與 `--all`，會拒絕位置參數的 Session ID，並忽略 `LODY_SESSION_ID`。
+
+JSONL 事件包含 `snapshot`、`ready`、`session.changed`、`turn.started`、`turn.finished` 與 `session.removed`。每個成功的事件皆包含 `version: 1`、`streamId`、`sequence`、`observedAt`（Unix 毫秒）與 `workspaceId`。
+`turn.finished` 包含使用者 ID／可選的助理 ID，以及 `outcome: completed | failed | canceled`。初始快照包含 `latestTurn`，使快速完成的任務結果依然可讀；舊輪次不會以事件形式重播。
+
+Session 快照會區分 `source: persisted | metadata` 與 `freshness: synced | unavailable`。工作區 `ready` 代表目錄列舉完成，而非所有歷史房間都已開啟：僅含中繼資料的 Session 其狀態為 `state: unknown`。歷史閒置房間會保持未開啟狀態；僅歷史紀錄本身的變更不在工作區追蹤的範圍內。需要時請個別附著。任務完成需要持久化的輪次證據；中繼資料顯示閒置或 Presence 遺失並不足以判定完成。新鮮度僅代表經過確認的讀取，並不證明 Agent 目前在線上。
+
+`sequence` 僅用於排序單一執行中處理程序內的事件，無法跨處理程序接續或保證重播。重新啟動後，請核對快照與歷史紀錄。一般串流文字會予以省略。結構化診斷資訊會輸出至 stderr；指令錯誤則沿用現有的 CLI 錯誤格式。按下 Ctrl+C 可停止觀察而不會取消執行。
+
+```bash
+lody session observe --help
+```
+
+### session show
+
+顯示工作階段中繼資料，例如狀態、機器、工作區綁定與對話紀錄筆數。
+
+```bash
+lody session show <sessionId>
+lody session show <sessionId> --json
+```
+
+查詢確切旗標：
+
+```bash
+lody session show --help
+```
+
+### session rename
+
+重新命名工作階段。
+
+```bash
+lody session rename <sessionId> "New title"
+LODY_SESSION_ID=<sessionId> lody session rename --title "New title"
+```
+
+如果您依賴 `LODY_SESSION_ID`，建議優先使用 `--title`，以免標題被誤認為顯式的工作階段選擇器。
+
+查詢確切旗標：
+
+```bash
+lody session rename --help
+```
+
+### session archive
+
+封存工作階段，使其從使用中列表消失，但仍可還原。
+
+```bash
+lody session archive <sessionId>
+```
+
+查詢確切旗標：
+
+```bash
+lody session archive --help
+```
+
+### session restore
+
+將已封存的工作階段還原回使用中列表。
+
+```bash
+lody session restore <sessionId>
+```
+
+此指令僅適用於已封存的工作階段。查詢確切旗標：
+
+```bash
+lody session restore --help
+```
+
+### session delete
+
+永久刪除已封存的工作階段。這也會排入機器端清理作業，以便移除 worktree 與執行時期資源。
+
+```bash
+lody session delete <sessionId>
+```
+
+此指令僅適用於已封存的工作階段。查詢確切旗標：
+
+```bash
+lody session delete --help
+```
+
+## Machine 指令
+
+使用 Machine 指令檢視工作區中註冊了哪些機器，以及它們是否看似在線上。
+
+| 指令                | 用途               | 說明指令                   |
+| ------------------- | ------------------ | -------------------------- |
+| `lody machine list` | 列出工作區中的機器 | `lody machine list --help` |
+
+### machine list
+
+```bash
+lody machine list --workspace my-team
+lody machine list --workspace my-team --online-only
+lody machine list --workspace my-team --json
+lody machine list --workspace my-team --json --include-acp-capabilities
+```
+
+預設表格顯示機器識別資訊與可用性。JSON 會保留 `onlineStatus: online | offline | unknown`；無法取得線上狀態時不會回報為離線。`--include-acp-capabilities` 與 `--include-agents` 保留舊版的詳細輸出，且無法與目錄分頁／篩選旗標併用。請使用 `agent-config list/get` 取得分頁能力資訊。
+
+- 預設同時顯示線上與離線機器
+- 使用 `--online-only` 可將列表篩選為近期有心跳訊號的機器
+- `--json` 預設省略 `acpCapabilities`，以維持較小的酬載體積
+- 當您需要在 JSON 輸出中取得能力快取時，請傳入 `--include-acp-capabilities`
+
+這在執行 `agent-config refresh-capabilities` 前非常實用。
+
+查詢確切旗標：
+
+```bash
+lody machine list --help
+```
+
+## Agent Config 指令
+
+Agent Config 指令對應了網頁介面中 [Agent 設定](/zh-hant/docs/quickstart)的大多數操作。
+
+使用前請注意：
+
+- 選擇器接受 ID 或名稱
+- 若多個設定或機器共用相同名稱，CLI 會要求提供明確的 ID
+- 目前從 CLI 執行 `refresh-capabilities` 僅支援目前機器
+
+| 子指令                                   | 用途                           | 說明指令                                        |
+| ---------------------------------------- | ------------------------------ | ----------------------------------------------- |
+| `lody agent-config list`                 | 列出工作區中的設定             | `lody agent-config list --help`                 |
+| `lody agent-config show`                 | 顯示單一設定                   | `lody agent-config show --help`                 |
+| `lody agent-config create`               | 建立新設定                     | `lody agent-config create --help`               |
+| `lody agent-config import-magpie`        | 匯入本機 Magpie 供應商         | `lody agent-config import-magpie --help`        |
+| `lody agent-config update`               | 更新現有設定                   | `lody agent-config update --help`               |
+| `lody agent-config delete`               | 刪除設定                       | `lody agent-config delete --help`               |
+| `lody agent-config refresh-capabilities` | 重新整理支援的模式、模型與選項 | `lody agent-config refresh-capabilities --help` |
+
+### agent-config list
+
+```bash
+lody agent-config list --workspace my-team
+```
+
+顯示設定識別資訊、機器與可用性。JSON 亦包含 Agent 類型、描述與支援的模型／執行設定。可使用 `--machine`、`--query` 與分頁來縮小列表範圍。
+
+### agent-config show
+
+```bash
+lody agent-config show <idOrName>
+LODY_AGENT_CONFIG_ID=<id> lody agent-config show
+```
+
+以適合閱讀的格式或 JSON 顯示設定欄位。
+
+### agent-config create
+
+為內建或 Registry Agent 執行時期建立設定。
+
+```bash
+lody agent-config create \
+  --workspace my-team \
+  --agent-type codex \
+  --name "Codex Default" \
+  --env OPENAI_API_KEY=... \
+  --prompt "Always run tests before finishing"
+```
+
+主要參數：
+
+- `--agent-type <type>` 為必填
+- `claude` 與 `codex` 會被視為內建執行時期
+- 所有其他 Agent 類型皆視為 Registry 執行時期
+- `--env KEY=VALUE` 可重複傳入
+- `--env-file <path>` 從檔案載入環境變數
+- `--prompt` 或 `--prompt-file` 設定預設提示詞前綴
+
+查詢確切旗標：
+
+```bash
+lody agent-config create --help
+```
+
+### agent-config import-magpie
+
+在執行指令的伺服器上，針對所有支援的 Agent 或選定的子集匯入 Magpie 供應商：
+
+```bash
+lody agent-config import-magpie --workspace my-team --json
+```
+
+設定步驟、選項與結果狀態請參閱[連接 Magpie](/zh-hant/docs/magpie)。
+
+### agent-config update
+
+就地更新現有設定。
+
+```bash
+lody agent-config update <idOrName> --name "Codex CI"
+lody agent-config update <idOrName> --env OPENAI_API_KEY=... --unset-env OLD_KEY
+lody agent-config update <idOrName> --prompt ""
+```
+
+主要參數：
+
+- `--name`：更新顯示名稱
+- `--description ""`：清空描述
+- `--env` 與 `--env-file`：合併新的環境變數值
+- `--unset-env KEY`：移除一或多個環境變數
+- `--prompt ""`：清空預設提示詞前綴
+
+查詢確切旗標：
+
+```bash
+lody agent-config update --help
+```
+
+### agent-config delete
+
+```bash
+lody agent-config delete <idOrName>
+```
+
+依 ID 或唯一名稱刪除單一設定。
+
+### agent-config refresh-capabilities
+
+重新整理目前機器上某個 Agent 設定所快取的能力資訊。
+
+```bash
+lody agent-config refresh-capabilities <idOrName> --workspace my-team
+```
+
+適合在以下情況後使用：
+
+- 安裝或升級編碼 CLI
+- 變更 Agent 設定的環境變數
+- 更新機器上可用的模型或模式
+
+主要參數：
+
+- `--machine <idOrName>` 預設為目前機器
+- 所選機器必須處於線上狀態
+- CLI 目前不支援遠端機器重新整理；請在目前機器上執行此指令
+- 支援 `--json` 與 `--jsonl` 以利自動化
+
+查詢確切旗標：
+
+```bash
+lody agent-config refresh-capabilities --help
+```
+
+## 常見範例
+
+```bash
+# 找出您要使用的工作區 ID 或 slug
+lody workspace list
+
+# 檢視已連結至該工作區的 GitHub 儲存庫
+lody github list --workspace my-team
+
+# 檢視該工作區中的 Agent 設定
+lody agent-config list --workspace my-team
+
+# 在背景啟動本機 Daemon
+lody daemon start
+
+# 暫時除錯時可使用前景模式
+lody start
+
+# 在 GitHub 儲存庫中建立工作階段
+lody session create \
+  --workspace my-team \
+  --agent-config codex \
+  --repo owner/repo \
+  "Fix the failing tests"
+
+# 讀取最新的可見對話紀錄輪次
+lody session history <sessionId> --limit 20
+
+# 檢視線上機器並重新整理目前機器的能力快取
+lody machine list --workspace my-team --online-only
+lody agent-config refresh-capabilities codex --workspace my-team
+```

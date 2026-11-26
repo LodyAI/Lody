@@ -150,6 +150,12 @@ export const GLOBAL_SHORTCUTS: GlobalShortcut[] = [
     defaultTitle: 'Bring Lody to Front',
     binding: GLOBAL_SHORTCUT_DEFAULTS['app.focus'],
   },
+  {
+    id: 'today.toggleWindow',
+    titleKey: 'commands.today.toggleWindow',
+    defaultTitle: 'Toggle Today Window',
+    binding: GLOBAL_SHORTCUT_DEFAULTS['today.toggleWindow'],
+  },
 ];
 
 export function keybindingAppliesToEnvironment(

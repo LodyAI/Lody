@@ -1,0 +1,22 @@
+---
+title: "20260520"
+version: 0.53.0
+date: 2026-05-20
+description: "Prise en charge du Plan Mode de Codex, amélioration des performances du rendu Markdown en streaming et correction de problèmes liés à la connexion mobile, au parcours de démarrage, à l'identité GitHub, à l'actualisation des PR et au chargement des branches des projets locaux."
+---
+
+### Nouveautés
+
+- Ajout de la prise en charge du flux Plan Mode de Codex.
+
+### Corrections et améliorations
+
+- Amélioration des performances de rendu Markdown en streaming dans les conversations.
+- Correction d'un écran blanc après la première connexion réussie dans l'application mobile native.
+- Le parcours de démarrage permet désormais d'ignorer la connexion d'un agent et de la configurer plus tard depuis les Paramètres.
+- Correction d'échecs lors de l'actualisation de la configuration de Claude.
+- Correction d'un rendu anormal des polices sur Android.
+- Correction de cas où des actions utilisaient encore la mauvaise identité après l'octroi des autorisations GitHub personnelles.
+- Correction de pages de PR obsolètes qui ne s'actualisaient pas automatiquement.
+- Augmentation du seuil avant qu'un long texte collé ne soit réduit en aperçu compact.
+- Correction de délais d'attente expirés lors du chargement des informations de branche pour les projets locaux, et ajout d'une entrée d'actualisation manuelle.

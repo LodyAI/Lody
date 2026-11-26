@@ -26,27 +26,41 @@ vi.mock('@lody/platform/react', async () => {
       cloud.listeners.delete(listener);
     };
   };
-  return {
-    useCloudQuery: (op: { name: string }) => {
-      const management = op.name === 'sessionSharing:getManagement';
-      const status = useSyncExternalStore(management ? () => () => {} : subscribe, () =>
-        management ? null : cloud.loaded ? cloud.status : undefined
-      );
-      if (management) return null;
-      // Convex surfaces a failed query by throwing out of render.
-      if (cloud.queryError) throw cloud.queryError;
-      if (status === undefined) return undefined;
-      return [
+  const useCloudQueryState = (op: { name: string }) => {
+    const management = op.name === 'sessionSharing:getManagement';
+    const snapshot = useSyncExternalStore(management ? () => () => {} : subscribe, () =>
+      management
+        ? null
+        : cloud.queryError
+          ? cloud.queryError
+          : cloud.loaded
+            ? cloud.status
+            : undefined
+    );
+    const retry = () => {
+      for (const listener of cloud.listeners) listener();
+    };
+    if (management) return { data: null, error: null, retry };
+    if (snapshot instanceof Error) return { data: undefined, error: snapshot, retry };
+    if (snapshot === undefined) return { data: undefined, error: null, retry };
+    return {
+      data: [
         {
           requestId: 'request',
           sourceSessionId: 'root',
           sessionIds: ['root'],
-          status,
+          status: snapshot,
           purpose: 'Review together',
           deliveryPublicKey: cloud.publicKey,
         },
-      ];
-    },
+      ],
+      error: null,
+      retry,
+    };
+  };
+  return {
+    useCloudQueryState,
+    useCloudQuery: (op: { name: string }) => useCloudQueryState(op).data,
     useCloudMutation: (op: { name: string }) =>
       op.name === 'sessionSharing:cancelRequest'
         ? cloud.cancel

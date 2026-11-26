@@ -103,5 +103,10 @@ export const DelegatedMessageRow: Story = {
 };
 
 const themeStyles = stylex.create({
-  glyph: { width: '720px', maxWidth: '100%', backgroundColor: uiColors.background, paddingBlock: 'calc(var(--spacing) * 6)' },
+  glyph: {
+    width: '720px',
+    maxWidth: '100%',
+    backgroundColor: uiColors.background,
+    paddingBlock: 'calc(var(--spacing) * 6)',
+  },
 });

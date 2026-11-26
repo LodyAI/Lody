@@ -1,0 +1,9 @@
+{
+  "title": "Агенты и среды выполнения",
+  "pages": [
+    "cli-runtimes",
+    "claude-codex-capabilities",
+    "skills",
+    "device-resource-monitoring"
+  ]
+}

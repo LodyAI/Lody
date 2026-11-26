@@ -1,0 +1,50 @@
+---
+title: "20260422"
+version: 0.45.0
+date: 2026-04-22
+description: "Se añadieron Codex Fast Mode, selección del nivel de pensamiento en Claude, ajustes de agentes por máquina, herramientas de flujo de PR, acciones de deslizamiento en móviles y mejoras en la búsqueda."
+---
+
+### Experiencia con agentes
+
+- Se añadió un selector rápido para Codex Fast Mode
+- Se añadió la selección del nivel de pensamiento de Claude
+  <img src="/_docs-assets/fast-think.png" alt="" />
+- Se mejoraron las tarjetas de solicitud de permisos: los botones largos pueden ajustarse en varias líneas, los comandos largos pueden expandirse para ver el contenido completo y es más fácil revisar lo que el agente está a punto de ejecutar antes de aprobar
+
+### Nuevos ajustes de máquinas y agentes
+
+- Las configuraciones de agentes ahora se gestionan por máquina. Al cambiar de máquina, Lody solo muestra los agentes disponibles en esa máquina, evitando que selecciones una configuración que no puede ejecutarse
+- Configuración ahora utiliza un diseño de lista de máquinas + detalle de máquina, donde puedes ver el estado de conexión, la versión de la CLI y el estado de uso compartido
+
+### Flujo de trabajo de PR de GitHub integrado
+
+- Haz clic en la insignia de PR en la parte superior de una sesión para abrir el panel de PR en Lody y ver el título, la descripción, la rama, el estado de CI, los comentarios y las revisiones
+- Comenta en los PR, fusiónalos y elimina las ramas tras la fusión directamente desde Lody
+  <img src="/_docs-assets/PR-panel.png" alt="" />
+
+### Experiencia móvil
+
+- Configura qué hace la tecla Intro en los teclados móviles: enviar el mensaje o insertar un salto de línea
+  <img width="400px" src="/_docs-assets/20260422-keyboard-option.png" />
+- La lista de sesiones permite deslizar hacia la izquierda para archivar; la lista de archivados permite deslizar hacia la izquierda para restaurar o eliminar permanentemente
+- Al abrir una sesión archivada, el menú superior ahora muestra correctamente Restaurar y Eliminar permanentemente en lugar de volver a mostrar Archivar
+  <img width="400px" src="/_docs-assets/mobile-swipe.png" />
+
+### Búsqueda en conversaciones y mensajes en cola
+
+- Se rediseñó la barra de búsqueda dentro de la conversación con recuentos de resultados más claros, estados vacíos y acciones de anterior/siguiente
+- Se corrigió el problema por el que los saltos entre resultados de búsqueda a veces se quedaban bloqueados en sesiones largas
+- Varios mensajes en cola ya no ocupan toda la pantalla; su altura está limitada y la lista permite desplazarse
+
+### Gestión de equipos e invitaciones
+
+- Las invitaciones pendientes ahora se actualizan correctamente después de cambiar de Workspace
+- Los administradores ahora pueden cancelar invitaciones pendientes del equipo
+
+### Otras correcciones
+
+- Se corrigió el problema por el que los tokens de CLI generados por el frontend a veces fallaban al iniciar sesión
+- El orden de los repositorios en la barra lateral ya no salta debido a cambios de visibilidad de máquinas o fluctuaciones de sincronización
+- El navegador revalida el estado de inicio de sesión al volver de segundo plano, recuperar el foco o recuperar la conexión
+- La creación de sesiones y el envío de tareas ahora se reintentan automáticamente cuando la sincronización lleva un breve retraso, reduciendo los casos en que las nuevas tareas se quedan bloqueadas

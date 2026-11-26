@@ -1,0 +1,125 @@
+---
+title: "20261015"
+version: 0.105.0
+date: 2026-10-15
+description: "Widgets iOS, sessions et Objectifs DeepSeek enrichis, aperçus de fichiers et importations de mémoire par lots, avec des améliorations de la synchronisation des longues sessions, des interactions mobiles et de la récupération."
+---
+
+Version 0.105.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Ajout de l'aperçu des fichiers vidéo.
+- Les aperçus d'images en plein écran proposent désormais un menu par appui long pour copier, enregistrer ou partager les images lorsque l'appareil le prend en charge.
+- Les aperçus CSV, TSV et XLSX prennent désormais en charge le redimensionnement des colonnes ainsi que la sélection et la copie de cellules ou de plages rectangulaires. Les aperçus XLSX permettent également de redimensionner les lignes.
+- Les fichiers HTML et les pièces jointes de chat sur mobile s'ouvrent désormais en mode aperçu par défaut, avec une option pour afficher la source.
+- Ajout de widgets pour l'écran d'accueil iOS affichant la progression des conversations et la consommation de jetons de l'espace de travail.
+- L'importation de mémoire permet désormais de sélectionner et d'ajouter plusieurs identités en une seule fois.
+- DeepSeek peut désormais charger et reprendre l'historique natif des sessions tout en conservant le contexte, le modèle, les permissions et la configuration prédéfinie.
+- DeepSeek prend désormais en charge le pilotage en cours d'exécution ainsi que la définition, la mise en pause et la reprise des Objectifs.
+- DeepSeek prend désormais en charge l'interrogation et l'annulation des sous-agents, ainsi que l'affichage du statut des tâches en arrière-plan, de l'activité de réessai et de l'utilisation actuelle du contexte. La disponibilité de l'annulation dépend de la méthode d'exécution.
+- L'outil de sous-agent de Pi peut désormais sélectionner un modèle disponible pour chaque sous-tâche.
+- Mise à jour de Claude Code avec la prise en charge de Haiku 5.5 et de Codex avec la prise en charge de fenêtres de contexte plus grandes.
+- Codex accepte désormais une description de tâche directement après `/plan`, et les titres automatiques peuvent utiliser le modèle de titre et les paramètres configurés dans Lody.
+- La création et la poursuite de sessions via CLI et MCP prennent désormais en charge les pièces jointes de fichiers et d'images, y compris celles envoyées vers des sessions sur des machines distantes.
+- La création de session via CLI prend désormais en charge `--agent-role <name or ID>` pour utiliser la machine, l'Agent, le modèle et la configuration de prompt d'un rôle de l'espace de travail.
+- La CLI Cloud ajoute `migrate --from-oss` pour importer les enregistrements de session Loro et les pièces jointes historiques de l'édition OSS dans un espace de travail cloud existant.
+- Après la création d'un worktree isolé, l'Agent reçoit une instruction lors de sa première tâche afin de nommer la branche d'après celle-ci, facilitant ainsi l'identification des travaux en parallèle.
+- Le panneau des conversations associées propose désormais des actions pour arrêter et reprendre la collaboration. L'arrêt de la session principale et de ses sessions enfants empêche les résultats tardifs d'Agents de relancer l'exécution. La collaboration doit être reprise manuellement ; les machines hors ligne appliquent le changement après synchronisation.
+- Les conversations enfants créées consécutivement sont regroupées dans un panneau de tâches compact avec déploiement, repli et défilement interne.
+- Les files d'attente de messages peuvent désormais être repliées tout en conservant les brouillons et en affichant le nombre de messages encore en cours de préparation ou en échec.
+- Le compositeur fournit désormais les détails de la machine d'exécution. Sur ordinateur, survolez ou cliquez sur le nom de la machine pour voir son propriétaire et son statut de connexion ; sur téléphone, ouvrez la fiche de détails à l'aide d'un bouton icône.
+- Le sélecteur de répertoires distants permet désormais de créer et d'ouvrir des dossiers sur ordinateur et sur mobile avant de les ajouter comme projets. La machine cible nécessite une version de la CLI prenant en charge cette fonctionnalité.
+- Les longs titres de session dans la barre latérale défilent au survol ou au focus clavier. Vous pouvez également faire glisser ou utiliser un pavé tactile ou la molette de la souris pour lire le titre complet. L'animation respecte le paramètre de réduction des animations du système.
+- Les fournisseurs prenant en charge les requêtes de quota peuvent désormais actualiser les quotas d'abonnement selon les besoins lors du changement de configuration du compositeur, de l'ouverture du panneau de quota ou du retour dans l'application.
+- Les détails de facturation affichent désormais les motifs de facturation, les modifications de licences (sièges), les lignes de facture, les soldes impayés et un point d'entrée de paiement.
+- Ajout d'un récepteur pour les importations locales de configuration Magpie. Le flux d'importation complet nécessite encore la prise en charge correspondante dans Magpie.
+
+### 🐛 Correctifs et améliorations
+
+- Correction d'un problème où le modèle sélectionné n'était pas appliqué à temps lors de la création ou de la reprise d'une session Codex.
+- L'interface avertit désormais lorsqu'un Agent rejette une sélection de modèle, afin qu'un changement échoué ne soit plus pris pour un changement réussi.
+- Correction de l'ordre de configuration des modèles pour certains Agents ACP afin que les options de rôle telles que l'effort de raisonnement ne soient pas réinitialisées après un changement de modèle.
+- Correction de la validation des options héritées telles que l'effort de raisonnement et Fast par rapport au mauvais modèle.
+- L'enregistrement d'un Rôle d'agent supprime désormais les options de configuration obsolètes tout en conservant les sélections valides, réduisant ainsi les avertissements de compatibilité persistants.
+- Correction de la modification des prompts, y compris ceux des Rôles d'agent, entre leur soumission et leur livraison lors d'une poursuite, d'un pilotage ou d'une reprise.
+- Correction des menus de mention de Rôle d'agent qui perdaient leur sélection ou leur position lorsque les détails changeaient, et correction des contours de focus dans les boîtes de dialogue de configuration d'Agent.
+- Correction d'un problème sur mobile où les options de configuration de Dimcode interféraient entre elles et où les sélections de permissions étaient perdues après le relâchement du doigt.
+- Dimcode utilise désormais la commande et la configuration déjà installées sur la machine, avec une commande d'installation copiable lorsqu'elles sont absentes.
+- Correction de l'adaptateur Amp qui utilisait de façon répétée une ancienne version mise en cache. Il utilise désormais le binaire correspondant à la version.
+- Correction du blocage de l'installation des Agents distribués au format ZIP lors de l'extraction sur certaines versions de Node.js.
+- Correction des sauts de ligne manquants dans les sorties de commandes Pi, y compris dans les sessions existantes.
+- Les extensions Pi affichent désormais les noms des paquets enregistrés avant la fin de l'analyse, et les échecs de chargement d'extensions sont signalés clairement.
+- Les importations d'historique Codex conservent désormais les pièces jointes. Les messages d'erreur sont plus clairs pour les sessions détenues par un autre client, les erreurs de service, les échecs de démarrage et les problèmes de répertoire de travail.
+- Correction de l'échec de reprise des sessions Codex vides après un redémarrage du service et de la sélection inexacte des titres pour les sessions historiques.
+- Codex enregistre désormais la confiance pour le répertoire d'exécution réel avant d'ouvrir une session, améliorant la découverte des compétences du projet et de la configuration MCP tout en préservant les répertoires explicitement non approuvés.
+- Les tâches Bash en arrière-plan de Claude affichent désormais leurs commandes réelles séparément des descriptions de tâches, avec prise en charge de la coloration syntaxique et de la copie.
+- Amélioration de l'affichage des tâches en arrière-plan arrêtées dans l'historique de Claude afin qu'elles risquent moins d'apparaître comme des prompts utilisateur.
+- Correction du traitement en double des messages de fin d'Agent après une reconnexion ou des réessais différés, ce qui déclenchait une exécution en double.
+- Les résultats provenant de plusieurs Agents sont désormais regroupés par lots. Les sessions occupées les reçoivent une fois le tour en cours terminé, réduisant ainsi les reprises répétées pour des résultats individuels.
+- Limitation de la délégation consécutive d'Agents à 16 niveaux et amélioration des instructions de collaboration afin de réduire les accusés de réception inutiles et les résultats répétés.
+- Correction d'un problème où l'accusé d'enregistrement d'un message en file d'attente effaçait le brouillon du message suivant en cours d'édition.
+- Le passage d'une question en attente à une autre conserve désormais les réponses sélectionnées, les saisies personnalisées et les notes. Les envois échoués affichent une erreur et conservent les réponses pour un nouvel essai.
+- Correction de la validation d'une proposition d'une méthode de saisie chinoise qui soumettait accidentellement une réponse personnalisée.
+- Correction des formulaires à question unique provenant de Codex et d'autres Agents qui n'affichaient que « Saisie demandée » au lieu de la question complète.
+- Correction des détails d'échec de chat affichés en double.
+- Optimisation de l'écriture des sorties en streaming dans les longues conversations afin de réduire les blocages de la CLI lors d'une utilisation intensive d'outils et les longs délais de livraison des messages vers d'autres appareils.
+- Correction des longs blocages de l'interface dans les conversations contenant de très longues commandes ou des images intégrées.
+- Réduction des images d'outils inutilisées, des octets de ressources intégrées et des données dupliquées dans l'historique des sessions, et limitation de la taille des résumés de commandes et des titres d'outils afin de réduire le volume de stockage et de synchronisation. Les pièces jointes ordinaires, les sorties lisibles, les diffs de code et le contenu des demandes d'approbation sont conservés. Les demandes de permission indiquent clairement les commandes tronquées.
+- Optimisation du rendu lors de l'ouverture des menus de mentions pour réduire la latence du compositeur.
+- Tout texte collé de 50 000 caractères ou plus est désormais converti en pièce jointe texte tout en conservant l'intégralité du contenu d'origine.
+- Correction de l'éditeur de texte collé sur mobile qui n'utilisait pas l'espace disponible. Le texte complet peut désormais défiler dans le panneau, avec une typographie alignée sur celle du compositeur.
+- Correction des événements de défilement différés qui interrompaient l'inertie ou ramenaient les utilisateurs tactiles vers le bas pendant la lecture de messages antérieurs.
+- Correction des saccades et des rebonds lors d'un défilement rapide vers le bas sur mobile, ainsi que du suivi involontaire des nouveaux messages lorsque la hauteur du compositeur change ou qu'un brouillon est modifié.
+- Correction du défilement des conversations au-dessus des aperçus Mermaid et réduction des erreurs de page causées par des mises à jour répétées de la mise en page.
+- L'envoi d'un nouveau message conserve désormais une partie du contexte précédent pour faciliter la lecture.
+- Correction de la flèche de défilement vers le dernier message qui était masquée au survol ou au focus clavier.
+- Amélioration de l'alignement et de l'espacement des tours dans les conversations mobiles entre le texte, les étapes d'exécution et les barres d'actions. Les messages plus anciens affichent les actions lors d'un appui, tandis que la dernière réponse de l'assistant garde les actions courantes visibles.
+- Alignement des vignettes de texte collé et des références d'Issues et de PR GitHub avec le texte environnant, amélioration de l'espacement des cartes de réponse aux tâches et harmonisation de la typographie du temps écoulé avec le pied de page.
+- Correction du Markdown gras et italique adjacent à la ponctuation dans les textes en chinois, japonais et coréen.
+- Les longs messages utilisateur repliés se terminent désormais entre des lignes complètes avec un fondu indiquant la suite du contenu, au lieu de couper au milieu du texte.
+- Le pied de page du compositeur sur ordinateur affiche désormais le nom complet du modèle.
+- Correction du débordement des boutons et des statistiques de modifications hors de la barre d'informations de session dans les fenêtres étroites. Le texte et les noms de machines rétrécissent lorsque l'espace est limité.
+- Les pièces jointes HTML, Markdown et texte brut sur mobile utilisent désormais une feuille presque plein écran pour offrir plus d'espace de lecture, avec des messages d'état vide d'aperçu améliorés.
+- Correction du clic, de la saisie et du défilement dans les boîtes de dialogue à l'intérieur des tiroirs mobiles, et blocage de la propagation des appuis vers l'interface sous-jacente.
+- Désactivation de l'aperçu système par appui long pour les liens des messages sur iOS afin d'éviter que les appuis suivants ne rouvrent de manière répétée le même lien. L'ouverture par appui simple et la sélection de texte restent disponibles.
+- Agrandissement des boutons d'action de la file d'attente de messages sur les appareils tactiles pour réduire les appuis accidentels.
+- Correction des icônes étirées lors du repli ou du déploiement de la barre de navigation inférieure sur mobile, et amélioration de la visibilité de la navigation et de la gestion du focus lors du défilement vers le haut.
+- Unification de l'ouverture, du collage et de l'exportation des liens de session pour un ciblage plus précis de l'espace de travail et de la session, tout en conservant la compatibilité avec les anciens liens.
+- Correction des liens collés vers une session enfant qui pointaient vers la session parente. Les erreurs de lien distinguent désormais les sessions archivées, les espaces de travail inaccessibles et les autres cas.
+- Les sessions locales sans répertoire de travail disponible peuvent désormais prévisualiser les chemins de fichiers absolus et `~/`. Correction d'un problème où les chemins `~/` pouvaient être prévisualisés mais ni ouverts ni affichés dans le gestionnaire de fichiers.
+- Correction des liens vers des fichiers avec numéros de ligne qui s'ouvraient en haut du fichier au premier clic, et rétablissement de la mise en surbrillance de la plage de lignes ciblée.
+- Rétablissement du bouton de déploiement de la barre latérale sur les pages des tâches planifiées lorsque celle-ci est masquée, et correction de la mise en page près des boutons de fenêtre macOS.
+- Correction de la liste des planifications sur téléphone qui était recouverte par la barre d'état. L'enregistrement ou la fermeture d'une tâche renvoie désormais vers l'onglet des planifications d'accueil avec changement d'espace de travail, recherche, paramètres et navigation inférieure.
+- Les échecs répétés de récupération de connexion arrêtent désormais le chargement infini et proposent de réessayer ou de se connecter tout en conservant la page actuelle.
+- Après plus de 30 secondes d'attente lors de la connexion, du changement d'espace de travail ou de l'ouverture d'un espace de travail, une page de récupération propose de recharger, vider le cache et copier les diagnostics. Une bannière de connexion bloquée ouvre également cette page.
+- La récupération au démarrage sur iOS prend désormais en charge une réinitialisation complète native des données locales pour effacer les données locales et revenir à la connexion lorsque l'application ne peut pas charger normalement.
+- Correction des échecs de connexion sur ordinateur dans certains environnements avec proxy ou certificat, avec des indications de dépannage plus claires pour les erreurs de validation de certificat.
+- Les requêtes cloud réessaient désormais un nombre limité de fois en cas d'erreurs serveur transitoires, réduisant les interruptions de page dues à des défaillances temporaires.
+- Les lectures de machine par la CLI peuvent se rabattre sur les données locales existantes après des échecs de synchronisation temporaires. Une configuration de machine incomplète ne marque plus à tort comme invalides les projets, Agents ou modèles temporairement indisponibles.
+- Amélioration du nettoyage après les changements d'espace de travail ou de compte et les échecs de connexion afin que les anciennes connexions et les requêtes tardives n'interfèrent pas avec les nouvelles. Les erreurs de synchronisation incluent désormais davantage de détails.
+- Amélioration du partage et de l'annulation des actualisations d'identifiants de synchronisation et des requêtes d'environnement shell afin que l'expiration ou l'annulation d'une requête n'affecte pas les autres.
+- Correction des erreurs d'initialisation en double lorsque plusieurs commandes CLI ou MCP accèdent au même espace de travail, ainsi que des interférences avec les sessions ultérieures lorsqu'un espace de travail est réutilisé avant la fin de la préparation précédente.
+- Correction du service MCP stdio qui libérait son runtime trop tôt après la connexion, provoquant l'échec des appels d'outils ultérieurs.
+- Amélioration du nettoyage des processus lors de la sortie d'un Agent, de la fin d'une session et d'un échec au démarrage. Les tâches annulées restent marquées comme actives pendant la fin du nettoyage.
+- Rétablissement de l'autorisation GitHub personnelle dans les clients de bureau et mobiles, avec ouverture du navigateur pour finaliser l'autorisation.
+- Les détails, revues et modifications de code des PR GitHub publiques peuvent désormais être consultés en lecture seule même lorsque l'espace de travail n'a aucun dépôt lié.
+- Limitation des réessais après les échecs d'association de PR GitHub et ajout d'indications de réparation des permissions tout en continuant à mettre à jour le statut des PR.
+- Correction d'un état obsolète des identifiants GitHub lors de la préparation et du redémarrage d'une session qui empêchait l'exécution des messages suivants.
+- Correction du rejet des identifiants GitHub en lecture seule pour les clonages HTTPS et les récupérations récursives de sous-modules, et préservation de l'attribution GitHub App dans les flux non interactifs de création de PR.
+- Ajout de délais d'expiration pour les requêtes d'identité Git et les sondes d'assistant d'identifiants, réduction des sondes d'environnement répétées et réessai des échecs transitoires de démarrage de processus afin d'éviter les initialisations prolongées d'Agents.
+- Correction des lectures d'identité Git qui manquaient la configuration globale XDG et de l'indexation de fichiers qui basculait en mode de repli avant la fin d'une requête Git parallèle.
+- Amélioration de la gestion des erreurs Git pour les projets locaux et les worktrees afin que les échecs de démarrage, les délais d'expiration et les erreurs de permission ne soient pas confondus avec des dépôts ou des branches manquants.
+- Amélioration de la mise en file d'attente et du nettoyage des verrous de fichiers après des arrêts anormaux afin de réduire les blocages dus à des verrous obsolètes. Les erreurs Git et de nettoyage sont conservées au lieu de déclencher à tort la suppression forcée des répertoires de travail.
+- Amélioration des vérifications avant le nommage des branches de worktree afin d'éviter d'envoyer des instructions de renommage pour des branches existantes ou des espaces de travail inadaptés.
+- Réorganisation des informations de quota dans les paramètres des fournisseurs pour distinguer les quotas restants des prévisions de réinitialisation et afficher chaque fenêtre de quota.
+- Les prévisions de réinitialisation Codex s'ouvrent désormais en un clic. Les actions d'actualisation et de suppression se trouvent dans un menu de gestion séparé afin de ne pas recouvrir l'entrée de prévision au survol.
+- Les groupes de machines de la barre latérale conservent leur ordre lorsqu'un Agent local est temporairement indisponible, réduisant ainsi les déplacements dans la liste.
+- La mise à jour d'un avatar personnel actualise désormais les informations des membres de l'espace de travail afin que les listes de membres ne continuent pas d'afficher l'ancien avatar.
+- La configuration d'exécution mobile et les paramètres des Rôles d'agent distinguent désormais plus clairement le Mode des Permissions. Les interrupteurs de partage de dossiers utilisent des libellés d'action explicites tels que « Partager le projet avec l'équipe. »
+- Correction de blocs d'arrière-plan inattendus derrière les boutons de fenêtre Windows en haut à droite après l'ouverture d'une boîte de dialogue.
+- Suppression des fichiers d'exécution en double dans les installateurs de bureau, compression des ressources de l'interface de bureau et réduction des vérifications répétées de l'environnement Claude sous Linux.
+- Amélioration de l'espacement de la conversation d'intégration après modification de la taille de police de l'interface, et correction des horodatages d'archivage tels que « il y a 0 minute. »
+- Correction des ancres de titres de la documentation et des titres de page de premier niveau en double.
+
+Merci à Astro-Han, delete-cloud, etonwan, hjlarry, kipyin, Lampese, lawvs, Pleasurecruise, slashdevcorpse, timonwong et yayoinoyume pour leur contribution à cette version !

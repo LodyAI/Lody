@@ -74,6 +74,10 @@ export type TodayDragGhost = {
 /** Indentation per outline level; matches the rows' padding. */
 export const TODAY_INDENT_PX = 22;
 
+function isElement(target: EventTarget | null): target is Element {
+  return !!target && 'nodeType' in target && target.nodeType === Node.ELEMENT_NODE;
+}
+
 /** What a press on the surface leaves alone: rows and controls handle their own. */
 const SURFACE_CONTENT =
   '[data-today-node], button, a, input, textarea, [contenteditable="true"], [role="menu"], [role="dialog"]';
@@ -207,8 +211,7 @@ export class TodayEditorController {
       // must not write its text selection into that transfer as a text drag source.
       this.editor.registerCommand(
         DRAGSTART_COMMAND,
-        (event) =>
-          event.target instanceof Element && event.target.closest('[data-today-mention]') !== null,
+        (event) => isElement(event.target) && event.target.closest('[data-today-mention]') !== null,
         COMMAND_PRIORITY_HIGH
       ),
       this.editor.registerCommand(
@@ -441,7 +444,8 @@ export class TodayEditorController {
     start: { clientX: number; clientY: number }
   ) {
     const day = bullet.closest('[data-today-date]');
-    if (!day) return;
+    const view = bullet.ownerDocument.defaultView;
+    if (!day || !view) return;
     this.stopPointer?.();
     const selection =
       this.selection?.store === store && this.selection.ids.includes(nodeId)
@@ -468,11 +472,11 @@ export class TodayEditorController {
       }, DRAG_UNFOLD_DELAY_MS);
     };
     const finish = (commit: boolean) => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', cancel);
-      window.removeEventListener('blur', cancel);
-      window.removeEventListener('keydown', key, true);
+      view.removeEventListener('pointermove', move);
+      view.removeEventListener('pointerup', up);
+      view.removeEventListener('pointercancel', cancel);
+      view.removeEventListener('blur', cancel);
+      view.removeEventListener('keydown', key, true);
       clearTimeout(unfoldTimer);
       this.stopPointer = null;
       const wasDragging = dragging;
@@ -536,11 +540,11 @@ export class TodayEditorController {
       event.stopPropagation();
       finish(false);
     };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', cancel);
-    window.addEventListener('blur', cancel);
-    window.addEventListener('keydown', key, true);
+    view.addEventListener('pointermove', move);
+    view.addEventListener('pointerup', up);
+    view.addEventListener('pointercancel', cancel);
+    view.addEventListener('blur', cancel);
+    view.addEventListener('keydown', key, true);
     this.stopPointer = () => finish(false);
   }
 
@@ -599,8 +603,7 @@ export class TodayEditorController {
   }
 
   private dayAt(x: number, y: number) {
-    const stack =
-      typeof document.elementsFromPoint === 'function' ? document.elementsFromPoint(x, y) : [];
+    const stack = this.surface?.ownerDocument.elementsFromPoint?.(x, y) ?? [];
     for (const element of stack) {
       const day = element.closest('[data-today-date]');
       const store = day && this.days.get(day.getAttribute('data-today-date') as TodayDate);
@@ -760,7 +763,7 @@ export class TodayEditorController {
     this.blockAnchor = ends.anchor ?? ids[0]!;
     this.blockFocus = ends.focus ?? ids.at(-1)!;
     store.undo.setSelection({ blockSelect: ids });
-    window.getSelection()?.removeAllRanges();
+    this.surface?.ownerDocument.getSelection()?.removeAllRanges();
     this.surface?.focus({ preventScroll: true });
     this.notify();
   }
@@ -792,7 +795,7 @@ export class TodayEditorController {
     const surface = event.currentTarget as HTMLElement;
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
       return;
-    if (!(event.target instanceof Element) || event.target.closest(SURFACE_CONTENT)) return;
+    if (!isElement(event.target) || event.target.closest(SURFACE_CONTENT)) return;
     // The scroller's own scrollbar.
     const left = surface.getBoundingClientRect().left;
     if (
@@ -1002,7 +1005,7 @@ export class TodayEditorController {
 
   private onEditorPaste(event: ClipboardEvent | InputEvent | KeyboardEvent | null): boolean {
     const active = this.active;
-    if (!active || !(event instanceof ClipboardEvent) || !event.clipboardData) return false;
+    if (!active || !event || !('clipboardData' in event) || !event.clipboardData) return false;
     const data = event.clipboardData;
     const structured = data.getData(TODAY_CLIPBOARD_MIME);
     const text = data.getData('text/plain');
@@ -1086,7 +1089,8 @@ export class TodayEditorController {
 
   private trackDrag(store: TodayPageStore, anchor: TodayNodeId, day: Element | null) {
     this.stopPointer?.();
-    if (!day) return;
+    const view = day?.ownerDocument.defaultView;
+    if (!day || !view) return;
     const rowAt = (y: number): TodayNodeId | null => {
       const rows = [...day.querySelectorAll<HTMLElement>('[data-today-node]')];
       let best: HTMLElement | undefined;
@@ -1116,17 +1120,17 @@ export class TodayEditorController {
       }
     };
     const stop = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', stop);
-      window.removeEventListener('blur', stop);
+      view.removeEventListener('pointermove', move);
+      view.removeEventListener('pointerup', stop);
+      view.removeEventListener('blur', stop);
       this.stopPointer = null;
       this.pointerSelecting = false;
       if (this.selection) this.notify();
     };
     this.pointerSelecting = true;
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', stop);
-    window.addEventListener('blur', stop);
+    view.addEventListener('pointermove', move);
+    view.addEventListener('pointerup', stop);
+    view.addEventListener('blur', stop);
     this.stopPointer = stop;
   }
 
@@ -1209,7 +1213,7 @@ export class TodayEditorController {
    * selection when it is ours.
    */
   private liveSelection(root: HTMLElement) {
-    const dom = window.getSelection();
+    const dom = root.ownerDocument.getSelection();
     return this.editor.read(() => {
       const length = $readComposerValue().text.length;
       if (dom?.anchorNode && dom.focusNode && root.contains(dom.anchorNode)) {
@@ -1262,7 +1266,7 @@ export class TodayEditorController {
 
   /** Copy or cut inside a node: mentions become links in text, and stay mentions in Today. */
   private onEditorCopy(event: ClipboardEvent | KeyboardEvent | null, cut: boolean): boolean {
-    if (!this.active || !(event instanceof ClipboardEvent) || !event.clipboardData) return false;
+    if (!this.active || !event || !('clipboardData' in event) || !event.clipboardData) return false;
     const range = $readSelectionOffsets();
     if (!range || range.start === range.end) return false;
     const rich = sliceTodayRich($readTodayEditorRich(), range.start, range.end);

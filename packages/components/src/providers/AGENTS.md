@@ -96,7 +96,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   [Sealing](../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md),
   [M2](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
   [transport](../../../../specs/workspace-streams-content.md).
-- Missing-key notices start thirty seconds after explicit post-grace seal failure and clear on successful saves; they never retry, gate, or discard edits.
+- Missing-key notices appear 5 seconds after an explicit post-grace seal failure and offer a manual check at 20 seconds. A successful save or key installation clears the notice. It never gates edits or starts an automatic retry.
 - Select transport per room, never merge. Use `getReadinessTransportForRoom`;
   hooks without the router use `src/lib/room-readiness.ts`. Keep rules aligned.
 - The local renderer identity comes atomically from the Electron local-platform snapshot
@@ -113,32 +113,34 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   including token rotation. Periodic repair honors per-`kind:id` error backoff (30s–5min), clears
   it on leaving error, charges attempted rooms only, and cannot revive waiting rooms or delay failures.
   [Recovery](../../../../.agents/docs/components-package.md#cloud-room-recovery).
-- Workspace-level rooms without a machine owner use the platform fallback.
-  Returning no transport silently disables synchronization for those rooms.
+- Workspace rooms without machine owners use the platform fallback. Without transport,
+  their synchronization is silently disabled.
 - Resource monitoring follows machine ownership: local or optional remote transport;
   unknown ownership remains pending.
 - Presence: local origin/absence wins over cloud; UI uses display state, recovery raw state.
   Encrypted presence uses its authorized bucket and shared minimal plaintext allowlist
   on publish/cloud/local read; unimplemented protected side channels stay disabled.
-- Doc-metadata bootstrap and the live repo watch overlap by design: merge per field with
-  live winning (`mergeBootstrapMetaCache`), never letting the snapshot undo an archive
-  already applied live.
+- Merge overlapping doc-metadata bootstrap and live Repo updates per field with live
+  winning (`mergeBootstrapMetaCache`). Snapshots preserve live archives.
 
 ## Attachment transfer ownership
 
-Validate protected attachment manifests before writing history. Queue records bind their workspace. Encrypted Roost requires the owner’s advertised capability and persists the signed input before delivery.
+Validate protected attachment manifests before history writes. Queue records bind their workspace. Encrypted Roost requires the owner’s advertised capability and persists signed input before delivery.
 
 `sendResources` owns preparation/I/O/borrows; cancel/join before transports/caches
 close. Only caches dispose stores. Loro commits locally, then dispatches best-effort.
 Roost freezes input/target and shares ordered leases with queues. Ordinary input
 negotiates `sessionInputDispatch` v1: one owner request commits history and activation;
 the sender uses its receipt without history readback or a second dispatch RPC.
-Guide handoff still needs an owner receipt. Archive/delete cancel durable work beyond local
-snapshots and join leases. Unready Blobs stay in memory; uncertain steers never replay.
+Guide handoff needs an owner receipt. Archive/delete cancel durable work beyond local
+snapshots and join leases. Keep unready Blobs in memory. Never replay uncertain steers.
 [Decision](../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).
 
-- Protected leases retain captured account/reader until confirmed close. Preallocated
-  leases fence cold opens. Begin native fencing with renderer cleanup. Retain full
-  incomplete owners; only overlapping custody bindings or Repo namespaces wait.
-  Independent workspaces remain usable. Device replacement shares its
-  account/workspace/genesis writer. First key reception keeps admission pending; usable epochs wake content.
+- Protected leases retain the captured account/reader through confirmed close. Preallocate leases
+  to fence cold opens. Start native fencing with renderer cleanup. Retain incomplete owners
+  in full. Only overlapping custody bindings or Repo namespaces wait. Device replacement
+  shares its account/workspace/genesis writer.
+
+- Initial encrypted admission awaits a usable epoch. Recheck 1s, 2s and 4s after
+  completed checks. Access loss or account/workspace retirement cancels automatic rechecks.
+  The original route’s waiting notice offers a manual check after exhaustion.

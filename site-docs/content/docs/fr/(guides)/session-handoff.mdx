@@ -1,0 +1,119 @@
+---
+title: "Partager une session d'agent de code"
+description: "Invitez un coéquipier dans une session d'agent de code Lody existante pour poursuivre le travail — conversation, diffs et worktree — au lieu d'envoyer une transcription en lecture seule."
+---
+
+# Partager une session d'agent de code avec votre équipe
+
+Dans Lody, un **transfert de session d'agent de code** signifie qu'un coéquipier ouvre la **même** session que celle que vous avez déjà démarrée et la poursuit. Il accède à la conversation en direct, aux diffs de fichiers produits par l'agent et au [worktree](/fr/docs/worktrees) de la session — et non à une capture d'écran, un export Markdown ou un lien de partage de type ChatGPT qui permet uniquement de _lire_ ce qui s'est passé.
+
+C'est ce qui le distingue de la plupart des workflows « partager ma session Claude Code », qui publient généralement une simple transcription. Lody invite une personne dans la session existante afin qu'elle puisse continuer à discuter et à guider l'agent.
+
+Voir aussi [Sessions](/fr/docs/session), [Fonctionnalités d'équipe](/fr/docs/team), [Configuration d'agent](/fr/docs/quickstart), ainsi que la comparaison des définitions dans [Lien de partage vs transfert en direct](/fr/docs/compare/share-link-vs-live-handoff).
+
+<Callout title="Ce que signifie « poursuivre »">
+  Les membres de l'espace de travail qui peuvent ouvrir la session peuvent poursuivre la conversation à partir du même contexte.
+  Lody ne transforme pas la session en une rediffusion en lecture seule. Le partage reste soumis à la visibilité de la machine et du projet —
+  voir [permissions](#permissions) ci-dessous.
+</Callout>
+
+## Pourquoi un lien de transcription n'est pas un transfert
+
+Plusieurs façons de partager le travail d'un agent existent déjà. La plupart se limitent à « regarde ceci ». Le transfert, c'est « prends le relais ».
+
+| Approche                        | Ce que reçoit le destinataire                                   | Même session en direct ?                 | Diffs et worktree                                                              |
+| ------------------------------- | --------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------ |
+| Capture d'écran                 | Une image de la discussion                                      | Non                                      | Non                                                                            |
+| Export Markdown / transcription | Du texte statique que vous pouvez coller ailleurs               | Non — il démarre une nouvelle discussion | Non                                                                            |
+| Lien de partage de type ChatGPT | Un instantané en lecture seule de la conversation               | Non                                      | Non                                                                            |
+| **Lody**                        | La [session](/fr/docs/session) existante de l'espace de travail | **Oui** — ouvrez-la et poursuivez        | **Oui** — [diffs](/fr/docs/diff-viewer) en direct et le worktree de la session |
+
+La distinction entre lien de partage et transfert en direct est détaillée dans [Lien de partage vs transfert en direct](/fr/docs/compare/share-link-vs-live-handoff). Lody permet toujours d'exporter une conversation en Markdown lorsque vous avez simplement besoin d'une trace écrite. Il s'agit d'une autre action : [Copier les conversations](/fr/docs/copy-md). Copier l'URL d'une session sans la partager ne donne pas non plus accès à l'équipe — le lien continue de fonctionner uniquement pour le propriétaire.
+
+## Comment transférer une session
+
+### 1. Inviter le coéquipier dans l'espace de travail
+
+Le transfert est une action propre aux espaces de travail d'équipe. L'autre personne doit déjà être membre.
+
+1. Ouvrez **Paramètres** -> **Espace de travail** -> **Général**.
+2. Dans la section **Membres**, cliquez sur **Inviter un membre**.
+3. Saisissez son adresse e-mail et choisissez un rôle.
+4. Elle peut accepter depuis l'e-mail, ou vous pouvez copier le lien d'invitation et le lui envoyer vous-même.
+
+Détails : [Inviter des membres](/fr/docs/team#invite-members).
+
+### 2. Rendre la session visible pour l'équipe
+
+Les nouvelles machines restent **privées**. Une session n'est visible par l'équipe que lorsque les ressources sur lesquelles elle s'exécute sont partagées.
+
+Depuis la session :
+
+1. Ouvrez le menu `...` de la session ou le contrôle **Privé** dans l'en-tête de session de l'application de bureau.
+2. Choisissez **Partager avec l'équipe…** (le libellé peut indiquer **Partager l'appareil avec l'équipe…** ou **Partager le projet avec l'équipe…** lorsque ce sont ces autorisations qui manquent).
+3. Confirmez. Lody partage la machine requise ainsi que, dans le cas d'un projet local, le projet, puis copie un lien.
+
+Seul le **propriétaire de l'appareil** peut partager. Si l'appareil n'est pas enregistré pour l'accès en équipe, enregistrez-le d'abord. Vous pouvez également partager une machine depuis **Paramètres** -> **Machines** -> **Partager la machine** sans ouvrir une session particulière. Voir [Visibilité des machines en équipe](/fr/docs/team#team-machine-visibility).
+
+<Callout type="warn" title="Le partage peut élargir la visibilité au-delà d'une seule conversation">
+  Le partage d'une session peut partager sa machine et/ou son projet local avec tous les membres de l'espace de travail.
+  D'autres conversations présentes sur cet appareil peuvent également devenir visibles. La boîte de dialogue de confirmation
+  précise la portée avant que vous ne validiez.
+</Callout>
+
+### 3. Lui indiquer où trouver la session
+
+Une fois la session visible pour l'équipe :
+
+- Envoyez-lui le lien de session copié, ou
+- Demandez-lui d'ouvrir la liste des sessions sur la page d'accueil. Si elle ne voit que ses propres conversations, passez le filtre de la barre latérale de **Mes tâches** à **Toutes les tâches** (sur mobile, **Tâches d'équipe**). Les avatars indiquent qui a démarré chaque session. La liste affiche **Toutes les tâches** par défaut.
+
+Elle ouvre **cette** session — ni un fork, ni un nouveau fil de discussion.
+
+### 4. Poursuivre le travail
+
+Une fois dans la session, votre coéquipier peut :
+
+- Lire l'intégralité de la conversation déjà menée avec l'agent
+- Passer en revue les [diffs](/fr/docs/diff-viewer) actuels
+- Continuer à travailler dans le même [worktree](/fr/docs/worktrees) et sur la même branche
+- Envoyer le prompt suivant et orienter la même [configuration d'agent](/fr/docs/quickstart)
+
+Forker une session est un autre outil : cela copie l'historique dans une **nouvelle** session. **Espace de travail actuel** conserve les mêmes fichiers ; **Nouveau worktree** (lorsqu'il est proposé) s'isole à partir du `HEAD` validé. Utilisez le fork lorsque vous souhaitez une branche privée de la conversation, et non lorsque vous voulez faire entrer un coéquipier dans la session d'origine. Voir [Forker une session](/fr/docs/session#fork-a-session).
+
+Pour exécuter plusieurs sessions isolées en équipe, voir [Agents de code en parallèle](/fr/docs/parallel-agents).
+Pour coordonner plusieurs conversations depuis un seul agent, voir [Contrôle de session par l'agent](/fr/docs/session-orchestration).
+
+## Permissions
+
+| Contrôle                           | À qui il s'applique                                                                                      | Effet                                                                                                                                                  |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Appartenance à l'espace de travail | Toute personne que vous invitez                                                                          | Requise avant que quiconque puisse ouvrir des sessions d'équipe                                                                                         |
+| Rôle de membre                     | Les propriétaires et administrateurs gèrent les membres                                                  | Détermine qui peut inviter, modifier ou supprimer des personnes — voir [Modifier les permissions des membres](/fr/docs/team#change-member-permissions) |
+| Partage de machine                 | Propriétaire de la machine uniquement                                                                    | Les sessions sur une machine non partagée n'apparaissent pas dans la barre latérale des autres membres                                                 |
+| Partage de projet local            | Propriétaire de la machine, lorsque la session utilise un projet local                                   | Les coéquipiers ont besoin de l'autorisation sur le projet en plus de celle sur la machine                                                             |
+| URL de session                     | Toujours pour le propriétaire ; pour les coéquipiers uniquement une fois la session visible par l'équipe | Copier l'URL n'équivaut pas à **Partager avec l'équipe…**                                                                                              |
+
+Rejoindre un espace de travail **n'expose pas** votre ordinateur portable. Les machines restent privées tant que vous ne les partagez pas. Les configurations d'agent peuvent être partagées séparément afin que vos coéquipiers exécutent la même configuration CLI ; voir [Configuration d'agent](/fr/docs/quickstart) et [Fonctionnalités d'équipe](/fr/docs/team).
+
+## Questions fréquentes
+
+### Puis-je partager une session Claude Code afin qu'un coéquipier la poursuive ?
+
+Oui, si la session s'exécute dans un espace de travail Lody. Invitez-le, partagez la session (ainsi que la machine ou le projet local dont elle dépend), puis demandez-lui d'ouvrir cette session et de continuer à discuter. Il ne s'agit ni d'un export de transcription Claude Code en lecture seule, ni d'un lien d'instantané public.
+
+### Est-ce identique à un lien de partage ChatGPT ?
+
+Non. Un lien de partage ChatGPT est un **enregistrement consultable** — un instantané en lecture seule. Lody transfère la **session d'agent de code existante** dans l'espace de travail d'équipe : même conversation, mêmes diffs et même worktree. Voir [Lien de partage vs transfert en direct](/fr/docs/compare/share-link-vs-live-handoff).
+
+### Que faire si mon coéquipier ne voit pas la session ?
+
+Vérifiez trois points : qu'il a bien accepté l'invitation à l'espace de travail, que la machine (et le projet local, le cas échéant) est partagée, et qu'il consulte bien **Toutes les tâches** plutôt que **Mes tâches**. Les machines non partagées ne synchronisent jamais leurs conversations dans la barre latérale des autres membres.
+
+### Le partage d'une session partage-t-il toute ma machine ?
+
+Cela peut être le cas. Si la machine n'est pas déjà partagée, **Partager avec l'équipe…** la partage afin que vos coéquipiers puissent ouvrir et poursuivre des conversations sur cet appareil. D'autres sessions présentes sur la même machine peuvent alors devenir visibles. Vous pourrez désactiver **Partager la machine** ultérieurement dans **Paramètres** -> **Machines**.
+
+### Puis-je simplement envoyer une transcription à la place ?
+
+Oui. Copiez un message ou utilisez **Copier en Markdown** depuis le menu de la session lorsque vous avez simplement besoin d'une trace écrite. Cela ne permet pas à quelqu'un de poursuivre la session en direct. Voir [Copier les conversations](/fr/docs/copy-md).

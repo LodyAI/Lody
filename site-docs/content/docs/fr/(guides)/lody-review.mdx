@@ -1,0 +1,69 @@
+---
+title: "Lody Review"
+description: "Transformez une revue de code générée par un agent en un rapport HTML interactif et partageable avec lody review, sans vous connecter à Lody."
+---
+
+# Lody Review
+
+`lody review` transforme une revue de code structurée en un rapport HTML autonome. Il s'exécute
+localement sur votre dépôt Git, ne nécessite pas de compte Lody et ouvre directement le résultat
+à partir d'une URL `file://` sans démarrer de serveur.
+
+## Créer une revue
+
+Le workflow le plus simple consiste à demander à un agent de code d'exécuter l'ensemble du processus :
+
+```text
+Use `npx lody review` to help me review <pull-request-url>.
+```
+
+Les étapes sous-jacentes sont les suivantes :
+
+1. Afficher le format de revue officiel :
+
+   ```bash
+   npx lody review prompt
+   ```
+
+2. Demander à l'agent d'inspecter la branche ou la pull request cible et d'écrire un fichier
+   `.review.md` respectant le format affiché.
+3. Générer et ouvrir le rapport :
+
+   ```bash
+   npx lody review <name>.review.md
+   ```
+
+Par défaut, le fichier `.review.html` généré est écrit dans le répertoire temporaire du système afin
+qu'il ne soit pas ajouté par erreur au dépôt. La CLI affiche son chemin absolu pour que vous
+puissiez rouvrir, déplacer ou partager le fichier.
+
+## Contenu du rapport
+
+Le rapport regroupe les modifications liées, affiche les diffs de fichiers, associe les constats
+aux lignes concernées et prend en charge les niveaux de gravité ainsi que les listes de
+vérification de revue. Vous pouvez également ajouter des commentaires lors de la lecture du
+rapport et les copier au format Markdown.
+
+## Prérequis
+
+- Exécutez la commande dans l'arbre de travail Git examiné, ou passez `--repo <dir>`.
+- Les commits référencés par la revue doivent exister localement. Récupérez ou basculez sur la
+  branche de la pull request avant le rendu.
+- Un fichier `.review.md` est résolu par rapport au dépôt local en mode lecture seule.
+- Un instantané `.review.json`, `.review.json.gz` ou `.review.json.br` précédemment exporté est
+  autonome et peut être généré sans Git.
+
+Le premier rendu peut télécharger la visionneuse de revue correspondante. Lody la vérifie et la
+met en cache localement pour une utilisation ultérieure.
+
+## Options
+
+```bash
+npx lody review <file> --repo <dir>
+npx lody review <file> --output <report.html>
+npx lody review <file> --no-open
+```
+
+- `--repo` sélectionne le dépôt utilisé pour résoudre un fichier `.review.md`.
+- `--output` remplace le chemin du fichier HTML généré.
+- `--no-open` écrit le rapport sans ouvrir le navigateur.

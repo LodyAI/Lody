@@ -5,6 +5,7 @@ import type { SessionHistoryInput, SessionHistoryReadResponse } from '@lody/shar
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { Identity, IndexedDbStorage, Store } from '@loro-dev/roost';
+import { encodeUvarU64 } from '@loro-dev/streams-client';
 import { fromApplicationJson, LodyHistory } from '@loro-dev/roost/lody-history';
 import {
   ROOST_HISTORY_BUCKET_ID,
@@ -35,6 +36,28 @@ import {
 import { createConversationViewFromReader } from '../src/lib/conversation-view/create-conversation-view-from-reader';
 import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/main/services/local-session-control-budget';
 import type { SessionDataChange } from '@lody/shared/session-data';
+
+function streamOffset(bytes: number): string {
+  return String(bytes).padStart(20, '0');
+}
+
+function backwardHistoryPage(message: Uint8Array): Response {
+  const length = encodeUvarU64(BigInt(message.byteLength));
+  const completeFrameHeader = Uint8Array.of(1, 0);
+  const body = new Uint8Array(completeFrameHeader.length + length.length + message.byteLength);
+  body.set(completeFrameHeader);
+  body.set(length, completeFrameHeader.length);
+  body.set(message, completeFrameHeader.length + length.length);
+  return new Response(body, {
+    headers: {
+      'content-type': 'application/vnd.loro-streams.frames',
+      'stream-prev-offset': streamOffset(0),
+      'stream-end-offset': streamOffset(message.byteLength),
+      'stream-at-start': 'true',
+      'stream-at-retained-start': 'true',
+    },
+  });
+}
 
 function limitReplicaStorage(isFull: () => boolean) {
   const put = IDBObjectStore.prototype.put;
@@ -378,8 +401,8 @@ describe('createConversationSession backend seam', () => {
       await storage.close();
       let oldStreamUnavailable = false;
       let publishedReplacement = false;
-      const startOffset = String(bytes.length);
-      const tail = String(bytes.length + incremental.length);
+      const startOffset = streamOffset(bytes.length);
+      const tail = streamOffset(bytes.length + incremental.length);
       const applied = Promise.withResolvers<void>();
       const switched = Promise.withResolvers<void>();
       const recovered = Promise.withResolvers<void>();
@@ -396,32 +419,15 @@ describe('createConversationSession backend seam', () => {
         const read = new URL(input instanceof Request ? input.url : input);
         const { pathname, origin } = new URL(url);
         if (read.href.startsWith(nextUrl) && publishedReplacement) {
-          const offset = String(replacement.byteLength);
-          const isHead = init?.method === 'HEAD';
-          const backwards = read.searchParams.get('direction') === 'backward';
+          if (read.searchParams.get('direction') === 'backward')
+            return Promise.resolve(backwardHistoryPage(replacement));
           return Promise.resolve(
-            new Response(backwards ? replacement : null, {
-              status: isHead || backwards ? 200 : 204,
+            new Response(null, {
+              status: init?.method === 'HEAD' ? 200 : 204,
               headers: {
                 'content-type': 'application/octet-stream',
-                'stream-next-offset': offset,
+                'stream-next-offset': streamOffset(replacement.byteLength),
                 'stream-up-to-date': 'true',
-                ...(backwards && {
-                  'stream-prev-offset': '0',
-                  'stream-end-offset': offset,
-                  'stream-tail-offset': offset,
-                  'stream-at-start': 'true',
-                  'stream-message-spans': JSON.stringify([
-                    {
-                      rel_start: 0,
-                      rel_end: replacement.byteLength,
-                      message_start: '0',
-                      message_end: offset,
-                      message_len: offset,
-                      msg_offset: '0',
-                    },
-                  ]),
-                }),
               },
             })
           );
@@ -452,27 +458,7 @@ describe('createConversationSession backend seam', () => {
         if (read.searchParams.get('direction') === 'backward') {
           if (startingState === 'Streams reverse read 503' && cloudUnavailable)
             return Promise.resolve(new Response(null, { status: 503 }));
-          return Promise.resolve(
-            new Response(new Uint8Array(bytes), {
-              headers: {
-                'content-type': 'application/octet-stream',
-                'stream-prev-offset': '0',
-                'stream-end-offset': startOffset,
-                'stream-tail-offset': startOffset,
-                'stream-at-start': 'true',
-                'stream-message-spans': JSON.stringify([
-                  {
-                    rel_start: 0,
-                    rel_end: bytes.length,
-                    message_start: '0',
-                    message_end: startOffset,
-                    message_len: startOffset,
-                    msg_offset: '0',
-                  },
-                ]),
-              },
-            })
-          );
+          return Promise.resolve(backwardHistoryPage(bytes));
         }
         const next = (body: Uint8Array<ArrayBuffer> | null, offset: string) =>
           new Response(body, {

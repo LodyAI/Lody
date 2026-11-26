@@ -9,9 +9,16 @@ const mocks = vi.hoisted(() => ({
   token: 'open-token',
   navigate: vi.fn(),
   query: vi.fn(),
+  queryError: null as Error | null,
+  retry: vi.fn(),
   submit: vi.fn(),
   session: null as null | {
-    user: { email: string };
+    user: { id?: string; email: string; emailVerified?: boolean };
+  },
+  sessionFlags: {
+    isPending: false,
+    isRetrying: false,
+    isOptimistic: false,
   },
   authClient: { id: 'auth-client' },
   signOutWithoutRedirect: vi.fn().mockResolvedValue({ ok: true }),
@@ -29,11 +36,16 @@ vi.mock('@lody/platform/react', () => ({
   usePlatform: () => ({ e2eeWorkspaces: undefined }),
   useCloudMutation: () => mocks.submit,
   useCloudQuery: (...args: unknown[]) => mocks.query(...args),
+  useCloudQueryState: (...args: unknown[]) => ({
+    data: mocks.queryError ? undefined : mocks.query(...args),
+    error: mocks.queryError,
+    retry: mocks.retry,
+  }),
   usePlatformCapability: () => true,
 }));
 
 vi.mock('../src/hooks/useStableSession', () => ({
-  useStableSession: () => ({ data: mocks.session, isPending: false }),
+  useStableSession: () => ({ data: mocks.session, ...mocks.sessionFlags }),
 }));
 
 vi.mock('../src/providers/convex-provider', () => ({
@@ -53,7 +65,9 @@ import { WorkspaceJoinRequestRoute } from '../src/routes/join/$token';
 describe('WorkspaceJoinRequestRoute', () => {
   afterEach(() => {
     vi.clearAllMocks();
+    mocks.queryError = null;
     mocks.session = null;
+    mocks.sessionFlags = { isPending: false, isRetrying: false, isOptimistic: false };
     mocks.token = 'open-token';
     window.location.hash = '';
   });
@@ -188,5 +202,77 @@ describe('WorkspaceJoinRequestRoute', () => {
 
     await act(async () => root.unmount());
     container.remove();
+  });
+
+  it('shows an error state with retry when the join-link preview query fails', async () => {
+    await initI18n('en');
+    mocks.queryError = new Error('backend unavailable');
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<WorkspaceJoinRequestRoute />);
+    });
+
+    const retryButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Retry'
+    );
+    expect(retryButton).toBeTruthy();
+    await act(async () => retryButton!.click());
+    expect(mocks.retry).toHaveBeenCalledOnce();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('does not offer email-verification sign-out for an encrypted invitation while the session is optimistic or retrying', async () => {
+    await initI18n('en');
+    const offer = {
+      version: 1,
+      workspaceId: 'team-a',
+      genesisHash: '11'.repeat(32),
+      genesisRecordHex: 'abcd',
+      endorser: '22'.repeat(32),
+      token: '33'.repeat(32),
+      mode: 'email',
+      expiresAt: 9_000_000_000_000,
+    };
+    mocks.token = offer.token;
+    window.location.hash = 'e2ee=' + encodeURIComponent(JSON.stringify(offer));
+    mocks.session = { user: { id: 'user-1', email: 'member@example.com' } };
+    mocks.sessionFlags = { isPending: false, isRetrying: false, isOptimistic: true };
+    mocks.query.mockReturnValue({
+      status: 'available',
+      offer,
+      workspaceName: 'Encrypted Team',
+      workspaceSlug: 'encrypted-team',
+      recipientEmailMasked: 'm***@example.com',
+      matchesRecipient: true,
+    });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(<WorkspaceJoinRequestRoute />));
+      expect(
+        [...container.querySelectorAll('button')].find((b) => b.textContent === 'Verify email')
+      ).toBeUndefined();
+      expect(container.textContent).not.toContain('Verify your email');
+      expect(mocks.signOutWithoutRedirect).not.toHaveBeenCalled();
+
+      mocks.session = { user: { id: 'user-1', email: 'member@example.com', emailVerified: true } };
+      mocks.sessionFlags = { isPending: false, isRetrying: false, isOptimistic: false };
+      await act(async () => root.render(<WorkspaceJoinRequestRoute />));
+      expect(
+        [...container.querySelectorAll('button')].find((b) => b.textContent === 'Verify email')
+      ).toBeUndefined();
+      expect(
+        [...container.querySelectorAll('button')].find((b) => b.textContent === 'Open Lody Desktop')
+      ).toBeDefined();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 });

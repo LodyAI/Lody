@@ -366,6 +366,13 @@ export function RecoveryPage({
   const [lastLocalClear] = useState(() => readRecentLocalClear(Date.now()));
   const requestFailure = useLatestBootRequestFailure();
   const storageFailure = isLocalStorageFailure(observation);
+  const blocker = blockerOf(observation);
+  const e2eeBlocked =
+    gate.includes('e2ee') ||
+    (observation.targetEncrypted &&
+      (gate === 'workspace_admission' ||
+        blocker === 'runtime_missing' ||
+        blocker === 'runtime_init_failed'));
   // A clear that already ran in this process and left databases behind may have
   // hit a storage backend that is itself broken; only a retry of that relaunches
   // the desktop (stopping the embedded CLI) instead of reloading this window.
@@ -442,11 +449,13 @@ export function RecoveryPage({
             : t('workspace.route.recovery.slowTitleGeneric')
       }
       description={
-        storageFailure
-          ? t('workspace.route.recovery.description')
-          : requestFailure !== null
-            ? t('workspace.route.recovery.descriptionRequest')
-            : t('workspace.route.recovery.descriptionGeneric')
+        e2eeBlocked
+          ? t('workspace.route.recovery.descriptionE2ee')
+          : storageFailure
+            ? t('workspace.route.recovery.description')
+            : requestFailure !== null
+              ? t('workspace.route.recovery.descriptionRequest')
+              : t('workspace.route.recovery.descriptionGeneric')
       }
     >
       <StatusPageActions>
@@ -518,6 +527,9 @@ export function RecoveryPage({
         onOpenChange={setHardResetOpen}
         isResetting={hardResetting}
         onConfirm={handleHardReset}
+        additionalWarning={
+          e2eeBlocked ? t('workspace.route.recovery.hardResetE2eeWarning') : undefined
+        }
       />
     </StatusPage>
   );

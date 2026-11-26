@@ -1,0 +1,9 @@
+{
+  "title": "Agentes y entornos de ejecución",
+  "pages": [
+    "cli-runtimes",
+    "claude-codex-capabilities",
+    "skills",
+    "device-resource-monitoring"
+  ]
+}

@@ -21,6 +21,17 @@ export const DEFAULT_TAB_DURATION_MS = 6000;
 
 type FeatureTab = { title: string };
 
+const TABLIST_LABEL: Record<LandingLocale, string> = {
+  en: 'Lody highlights',
+  zh: 'Lody 核心亮点',
+  'zh-hant': 'Lody 核心亮點',
+  ja: 'Lody の主な機能',
+  ko: 'Lody 주요 기능',
+  es: 'Aspectos destacados de Lody',
+  fr: 'Points forts de Lody',
+  ru: 'Ключевые возможности Lody',
+};
+
 const TABS: Record<LandingLocale, FeatureTab[]> = {
   en: [
     { title: 'Parallel worktrees' },
@@ -33,6 +44,42 @@ const TABS: Record<LandingLocale, FeatureTab[]> = {
     { title: '实时差异查看' },
     { title: '设计模式' },
     { title: '移动端访问' },
+  ],
+  'zh-hant': [
+    { title: 'Worktree 並行開發' },
+    { title: '即時差異檢視' },
+    { title: '設計模式' },
+    { title: '行動裝置存取' },
+  ],
+  ja: [
+    { title: '並列 Worktree' },
+    { title: 'リアルタイム差分レビュー' },
+    { title: 'デザインモード' },
+    { title: 'モバイルアクセス' },
+  ],
+  ko: [
+    { title: '병렬 Worktree' },
+    { title: '실시간 Diff 리뷰' },
+    { title: '디자인 모드' },
+    { title: '모바일 접근' },
+  ],
+  es: [
+    { title: 'Worktrees en paralelo' },
+    { title: 'Revisión de diffs en vivo' },
+    { title: 'Modo diseño' },
+    { title: 'Acceso móvil' },
+  ],
+  fr: [
+    { title: 'Worktrees en parallèle' },
+    { title: 'Revue de diff en direct' },
+    { title: 'Mode design' },
+    { title: 'Accès mobile' },
+  ],
+  ru: [
+    { title: 'Параллельные worktree' },
+    { title: 'Просмотр diff в реальном времени' },
+    { title: 'Режим дизайна' },
+    { title: 'Мобильный доступ' },
   ],
 };
 
@@ -79,7 +126,7 @@ export function LandingFeatureTabs({
   };
 
   return (
-    <div className="underwater-tabs" role="tablist" aria-label="Lody highlights">
+    <div className="underwater-tabs" role="tablist" aria-label={TABLIST_LABEL[locale]}>
       {tabs.map((tab, index) => {
         const isActive = index === active;
         const duration = durations?.[index] ?? DEFAULT_TAB_DURATION_MS;
@@ -89,7 +136,9 @@ export function LandingFeatureTabs({
             type="button"
             role="tab"
             aria-selected={isActive}
-            className={['underwater-tabs__tab', isActive ? 'is-active' : ''].filter(Boolean).join(' ')}
+            className={['underwater-tabs__tab', isActive ? 'is-active' : '']
+              .filter(Boolean)
+              .join(' ')}
             onClick={() => {
               // Manual click always allowed (clears pause intent for that hop).
               onActiveChange(((index % tabs.length) + tabs.length) % tabs.length);

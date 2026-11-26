@@ -1,0 +1,83 @@
+---
+title: "ACP と拡張機能のサポート状況"
+description: "Lody 組み込み ACP プロバイダーのサポートマトリックスです。標準の ACP 機能に加え、各プロバイダーアダプターが acp-extension-core を通じてネゴシエートする Lody 拡張機能の対応状況をまとめています。"
+---
+
+# ACP と拡張機能のサポート状況
+
+このページは、Codex、Claude Code、またはその他の ACP エージェントから移行される方で、どの機能が引き継がれるかを確認したい方向けのガイドです。ACP の概要、Lody による拡張方法、および各組み込みプロバイダーの対応状況を説明します。まだランタイムを接続していない場合は、先に[Codex や Claude Code からの移行](/ja/docs/from-codex-claude-code)または[エージェント設定](/ja/docs/quickstart)をご覧ください。
+
+## ACP とは
+
+[Agent Client Protocol](https://agentclientprotocol.com/)（ACP）は、クライアント（ユーザーが使用しているアプリ）と、実際に処理を行うエージェントとの間のオープンプロトコルです。Lody は ACP クライアントとして動作します。プロバイダーの ACP サーバーを起動し、`initialize` 時にケイパビリティ（機能）をネゴシエートしたうえで、プロンプト、ストリーミング更新、ツール呼び出し、権限リクエスト、セッションライフサイクルイベントなどをその単一の接続上でやり取りします。
+
+ACP は共通のコア部分をカバーしているため、画像入力、埋め込みコンテキスト、セッションの再開やフォーク、MCP トランスポート、エリシテーション（elicitation）などのオプション機能は ACP エージェントによって対応が異なります。そのため Lody は、機能を決め打ちするのではなくネゴシエートを行います。なお、テキストプロンプト、ストリーミング更新、ツール呼び出し、権限リクエスト、キャンセル、および Lody のファイルシステム／ターミナルコールバックといったベースライン機能は、すべての組み込みプロバイダーで動作します。
+
+## Lody による ACP の拡張方法
+
+Lody 独自の機能は、ACP v1 上のプロバイダー非依存コントラクトである [`acp-extension-core`](https://github.com/LodyAI/acp-extension-core) に定義されています。サブエージェントイベントのストリーミング、使用量集計、レート制限、永続的なゴール（Goal）、コンテキストコンパクションなどの機能には安定した共通の記述仕様が必要なため、各機能は個別にバージョニングされ、`_meta.lody` 配下でアドバタイズされます。
+
+- エージェントは実装している機能を `InitializeResponse.agentCapabilities._meta.lody` でアドバタイズします。
+- クライアントは自身の機能を `InitializeRequest.clientCapabilities._meta.lody` でアドバタイズします。
+- キーが存在しない場合、相手側はその機能をサポートしていないことを意味し、ある機能のサポートが別の機能のサポートを意味することはありません。
+
+公開されている `acp-extension-*` アダプターは各ランタイムをこのコントラクトに変換するため、接続先のプロバイダーに関わらず Lody クライアントは常に同じ形式を読み取ることができます。カスタムまたはレジストリの ACP エージェントでも同じキーを実装できます。正確なペイロードについては、[ケイパビリティカタログ](https://github.com/LodyAI/acp-extension-core#capability-catalog)を参照してください。
+
+## サポート状況一覧
+
+以下の表では、標準の ACP 機能（`ACP:` プレフィックス）と Lody 拡張機能（`Lody:` プレフィックス）をまとめています。9 つのプロバイダーすべてが前述の ACP ベースラインを共有しており、以下のオプション機能のみプロバイダーごとに異なります。プロバイダー名は、各ランタイムまたはアダプターのリポジトリへリンクしています。
+
+| プロバイダー             | ACP: image | ACP: embedded context | ACP: load | ACP: resume | ACP: fork | ACP: extra directories | ACP: MCP | ACP: logout | ACP: elicitation | Lody: subagent events | Lody: session title | Lody: usage | Lody: rate limits | Lody: fork at turn | Lody: steering | Lody: tasks | Lody: subagents | Lody: goal | Lody: compaction |
+| -------------------- | ---------- | --------------------- | --------- | ----------- | --------- | ---------------------- | -------- | ----------- | ---------------- | --------------------- | ------------------- | ----------- | ----------------- | ------------------ | -------------- | ----------- | --------------- | ---------- | ---------------- |
+| <a href="https://github.com/LodyAI/acp-extension-claude" target="_blank" rel="noreferrer"><strong>Claude Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-codex" target="_blank" rel="noreferrer"><strong>Codex</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-grok" target="_blank" rel="noreferrer"><strong>Grok</strong></a> | — | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓³ | — | — | — |
+| <a href="https://github.com/LodyAI/acp-extension-kimi" target="_blank" rel="noreferrer"><strong>Kimi Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ◐⁴ | ✓ | ✓ | ✓ | — | ✓¹ | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-devin" target="_blank" rel="noreferrer"><strong>Devin</strong></a> | ✓ | ✓ | ✓ | — | — | ✓ | HTTP+SSE | — | ✓ | ✓ | — | — | — | — | — | — | — | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-pi" target="_blank" rel="noreferrer"><strong>Pi</strong></a> | ✓ | ✓ | ✓ | ✓ | — | — | — | — | ✓ | ✓ | — | ✓ | — | — | ✓ | — | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-dsh" target="_blank" rel="noreferrer"><strong>DeepSeek Harness</strong></a> | ◐⁵ | — | ✓ | ✓ | ✓ | — | HTTP | — | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓¹ | ✓ | ✓ | ✓ |
+| <a href="https://github.com/bubbuild/bub" target="_blank" rel="noreferrer"><strong>Bub</strong></a> | — | — | ✓ | ✓ | — | — | HTTP+SSE | — | ✓ | — | — | — | — | — | ✓ | — | — | — | — |
+| <a href="https://github.com/arcships/dimcode" target="_blank" rel="noreferrer"><strong>Dimcode</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+凡例：
+
+- **✓** — プロバイダーがその機能を宣言しています（標準 ACP の場合は `initialize` でアドバタイズします）。
+- **◐** — 部分的に宣言しています。下記の注記を参照してください。
+- **—** — プロバイダーによって宣言されていません。
+
+### 拡張機能リファレンス
+
+`Lody:` で始まる列は、プロバイダーが宣言する拡張機能を示しています。各列に対応するプロバイダー側の機能は以下のとおりです：
+
+- **subagent events** — アダプターが子エージェントのスナップショット、進捗状況、および出力を `_lody/subagents/event` でストリーミングします。
+- **session title** — アダプターがタイトルを生成し、`_meta.lody.titleSource` タグ付きの標準 `session_info_update` としてプッシュします。
+- **usage** — 標準の `usage_update` でコンテキストおよびトークン使用量（モデルごとの合計を含む）を報告します。
+- **rate limits** — `_lody/rate_limits/update` でクォータのスナップショットを通知し、オプションで `_lody/rate_limits/get` クエリに対応します。
+- **fork at turn** — `session/fork` でフォーク元の過去のターンを指定できます。
+- **steering** — `_lody/session/steer` または `_meta.lody.steer` を通じて、実行中のターンに指示を注入できます。
+- **tasks** — バックグラウンドタスクやスケジュールされたタスクを、`_meta.lody.task` 付きの通常のツール呼び出しライフサイクルとして報告します。
+- **subagents** — サブエージェントのライフサイクル管理に加え、オプションで一覧取得、キャンセル、出力取得クエリに対応します。
+- **goal** — 1 回のプロンプトを超えて維持される永続的なセッションゴール（set、pause、resume、clear アクションに対応）。
+- **compaction** — コンテキストのコンパクションおよびリトライを、`_meta.lody.activity` 付きのツールライフサイクルとして報告します。
+
+注記：
+
+1. **タスク（Tasks）：** Claude Code、Codex、Kimi Code、DeepSeek Harness はバックグラウンドタスクを宣言し、Grok はスケジュールされたタスクを宣言します。両方を宣言しているプロバイダーはありません。
+2. **サブエージェント（Subagents）：** Claude Code と Codex はライフサイクルのみを宣言しており、一覧取得、キャンセル、出力取得の各クエリには対応していません。
+3. **Grok のタスク**はスケジュールされたタスクのみです。
+4. **Kimi Code のセッションタイトル**は、インストールされている Kimi エンジンがタイトル機能をサポートしている場合にのみアドバタイズされます。それ以外の場合は、Lody 側でタイトルを生成します。
+5. **DeepSeek Harness の画像入力**は、選択されたモデルに依存します。アクティブなモデルが画像入力を宣言している場合にのみ、アダプターがこの機能を有効にします。
+6. **Dimcode の MCP：** Dimcode は Streamable HTTP と SSE をアドバタイズしますが、stdio MCP は非対応として報告します。
+
+`ACP: MCP` 列において、`HTTP+SSE` はプロバイダーが両方のトランスポートをアドバタイズしていることを、`HTTP` は HTTP のみをアドバタイズしていることを意味します。stdio MCP は通常の ACP ベースラインですが、注記 6 のとおり Dimcode は例外です。`Devin` と `Grok` の標準 ACP 列は公式ランタイムの仕様を反映しており、`Lody:` 列は Lody 互換プロキシによって追加される機能を示しています。`Bub` と `Dimcode` は Lody によって起動される外部 ACP サーバーであり、それらの行は実装している Lody 拡張機能を含め、各サーバー自身が宣言する内容を反映しています。
+
+上記のサポート情報は、Lody のアダプターおよび外部 ACP サーバーに同梱されている機能宣言に基づいています。Lody はセッション開始時にネゴシエート結果を読み取るため、プロバイダーのアップデートによってこのページの更新よりも先にアプリ上の表示が変わる場合があります。標準 ACP 実装の独立したバージョン別の比較については、[ACP Wall](https://github.com/wibus-wee/acp-wall) を参照してください。
+
+## 次のステップ
+
+<Cards>
+  <Card href="/ja/docs/from-codex-claude-code" title="Codex や Claude Code からの移行" />
+  <Card href="/ja/docs/quickstart" title="エージェント設定" />
+  <Card href="/ja/docs/cli-runtimes" title="CLI ランタイムの種類" />
+  <Card href="/ja/docs/concepts" title="概念と用語集" />
+</Cards>

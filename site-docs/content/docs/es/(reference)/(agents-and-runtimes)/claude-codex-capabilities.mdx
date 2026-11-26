@@ -1,0 +1,133 @@
+---
+title: "Capacidades de Claude y Codex"
+description: "Capacidades que Lody expone para Claude Code y Codex, incluidas la redirección de tareas activas, comandos slash, AskUserQuestion, Modo rápido, tareas en segundo plano y programadas, generación de imágenes y Goals."
+---
+
+# Capacidades de Claude y Codex
+
+Lody detecta las capacidades del entorno de ejecución a partir de la Configuración de agente seleccionada y
+expone directamente en la interfaz de conversación las funciones compatibles de Claude Code y Codex.
+
+Si falta alguna capacidad después de cambiar la configuración de un agente, actualiza las capacidades
+de esa Configuración de agente desde **Configuración** -> **Configuración de agente**, o ejecuta
+`lody agent-config refresh-capabilities <idOrName>` en la máquina propietaria de la configuración.
+
+## Claude Code
+
+### Redirigir una tarea en ejecución
+
+Mientras Claude Code está trabajando, usa **Redirigir** para cambiar el rumbo sin detener la tarea
+activa ni empezar de nuevo. Configura **Configuración** -> **General** -> **Comportamiento de mensajes
+en cola** en **Guiar** para redirigir los mensajes que envíes mientras el agente está ocupado, o elige
+**Redirigir** en el primer mensaje en cola. Lody mantiene el mensaje pendiente hasta que Claude Code
+confirma que ha aplicado la nueva instrucción y, a continuación, continúa transmitiendo la respuesta
+dentro del turno redirigido.
+
+Redirigir la tarea principal no cancela automáticamente las tareas en segundo plano de Claude Code.
+Claude Code decide si esas tareas siguen encajando con la nueva dirección, de modo que puedes
+reorientar el trabajo principal sin perder el progreso paralelo útil.
+
+### Comandos slash
+
+Claude Code puede exponer comandos slash como `/review`, `/compact` o `/undo`. Escribe `/` al
+principio del campo de entrada para explorar los comandos disponibles en la configuración actual.
+
+<SlashCommandsPreview locale="es" />
+
+Consulta [Comandos slash](/es/docs/slash-commands) para ver todos los detalles de la interacción.
+
+### AskUserQuestion
+
+Claude Code puede hacer preguntas de seguimiento mientras una tarea está en ejecución. Lody muestra
+estas solicitudes como tarjetas interactivas con entradas de selección única, selección múltiple y
+respuesta personalizada, y luego envía tu respuesta de vuelta al agente.
+
+<AskQuestionPreview locale="es" />
+
+### Modo rápido
+
+Algunas configuraciones de Claude Code exponen un selector de Modo rápido: un botón con un rayo (⚡)
+en el selector de modo debajo del editor. Actívalo para usar un perfil de respuesta acelerado; la
+descripción emergente detalla el compromiso (aproximadamente 2,5× más rápido con un mayor costo por
+token). El selector solo aparece cuando la configuración seleccionada anuncia la opción, y tu elección
+se recuerda por sesión y se aplica al siguiente mensaje que envíes.
+
+### Tareas en segundo plano
+
+Cuando Claude Code delega trabajo en tareas en segundo plano —subagentes o comandos de shell en
+segundo plano—, Lody muestra un panel de tareas integrado en la conversación:
+
+- Mientras hay tareas en ejecución, el panel permanece expandido con un indicador de carga y el
+  encabezado **"Esperando N tareas en segundo plano"**, de modo que el chat no queda bloqueado
+  mientras trabajan.
+- Cada fila muestra el actor de la tarea (el tipo de subagente, el nombre del flujo de trabajo o
+  `Bash` / `Task`), una descripción opcional y la herramienta que está ejecutando en ese momento.
+- Cuando todo termina, el panel se contrae en un resumen de **"N tareas en segundo plano"** que puedes
+  expandir para revisar cada tarea, incluidos los tokens y las herramientas que utilizó.
+
+El panel solo informa el progreso; no permite cancelar tareas individuales.
+
+### Tareas programadas
+
+Claude Code también puede programar ejecuciones futuras y mantener la sesión activa para
+gestionarlas. Un panel sobre el editor muestra **"La sesión continuará · N tareas programadas
+pendientes"**; expándelo para ver cada entrada:
+
+- La próxima hora de ejecución con una cuenta regresiva en vivo (**"en 5 min"**, **"ejecutándose ahora…"**).
+- Una etiqueta de tipo —**Reactivación** para una reanudación única o **Programada** para una
+  ejecución cron— además de una insignia **Recurrente** cuando la programación se repite.
+- Un resumen opcional que describe qué se ejecutará.
+
+Las reactivaciones únicas se eliminan de la lista poco después de ejecutarse; las programaciones
+recurrentes permanecen y pasan a su siguiente horario. El panel es de solo lectura.
+
+## Codex
+
+### Redirigir una tarea en ejecución
+
+También puedes usar **Redirigir** mientras Codex está trabajando. Configura **Comportamiento de
+mensajes en cola** en **Guiar**, o elige **Redirigir** en el primer mensaje en cola. Codex añade la
+instrucción al mismo turno activo en lugar de cancelarlo o crear un turno de Codex independiente.
+Lody hace avanzar la conversación solo después de que Codex confirme que ha aplicado la redirección.
+
+Una redirección puede permanecer en estado **Pendiente** brevemente mientras Codex alcanza un punto en
+el que puede aplicar la instrucción. Utiliza el modelo, el modo y la configuración del turno activo.
+Si el mensaje en cola solicita ajustes diferentes, Lody lo deja pendiente para que puedas conservar
+esos ajustes y usar **Interrumpir y enviar ahora** en su lugar.
+
+### Comandos slash
+
+Codex también puede exponer comandos slash mediante la detección de capacidades. La lista disponible
+depende de la versión de Codex instalada y de la Configuración de agente seleccionada.
+
+<SlashCommandsPreview locale="es" />
+
+### Modo rápido
+
+El Modo rápido de Codex puede activarse o desactivarse desde los controles de la sesión cuando la
+configuración de Codex seleccionada anuncia la opción. Úsalo cuando quieras un perfil de respuesta
+más rápido para una tarea.
+
+<FastModePreview locale="es" />
+
+### Generación de imágenes
+
+Cuando Codex emite una salida de generación de imágenes, Lody sube la imagen generada de vuelta a la
+conversación para que el prompt, el resultado y el trabajo posterior permanezcan juntos.
+
+<ImageOutputPreview locale="es" />
+
+### Goals
+
+Los Goals de Codex permiten que una sesión mantenga visible un objetivo de tarea y su estado de
+progreso. Primero activa la función en Codex con:
+
+```bash
+codex features enable goals
+```
+
+Después de eso, Lody puede mostrar el estado del objetivo en la interfaz de la conversación y de la
+sesión. Cada ejecución de un goal también informa su tiempo transcurrido y el uso de tokens, para que
+puedas ver de un vistazo cuánto se consumió para alcanzar el objetivo.
+
+<GoalPreview locale="es" />

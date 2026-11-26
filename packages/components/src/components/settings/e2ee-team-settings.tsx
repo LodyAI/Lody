@@ -1,3 +1,4 @@
+import { managementFailureKind } from '@/lib/e2ee-actionable-failure';
 import { seatBillingErrorKey } from './billing-errors';
 import {
   hostLedgerHistory,
@@ -69,6 +70,42 @@ const deviceFingerprint = (key: string) =>
 
 export const memberInvitationUrl = (offer: E2eeMemberOffer) =>
   getAppShareUrl(memberJoinPath(offer));
+
+function KeyDeliveryRetry({ retry }: { retry?: () => Promise<void> }) {
+  const { t } = useTranslation();
+  const [message, setMessage] = useState('e2ee.team.keyFailed');
+  const running = useRef(false);
+  const run = async () => {
+    if (!retry || running.current) return;
+    running.current = true;
+    setMessage('e2ee.team.keyRetrying');
+    try {
+      await retry();
+      setMessage('e2ee.team.keyFailed');
+    } catch (error) {
+      const kind = managementFailureKind(error);
+      setMessage(`e2ee.team.keyRetryError.${kind === 'conflict' ? 'generic' : kind}`);
+    } finally {
+      running.current = false;
+    }
+  };
+  return (
+    <>
+      <span role="status" {...stylex.props(styles.label)}>
+        {t(message)}
+      </span>
+      {retry && (
+        <Button
+          variant="secondary"
+          disabled={message === 'e2ee.team.keyRetrying'}
+          onClick={() => void run()}
+        >
+          {t('e2ee.team.keyRetry')}
+        </Button>
+      )}
+    </>
+  );
+}
 
 type Member = { membershipId: string; role: string; name?: string };
 export function E2eeTeamSettings(props: {
@@ -146,7 +183,7 @@ function TeamSession({
     if (current()) setData(value);
     await readDeliveries().catch(() => {});
   };
-  const perform = async (action: () => Promise<void>) => {
+  const perform = async (action: () => Promise<void>, approval = false) => {
     if (working.current) return;
     working.current = true;
     setBusy(true);
@@ -154,6 +191,14 @@ function TeamSession({
     try {
       await action();
     } catch (error) {
+      const kind = managementFailureKind(error);
+      const messageKey = approval
+        ? 'e2ee.team.retryOriginal'
+        : kind === 'generic'
+          ? 'e2ee.team.error.actionFailed'
+          : kind === 'network'
+            ? 'e2ee.team.error.actionNetwork'
+            : `e2ee.team.error.${kind}`;
       if (current())
         setMessage(
           t(
@@ -163,7 +208,7 @@ function TeamSession({
                   // An applicant of the unsigned invitation for this email is still waiting.
                   (e2eeErrorCode(error) === 'e2ee_member_invitation_request_pending'
                     ? 'e2ee.team.invitationRequestPending'
-                    : 'e2ee.team.retryOriginal'))
+                    : messageKey))
           )
         );
     } finally {
@@ -397,7 +442,7 @@ function TeamSession({
                       if (current()) setApproving(null);
                     }
                     await refresh();
-                  })
+                  }, true)
                 }
               >
                 {approving === request.requestId ? (
@@ -440,32 +485,22 @@ function TeamSession({
                 {applicants.current.get(delivery.requestId) ?? t('e2ee.team.applicant')}
               </span>
               {delivery.state === 'failed' ? (
-                <>
-                  <span role="status" {...stylex.props(styles.label)}>
-                    {t('e2ee.team.keyFailed')}
-                  </span>
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      void (async () => {
-                        try {
-                          const next = await runtime.retryMemberKeyDelivery?.(
+                <KeyDeliveryRetry
+                  retry={
+                    runtime.retryMemberKeyDelivery
+                      ? async () => {
+                          const next = await runtime.retryMemberKeyDelivery!(
                             workspaceId,
                             delivery.requestId
                           );
-                          if (next && current())
+                          if (current())
                             setDeliveries((items) =>
                               items.map((item) => (item.requestId === next.requestId ? next : item))
                             );
-                        } catch {
-                          /* The next poll shows the retained failure again. */
                         }
-                      })()
-                    }
-                  >
-                    {t('e2ee.team.keyRetry')}
-                  </Button>
-                </>
+                      : undefined
+                  }
+                />
               ) : (
                 <span role="status" {...stylex.props(styles.busy, styles.label)}>
                   <Spinner size="small" label={null} />

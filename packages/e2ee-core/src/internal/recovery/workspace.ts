@@ -381,7 +381,10 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
       (latest) => Effect.sync(() => disposeEpochKey(latest))
     );
   });
-  const checkedStatus = Effect.fnUntraced(function* () {
+  const checkedStatus = Effect.fnUntraced(function* (verified?: {
+    readonly reference: RecoveryEntryReference;
+    readonly identity: RecoveryIdentity;
+  }) {
     yield* guard();
     const progress = (yield* load()).value;
     if (!progress?.reference)
@@ -395,7 +398,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
         skipped: progress?.skipped ?? false,
       };
     const view = yield* current();
-    return yield* useIdentity(progress.reference, (identity) =>
+    const project = (identity: RecoveryIdentity) =>
       Effect.sync(() => {
         const paired = active(view, identity),
           currentEpoch = view.inspectState().epoch.number;
@@ -413,33 +416,34 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           lastTest: progress.lastTest,
           skipped: progress.skipped,
         };
-      })
-    );
+      });
+    return verified && verified.reference.entryId === progress.reference.entryId
+      ? yield* project(verified.identity)
+      : yield* useIdentity(progress.reference, project);
   });
-  const runTest = Effect.fnUntraced(function* () {
+  const runTest = Effect.fnUntraced(function* (verified?: {
+    readonly reference: RecoveryEntryReference;
+    readonly identity: RecoveryIdentity;
+  }) {
     let state = yield* load();
     if (!state.value?.reference) return yield* vaultError('missing');
     const reference = state.value.reference;
-    state = yield* save(state.raw, { ...state.value, stage: 'registered', envelopeEpoch: null });
-    const epoch = yield* useIdentity(reference, (identity) =>
-      openCurrent(identity, (number) =>
-        Effect.gen(function* () {
-          state = yield* save(state.raw, {
-            ...state.value!,
-            stage: 'enveloped',
-            envelopeEpoch: number,
-          });
-        })
-      )
-    );
+    if (state.value.stage !== 'registered' || state.value.envelopeEpoch !== null) {
+      state = yield* save(state.raw, { ...state.value, stage: 'registered', envelopeEpoch: null });
+    }
+    const epoch =
+      verified && verified.reference.entryId === reference.entryId
+        ? yield* openCurrent(verified.identity)
+        : yield* useIdentity(reference, (identity) => openCurrent(identity));
     const lastTest = yield* Clock.currentTimeMillis;
     state = yield* save(state.raw, {
       ...state.value!,
       stage: 'recoverable',
+      envelopeEpoch: epoch,
       testedEpoch: epoch,
       lastTest,
     });
-    return yield* checkedStatus();
+    return yield* checkedStatus(verified);
   });
   const setup = Effect.fnUntraced(function* () {
     yield* current();
@@ -482,7 +486,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             (bundle) => vault.upload(bundle, progress.entryId),
             (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
           );
-        const reserved = yield* vault.reserve(selected);
+        const reserved = yield* vault.reserve(selected, index);
         if (!reserved.reference) return yield* vaultError('conflict');
         reference = reserved.reference;
       }
@@ -612,10 +616,14 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           recordPosition: null,
           recoveryDevice: hex(identity.publicKey.toBytes()),
         });
-        return yield* runTest().pipe(
+        const verified = { reference, identity };
+        return yield* runTest(verified).pipe(
           Effect.map((status) => ({ outcome: 'Committed' as const, status })),
           Effect.catchIf(isPending, () =>
-            Effect.map(checkedStatus(), (status) => ({ outcome: 'Pending' as const, status }))
+            Effect.map(checkedStatus(verified), (status) => ({
+              outcome: 'Pending' as const,
+              status,
+            }))
           )
         );
       })

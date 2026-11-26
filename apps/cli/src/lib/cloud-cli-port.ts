@@ -1,5 +1,6 @@
 import { hostname, type as osType, release as osRelease } from 'node:os';
 import { getLodyCLIVersion } from '@/utils';
+import { syncAccountUsageSharing } from '@lody/shared/node/usage-sharing';
 import { makeInlineVersionReadHead, sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas';
 import { StreamsClient } from '@loro-dev/streams-client';
 import {
@@ -813,6 +814,20 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
   );
   const serverBaseUrl = normalizeBaseUrl(options.serverBaseUrl);
   const subscriptionClient = new ConvexClient(authBaseUrl);
+  const stopUsageSharingSync = subscriptionClient.onUpdate(
+    api.analytics.getUsageSharingForCliToken,
+    { cliToken: options.token },
+    (enabled: boolean | null) => {
+      try {
+        syncAccountUsageSharing(enabled === true);
+      } catch {
+        // Keep current local state if disk write fails.
+      }
+    },
+    () => {
+      // Older backends without the CLI query or transient outages leave local state unchanged.
+    }
+  );
   const notificationService = new NotificationService({
     convexUrl: authBaseUrl,
     cliToken: options.token,
@@ -1077,6 +1092,7 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
       baseUrl: resolveRuntimeArtifactsBaseUrl(options.runtimeArtifactsBaseUrl),
     },
     dispose: async () => {
+      stopUsageSharingSync();
       await githubTokenManagers.shutdownAll();
       await streamsTokens.closeLegacy();
       await subscriptionClient.close();

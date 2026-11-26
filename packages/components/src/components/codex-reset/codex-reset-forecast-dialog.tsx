@@ -1,8 +1,7 @@
 import { useCallback, type ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
-import { enUS } from 'date-fns/locale/en-US';
-import { zhCN } from 'date-fns/locale/zh-CN';
+import { getDateFnsLocale } from '@/lib/date-fns-locale';
 import { AlertTriangle, ExternalLink, TimerReset } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -252,7 +251,7 @@ export function CodexResetForecastDialog({
   onRetry,
 }: CodexResetForecastDialogProps) {
   const { t, i18n } = useTranslation();
-  const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const locale: Locale = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
 
   const relative = useCallback(
     (epochMs: number) =>

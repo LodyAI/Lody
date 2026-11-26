@@ -189,7 +189,9 @@ describe('Thought visibility', () => {
       contents
     );
     const collapsed = expansion(id, { [key]: false });
-    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: collapsed }))).toEqual([]);
+    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: collapsed }))).toEqual(
+      []
+    );
     // Search retains original item indexes, including thoughts after a tool call.
     const search = new Map([
       [id, { ...collapsed.get(id)!, activeSearchBlockId: getMessageItemPrefix(id, 2) }],

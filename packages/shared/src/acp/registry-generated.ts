@@ -5,9 +5,21 @@
 
 import type { RegistryAcpAgent } from '../ai';
 
-export const ACP_REGISTRY_SOURCE_URL = 'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json';
+export const ACP_REGISTRY_SOURCE_URL =
+  'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json';
 export const ACP_REGISTRY_GENERATED_AT = '2026-11-24T12:53:31.094Z';
-export const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = ["antigravity-acp","claude-acp","claude-p","codex-acp","grok-build","pi-acp","devin","dimcode","kimi","kimi-code"] as const;
+export const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = [
+  'antigravity-acp',
+  'claude-acp',
+  'claude-p',
+  'codex-acp',
+  'grok-build',
+  'pi-acp',
+  'devin',
+  'dimcode',
+  'kimi',
+  'kimi-code',
+] as const;
 
 export const HARDCODED_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
   {
@@ -22,20 +34,20 @@ export const HARDCODED_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
         platformPackages: {
           darwin: {
             arm64: 'acp-extension-claude-pty-darwin-arm64@0.1.5',
-            x64: 'acp-extension-claude-pty-darwin-x64@0.1.5'
+            x64: 'acp-extension-claude-pty-darwin-x64@0.1.5',
           },
           linux: {
             arm64: 'acp-extension-claude-pty-linux-arm64@0.1.5',
-            x64: 'acp-extension-claude-pty-linux-x64@0.1.5'
+            x64: 'acp-extension-claude-pty-linux-x64@0.1.5',
           },
           win32: {
             arm64: 'acp-extension-claude-pty-win32-arm64@0.1.5',
-            x64: 'acp-extension-claude-pty-win32-x64@0.1.5'
-          }
-        }
-      }
-    }
-  }
+            x64: 'acp-extension-claude-pty-win32-x64@0.1.5',
+          },
+        },
+      },
+    },
+  },
 ];
 
 const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
@@ -43,16 +55,15 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     id: 'agoragentic-acp',
     name: 'Agoragentic',
     version: '1.3.0',
-    description: 'Agent marketplace with 174+ AI capabilities. Browse, invoke, and pay for agent services settled in USDC on Base L2.',
+    description:
+      'Agent marketplace with 174+ AI capabilities. Browse, invoke, and pay for agent services settled in USDC on Base L2.',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/agoragentic-acp.svg',
     distribution: {
       npx: {
         package: 'agoragentic-mcp@1.3.0',
-        args: [
-          '--acp'
-        ]
-      }
-    }
+        args: ['--acp'],
+      },
+    },
   },
   {
     id: 'amp-acp',
@@ -63,45 +74,49 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-darwin-aarch64.tar.gz',
-          cmd: './amp-acp'
+          archive:
+            'https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-darwin-aarch64.tar.gz',
+          cmd: './amp-acp',
         },
         'darwin-x86_64': {
-          archive: 'https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-darwin-x86_64.tar.gz',
-          cmd: './amp-acp'
+          archive:
+            'https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-darwin-x86_64.tar.gz',
+          cmd: './amp-acp',
         },
         'linux-aarch64': {
-          archive: 'https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-linux-aarch64.tar.gz',
-          cmd: './amp-acp'
+          archive:
+            'https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-linux-aarch64.tar.gz',
+          cmd: './amp-acp',
         },
         'linux-x86_64': {
-          archive: 'https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-linux-x86_64.tar.gz',
-          cmd: './amp-acp'
+          archive:
+            'https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-linux-x86_64.tar.gz',
+          cmd: './amp-acp',
         },
         'windows-x86_64': {
-          archive: 'https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-windows-x86_64.zip',
-          cmd: 'amp-acp.exe'
-        }
-      }
-    }
+          archive:
+            'https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-windows-x86_64.zip',
+          cmd: 'amp-acp.exe',
+        },
+      },
+    },
   },
   {
     id: 'auggie',
     name: 'Auggie CLI',
     version: '0.37.0',
-    description: 'Augment Code\'s powerful software agent, backed by industry-leading context engine',
+    description:
+      "Augment Code's powerful software agent, backed by industry-leading context engine",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/auggie.svg',
     distribution: {
       npx: {
         package: '@augmentcode/auggie@0.37.0',
-        args: [
-          '--acp'
-        ],
+        args: ['--acp'],
         env: {
-          AUGMENT_DISABLE_AUTO_UPDATE: '1'
-        }
-      }
-    }
+          AUGMENT_DISABLE_AUTO_UPDATE: '1',
+        },
+      },
+    },
   },
   {
     id: 'autohand',
@@ -112,56 +127,49 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-macos-arm64.tar.gz',
+          archive:
+            'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-macos-arm64.tar.gz',
           cmd: './autohand',
-          args: [
-            '--acp'
-          ]
+          args: ['--acp'],
         },
         'darwin-x86_64': {
-          archive: 'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-macos-x64.tar.gz',
+          archive:
+            'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-macos-x64.tar.gz',
           cmd: './autohand',
-          args: [
-            '--acp'
-          ]
+          args: ['--acp'],
         },
         'linux-aarch64': {
-          archive: 'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-linux-arm64.tar.gz',
+          archive:
+            'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-linux-arm64.tar.gz',
           cmd: './autohand',
-          args: [
-            '--acp'
-          ]
+          args: ['--acp'],
         },
         'linux-x86_64': {
-          archive: 'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-linux-x64.tar.gz',
+          archive:
+            'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-linux-x64.tar.gz',
           cmd: './autohand',
-          args: [
-            '--acp'
-          ]
+          args: ['--acp'],
         },
         'linux-aarch64-musl': {
-          archive: 'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-linux-arm64-musl.tar.gz',
+          archive:
+            'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-linux-arm64-musl.tar.gz',
           cmd: './autohand',
-          args: [
-            '--acp'
-          ]
+          args: ['--acp'],
         },
         'linux-x86_64-musl': {
-          archive: 'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-linux-x64-musl.tar.gz',
+          archive:
+            'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-linux-x64-musl.tar.gz',
           cmd: './autohand',
-          args: [
-            '--acp'
-          ]
+          args: ['--acp'],
         },
         'windows-x86_64': {
-          archive: 'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-windows-x64.zip',
+          archive:
+            'https://github.com/autohandai/code-cli/releases/download/v0.9.12/autohand-windows-x64.zip',
           cmd: './autohand.exe',
-          args: [
-            '--acp'
-          ]
-        }
-      }
-    }
+          args: ['--acp'],
+        },
+      },
+    },
   },
   {
     id: 'bob',
@@ -172,100 +180,83 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       npx: {
         package: '@ibm/bob@2.1.0',
-        args: [
-          'acp'
-        ]
-      }
-    }
+        args: ['acp'],
+      },
+    },
   },
   {
     id: 'cline',
     name: 'Cline',
     version: '3.0.75',
-    description: 'Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more',
+    description:
+      'Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/cline.svg',
     distribution: {
       npx: {
         package: 'cline@3.0.75',
-        args: [
-          '--acp'
-        ]
-      }
-    }
+        args: ['--acp'],
+      },
+    },
   },
   {
     id: 'codebuddy-code',
     name: 'Codebuddy Code',
     version: '2.185.0',
-    description: 'Tencent Cloud\'s official intelligent coding tool',
+    description: "Tencent Cloud's official intelligent coding tool",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/codebuddy-code.svg',
     distribution: {
       npx: {
         package: '@tencent-ai/codebuddy-code@2.185.0',
-        args: [
-          '--acp'
-        ]
-      }
-    }
+        args: ['--acp'],
+      },
+    },
   },
   {
     id: 'cortex-code',
     name: 'Cortex Code',
     version: '1.0.73',
-    description: 'Snowflake\'s Cortex Code coding agent',
+    description: "Snowflake's Cortex Code coding agent",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/cortex-code.svg',
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-darwin-arm64.tar.gz',
+          archive:
+            'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-darwin-arm64.tar.gz',
           cmd: './coco-1.0.73+180523.e6179a031de9-darwin-arm64/cortex',
-          args: [
-            'acp',
-            'serve'
-          ]
+          args: ['acp', 'serve'],
         },
         'darwin-x86_64': {
-          archive: 'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-darwin-amd64.tar.gz',
+          archive:
+            'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-darwin-amd64.tar.gz',
           cmd: './coco-1.0.73+180523.e6179a031de9-darwin-amd64/cortex',
-          args: [
-            'acp',
-            'serve'
-          ]
+          args: ['acp', 'serve'],
         },
         'linux-x86_64': {
-          archive: 'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-linux-amd64.tar.gz',
+          archive:
+            'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-linux-amd64.tar.gz',
           cmd: './coco-1.0.73+180523.e6179a031de9-linux-amd64/cortex',
-          args: [
-            'acp',
-            'serve'
-          ]
+          args: ['acp', 'serve'],
         },
         'linux-aarch64': {
-          archive: 'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-linux-arm64.tar.gz',
+          archive:
+            'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-linux-arm64.tar.gz',
           cmd: './coco-1.0.73+180523.e6179a031de9-linux-arm64/cortex',
-          args: [
-            'acp',
-            'serve'
-          ]
+          args: ['acp', 'serve'],
         },
         'windows-x86_64': {
-          archive: 'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-windows-amd64.tar.gz',
+          archive:
+            'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-windows-amd64.tar.gz',
           cmd: './coco-1.0.73+180523.e6179a031de9-windows-amd64/cortex.exe',
-          args: [
-            'acp',
-            'serve'
-          ]
+          args: ['acp', 'serve'],
         },
         'windows-aarch64': {
-          archive: 'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-windows-arm64.tar.gz',
+          archive:
+            'https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-windows-arm64.tar.gz',
           cmd: './coco-1.0.73+180523.e6179a031de9-windows-arm64/cortex.exe',
-          args: [
-            'acp',
-            'serve'
-          ]
-        }
-      }
-    }
+          args: ['acp', 'serve'],
+        },
+      },
+    },
   },
   {
     id: 'corust-agent',
@@ -276,23 +267,27 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://github.com/Corust-ai/corust-agent-release/releases/download/v0.6.0/agent-darwin-arm64.tar.gz',
-          cmd: './corust-agent-acp'
+          archive:
+            'https://github.com/Corust-ai/corust-agent-release/releases/download/v0.6.0/agent-darwin-arm64.tar.gz',
+          cmd: './corust-agent-acp',
         },
         'darwin-x86_64': {
-          archive: 'https://github.com/Corust-ai/corust-agent-release/releases/download/v0.6.0/agent-darwin-x64.tar.gz',
-          cmd: './corust-agent-acp'
+          archive:
+            'https://github.com/Corust-ai/corust-agent-release/releases/download/v0.6.0/agent-darwin-x64.tar.gz',
+          cmd: './corust-agent-acp',
         },
         'linux-x86_64': {
-          archive: 'https://github.com/Corust-ai/corust-agent-release/releases/download/v0.6.0/agent-linux-x64.tar.gz',
-          cmd: './corust-agent-acp'
+          archive:
+            'https://github.com/Corust-ai/corust-agent-release/releases/download/v0.6.0/agent-linux-x64.tar.gz',
+          cmd: './corust-agent-acp',
         },
         'windows-x86_64': {
-          archive: 'https://github.com/Corust-ai/corust-agent-release/releases/download/v0.6.0/agent-windows-x64.zip',
-          cmd: './corust-agent-acp.exe'
-        }
-      }
-    }
+          archive:
+            'https://github.com/Corust-ai/corust-agent-release/releases/download/v0.6.0/agent-windows-x64.zip',
+          cmd: './corust-agent-acp.exe',
+        },
+      },
+    },
   },
   {
     id: 'crow-cli',
@@ -303,60 +298,51 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-darwin-aarch64.tar.gz',
+          archive:
+            'https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-darwin-aarch64.tar.gz',
           cmd: './crow-cli',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'darwin-x86_64': {
-          archive: 'https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-darwin-x86_64.tar.gz',
+          archive:
+            'https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-darwin-x86_64.tar.gz',
           cmd: './crow-cli',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-aarch64': {
-          archive: 'https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-linux-aarch64.tar.gz',
+          archive:
+            'https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-linux-aarch64.tar.gz',
           cmd: './crow-cli',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-x86_64': {
-          archive: 'https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-linux-x86_64.tar.gz',
+          archive:
+            'https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-linux-x86_64.tar.gz',
           cmd: './crow-cli',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'windows-x86_64': {
-          archive: 'https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-windows-x86_64.zip',
+          archive:
+            'https://github.com/crow-cli/crow-cli/releases/download/v0.1.49/crow-cli-windows-x86_64.zip',
           cmd: './crow-cli.exe',
-          args: [
-            'acp'
-          ]
-        }
-      }
-    }
+          args: ['acp'],
+        },
+      },
+    },
   },
   {
     id: 'cursor',
     name: 'Cursor',
     version: '2026.11.22',
-    description: 'Cursor\'s coding agent',
+    description: "Cursor's coding agent",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/cursor.svg',
     distribution: {
       local: {
         command: 'cursor-agent',
-        args: [
-          'acp'
-        ],
-        versionArgs: [
-          '--version'
-        ]
-      }
-    }
+        args: ['acp'],
+        versionArgs: ['--version'],
+      },
+    },
   },
   {
     id: 'deepagents',
@@ -366,24 +352,23 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/deepagents.svg',
     distribution: {
       npx: {
-        package: 'deepagents-acp@0.1.7'
-      }
-    }
+        package: 'deepagents-acp@0.1.7',
+      },
+    },
   },
   {
     id: 'dirac',
     name: 'Dirac',
     version: '0.6.1',
-    description: 'Reduces API costs by more than 50%, produces better and faster work. Uses Hash anchored parallel edits, AST manipulation and a whole lot of neat optimizations. Fully Open Source.',
+    description:
+      'Reduces API costs by more than 50%, produces better and faster work. Uses Hash anchored parallel edits, AST manipulation and a whole lot of neat optimizations. Fully Open Source.',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/dirac.svg',
     distribution: {
       npx: {
         package: 'dirac-cli@0.6.1',
-        args: [
-          '--acp'
-        ]
-      }
-    }
+        args: ['--acp'],
+      },
+    },
   },
   {
     id: 'factory-droid',
@@ -394,17 +379,13 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       npx: {
         package: 'droid@1.19.0',
-        args: [
-          'exec',
-          '--output-format',
-          'acp'
-        ],
+        args: ['exec', '--output-format', 'acp'],
         env: {
           DROID_DISABLE_AUTO_UPDATE: 'true',
-          FACTORY_DROID_AUTO_UPDATE_ENABLED: 'false'
-        }
-      }
-    }
+          FACTORY_DROID_AUTO_UPDATE_ENABLED: 'false',
+        },
+      },
+    },
   },
   {
     id: 'fast-agent',
@@ -415,56 +396,51 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       uvx: {
         package: 'fast-agent-acp==0.10.66',
-        args: [
-          '-x'
-        ],
+        args: ['-x'],
         env: {
-          FAST_AGENT_MODEL: 'codexplan'
-        }
-      }
-    }
+          FAST_AGENT_MODEL: 'codexplan',
+        },
+      },
+    },
   },
   {
     id: 'gemini',
     name: 'Gemini CLI',
     version: '0.71.1',
-    description: 'Google\'s official CLI for Gemini',
+    description: "Google's official CLI for Gemini",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/gemini.svg',
     distribution: {
       npx: {
         package: '@google/gemini-cli@0.71.1',
-        args: [
-          '--acp'
-        ]
-      }
-    }
+        args: ['--acp'],
+      },
+    },
   },
   {
     id: 'github-copilot-cli',
     name: 'GitHub Copilot',
     version: '1.0.114',
-    description: 'GitHub\'s AI pair programmer',
+    description: "GitHub's AI pair programmer",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/github-copilot-cli.svg',
     distribution: {
       npx: {
         package: '@github/copilot@1.0.114',
-        args: [
-          '--acp'
-        ]
-      }
-    }
+        args: ['--acp'],
+      },
+    },
   },
   {
     id: 'glm-acp-agent',
     name: 'GLM Agent',
     version: '1.17.1',
-    description: 'ACP agent powered by Zhipu AI\'s GLM Coding Plan models (glm-5.1, glm-5-turbo, glm-4.7, glm-4.5-air). Supports streaming, tool calls, mid-session model switching, image input via Z.AI Coding Plan Vision MCP, and session load/fork/resume with on-disk persistence.',
+    description:
+      "ACP agent powered by Zhipu AI's GLM Coding Plan models (glm-5.1, glm-5-turbo, glm-4.7, glm-4.5-air). Supports streaming, tool calls, mid-session model switching, image input via Z.AI Coding Plan Vision MCP, and session load/fork/resume with on-disk persistence.",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/glm-acp-agent.svg',
     distribution: {
       npx: {
-        package: 'glm-acp-agent@1.17.1'
-      }
-    }
+        package: 'glm-acp-agent@1.17.1',
+      },
+    },
   },
   {
     id: 'goose',
@@ -475,14 +451,10 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       local: {
         command: 'goose',
-        args: [
-          '--acp=true'
-        ],
-        versionArgs: [
-          '--version'
-        ]
-      }
-    }
+        args: ['--acp=true'],
+        versionArgs: ['--version'],
+      },
+    },
   },
   {
     id: 'harn',
@@ -493,47 +465,37 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-aarch64-apple-darwin.tar.gz',
+          archive:
+            'https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-aarch64-apple-darwin.tar.gz',
           cmd: './harn',
-          args: [
-            'serve',
-            'acp'
-          ]
+          args: ['serve', 'acp'],
         },
         'darwin-x86_64': {
-          archive: 'https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-x86_64-apple-darwin.tar.gz',
+          archive:
+            'https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-x86_64-apple-darwin.tar.gz',
           cmd: './harn',
-          args: [
-            'serve',
-            'acp'
-          ]
+          args: ['serve', 'acp'],
         },
         'linux-aarch64': {
-          archive: 'https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-aarch64-unknown-linux-gnu.tar.gz',
+          archive:
+            'https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-aarch64-unknown-linux-gnu.tar.gz',
           cmd: './harn',
-          args: [
-            'serve',
-            'acp'
-          ]
+          args: ['serve', 'acp'],
         },
         'linux-x86_64': {
-          archive: 'https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-x86_64-unknown-linux-gnu.tar.gz',
+          archive:
+            'https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-x86_64-unknown-linux-gnu.tar.gz',
           cmd: './harn',
-          args: [
-            'serve',
-            'acp'
-          ]
+          args: ['serve', 'acp'],
         },
         'windows-x86_64': {
-          archive: 'https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-x86_64-pc-windows-msvc.zip',
+          archive:
+            'https://github.com/burin-labs/harn/releases/download/v0.10.202/harn-x86_64-pc-windows-msvc.zip',
           cmd: 'harn.exe',
-          args: [
-            'serve',
-            'acp'
-          ]
-        }
-      }
-    }
+          args: ['serve', 'acp'],
+        },
+      },
+    },
   },
   {
     id: 'junie',
@@ -544,14 +506,10 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       local: {
         command: 'junie',
-        args: [
-          '--acp=true'
-        ],
-        versionArgs: [
-          '--version'
-        ]
-      }
-    }
+        args: ['--acp=true'],
+        versionArgs: ['--version'],
+      },
+    },
   },
   {
     id: 'kilo',
@@ -562,62 +520,53 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       npx: {
         package: '@kilocode/cli@7.8.32',
-        args: [
-          'acp'
-        ]
+        args: ['acp'],
       },
       binary: {
         'darwin-aarch64': {
-          archive: 'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-darwin-arm64.zip',
+          archive:
+            'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-darwin-arm64.zip',
           cmd: './kilo',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'darwin-x86_64': {
-          archive: 'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-darwin-x64.zip',
+          archive:
+            'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-darwin-x64.zip',
           cmd: './kilo',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-aarch64': {
-          archive: 'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-linux-arm64.tar.gz',
+          archive:
+            'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-linux-arm64.tar.gz',
           cmd: './kilo',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-x86_64': {
-          archive: 'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-linux-x64.tar.gz',
+          archive:
+            'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-linux-x64.tar.gz',
           cmd: './kilo',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-aarch64-musl': {
-          archive: 'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-linux-arm64-musl.tar.gz',
+          archive:
+            'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-linux-arm64-musl.tar.gz',
           cmd: './kilo',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-x86_64-musl': {
-          archive: 'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-linux-x64-musl.tar.gz',
+          archive:
+            'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-linux-x64-musl.tar.gz',
           cmd: './kilo',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'windows-x86_64': {
-          archive: 'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-windows-x64.zip',
+          archive:
+            'https://github.com/Kilo-Org/kilocode/releases/download/v7.8.32/kilo-windows-x64.zip',
           cmd: './kilo.exe',
-          args: [
-            'acp'
-          ]
-        }
-      }
-    }
+          args: ['acp'],
+        },
+      },
+    },
   },
   {
     id: 'kimchi',
@@ -628,47 +577,37 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://github.com/getkimchi/kimchi/releases/download/v1.39.1/kimchi_darwin_arm64.tar.gz',
+          archive:
+            'https://github.com/getkimchi/kimchi/releases/download/v1.39.1/kimchi_darwin_arm64.tar.gz',
           cmd: './bin/kimchi',
-          args: [
-            '--mode',
-            'acp'
-          ]
+          args: ['--mode', 'acp'],
         },
         'darwin-x86_64': {
-          archive: 'https://github.com/getkimchi/kimchi/releases/download/v1.39.1/kimchi_darwin_amd64.tar.gz',
+          archive:
+            'https://github.com/getkimchi/kimchi/releases/download/v1.39.1/kimchi_darwin_amd64.tar.gz',
           cmd: './bin/kimchi',
-          args: [
-            '--mode',
-            'acp'
-          ]
+          args: ['--mode', 'acp'],
         },
         'linux-aarch64': {
-          archive: 'https://github.com/getkimchi/kimchi/releases/download/v1.39.1/kimchi_linux_arm64.tar.gz',
+          archive:
+            'https://github.com/getkimchi/kimchi/releases/download/v1.39.1/kimchi_linux_arm64.tar.gz',
           cmd: './bin/kimchi',
-          args: [
-            '--mode',
-            'acp'
-          ]
+          args: ['--mode', 'acp'],
         },
         'linux-x86_64': {
-          archive: 'https://github.com/getkimchi/kimchi/releases/download/v1.39.1/kimchi_linux_amd64.tar.gz',
+          archive:
+            'https://github.com/getkimchi/kimchi/releases/download/v1.39.1/kimchi_linux_amd64.tar.gz',
           cmd: './bin/kimchi',
-          args: [
-            '--mode',
-            'acp'
-          ]
+          args: ['--mode', 'acp'],
         },
         'windows-x86_64': {
-          archive: 'https://github.com/getkimchi/kimchi/releases/download/v1.39.1/kimchi_windows_amd64.zip',
+          archive:
+            'https://github.com/getkimchi/kimchi/releases/download/v1.39.1/kimchi_windows_amd64.zip',
           cmd: './bin/kimchi.exe',
-          args: [
-            '--mode',
-            'acp'
-          ]
-        }
-      }
-    }
+          args: ['--mode', 'acp'],
+        },
+      },
+    },
   },
   {
     id: 'kiro',
@@ -679,55 +618,39 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://prod.download.cli.kiro.dev/stable/3.0.0/kirocli-universal-darwin.tar.gz',
+          archive:
+            'https://prod.download.cli.kiro.dev/stable/3.0.0/kirocli-universal-darwin.tar.gz',
           cmd: './kirocli/bin/kiro-cli',
-          args: [
-            'acp',
-            '--agent-engine=v3'
-          ]
+          args: ['acp', '--agent-engine=v3'],
         },
         'darwin-x86_64': {
-          archive: 'https://prod.download.cli.kiro.dev/stable/3.0.0/kirocli-universal-darwin.tar.gz',
+          archive:
+            'https://prod.download.cli.kiro.dev/stable/3.0.0/kirocli-universal-darwin.tar.gz',
           cmd: './kirocli/bin/kiro-cli',
-          args: [
-            'acp',
-            '--agent-engine=v3'
-          ]
+          args: ['acp', '--agent-engine=v3'],
         },
         'linux-aarch64': {
           archive: 'https://prod.download.cli.kiro.dev/stable/3.0.0/kirocli-aarch64-linux.tar.gz',
           cmd: './kirocli/bin/kiro-cli',
-          args: [
-            'acp',
-            '--agent-engine=v3'
-          ]
+          args: ['acp', '--agent-engine=v3'],
         },
         'linux-x86_64': {
           archive: 'https://prod.download.cli.kiro.dev/stable/3.0.0/kirocli-x86_64-linux.tar.gz',
           cmd: './kirocli/bin/kiro-cli',
-          args: [
-            'acp',
-            '--agent-engine=v3'
-          ]
+          args: ['acp', '--agent-engine=v3'],
         },
         'linux-aarch64-musl': {
           archive: 'https://prod.download.cli.kiro.dev/stable/3.0.0/kirocli-aarch64-linux-musl.zip',
           cmd: './kirocli/bin/kiro-cli',
-          args: [
-            'acp',
-            '--agent-engine=v3'
-          ]
+          args: ['acp', '--agent-engine=v3'],
         },
         'linux-x86_64-musl': {
           archive: 'https://prod.download.cli.kiro.dev/stable/3.0.0/kirocli-x86_64-linux-musl.zip',
           cmd: './kirocli/bin/kiro-cli',
-          args: [
-            'acp',
-            '--agent-engine=v3'
-          ]
-        }
-      }
-    }
+          args: ['acp', '--agent-engine=v3'],
+        },
+      },
+    },
   },
   {
     id: 'minimax-code',
@@ -738,116 +661,103 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       npx: {
         package: '@minimax-ai/code-acp@0.7.9',
-        args: [
-          'acp'
-        ]
-      }
-    }
+        args: ['acp'],
+      },
+    },
   },
   {
     id: 'minion-code',
     name: 'Minion Code',
     version: '0.1.44',
-    description: 'An enhanced AI code assistant built on the Minion framework with rich development tools',
+    description:
+      'An enhanced AI code assistant built on the Minion framework with rich development tools',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/minion-code.svg',
     distribution: {
       local: {
         command: 'minion-code',
-        args: [
-          'acp'
-        ],
-        versionArgs: [
-          '--version'
-        ]
-      }
-    }
+        args: ['acp'],
+        versionArgs: ['--version'],
+      },
+    },
   },
   {
     id: 'mistral-vibe',
     name: 'Mistral Vibe',
     version: '3.1.4',
-    description: 'Mistral\'s open-source coding assistant',
+    description: "Mistral's open-source coding assistant",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/mistral-vibe.svg',
     distribution: {
       local: {
         command: 'vibe-acp',
         args: [],
-        versionArgs: [
-          '--version'
-        ]
-      }
-    }
+        versionArgs: ['--version'],
+      },
+    },
   },
   {
     id: 'muse-code',
     name: 'Muse Code',
     version: '1.4.24',
-    description: 'Meta\'s coding agent, built for Muse Spark',
+    description: "Meta's coding agent, built for Muse Spark",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/muse-code.svg',
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-aarch64-macos',
+          archive:
+            'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-aarch64-macos',
           cmd: './muse',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
-            MUSE_EXPERIMENTAL_ACP: 'on'
-          }
+            MUSE_EXPERIMENTAL_ACP: 'on',
+          },
         },
         'darwin-x86_64': {
-          archive: 'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-x86-macos',
+          archive:
+            'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-x86-macos',
           cmd: './muse',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
-            MUSE_EXPERIMENTAL_ACP: 'on'
-          }
+            MUSE_EXPERIMENTAL_ACP: 'on',
+          },
         },
         'linux-aarch64': {
-          archive: 'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-aarch64-linux',
+          archive:
+            'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-aarch64-linux',
           cmd: './muse',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
-            MUSE_EXPERIMENTAL_ACP: 'on'
-          }
+            MUSE_EXPERIMENTAL_ACP: 'on',
+          },
         },
         'linux-x86_64': {
-          archive: 'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-x86-linux',
+          archive:
+            'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-x86-linux',
           cmd: './muse',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
-            MUSE_EXPERIMENTAL_ACP: 'on'
-          }
+            MUSE_EXPERIMENTAL_ACP: 'on',
+          },
         },
         'windows-aarch64': {
-          archive: 'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-aarch64-windows.exe',
+          archive:
+            'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-aarch64-windows.exe',
           cmd: './muse.exe',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
-            MUSE_EXPERIMENTAL_ACP: 'on'
-          }
+            MUSE_EXPERIMENTAL_ACP: 'on',
+          },
         },
         'windows-x86_64': {
-          archive: 'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-x86-windows.exe',
+          archive:
+            'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.24-R9131.1&file=muse-x86-windows.exe',
           cmd: './muse.exe',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
-            MUSE_EXPERIMENTAL_ACP: 'on'
-          }
-        }
-      }
-    }
+            MUSE_EXPERIMENTAL_ACP: 'on',
+          },
+        },
+      },
+    },
   },
   {
     id: 'nova',
@@ -858,11 +768,9 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       npx: {
         package: '@compass-ai/nova@1.1.68',
-        args: [
-          'acp'
-        ]
-      }
-    }
+        args: ['acp'],
+      },
+    },
   },
   {
     id: 'opencode',
@@ -873,134 +781,111 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       local: {
         command: 'opencode',
-        args: [
-          'acp'
-        ],
-        versionArgs: [
-          '-v'
-        ]
-      }
-    }
+        args: ['acp'],
+        versionArgs: ['-v'],
+      },
+    },
   },
   {
     id: 'opencode-v2',
     name: 'OpenCode (legacy ID)',
     version: '2.4.1',
-    description: 'Compatibility entry for existing opencode-v2 installations. Select OpenCode (opencode) for new installations.',
+    description:
+      'Compatibility entry for existing opencode-v2 installations. Select OpenCode (opencode) for new installations.',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/opencode-v2.svg',
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-darwin-arm64.zip',
+          archive:
+            'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-darwin-arm64.zip',
           cmd: './opencode',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'darwin-x86_64': {
-          archive: 'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-darwin-x64.zip',
+          archive:
+            'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-darwin-x64.zip',
           cmd: './opencode',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-aarch64': {
-          archive: 'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-linux-arm64.tar.gz',
+          archive:
+            'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-linux-arm64.tar.gz',
           cmd: './opencode',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-x86_64': {
-          archive: 'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-linux-x64.tar.gz',
+          archive:
+            'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-linux-x64.tar.gz',
           cmd: './opencode',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-aarch64-musl': {
-          archive: 'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-linux-arm64-musl.tar.gz',
+          archive:
+            'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-linux-arm64-musl.tar.gz',
           cmd: './opencode',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-x86_64-musl': {
-          archive: 'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-linux-x64-musl.tar.gz',
+          archive:
+            'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-linux-x64-musl.tar.gz',
           cmd: './opencode',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'windows-aarch64': {
-          archive: 'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-windows-arm64.zip',
+          archive:
+            'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-windows-arm64.zip',
           cmd: './opencode.exe',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'windows-x86_64': {
-          archive: 'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-windows-x64.zip',
+          archive:
+            'https://github.com/anomalyco/opencode/releases/download/v2.4.1/opencode-windows-x64.zip',
           cmd: './opencode.exe',
-          args: [
-            'acp'
-          ]
-        }
-      }
-    }
+          args: ['acp'],
+        },
+      },
+    },
   },
   {
     id: 'poolside',
     name: 'Poolside',
     version: '1.0.16',
-    description: 'Poolside\'s coding agent',
+    description: "Poolside's coding agent",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/poolside.svg',
     distribution: {
       binary: {
         'darwin-aarch64': {
           archive: 'https://downloads.poolside.ai/pool/v1.0.16/pool-darwin-arm64.tar.gz',
           cmd: './pool-darwin-arm64',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'darwin-x86_64': {
           archive: 'https://downloads.poolside.ai/pool/v1.0.16/pool-darwin-amd64.tar.gz',
           cmd: './pool-darwin-amd64',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-aarch64': {
           archive: 'https://downloads.poolside.ai/pool/v1.0.16/pool-linux-arm64.tar.gz',
           cmd: './pool-linux-arm64',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'linux-x86_64': {
           archive: 'https://downloads.poolside.ai/pool/v1.0.16/pool-linux-amd64.tar.gz',
           cmd: './pool-linux-amd64',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'windows-aarch64': {
           archive: 'https://downloads.poolside.ai/pool/v1.0.16/pool-windows-arm64.tar.gz',
           cmd: './pool-windows-arm64.exe',
-          args: [
-            'acp'
-          ]
+          args: ['acp'],
         },
         'windows-x86_64': {
           archive: 'https://downloads.poolside.ai/pool/v1.0.16/pool-windows-amd64.tar.gz',
           cmd: './pool-windows-amd64.exe',
-          args: [
-            'acp'
-          ]
-        }
-      }
-    }
+          args: ['acp'],
+        },
+      },
+    },
   },
   {
     id: 'qoder',
@@ -1011,79 +896,78 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       npx: {
         package: '@qoder-ai/qodercli@1.1.96',
-        args: [
-          '--acp'
-        ]
-      }
-    }
+        args: ['--acp'],
+      },
+    },
   },
   {
     id: 'qwen-code',
     name: 'Qwen Code',
     version: '0.28.4',
-    description: 'Alibaba\'s Qwen coding assistant',
+    description: "Alibaba's Qwen coding assistant",
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/qwen-code.svg',
     distribution: {
       npx: {
         package: '@qwen-code/qwen-code@0.28.4',
-        args: [
-          '--acp',
-          '--experimental-skills'
-        ]
-      }
-    }
+        args: ['--acp', '--experimental-skills'],
+      },
+    },
   },
   {
     id: 'reasonix',
     name: 'DeepSeek Reasonix',
     version: '1.7.0-rc.1',
-    description: 'DeepSeek-native coding agent: cache-first loop, flash-first cost control, tool-call repair.',
+    description:
+      'DeepSeek-native coding agent: cache-first loop, flash-first cost control, tool-call repair.',
     distribution: {
       npx: {
         package: 'reasonix@1.7.0-rc.1',
-        args: [
-          'acp'
-        ]
-      }
-    }
+        args: ['acp'],
+      },
+    },
   },
   {
     id: 'sigit',
     name: 'siGit Code',
     version: '1.7.10',
-    description: 'Local-first coding agent. Runs entirely on your machine with optional on-device LLM inference via Onde.',
+    description:
+      'Local-first coding agent. Runs entirely on your machine with optional on-device LLM inference via Onde.',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/sigit.svg',
     distribution: {
       npx: {
-        package: '@smbcloud/sigit@1.7.10'
+        package: '@smbcloud/sigit@1.7.10',
       },
       binary: {
         'darwin-aarch64': {
-          archive: 'https://github.com/getsigit/sigit/releases/download/v1.7.10/sigit-macos-arm64.tar.gz',
-          cmd: './sigit'
+          archive:
+            'https://github.com/getsigit/sigit/releases/download/v1.7.10/sigit-macos-arm64.tar.gz',
+          cmd: './sigit',
         },
         'darwin-x86_64': {
-          archive: 'https://github.com/getsigit/sigit/releases/download/v1.7.10/sigit-macos-amd64.tar.gz',
-          cmd: './sigit'
+          archive:
+            'https://github.com/getsigit/sigit/releases/download/v1.7.10/sigit-macos-amd64.tar.gz',
+          cmd: './sigit',
         },
         'linux-aarch64': {
           archive: 'https://github.com/getsigit/sigit/releases/download/v1.7.10/sigit-linux-arm64',
-          cmd: './sigit-linux-arm64'
+          cmd: './sigit-linux-arm64',
         },
         'linux-x86_64': {
           archive: 'https://github.com/getsigit/sigit/releases/download/v1.7.10/sigit-linux-amd64',
-          cmd: './sigit-linux-amd64'
+          cmd: './sigit-linux-amd64',
         },
         'windows-aarch64': {
-          archive: 'https://github.com/getsigit/sigit/releases/download/v1.7.10/sigit-win-arm64.exe',
-          cmd: './sigit-win-arm64.exe'
+          archive:
+            'https://github.com/getsigit/sigit/releases/download/v1.7.10/sigit-win-arm64.exe',
+          cmd: './sigit-win-arm64.exe',
         },
         'windows-x86_64': {
-          archive: 'https://github.com/getsigit/sigit/releases/download/v1.7.10/sigit-win-amd64.exe',
-          cmd: './sigit-win-amd64.exe'
-        }
-      }
-    }
+          archive:
+            'https://github.com/getsigit/sigit/releases/download/v1.7.10/sigit-win-amd64.exe',
+          cmd: './sigit-win-amd64.exe',
+        },
+      },
+    },
   },
   {
     id: 'stakpak',
@@ -1094,84 +978,76 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     distribution: {
       local: {
         command: 'stakpak',
-        args: [
-          'acp'
-        ],
-        versionArgs: [
-          '--version'
-        ]
-      }
-    }
+        args: ['acp'],
+        versionArgs: ['--version'],
+      },
+    },
   },
   {
     id: 'vtcode',
     name: 'VT Code',
     version: '0.96.14',
-    description: 'An open-source coding agent with LLM-native code understanding and robust shell safety. Supports multiple LLM providers with automatic failover and efficient context management.',
+    description:
+      'An open-source coding agent with LLM-native code understanding and robust shell safety. Supports multiple LLM providers with automatic failover and efficient context management.',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/vtcode.svg',
     distribution: {
       binary: {
         'darwin-aarch64': {
-          archive: 'https://github.com/vinhnx/VTCode/releases/download/0.96.14/vtcode-0.96.14-aarch64-apple-darwin.tar.gz',
+          archive:
+            'https://github.com/vinhnx/VTCode/releases/download/0.96.14/vtcode-0.96.14-aarch64-apple-darwin.tar.gz',
           cmd: './vtcode',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
             VT_ACP_ENABLED: '1',
-            VT_ACP_ZED_ENABLED: '1'
-          }
+            VT_ACP_ZED_ENABLED: '1',
+          },
         },
         'darwin-x86_64': {
-          archive: 'https://github.com/vinhnx/VTCode/releases/download/0.96.14/vtcode-0.96.14-x86_64-apple-darwin.tar.gz',
+          archive:
+            'https://github.com/vinhnx/VTCode/releases/download/0.96.14/vtcode-0.96.14-x86_64-apple-darwin.tar.gz',
           cmd: './vtcode',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
             VT_ACP_ENABLED: '1',
-            VT_ACP_ZED_ENABLED: '1'
-          }
+            VT_ACP_ZED_ENABLED: '1',
+          },
         },
         'linux-x86_64': {
-          archive: 'https://github.com/vinhnx/VTCode/releases/download/0.96.14/vtcode-0.96.14-x86_64-unknown-linux-gnu.tar.gz',
+          archive:
+            'https://github.com/vinhnx/VTCode/releases/download/0.96.14/vtcode-0.96.14-x86_64-unknown-linux-gnu.tar.gz',
           cmd: './vtcode',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
             VT_ACP_ENABLED: '1',
-            VT_ACP_ZED_ENABLED: '1'
-          }
+            VT_ACP_ZED_ENABLED: '1',
+          },
         },
         'linux-x86_64-musl': {
-          archive: 'https://github.com/vinhnx/VTCode/releases/download/0.96.14/vtcode-0.96.14-x86_64-unknown-linux-musl.tar.gz',
+          archive:
+            'https://github.com/vinhnx/VTCode/releases/download/0.96.14/vtcode-0.96.14-x86_64-unknown-linux-musl.tar.gz',
           cmd: './vtcode',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
             VT_ACP_ENABLED: '1',
-            VT_ACP_ZED_ENABLED: '1'
-          }
+            VT_ACP_ZED_ENABLED: '1',
+          },
         },
         'windows-x86_64': {
-          archive: 'https://github.com/vinhnx/VTCode/releases/download/0.96.14/vtcode-0.96.14-x86_64-pc-windows-msvc.zip',
+          archive:
+            'https://github.com/vinhnx/VTCode/releases/download/0.96.14/vtcode-0.96.14-x86_64-pc-windows-msvc.zip',
           cmd: 'vtcode.exe',
-          args: [
-            'acp'
-          ],
+          args: ['acp'],
           env: {
             VT_ACP_ENABLED: '1',
-            VT_ACP_ZED_ENABLED: '1'
-          }
-        }
-      }
-    }
-  }
+            VT_ACP_ZED_ENABLED: '1',
+          },
+        },
+      },
+    },
+  },
 ];
 
 export const REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
   ...HARDCODED_REGISTRY_ACP_AGENTS,
-  ...REMOTE_REGISTRY_ACP_AGENTS
+  ...REMOTE_REGISTRY_ACP_AGENTS,
 ];

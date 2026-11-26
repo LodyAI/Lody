@@ -342,7 +342,12 @@ it('keeps a connect pending until the job on the machine reports back', async ()
   let job: 'running' | 'done' = 'running';
   const state = {
     ...mocks.provider,
-    result: { type: 'machine/memory' as const, status: 'ready' as const, memories: [], agents: before },
+    result: {
+      type: 'machine/memory' as const,
+      status: 'ready' as const,
+      memories: [],
+      agents: before,
+    },
     connect: vi.fn(async () => ({
       type: 'machine/memory' as const,
       status: 'ready' as const,

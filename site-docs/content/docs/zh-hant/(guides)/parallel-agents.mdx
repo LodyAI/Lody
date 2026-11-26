@@ -1,0 +1,86 @@
+---
+title: "平行 Coding Agents"
+description: "在同一個 Lody 工作區中以團隊方式運行多個編碼 Agent——包含隔離的 Git worktree、混用 Claude Code 與 Kimi 等不同模型，以及共享的工作階段可見性。"
+---
+
+Lody 是一個專為 **multi-agent coding** 打造的團隊工作區：你可以同時啟動多個編碼 Agent 工作階段，每個工作階段都有各自的對話。當工作階段使用 [worktree](/zh-hant/docs/worktrees) 時——GitHub 專案一律會使用，而本機專案亦可選擇啟用——該工作階段還會擁有獨立的工作目錄，讓多個 Agent 能並行修改檔案而不會互相衝突。
+
+你可以同時執行多個 Claude Code 工作階段，或是將 Claude Code 與 Codex、Kimi、Grok、DeepSeek 或其他 [ACP](/zh-hant/docs/cli-runtimes) 執行環境搭配使用。若要讓 Agent 分派任務、交換上下文並互相審查變更，請參閱[多 Agent 協作指南](/zh-hant/docs/agent-collaboration/)。
+
+另請參閱 [Agent Config](/zh-hant/docs/quickstart)、[團隊功能](/zh-hant/docs/team)、[分享 Coding Agent 工作階段](/zh-hant/docs/session-handoff) 與 [Agent 工作階段控制](/zh-hant/docs/session-orchestration)。分享連結只是一份靜態紀錄，而非即時接續——詳見[分享連結 vs 現場交接](/zh-hant/docs/compare/share-link-vs-live-handoff)。
+
+## 隔離的 Worktree
+
+當你建立使用 worktree 的工作階段時，Lody 會：
+
+1. 建立一個分支（預設為 `session/<shortSessionId>`）
+2. 在專屬的 worktree 中簽出該分支
+3. 視需要執行專案的 setup 腳本
+4. 將檔案變更即時串流至工作階段介面
+
+不同工作階段中的 Agent 不會共用工作目錄，因此未提交的編輯會保留在各自建立該變更的任務中。你可以依各個工作階段個別進行審查、捨棄或開啟 PR。
+
+<Callout title="Fork 目標位置">
+[Fork](/zh-hant/docs/session#fork-工作階段) 會將對話紀錄複製到一個**新的**工作階段。**目前工作區**（以及側邊對話）會留在來源目錄中。當畫面提供 **新 Worktree** 選項時，該 Fork 會從最新已提交的 `HEAD` 建立一個獨立的工作階段——當你想要目錄隔離又不想放棄現有對話紀錄時，可以使用此選項。若你想要一個完全獨立、不複製任何歷史紀錄的全新任務，請從首頁啟動新的工作階段。
+</Callout>
+
+詳細資訊請參閱 [Worktree](/zh-hant/docs/worktrees)。
+
+## 多個 Agent，同一個工作區
+
+每個工作階段都能在輸入框中各自選擇 [Agent Config](/zh-hant/docs/quickstart)、模型與權限範圍。你可以執行：
+
+- 透過該機器上已登入的訂閱帳號執行 Claude Code 或 Codex
+- Kimi Code、DeepSeek Harness，以及其他內建或相容於 Claude 的設定
+- [ACP Registry](/zh-hant/docs/cli-runtimes) 中的任何執行環境，或自訂的 ACP 啟動指令
+
+如果你經常重複使用同一套機器、設定、模型與權限組合，可以將其儲存為 [Agent Role](/zh-hant/docs/agent-roles)。
+
+同時可以運行多少個工作階段，取決於主機效能以及你實際能有效追蹤的對話數量——請參閱[推薦工作流程](/zh-hant/docs/workflow)。
+
+## 團隊可見性
+
+當團隊成員都能看見目前正在執行的任務時，平行協作會更加順暢。
+
+- 在首頁上，側邊欄的篩選預設為 **全部任務**。如果某位成員只看得到自己的工作階段，請將 **我的任務** 切換為 **全部任務**（在行動裝置上則為 **團隊任務**）。頭像會顯示每個工作階段是由誰發起的。
+- 機器**預設為私人**。當需要讓團隊成員開啟這些對話時，請共享該機器（或在工作階段中使用 **Share with team…**）。
+- 若要讓團隊成員*直接進入*某個現有的工作階段——共用同一段對話、diff 與 worktree——請參閱[分享 Coding Agent 工作階段](/zh-hant/docs/session-handoff)。
+
+成員資格、角色與機器共享說明請參閱[團隊功能](/zh-hant/docs/team)。
+
+## 從單一對話中協調
+
+對大多數的平行工作而言，手動啟動幾個工作階段就已經足夠。如果你想讓其中一個 Agent 來拆解任務，可以請它使用 [Agent 工作階段控制](/zh-hant/docs/session-orchestration)：建立或重複使用對話、檢查執行狀態、發送後續指示，並將結果彙整回來。只要目標機器保持在線，這些被委派的對話就能平行執行。
+
+## 實務上的拆分方式
+
+參考[推薦工作流程](/zh-hant/docs/workflow)：
+
+1. 將工作拆分為小型的功能或修復項目。
+2. 每個項目在首頁啟動一個對話（通常對應一個 PR）。
+3. 在各個 Agent 工作期間，即時審查它們產生的 [Diff](/zh-hant/docs/diff-viewer)。
+4. 針對託管於 GitHub 的工作，在變更就緒後直接從該工作階段建立 PR。
+5. 工作完成後[封存](/zh-hant/docs/session#封存工作階段)該工作階段，讓系統回收對應的 worktree。
+
+## 常見問題
+
+### 這是 Claude Code 的團隊功能嗎？
+
+不是。Claude Code 只是你可以在 Lody 中執行的其中一種 [Agent Config](/zh-hant/docs/quickstart)。工作區、隔離的 worktree 以及團隊工作階段列表皆由 Lody 提供。你可以同時執行多個 Claude Code 工作階段，也可以將 Claude Code 與 Kimi、DeepSeek、Codex 或其他 ACP Agent 混搭使用。
+
+### 平行執行的 Agent 會互相覆寫檔案嗎？
+
+只要每個任務都擁有各自的 [worktree](/zh-hant/docs/worktrees)——包含 **新 Worktree** Fork 或從首頁新建的工作階段——就不會互相覆寫。**目前工作區** Fork 與側邊對話會共用來源工作階段的目錄，因此彼此可以看到對方的檔案變更。新 Worktree Fork 會從已提交的 `HEAD` 起步；未提交的編輯則會保留在來源工作階段中。
+
+### 團隊成員看得到所有正在執行的 Agent 嗎？
+
+他們可以看到已共享給該工作區的機器（以及本機專案）上的工作階段，若首頁篩選器目前設為 **我的任務**，只需切換至 **全部任務** 即可查看。未共享的機器絕不會將這些對話同步至其他成員的側邊欄。詳見[團隊功能](/zh-hant/docs/team)。
+
+### 可以讓一個 Agent 啟動其他 Agent 嗎？
+
+可以，透過 [Agent 工作階段控制](/zh-hant/docs/session-orchestration) 即可達成。你可以請某個對話建立專注於特定任務的工作階段、與其他 Agent 交換訊息、追蹤它們的進度並彙整結果。此機制僅限於 Lody 對話資料的範圍內，並非通用的背景排程器。
+
+### 什麼時候該交接，而不是再啟動另一個 Agent？
+
+當你想開啟一個**新的**隔離任務時，請啟動另一個工作階段。
+當你需要讓團隊成員**接續**進行現有的工作階段時，請使用[交接](/zh-hant/docs/session-handoff)。

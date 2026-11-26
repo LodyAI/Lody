@@ -1,0 +1,97 @@
+---
+title: "Proyectos locales"
+description: "Agrega directorios de trabajo locales a Lody para que los clientes de escritorio, web y móvil puedan sincronizar el historial de chat del proyecto, los diffs de archivos, las ramas y los worktrees."
+---
+
+# Proyectos locales
+
+Lody permite agregar cualquier directorio de trabajo local como proyecto. Recomendamos usar la
+aplicación de escritorio para este flujo de trabajo. Una vez agregado un proyecto local, Lody lo
+mantiene sincronizado entre dispositivos en tiempo real, incluyendo el historial de chat, las vistas
+de diffs de archivos, las ramas de Git y los worktrees por sesión.
+
+## Agregar un proyecto local
+
+Lody admite varias formas de agregarlo:
+
+- En la aplicación de escritorio, haz clic en el botón de agregar junto a `My Projects`. Esto abre
+  el selector de archivos local, donde puedes elegir un directorio para agregar.
+- En entornos sin escritorio, como servidores, usa los [comandos de proyecto de la CLI](/es/docs/cli#project-commands),
+  por ejemplo `npx lody project add [path]`.
+
+## Disponibilidad local primero
+
+En la aplicación de escritorio, los proyectos y las sesiones ya disponibles en la máquina local
+siguen siendo utilizables cuando no hay red. Puedes abrirlos desde el catálogo de espacios de
+trabajo local, leer su historial y seguir trabajando. Los cambios realizados localmente se conservan
+y se sincronizan cuando vuelve la conexión.
+
+Las acciones exclusivas de la nube, como abrir un proyecto en otra máquina u obtener datos nuevos de
+GitHub, siguen necesitando conexión de red. Eliminar un proyecto desde otro dispositivo también
+requiere que su máquina propietaria esté en línea.
+
+## Worktrees en proyectos locales
+
+Los proyectos locales ahora usan el mismo flujo de trabajo de worktrees que los proyectos vinculados
+a GitHub:
+
+- Cada sesión obtiene su propio worktree aislado, creado automáticamente bajo demanda.
+- Cuando se archiva la sesión, el worktree se libera automáticamente.
+
+Consulta [Worktrees](/es/docs/worktrees) para ver la estructura completa y su justificación.
+
+## Sincronizar el historial de agentes de código (Codex, Claude Code y más)
+
+Si has estado usando Codex o Claude Code directamente en un proyecto local, Lody puede importar ese
+historial de conversaciones existente y continuarlo desde cualquier dispositivo.
+
+- Abre **Configuración → Proyectos**, selecciona el proyecto local y ejecuta una sincronización
+  manual para importar el historial de los agentes que Lody detecte en esa máquina.
+- Una vez sincronizado un proyecto, las nuevas conversaciones iniciadas en Lody se reflejan de vuelta
+  en la CLI correspondiente (Claude Code, Codex y otros agentes compatibles basados en ACP), para
+  que ambos lados se mantengan al día.
+- Al abrir una conversación importada se actualiza su contenido más reciente bajo demanda, para que
+  siempre veas lo que tiene la CLI subyacente.
+
+## Visibilidad en equipo para proyectos que no están en GitHub
+
+Los proyectos locales son privados de forma predeterminada: solo tú puedes verlos, incluso después
+de unirte a un espacio de trabajo.
+
+Para colaborar en un proyecto que no está alojado en GitHub:
+
+1. Abre **Configuración → Proyectos**.
+2. Selecciona el proyecto local.
+3. Activa la visibilidad para el equipo.
+
+De este modo, tus compañeros de equipo podrán ver el proyecto en su barra lateral e iniciar sesiones
+en él. Al igual que con las [máquinas compartidas](/es/docs/team#team-machine-visibility), solo el
+propietario del proyecto puede cambiar la configuración de visibilidad, y desactivarla oculta el
+proyecto de inmediato para el resto de los miembros.
+
+## Acceso remoto a proyectos locales
+
+Desde otro dispositivo (web, móvil u otro escritorio) puedes inspeccionar un proyecto local en su
+máquina propietaria sin tener que estar frente a ella:
+
+- Explorar el estado actual de las ramas de Git del proyecto.
+- Iniciar un worktree directamente en la máquina remota y luego continuar el trabajo desde donde
+  estés.
+
+Esto hace que los flujos de trabajo desde el teléfono o con un portátil sobre la marcha funcionen de
+la misma manera para proyectos locales que para proyectos vinculados a GitHub.
+
+## Eliminar un proyecto desde otro dispositivo
+
+Puedes eliminar uno de tus proyectos locales desde escritorio o móvil incluso cuando la carpeta
+pertenece a otro dispositivo.
+
+El dispositivo propietario debe estar en línea porque Lody envía la solicitud de eliminación a esa
+máquina. Antes de eliminar el proyecto, Lody archiva sus sesiones y solicita a la máquina propietaria
+que limpie la configuración de worktrees del proyecto. Eliminar un proyecto de Lody no borra la
+carpeta original del proyecto.
+
+## Limitaciones actuales
+
+- Los proyectos locales aún no pueden hacer push directamente a ramas remotas, pero puedes pedirle al
+  agente que se encargue de las operaciones de Git relacionadas por ti.

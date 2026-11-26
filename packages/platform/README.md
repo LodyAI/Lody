@@ -5,6 +5,17 @@ This package contains platform-neutral composition contracts. The optional
 inspection with persistent host custody. It never enables document transports;
 see the [workspace bootstrap guide](../../.agents/docs/e2ee-workspace-bootstrap.md).
 
+Cloud analytics requires explicit opt-in consent after sign-in across desktop,
+web, mobile, and CLI, controlled by one unified account-level switch. When
+enabled, it emits only a minimal registered event set (message submissions,
+sign-ups, app launches/active heartbeats, agent provider usage, and redacted
+errors) with opaque identifiers, coarse platform/OS/SDK metadata, and fixed
+`cli_type` / normalized `agent_type` enums (custom agent names collapse to
+`other`). The browser projects newly captured events and queued requests to the
+same allowlist, avoids analytics cookies (`localStorage` persistence), and
+disables session replay, DOM autocapture, and pageview/pageleave capture in
+every workspace. Local composition disables PostHog.
+
 Hosted entries may pass `createE2eeRuntime: E2eeRuntimeFactory` to the shared
 `createRouter`. Its cloud provider borrows the returned `E2eeWorkspaceRuntime`
 without changing optional methods or reader labels. Standalone login without

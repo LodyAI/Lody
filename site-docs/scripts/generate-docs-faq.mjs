@@ -1,13 +1,15 @@
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractFaqFromMdx } from './extract-docs-faq.mjs';
-import { slugFromMdxFile } from './site-paths.mjs';
+import { localePrefix, SITE_LOCALES, slugFromMdxFile } from './site-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outFile = path.join(packageRoot, 'lib', 'docs-faq.generated.ts');
 
 function listMdxFiles(dir) {
+  if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) return [];
+
   const files = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const entryPath = path.join(dir, entry.name);
@@ -21,9 +23,9 @@ function listMdxFiles(dir) {
 }
 
 const docsFaqByPath = {};
-for (const locale of ['en', 'zh']) {
+for (const locale of SITE_LOCALES) {
   const localeRoot = path.join(packageRoot, 'content', 'docs', locale);
-  const base = locale === 'zh' ? '/zh/docs' : '/docs';
+  const base = `${localePrefix(locale)}/docs`;
   for (const file of listMdxFiles(localeRoot)) {
     const items = extractFaqFromMdx(readFileSync(file, 'utf8'));
     if (items.length === 0) continue;

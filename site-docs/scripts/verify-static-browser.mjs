@@ -21,7 +21,24 @@ const browser = await chromium.launch({
 });
 const results = [];
 const baselines = new Map();
-const pagePaths = collectSitePaths(packageRoot).filter((p) => !['/404', '/zh/404'].includes(p));
+const LOCALE_HTML_LANG = [
+  ['/zh-hant', 'zh-Hant'],
+  ['/zh', 'zh-CN'],
+  ['/ja', 'ja'],
+  ['/ko', 'ko'],
+  ['/es', 'es'],
+  ['/fr', 'fr'],
+  ['/ru', 'ru'],
+];
+const expectedHtmlLang = (urlPath) => {
+  for (const [prefix, lang] of LOCALE_HTML_LANG) {
+    if (urlPath === prefix || urlPath.startsWith(`${prefix}/`)) return lang;
+  }
+  return 'en';
+};
+const pagePaths = collectSitePaths(packageRoot).filter(
+  (p) => !/^\/(?:(?:zh-hant|zh|ja|ko|es|fr|ru)\/)?404$/u.test(p)
+);
 const normalize = (p) => p.replace(/\/$/u, '') || '/';
 const directoryPath = (p) => (p === '/' ? '/' : `${normalize(p)}/`);
 const pagePathSet = new Set(pagePaths);
@@ -133,7 +150,9 @@ async function scan() {
             assert.ok(data.title.trim().length > 0);
             assert.ok(data.description?.length > 5);
             const canonicalPath =
-              urlPath === '/home' ? '/' : urlPath === '/zh/home' ? '/zh' : urlPath;
+              urlPath === '/home'
+                ? '/'
+                : urlPath.replace(/^(\/(?:zh-hant|zh|ja|ko|es|fr|ru))\/home$/u, '$1');
             assert.equal(data.canonical, `https://lody.ai${directoryPath(canonicalPath)}`);
             assert.equal(data.ogUrl, data.canonical);
             for (const alternate of data.alternates) {
@@ -148,15 +167,18 @@ async function scan() {
                 `Unknown alternate: ${alternate}`
               );
             }
-            assert.equal(data.lang, urlPath.startsWith('/zh') ? 'zh-CN' : 'en');
+            assert.equal(data.lang, expectedHtmlLang(urlPath));
             assert.ok(data.headings.length > 0);
-            if (/^\/(zh\/)?docs(\/|$)/u.test(urlPath)) {
+            if (/^\/(?:(?:zh-hant|zh|ja|ko|es|fr|ru)\/)?docs(?:\/|$)/u.test(urlPath)) {
               assert.equal(data.headings.length, 1);
               assert.deepEqual(data.missingFragmentTargets, [], 'Docs anchors must resolve');
             }
             assert.ok(await page.locator('h1').first().isVisible());
             assert.ok(data.text.length > 80);
-            if (/^\/(zh\/)?docs(\/|$)/u.test(urlPath) || /^\/(zh\/)?blog\//u.test(urlPath)) {
+            if (
+              /^\/(?:(?:zh-hant|zh|ja|ko|es|fr|ru)\/)?docs(?:\/|$)/u.test(urlPath) ||
+              /^\/(?:(?:zh-hant|zh|ja|ko|es|fr|ru)\/)?blog\//u.test(urlPath)
+            ) {
               assert.ok(data.articleText?.length > 40, 'Prerendered article body must be present');
             }
             assert.ok(!data.text.includes('Something went wrong!'));

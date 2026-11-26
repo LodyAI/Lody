@@ -157,4 +157,18 @@ describe('deferred PostHog initialization', () => {
     expect(client.capture).not.toHaveBeenCalled();
     expect(onDisabled).toHaveBeenCalledTimes(1);
   });
+
+  it('still runs reset on logout when telemetry has been disabled so prior identity does not persist', () => {
+    const { client } = createClient();
+    const scheduled = createScheduler({ withIdle: false });
+    const controller = createDeferredPostHogController(client, scheduled.scheduler);
+
+    controller.configure('project-key', {});
+    scheduled.runDelay();
+    controller.client.identify('user_a');
+    controller.configure('', {});
+    controller.client.reset();
+
+    expect(client.reset).toHaveBeenCalledTimes(1);
+  });
 });

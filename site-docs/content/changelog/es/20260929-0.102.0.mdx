@@ -1,0 +1,26 @@
+---
+title: "20260929-0.102.0"
+version: 0.102.0
+date: 2026-09-29
+description: "Vistas previas de PDF, referencias de conversación clicables y atajos de prompt en la configuración, con mejoras en el envío de mensajes, los temas y los menús de comandos."
+---
+
+Versión 0.102.0
+
+### ✨ Nuevas funciones
+
+- Previsualiza archivos PDF directamente en las conversaciones, con navegación por páginas, zoom y búsqueda de texto.
+- Se agregaron los atajos de prompt a la configuración.
+- Los enlaces a conversaciones en los mensajes ahora aparecen como chips de conversación clicables, lo que facilita saltar a discusiones relacionadas.
+
+### 🐛 Correcciones y mejoras
+
+- Se mejoró la capacidad de respuesta al enviar mensajes reduciendo los retrasos de sincronización. Los mensajes con imágenes mantienen sus vistas previas en su sitio al enviarse, reduciendo los saltos de diseño.
+- Las aplicaciones de escritorio y móviles ahora inician con tu tema guardado, reduciendo los destellos entre la apariencia clara y oscura.
+- Abrir la aplicación desde su acceso predeterminado ahora te lleva a la página principal de chat, lista para una nueva conversación.
+- Los menús de menciones y comandos siguen al cursor de texto, con mejor posicionamiento cuando el texto se ajusta a varias líneas, el compositor se desplaza o se abre el teclado móvil.
+- Se mejoró la búsqueda de comandos con barra con una clasificación compartida para atajos de prompt y comandos de agente, lo que facilita encontrar coincidencias por nombre.
+- Se mejoró la alineación en los menús de roles de agente, las barras laterales y las opciones de selección, y se corrigieron textos recortados y botones superpuestos.
+- Se corrigieron la alineación de Markdown en las conversaciones, el renderizado de matemáticas en línea y la visualización duplicada de comandos en algunas llamadas a herramientas.
+- Se corrigió el inicio de sesión en perfiles de cuenta de Codex recién creados en máquinas Linux sin un llavero del sistema disponible.
+- Los proyectos locales conservan su configuración existente de autenticación de Git y GitHub, con un mejor envío de tareas entre máquinas mediante roles de agente.

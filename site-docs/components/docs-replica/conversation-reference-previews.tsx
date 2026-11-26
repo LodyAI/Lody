@@ -1,3 +1,4 @@
+import type { SiteLocale } from '@site/src/site-pages/shared';
 import { ChevronRight, Copy, Folder, PanelRight, Plus, X } from 'lucide-react';
 import { ReplicaBrowserToolbar } from '../landing-replica/browser-toolbar';
 import { Button } from '../landing-replica/button';
@@ -8,7 +9,7 @@ import {
   ReplicaRunConfigTrigger,
 } from '../landing-replica/composer-controls';
 import { AgentIcon, FileIcon } from '../landing-replica/icons';
-import type { ReplicaChangeFile, ReplicaLocale } from '../landing-replica/types';
+import type { ReplicaChangeFile } from '../landing-replica/types';
 import { cn } from '../landing-replica/utils';
 
 /* Display-only docs previews for the conversation reference pages. They copy
@@ -51,21 +52,53 @@ type SummaryFile = {
   del: number;
 };
 
+function formatRuFiles(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return `Изменён ${count} файл`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `Изменено ${count} файла`;
+  return `Изменено ${count} файлов`;
+}
+
 const FILE_SUMMARY_COPY: Record<
-  ReplicaLocale,
+  SiteLocale,
   { summary: (count: number) => string; changed: string }
 > = {
   en: {
-    summary: (count) => `Edited ${count} files`,
+    summary: (count) => (count === 1 ? 'Edited 1 file' : `Edited ${count} files`),
     changed: 'Changed',
   },
   zh: {
     summary: (count) => `编辑了 ${count} 个文件`,
     changed: '已更改',
   },
+  'zh-hant': {
+    summary: (count) => `已編輯 ${count} 個檔案`,
+    changed: '已變更',
+  },
+  ja: {
+    summary: (count) => `${count} 件のファイルを編集`,
+    changed: '変更済み',
+  },
+  ko: {
+    summary: (count) => `파일 ${count}개 편집됨`,
+    changed: '변경됨',
+  },
+  es: {
+    summary: (count) => (count === 1 ? '1 archivo editado' : `${count} archivos editados`),
+    changed: 'Modificado',
+  },
+  fr: {
+    summary: (count) => (count === 1 ? '1 fichier modifié' : `${count} fichiers modifiés`),
+    changed: 'Modifié',
+  },
+  ru: {
+    summary: formatRuFiles,
+    changed: 'Изменён',
+  },
 };
 
-const CONVERSATION_DIFF_COPY: Record<ReplicaLocale, { finished: string; assistantText: string }> = {
+const CONVERSATION_DIFF_COPY: Record<SiteLocale, { finished: string; assistantText: string }> = {
   en: {
     finished: 'Finished working',
     assistantText:
@@ -74,6 +107,35 @@ const CONVERSATION_DIFF_COPY: Record<ReplicaLocale, { finished: string; assistan
   zh: {
     finished: '已完成工作',
     assistantText: '已完成修改并运行了测试。切换模型时，首页输入框会保留已附加的图片。',
+  },
+  'zh-hant': {
+    finished: '已完成工作',
+    assistantText: '已完成要求的變更並執行測試套件。切換模型時，首頁輸入框現在會保留已附加的圖片。',
+  },
+  ja: {
+    finished: '作業完了',
+    assistantText:
+      'ご要望の変更を実装し、テストスイートを実行しました。モデルを切り替えてもホーム入力欄の添付画像が保持されるようになりました。',
+  },
+  ko: {
+    finished: '작업 완료',
+    assistantText:
+      '요청하신 변경 사항을 구현하고 테스트 스위트를 실행했습니다. 이제 모델을 전환해도 홈 입력창에 첨부된 이미지가 유지됩니다.',
+  },
+  es: {
+    finished: 'Trabajo finalizado',
+    assistantText:
+      'Se implementaron los cambios solicitados y se ejecutó la suite de pruebas. El compositor de inicio ahora conserva las imágenes adjuntas al cambiar de modelo.',
+  },
+  fr: {
+    finished: 'Travail terminé',
+    assistantText:
+      'Les modifications demandées ont été implémentées et la suite de tests a été exécutée. Le champ de saisie d’accueil conserve désormais les images jointes lors du changement de modèle.',
+  },
+  ru: {
+    finished: 'Работа завершена',
+    assistantText:
+      'Запрошенные изменения реализованы, а набор тестов успешно пройден. Поле ввода на главной странице теперь сохраняет прикреплённые изображения при переключении моделей.',
   },
 };
 
@@ -110,7 +172,7 @@ function splitFilePath(filePath: string): { directory: string; name: string } {
   };
 }
 
-function SummaryStats({ add, del, locale }: { add: number; del: number; locale: ReplicaLocale }) {
+function SummaryStats({ add, del, locale }: { add: number; del: number; locale: SiteLocale }) {
   const copy = FILE_SUMMARY_COPY[locale];
   if (add === 0 && del === 0) {
     return (
@@ -131,7 +193,7 @@ function AssistantEditedFilesSummary({
   locale,
 }: {
   files: readonly SummaryFile[];
-  locale: ReplicaLocale;
+  locale: SiteLocale;
 }) {
   const copy = FILE_SUMMARY_COPY[locale];
   const totals = files.reduce(
@@ -184,7 +246,7 @@ function AssistantEditedFilesSummary({
   );
 }
 
-export function ConversationDiffPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
+export function ConversationDiffPreview({ locale = 'en' }: { locale?: SiteLocale }) {
   const copy = CONVERSATION_DIFF_COPY[locale];
 
   return (
@@ -252,16 +314,25 @@ const DIFF_PREVIEW_FILE: ReplicaChangeFile = {
   ].join('\n'),
 };
 
-export function DiffViewerPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
+const DIFF_VIEWER_COPY: Record<SiteLocale, string> = {
+  en: 'Diff viewer preview',
+  zh: '差异查看器预览',
+  'zh-hant': '差異檢視器預覽',
+  ja: '差分ビューアーのプレビュー',
+  ko: 'Diff 뷰어 미리보기',
+  es: 'Vista previa del visor de diffs',
+  fr: 'Aperçu de la visionneuse de diffs',
+  ru: 'Предпросмотр просмотрщика диффов',
+};
+
+export function DiffViewerPreview({ locale = 'en' }: { locale?: SiteLocale }) {
   return (
     <div className="my-6">
       <div
         aria-hidden="true"
         className="lody-app-preview overflow-hidden rounded-xl border border-border bg-background p-3 text-foreground shadow-sm sm:p-4"
       >
-        <span className="sr-only">
-          {locale === 'zh' ? '差异查看器预览' : 'Diff viewer preview'}
-        </span>
+        <span className="sr-only">{DIFF_VIEWER_COPY[locale]}</span>
         <div className="hidden dark:block">
           <ReplicaDiffViewer file={DIFF_PREVIEW_FILE} dark />
         </div>
@@ -287,11 +358,57 @@ type FileTreeEntry = {
 type TreeEntry = FolderTreeEntry | FileTreeEntry;
 
 const SESSION_TREE_COPY: Record<
-  ReplicaLocale,
-  { files: string; changes: string; modified: string }
+  SiteLocale,
+  { files: string; changes: string; modified: string; collapseSidebar: string }
 > = {
-  en: { files: 'Files', changes: 'Changes', modified: 'Modified in this conversation' },
-  zh: { files: '文件', changes: '变更', modified: '当前对话中已修改' },
+  en: {
+    files: 'Files',
+    changes: 'Changes',
+    modified: 'Modified in this conversation',
+    collapseSidebar: 'Collapse sidebar',
+  },
+  zh: {
+    files: '文件',
+    changes: '变更',
+    modified: '当前对话中已修改',
+    collapseSidebar: '收起侧边栏',
+  },
+  'zh-hant': {
+    files: '檔案',
+    changes: '變更',
+    modified: '在此對話中已修改',
+    collapseSidebar: '收合側邊欄',
+  },
+  ja: {
+    files: 'ファイル',
+    changes: '変更',
+    modified: 'この会話で変更済み',
+    collapseSidebar: 'サイドバーを折りたたむ',
+  },
+  ko: {
+    files: '파일',
+    changes: '변경 사항',
+    modified: '이 대화에서 수정됨',
+    collapseSidebar: '사이드바 접기',
+  },
+  es: {
+    files: 'Archivos',
+    changes: 'Cambios',
+    modified: 'Modificado en esta conversación',
+    collapseSidebar: 'Contraer barra lateral',
+  },
+  fr: {
+    files: 'Fichiers',
+    changes: 'Modifications',
+    modified: 'Modifié dans cette conversation',
+    collapseSidebar: 'Réduire la barre latérale',
+  },
+  ru: {
+    files: 'Файлы',
+    changes: 'Изменения',
+    modified: 'Изменено в этом диалоге',
+    collapseSidebar: 'Свернуть боковую панель',
+  },
 };
 
 // Short synthetic root from the SessionChangesSidebar / FileTreeList stories.
@@ -331,7 +448,7 @@ function FolderTreeRow({ name }: { name: string }) {
   );
 }
 
-function FileTreeRow({ entry, locale }: { entry: FileTreeEntry; locale: ReplicaLocale }) {
+function FileTreeRow({ entry, locale }: { entry: FileTreeEntry; locale: SiteLocale }) {
   const copy = SESSION_TREE_COPY[locale];
   return (
     <div
@@ -351,7 +468,7 @@ function FileTreeRow({ entry, locale }: { entry: FileTreeEntry; locale: ReplicaL
   );
 }
 
-export function SessionFilesPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
+export function SessionFilesPreview({ locale = 'en' }: { locale?: SiteLocale }) {
   const copy = SESSION_TREE_COPY[locale];
 
   return (
@@ -373,7 +490,7 @@ export function SessionFilesPreview({ locale = 'en' }: { locale?: ReplicaLocale 
             type="button"
             variant="ghost"
             size="icon"
-            aria-label={locale === 'zh' ? '收起侧边栏' : 'Collapse sidebar'}
+            aria-label={copy.collapseSidebar}
             className="ml-auto h-6 w-6 text-muted-foreground"
           >
             <PanelRight className="h-3.5 w-3.5" />
@@ -396,7 +513,7 @@ export function SessionFilesPreview({ locale = 'en' }: { locale?: ReplicaLocale 
 }
 
 const IMAGE_INPUT_COPY: Record<
-  ReplicaLocale,
+  SiteLocale,
   {
     attachmentAlt: string;
     removeImage: string;
@@ -419,12 +536,54 @@ const IMAGE_INPUT_COPY: Record<
     permission: 'Agent（完全访问）',
     prompt: '图片里是什么？',
   },
+  'zh-hant': {
+    attachmentAlt: '設定類型下拉選單的模擬截圖',
+    removeImage: '移除圖片',
+    addAttachment: '新增附件',
+    permission: 'Agent（完全存取）',
+    prompt: '這張圖片裡是什麼？',
+  },
+  ja: {
+    attachmentAlt: '構成タイプドロップダウンのモックスクリーンショット',
+    removeImage: '画像を削除',
+    addAttachment: '添付ファイルを追加',
+    permission: 'Agent（フルアクセス）',
+    prompt: 'この画像には何が写っていますか？',
+  },
+  ko: {
+    attachmentAlt: '구성 유형 드롭다운의 모의 스크린샷',
+    removeImage: '이미지 제거',
+    addAttachment: '첨부 파일 추가',
+    permission: 'Agent(전체 액세스)',
+    prompt: '이 이미지에 무엇이 있나요?',
+  },
+  es: {
+    attachmentAlt: 'Captura de ejemplo del menú desplegable de tipo de configuración',
+    removeImage: 'Quitar imagen',
+    addAttachment: 'Añadir archivo adjunto',
+    permission: 'Agent (acceso total)',
+    prompt: '¿Qué aparece en esta imagen?',
+  },
+  fr: {
+    attachmentAlt: 'Capture factice d’un menu déroulant Type de configuration',
+    removeImage: 'Supprimer l’image',
+    addAttachment: 'Ajouter une pièce jointe',
+    permission: 'Agent (accès complet)',
+    prompt: 'Que contient cette image ?',
+  },
+  ru: {
+    attachmentAlt: 'Демонстрационный скриншот выпадающего списка типа конфигурации',
+    removeImage: 'Удалить изображение',
+    addAttachment: 'Добавить вложение',
+    permission: 'Agent (полный доступ)',
+    prompt: 'Что изображено на этом снимке?',
+  },
 };
 
 const COMPOSER_BOX_CLASS =
   '@container/composer-box flex flex-col gap-1 rounded-xl border px-2 py-1.5 transition-colors duration-150 border-foreground/[0.10] bg-[hsl(var(--composer))] shadow-[0_3px_6px_-2px_lch(0%_0_0/0.02),0_1px_1px_lch(0%_0_0/0.04)] dark:shadow-none dark:border-input-border/70 dark:bg-input/90 [--mention-chip-surface:hsl(var(--composer))]';
 
-export function ImageInputPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
+export function ImageInputPreview({ locale = 'en' }: { locale?: SiteLocale }) {
   const copy = IMAGE_INPUT_COPY[locale];
 
   return (
@@ -477,10 +636,7 @@ export function ImageInputPreview({ locale = 'en' }: { locale?: ReplicaLocale })
   );
 }
 
-const IMAGE_OUTPUT_COPY: Record<
-  ReplicaLocale,
-  { alt: string; metadata: string; duration: string }
-> = {
+const IMAGE_OUTPUT_COPY: Record<SiteLocale, { alt: string; metadata: string; duration: string }> = {
   en: {
     alt: 'Lody logo used as the generated-image sample',
     metadata: 'Generated with gpt-5.4',
@@ -491,9 +647,39 @@ const IMAGE_OUTPUT_COPY: Record<
     metadata: '由 gpt-5.4 生成',
     duration: '21m 14s',
   },
+  'zh-hant': {
+    alt: '作為產生圖片範例的 Lody 標誌',
+    metadata: '由 gpt-5.4 產生',
+    duration: '21m 14s',
+  },
+  ja: {
+    alt: '生成画像サンプルとして使用された Lody ロゴ',
+    metadata: 'gpt-5.4 で生成',
+    duration: '21m 14s',
+  },
+  ko: {
+    alt: '생성된 이미지 예시로 사용된 Lody 로고',
+    metadata: 'gpt-5.4로 생성됨',
+    duration: '21m 14s',
+  },
+  es: {
+    alt: 'Logotipo de Lody usado como ejemplo de imagen generada',
+    metadata: 'Generado con gpt-5.4',
+    duration: '21m 14s',
+  },
+  fr: {
+    alt: 'Logo Lody utilisé comme exemple d’image générée',
+    metadata: 'Généré avec gpt-5.4',
+    duration: '21m 14s',
+  },
+  ru: {
+    alt: 'Логотип Lody в качестве примера сгенерированного изображения',
+    metadata: 'Сгенерировано с помощью gpt-5.4',
+    duration: '21m 14s',
+  },
 };
 
-export function ImageOutputPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
+export function ImageOutputPreview({ locale = 'en' }: { locale?: SiteLocale }) {
   const copy = IMAGE_OUTPUT_COPY[locale];
 
   return (
@@ -537,7 +723,7 @@ export function ImageOutputPreview({ locale = 'en' }: { locale?: ReplicaLocale }
 }
 
 const BROWSER_COPY: Record<
-  ReplicaLocale,
+  SiteLocale,
   {
     heading: string;
     body: string;
@@ -572,9 +758,75 @@ const BROWSER_COPY: Record<
     cancel: '取消',
     addComment: '添加评论',
   },
+  'zh-hant': {
+    heading: '隨時隨地執行你的 Agent',
+    body: '在一台機器上開始工作，接著在桌面、平板或手機上持續推進。',
+    getStarted: '開始使用',
+    viewDocs: '檢視文件',
+    commentTitle: '預覽註解',
+    commentTarget: 'h2 「隨時隨地執行你的 Agent」',
+    commentBody: '縮小主要操作按鈕上方的間距。',
+    cancel: '取消',
+    addComment: '新增註解',
+  },
+  ja: {
+    heading: 'どこからでもエージェントを実行',
+    body: '1 台のマシンで作業を始め、デスクトップ、タブレット、スマートフォンからそのまま続けられます。',
+    getStarted: 'はじめる',
+    viewDocs: 'ドキュメントを見る',
+    commentTitle: 'プレビューコメント',
+    commentTarget: 'h2 「どこからでもエージェントを実行」',
+    commentBody: 'メインボタンの上の余白をもう少し詰めてください。',
+    cancel: 'キャンセル',
+    addComment: 'コメントを追加',
+  },
+  ko: {
+    heading: '어디서나 에이전트 실행하기',
+    body: '한 머신에서 작업을 시작하고 데스크톱, 태블릿, 휴대폰에서 이어서 진행하세요.',
+    getStarted: '시작하기',
+    viewDocs: '문서 보기',
+    commentTitle: '미리보기 코멘트',
+    commentTarget: 'h2 "어디서나 에이전트 실행하기"',
+    commentBody: '기본 동작 버튼 위쪽의 간격을 조금 줄여주세요.',
+    cancel: '취소',
+    addComment: '코멘트 추가',
+  },
+  es: {
+    heading: 'Ejecuta tus agentes desde cualquier lugar',
+    body: 'Empieza el trabajo en una máquina y síguelo desde tu ordenador, tablet o teléfono.',
+    getStarted: 'Empezar',
+    viewDocs: 'Ver documentación',
+    commentTitle: 'Comentario de vista previa',
+    commentTarget: 'h2 «Ejecuta tus agentes desde cualquier lugar»',
+    commentBody: 'Reduce el espaciado encima de la acción principal.',
+    cancel: 'Cancelar',
+    addComment: 'Añadir comentario',
+  },
+  fr: {
+    heading: 'Pilotez vos agents où que vous soyez',
+    body: 'Démarrez une tâche sur une machine, puis poursuivez-la depuis un ordinateur, une tablette ou un téléphone.',
+    getStarted: 'Commencer',
+    viewDocs: 'Voir la documentation',
+    commentTitle: 'Commentaire d’aperçu',
+    commentTarget: 'h2 « Pilotez vos agents où que vous soyez »',
+    commentBody: 'Réduire l’espacement au-dessus du bouton principal.',
+    cancel: 'Annuler',
+    addComment: 'Ajouter un commentaire',
+  },
+  ru: {
+    heading: 'Запускайте агентов откуда угодно',
+    body: 'Начните работу на одной машине и продолжайте с компьютера, планшета или телефона.',
+    getStarted: 'Начать',
+    viewDocs: 'Документация',
+    commentTitle: 'Комментарий к предпросмотру',
+    commentTarget: 'h2 «Запускайте агентов откуда угодно»',
+    commentBody: 'Уменьшить отступ над основной кнопкой действия.',
+    cancel: 'Отмена',
+    addComment: 'Добавить комментарий',
+  },
 };
 
-export function BrowserPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
+export function BrowserPreview({ locale = 'en' }: { locale?: SiteLocale }) {
   const copy = BROWSER_COPY[locale];
 
   return (

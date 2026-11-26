@@ -3,7 +3,11 @@ import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
-import { desktopOnboardingDraftAtom, desktopOnboardingPhaseAtom } from '@/atoms/onboarding';
+import {
+  desktopOnboardingCompletionRevisionAtom,
+  desktopOnboardingDraftAtom,
+  desktopOnboardingPhaseAtom,
+} from '@/atoms/onboarding';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { OnboardingOverlay, type DesktopOnboardingCompletion } from '@/components/onboarding';
 import { enterDesktopProduct } from '@/components/onboarding/desktop-onboarding-completion';
@@ -33,6 +37,7 @@ function DesktopOnboardingExperience() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const notifyCompletion = useSetAtom(desktopOnboardingCompletionRevisionAtom);
   const setPhase = useSetAtom(desktopOnboardingPhaseAtom);
   const setDraft = useSetAtom(desktopOnboardingDraftAtom);
   const inFlightCompletion = useRef<Promise<boolean> | null>(null);
@@ -96,6 +101,7 @@ function DesktopOnboardingExperience() {
           });
         },
         onDurableCompletion: () => {
+          notifyCompletion((revision) => revision + 1);
           analytics.capture('onboarding/flow_completed', {
             ...eventProperties,
             duration_ms: analytics.durationSince(startedAtMs),
@@ -133,7 +139,16 @@ function DesktopOnboardingExperience() {
       inFlightCompletion.current = attempt;
       return attempt;
     },
-    [analytics, completeThemeLifecycle, navigate, setDraft, setPhase, t, workspaceSlug]
+    [
+      analytics,
+      completeThemeLifecycle,
+      navigate,
+      notifyCompletion,
+      setDraft,
+      setPhase,
+      t,
+      workspaceSlug,
+    ]
   );
 
   return <OnboardingOverlay onCompleted={complete} />;

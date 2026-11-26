@@ -46,8 +46,7 @@ export const recordSessionRenderTrace = (line: string): void => {
 };
 
 /** Shorten a session/tab id for trace lines; full ids are in the report URL. */
-export const shortTraceId = (id: string | null | undefined): string =>
-  id ? id.slice(0, 8) : '∅';
+export const shortTraceId = (id: string | null | undefined): string => (id ? id.slice(0, 8) : '∅');
 
 export const getSessionRenderTraceText = (): string | undefined => {
   if (entries.length === 0) {

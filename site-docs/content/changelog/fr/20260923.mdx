@@ -1,0 +1,29 @@
+---
+title: "20260923"
+version: 0.100.0
+date: 2026-09-23
+description: "Ajout de la prise en charge d'Opus 5.5, GPT-6-Sol, GPT-6-Luna et Dimcode, avec des améliorations pour les agents, les fenêtres desktop, les conversations longues, la barre latérale et la synchronisation des fichiers."
+---
+
+Version 0.100.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Ajout de la prise en charge d'Opus 5.5, GPT-6-Sol et GPT-6-Luna.
+- Ajout de Dimcode en tant qu'Agent intégré pouvant être configuré et utilisé pour créer des sessions directement dans Lody.
+
+### 🐛 Correctifs et améliorations
+
+- Mise à niveau des runtimes intégrés Claude Code, Codex, Grok, Kimi et Pi pour améliorer la fiabilité des Agents et le démarrage des sessions.
+- Amélioration du préchauffage des fenêtres desktop et du chargement du contenu afin de réduire les écrans blancs, les pages d'erreur et les brefs états de chargement à l'ouverture des sessions.
+- Amélioration du chargement en arrière-plan pour les conversations longues afin d'éviter le scintillement du contenu, les messages mal placés et la perte de sélections de texte.
+- Amélioration de la disposition des filtres dans la barre latérale et maintien de l'accessibilité des contrôles de filtrage lorsque la liste des tâches est vide.
+- Correction de cas où l'ouverture d'un autre fichier de worktree local depuis une session pouvait cibler le mauvais fichier.
+- Empêche les processus enfants de DeepSeek Harness d'ouvrir de manière répétée des fenêtres de console sous Windows.
+- Nouvelle tentative automatique en cas d'échec de la synchronisation distante Machine Flock, avec affichage d'un état d'échec clair.
+- Préservation des permissions de fichiers POSIX exécutables et privées lorsque Code Collab enregistre des fichiers texte.
+- Affinement du point d'entrée de partage et de l'interface d'en-tête de session.
+
+### 🙏 Remerciements aux contributeurs externes
+
+- Merci à ladydd pour la préservation des permissions POSIX lorsque Code Collab enregistre des fichiers.

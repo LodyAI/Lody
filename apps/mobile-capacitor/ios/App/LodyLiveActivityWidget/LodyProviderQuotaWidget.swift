@@ -1,8 +1,27 @@
 import SwiftUI
 import WidgetKit
 
+private func quotaLproj(for locale: String) -> String {
+    let parts = locale
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+        .split(whereSeparator: { $0 == "-" || $0 == "_" })
+    guard let base = parts.first else { return "en" }
+    switch base {
+    case "zh":
+        let traditional: Set<Substring> = ["hant", "tw", "hk", "mo"]
+        return parts.dropFirst().contains(where: { traditional.contains($0) }) ? "zh-Hant" : "zh-Hans"
+    case "ja": return "ja"
+    case "ko": return "ko"
+    case "es": return "es"
+    case "fr": return "fr"
+    case "ru": return "ru"
+    default: return "en"
+    }
+}
+
 private func quotaText(_ key: String, locale: String? = nil) -> String {
-    let language = locale.map { $0.lowercased().hasPrefix("zh") ? "zh-Hans" : "en" }
+    let language = locale.map(quotaLproj(for:))
     let bundle = language.flatMap { Bundle.main.path(forResource: $0, ofType: "lproj") }
         .flatMap { Bundle(path: $0) } ?? .main
     return NSLocalizedString(key, tableName: "Localizable", bundle: bundle, comment: "")

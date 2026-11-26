@@ -21,6 +21,7 @@ import {
   isE2eeCreationNotEnabled,
 } from '@/lib/create-e2ee-workspace';
 import {
+  clearPendingE2eeWorkspace,
   isPendingE2eeCreationStorageKey,
   listPendingE2eeWorkspacesByArchive,
   savePendingE2eeWorkspace,
@@ -53,7 +54,6 @@ import {
   capturePostHogSampled,
   getDurationSinceMs,
   getPerformanceNowMs,
-  identifyPostHogWorkspace,
 } from '@/lib/posthog-analytics';
 
 type WorkspaceCreateFailureReason =
@@ -495,6 +495,8 @@ function CreateWorkspaceAuthed({
       has_redirect: Boolean(redirect),
     });
 
+    let submittedIntent = currentPending;
+    let preparationCancelled = false;
     try {
       if (useEncryption) {
         const port = platform.e2eeWorkspaces;
@@ -507,13 +509,31 @@ function CreateWorkspaceAuthed({
           name: workspaceName.trim(),
           slug: workspaceSlug,
         };
+        submittedIntent = intent;
         // Persist before generating an identity or sending a request. A lost
         // response reuses these exact fields after reload, including its slug.
         savePendingE2eeWorkspace(localStorage, intent);
         applyRequestLists(listPendingE2eeWorkspacesByArchive(localStorage, accountId));
         setIntentReadFailed(false);
         setPendingCreation(intent);
-        const result = await createPreparedE2eeWorkspace(port, localStorage, intent);
+        const result = await createPreparedE2eeWorkspace(
+          {
+            ...port,
+            prepareCreation: async (input) => {
+              try {
+                return await port.prepareCreation!(input);
+              } catch (error) {
+                if (error instanceof Error && error.message === 'e2ee_creation_cancelled') {
+                  if (!currentPending) clearPendingE2eeWorkspace(localStorage, intent);
+                  preparationCancelled = true;
+                }
+                throw error;
+              }
+            },
+          },
+          localStorage,
+          intent
+        );
         if (accountRef.current !== accountId) return;
         setPendingCreation(null);
         await navigate({
@@ -536,7 +556,6 @@ function CreateWorkspaceAuthed({
             ? { returnTarget: 'desktop' as const }
             : { successUrl: billingUrl, cancelUrl: billingUrl }),
         });
-        identifyPostHogWorkspace(postHog, result.workspaceId);
         capturePostHogEvent(postHog, 'workspace/create_succeeded', {
           workspace_id: result.workspaceId,
           slug_length: result.workspaceSlug.length,
@@ -570,7 +589,6 @@ function CreateWorkspaceAuthed({
       const createdWorkspace = await createOrganization(workspaceName.trim(), workspaceSlug);
       const createdWorkspaceId =
         typeof createdWorkspace?.id === 'string' ? createdWorkspace.id : null;
-      identifyPostHogWorkspace(postHog, createdWorkspaceId);
       capturePostHogEvent(postHog, 'workspace/create_succeeded', {
         workspace_id: createdWorkspaceId,
         slug_length: workspaceSlug.length,
@@ -595,17 +613,16 @@ function CreateWorkspaceAuthed({
       }
     } catch (err) {
       if (accountRef.current !== accountId) return;
-      console.error('Failed to create workspace:', err);
       // A refusal that proves nothing was reserved removed the saved request:
       // unlock the fields (keeping what was typed) instead of retrying it forever.
       let removed = false;
-      if (useEncryption && currentPending) {
+      if (useEncryption && submittedIntent) {
+        const requestId = submittedIntent.requestId;
         try {
           const lists = listPendingE2eeWorkspacesByArchive(localStorage, accountId);
           setPendingRequests(lists.active);
           setArchivedRequests(lists.archived);
-          const same = (request: PendingE2eeWorkspace) =>
-            request.requestId === currentPending.requestId;
+          const same = (request: PendingE2eeWorkspace) => request.requestId === requestId;
           removed = !lists.active.some(same) && !lists.archived.some(same);
           if (removed) setPendingCreation(null);
           // Another window archived it while this submit ran: the late result stays
@@ -615,6 +632,8 @@ function CreateWorkspaceAuthed({
           // Storage stays authoritative; the next page load reads it again.
         }
       }
+      if (preparationCancelled) return;
+      console.error('Failed to create workspace:', err);
       const code =
         err instanceof ConvexError && err.data && typeof err.data === 'object'
           ? (err.data as { code?: unknown }).code

@@ -296,8 +296,8 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   let structureDirty = true;
   const dirtyText = new Set<string>();
   /**
-   * The tree's shape mirrored in JS (child ids per parent, '' for the roots),
-   * kept by tree events: reading it costs no calls into the document.
+   * Child IDs by parent ('' for roots), maintained by tree events.
+   * Revived IDs replay their descendants, so retained child lists must be rebuilt.
    */
   const ROOT_KEY = '';
   const kids = new Map<string, string[]>();
@@ -325,9 +325,15 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
         structureDirty = true;
         if (mirrorBroken) continue;
         for (const item of event.diff.diff) {
-          if (item.action === 'create') attach(item.target, item.parent, item.index);
-          else if (item.action === 'delete') detach(item.target, item.oldParent, item.oldIndex);
-          else {
+          if (item.action === 'create') {
+            if (kids.has(item.target)) {
+              mirrorBroken = true;
+              break;
+            }
+            attach(item.target, item.parent, item.index);
+          } else if (item.action === 'delete') {
+            detach(item.target, item.oldParent, item.oldIndex);
+          } else {
             detach(item.target, item.oldParent, item.oldIndex);
             attach(item.target, item.parent, item.index);
           }
@@ -388,6 +394,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       if (event.diff.type !== 'map') continue;
       const id = dataOwner.get(String(event.target));
       if (id === undefined) continue;
+      if (Object.hasOwn(event.diff.updated, 'text')) richCache.delete(id);
       const before = attrCache.get(id);
       attrCache.delete(id);
       const node = tree.getNodeByID(id as TodayNodeId);
@@ -1238,7 +1245,10 @@ export function createTodayPageUndo(
         if ('blockSelect' in selection) {
           return { value: { blockSelect: selection.blockSelect }, cursors: [] };
         }
-        const text = doc.getTree(TODAY_OUTLINE_TREE).getNodeByID(selection.nodeId)?.data.get('text');
+        const text = doc
+          .getTree(TODAY_OUTLINE_TREE)
+          .getNodeByID(selection.nodeId)
+          ?.data.get('text');
         const cursor = text instanceof LoroText ? text.getCursor(selection.focus) : undefined;
         return { value: { nodeId: selection.nodeId }, cursors: cursor ? [cursor] : [] };
       },

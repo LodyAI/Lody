@@ -1,0 +1,38 @@
+---
+title: "提及功能"
+description: "使用 @ 提及對話、檔案、Issue 與 Pull Request，並使用 $ 提及 Skill，將精確的上下文注入 Lody Prompt 中。"
+---
+
+# 提及
+
+Lody 為輸入框加入了提及支援。輸入 `@` 即可開啟提及選單，從中選擇對話、檔案、Issue、Pull Request、Skill 或 Agent 角色；`$` 則維持作為 Skill 的直接快捷鍵。
+
+## 對話提及
+
+輸入 `@`，選擇 **會話**，再選取另一則對話即可引用它。你可以要求目前的 Agent 聯繫該會話、讀取相關上下文、交流調查結果，或請求審查。例如，提及一個實作會話，並要求目前的 Agent 審查其最新提交（commit），再將發現的問題傳回。
+
+被引用的會話可以使用其他 Agent，或執行於另一台已連線的機器上。存取權限仍遵循工作區設定，且目標機器必須在線才能執行任務。提及只會指定目標會話，請在指令中說明要交換哪些上下文或執行什麼工作。
+
+如需了解可用操作，請參閱 [Agent 會話控制](/zh-hant/docs/session-orchestration/)，或參考[多 Agent 協作指南](/zh-hant/docs/agent-collaboration/)，以跨 Agent 與機器交換上下文並請求審查。
+
+## 檔案提及
+
+輸入 `@` 並選擇 **檔案**，接著繼續輸入即可依檔案名稱或檔案路徑進行模糊比對。使用上下方向鍵選取，然後按 Enter 確認。被提及的檔案會以完整路徑作為 Prompt 上下文傳送給程式設計 Agent。
+
+<MentionPreview locale="zh-hant" kind="file" />
+
+## Issue 與 Pull Request 提及
+
+在首頁選取儲存庫後，輸入 `@` 開啟提及選單，接著選擇 **Issues** 或 **Pull Requests**，即可提及目前儲存庫中的項目。
+
+<MentionPreview locale="zh-hant" kind="issue" />
+
+使用上下方向鍵選取，然後按 Enter 確認。Lody 會將選取的項目以 `#<number>` 格式寫入輸入框，並將其上下文注入 Prompt 中，讓 Agent 能夠處理像是 `Fix #12` 或 `Review the implementation in #56` 這類任務。
+
+## Skill 提及
+
+輸入 `$` 即可瀏覽所選專案與 Agent 機器上可用的 Skills。繼續輸入名稱以進行篩選，接著使用方向鍵與 `Enter` 選取目標 Skill。
+
+Lody 會在輸入框中保留易讀的 `$skill-name` 標記。當你傳送訊息時，系統會附上對應的 `SKILL.md` 路徑，讓 Agent 能夠載入並遵循其中的指示。
+
+如需了解探索路徑、專案與全域作用域以及離線行為，請參閱 [Skills](/zh-hant/docs/skills)。

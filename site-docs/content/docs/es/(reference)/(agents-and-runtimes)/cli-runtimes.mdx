@@ -1,0 +1,58 @@
+---
+title: "Tipos de entorno de ejecución de CLI"
+description: "Usa todos los entornos de ejecución disponibles a través del Registro de ACP o añade tu propio comando de inicio compatible con ACP."
+---
+
+# Tipos de entorno de ejecución de CLI
+
+Lody es compatible con todos los entornos de ejecución de CLI publicados en el [Registro de ACP](https://agentclientprotocol.com/get-started/registry).
+La lista de entornos de ejecución disponibles se carga desde el registro, por lo que esta página no mantiene una lista
+estática separada de proveedores ni de comandos.
+
+<CliRuntimePreview locale="es" />
+
+## Entornos de ejecución del registro
+
+1. Abre **Configuración** -> **Configuración de agente**.
+2. Haz clic en el botón para añadir.
+3. Introduce un nombre para la configuración.
+4. Elige el tipo de CLI que quieras en el selector respaldado por el registro.
+5. Añade las variables de entorno necesarias.
+6. Haz clic en **Probar** cuando aparezca el botón. Esto verifica que Lody pueda iniciar el entorno de ejecución y leer
+   sus capacidades, incluidos los modelos compatibles y los modos de ejecución.
+7. Guarda la configuración y luego selecciónala al crear una conversación.
+
+La compatibilidad con el registro significa que Lody puede seguir las nuevas entradas de entornos de ejecución ACP a medida que se añaden en upstream. La máquina anfitriona
+sigue necesitando tener instalados el comando, el inicio de sesión, las credenciales y las dependencias del entorno de ejecución seleccionado
+según su propia documentación.
+
+## Agente ACP personalizado
+
+Si tu agente es compatible con ACP pero no está publicado en el registro, elige **ACP personalizado** en
+**Configuración** -> **Configuración de agente**.
+
+1. Introduce un nombre para la configuración.
+2. Establece **Tipo de CLI** en **ACP personalizado**.
+3. Completa **Comando de inicio** con el comando que inicia el agente por stdio.
+4. Añade las variables de entorno necesarias en la misma Configuración de agente.
+5. Haz clic en **Probar** para verificar que Lody pueda iniciar el agente y leer sus capacidades.
+6. Guarda la configuración y luego selecciónala al crear una conversación.
+
+Ejemplo de comando de inicio:
+
+```bash
+npx -y my-acp-agent --stdio
+```
+
+El comando de inicio se analiza en un comando más argumentos y se ejecuta directamente. Se admiten comillas
+para argumentos con espacios, pero no se evalúan características del shell como tuberías (*pipes*), redirecciones, expansión de patrones (*glob*)
+ni `$VARS`. En su lugar, coloca las variables de entorno en la Configuración de agente.
+
+## Notas
+
+- Algunos entornos de ejecución del registro pueden seguir siendo experimentales en upstream.
+- Antes de usarlos, asegúrate de que las credenciales de inicio de sesión necesarias ya estén configuradas en el host donde
+  se ejecuta la CLI de Lody.
+- Los tipos de entorno de ejecución locales requieren que su correspondiente comando en el host esté instalado primero.
+- La disponibilidad de modelos depende del entorno de ejecución seleccionado, del estado de la instalación local y de los permisos de la
+  cuenta.

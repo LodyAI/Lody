@@ -1,5 +1,5 @@
 import { Component, createElement, useEffect, useRef, type ReactNode } from 'react';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQueryState } from '@lody/platform/react';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { useAppCapability } from '@/lib/app-platform';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -18,7 +18,7 @@ export function useBillingOverviewPreload(workspaceId: string | null): void {
     workspaceId: string;
     authSessionId: string | null;
   } | null>(null);
-  const overview = useCloudQuery(
+  const { data: overview, error: overviewError } = useCloudQueryState(
     cloudOperations.billing.getBillingOverview,
     billingAvailable && authSessionId && workspaceId ? { workspaceId } : 'skip'
   );
@@ -41,7 +41,7 @@ export function useBillingOverviewPreload(workspaceId: string | null): void {
     }
     previousWorkspaceAuthRef.current = { workspaceId, authSessionId };
 
-    if (!billingAvailable) {
+    if (!billingAvailable || overviewError) {
       clearBillingOverviewCache(workspaceId);
       return;
     }
@@ -53,7 +53,7 @@ export function useBillingOverviewPreload(workspaceId: string | null): void {
     } else if (!areBillingOverviewsEqual(cached, overview)) {
       writeBillingOverviewCache(workspaceId, authSessionId, overview);
     }
-  }, [authSessionId, billingAvailable, overview, workspaceId]);
+  }, [authSessionId, billingAvailable, overview, overviewError, workspaceId]);
 }
 
 function BillingOverviewPreloadProbe({ workspaceId }: { workspaceId: string | null }) {

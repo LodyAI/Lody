@@ -160,9 +160,7 @@ describe('in-app settings and schedules action links', () => {
     });
     expect(parseAppActionLink(buildAppActionLink(gh!))).toEqual(gh);
     expect(
-      parseAppActionLink(
-        'lody://settings/projects?machine=m1&local=proj_1&page=conversations'
-      )
+      parseAppActionLink('lody://settings/projects?machine=m1&local=proj_1&page=conversations')
     ).toEqual({
       kind: 'settings',
       tab: 'projects',
@@ -199,15 +197,9 @@ describe('in-app settings and schedules action links', () => {
   });
 
   it('rejects secret/command injection parameters, conflicts, unknown tabs and non-canonical encodings', () => {
-    expect(
-      parseAppActionLink('lody://settings/agents?create=custom&command=sh')
-    ).toBeNull();
-    expect(
-      parseAppActionLink('lody://settings/agents?create=codex&apiKey=sk-secret')
-    ).toBeNull();
-    expect(
-      parseAppActionLink('lody://settings/mcp?create=1&url=https://evil.example')
-    ).toBeNull();
+    expect(parseAppActionLink('lody://settings/agents?create=custom&command=sh')).toBeNull();
+    expect(parseAppActionLink('lody://settings/agents?create=codex&apiKey=sk-secret')).toBeNull();
+    expect(parseAppActionLink('lody://settings/mcp?create=1&url=https://evil.example')).toBeNull();
     expect(parseAppActionLink('lody://settings/workspace?panel=e2ee')).toBeNull();
     expect(parseAppActionLink('lody://settings/agents?create=codex&config=cfg_1')).toBeNull();
     expect(parseAppActionLink('lody://settings/agents?create=sorbet')).toBeNull();

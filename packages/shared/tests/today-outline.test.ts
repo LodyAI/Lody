@@ -477,6 +477,18 @@ describe('Today zoomed subtree', () => {
 });
 
 describe('Today snapshot caches', () => {
+  it('shows restored descendants once after undoing a subtree deletion', () => {
+    const { doc, outline, ids } = build('parent\n  child\n    grandchild\nother');
+    const undo = createTodayPageUndo(doc, { setTimer: () => () => {} });
+    const before = outline.getSnapshot().visible.map((node) => node.id);
+
+    undo.structural(() => outline.deleteNodes([idOf(ids, 'parent')]));
+    expect(outline.getSnapshot().visible.map((node) => node.id)).toEqual([idOf(ids, 'other')]);
+    expect(undo.undo()).toBe(true);
+    expect(outline.getSnapshot().visible.map((node) => node.id)).toEqual(before);
+    undo.dispose();
+  });
+
   it('match a page opened afresh after every local edit, undo, redo and merged peer edit', () => {
     let seed = 11;
     const random = () => {

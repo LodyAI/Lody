@@ -22,7 +22,7 @@ export function resolveElectronReleaseProfile({ environment, baseVersion, env = 
   const builtAt = env.LODY_BUILD_TIMESTAMP
   const runId = env.LODY_BUILD_RUN_ID
   validateNightlyBuildIdentity({ buildNumber, sourceSha, builtAt, runId })
-  const version = validateNightlyVersion(env.LODY_NIGHTLY_VERSION, baseVersion)
+  const version = validateNightlyVersion(env.LODY_NIGHTLY_VERSION)
   const number = Number(buildNumber)
   const nativeVersion = `${1 + Math.floor(number / 10000)}.${Math.floor(number / 100) % 100}.${number % 100}`
   return { channel, version, buildNumber, nativeVersion, sourceSha, builtAt, runId }

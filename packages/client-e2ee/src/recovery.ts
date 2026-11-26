@@ -16,6 +16,7 @@ import {
   setVaultPasswordVerified,
 } from '@lody/e2ee-client/recovery-password';
 import { recoveryServiceLocator } from '@lody/e2ee-client/recovery-locator';
+import { gatewayRequest, isTransientGatewayError } from './network';
 import { clientRecoveryJournal } from './recovery-journal';
 import { MAX_VAULT_PASSWORD_GENERATIONS, passwordWrapEntryId } from '@lody/e2ee-core/protocol';
 
@@ -89,6 +90,9 @@ const errorCodes = new Set([
   'invalid-input',
   'authentication',
   'storage',
+  'conflict',
+  'unavailable',
+  'exists',
   'missing',
   'rollback',
   'prf-unavailable',
@@ -97,30 +101,55 @@ const errorCodes = new Set([
   'disabled',
   'failed',
 ]);
-function failure(error: unknown): Error {
+export function recoveryFailure(error: unknown): Error {
   if (error instanceof E2eePasskeyCancelled) return new Error('e2ee_recovery_cancelled');
+  if (isTransientGatewayError(error)) return new Error('e2ee_recovery_unavailable');
+  const record =
+    typeof error === 'object' && error !== null
+      ? (error as { code?: unknown; data?: { code?: unknown }; _tag?: string; reason?: string })
+      : undefined;
+  const code = record?.data?.code ?? record?.code;
   if (
     error instanceof Error &&
-    [...errorCodes].some((code) => error.message === `e2ee_recovery_${code}`)
+    [...errorCodes].some((key) => error.message === `e2ee_recovery_${key}`)
   )
     return error;
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    typeof error.code === 'string' &&
-    errorCodes.has(error.code)
-  )
-    return new Error(`e2ee_recovery_${error.code}`);
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === 'locator-mismatch'
-  )
-    return new Error('e2ee_recovery_authentication');
+  if (typeof code === 'string') {
+    const key = code.replace(/^e2ee_recovery_/, '');
+    if (errorCodes.has(key)) return new Error(`e2ee_recovery_${key}`);
+    if (key === 'locator-mismatch') return new Error('e2ee_recovery_authentication');
+  }
+  if (record?._tag === 'BackendError') {
+    if (record.reason === 'conflict') return new Error('e2ee_recovery_conflict');
+    if (record.reason === 'unavailable') return new Error('e2ee_recovery_unavailable');
+  }
+  if (record?._tag === 'LocalStoreError' || record?._tag === 'KeyProtectorError')
+    return new Error('e2ee_recovery_storage');
+  if (error instanceof Error) {
+    if (/^(?:QuotaExceededError|InvalidStateError|UnknownError|NotReadableError)$/.test(error.name))
+      return new Error('e2ee_recovery_storage');
+    if (
+      /^(?:NetworkError|TimeoutError)$/.test(error.name) ||
+      /failed to fetch|fetch failed|load failed|network(?:error| request failed)|timed? ?out/i.test(
+        error.message
+      )
+    )
+      return new Error('e2ee_recovery_unavailable');
+  }
   return new Error('e2ee_recovery_failed');
 }
+const boundedRecoveryRpc = <A, E>(request: Effect.Effect<A, E>) =>
+  request.pipe(
+    Effect.timeoutOrElse({
+      duration: rpcTimeout,
+      orElse: () => Effect.fail(new Error('e2ee_recovery_unavailable')),
+    }),
+    Effect.interruptible
+  );
+
+export const recoveryRpc = <A>(work: () => Promise<A>, check: () => void) =>
+  boundedRecoveryRpc(gatewayRequest(work, Effect.try({ try: check, catch: recoveryFailure })));
+
 /** The page's origin; non-HTTP(S) shells such as `capacitor://localhost` yield no locator. */
 const pageOrigin = (): string | undefined =>
   typeof globalThis.location?.origin === 'string' ? globalThis.location.origin : undefined;
@@ -160,15 +189,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
       },
       catch: (error) => error,
     });
-  const rpc = <A>(work: () => Promise<A>) =>
-    request(work).pipe(
-      Effect.interruptible,
-      Effect.timeoutOrElse({
-        duration: rpcTimeout,
-        orElse: () => Effect.fail(new Error('e2ee_recovery_failed')),
-      }),
-      Effect.interruptible
-    );
+  const rpc = <A>(work: () => Promise<A>) => recoveryRpc(work, check);
   const port = (borrow: (prf: Uint8Array) => void = () => {}): E2eePasskeyPort => {
     if (!options.passkey) throw new Error('e2ee_recovery_prf-unavailable');
     const native = options.passkey;
@@ -206,6 +227,8 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
     value === null ? Effect.succeed(null) : Effect.fromResult(decodeRecoveryVaultCiphertext(value));
   const acknowledge = (reply: { ok: boolean }) =>
     reply.ok === true ? Effect.void : Effect.fail({ code: 'storage' });
+  const readEntry = (vaultId: string, entryId: string) =>
+    rpc(() => options.client.query(api.e2eeRecoveryVault.readEntry, { vaultId, entryId }));
   const store: RecoveryVaultStore['Service'] = {
     putImmutable: (vaultId, entry) =>
       rpc(() =>
@@ -214,39 +237,25 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
           entry: encodeRecoveryVaultCiphertext(entry),
         })
       ).pipe(Effect.flatMap(acknowledge)),
-    readEntry: (vaultId, entryId) =>
-      rpc(() => options.client.query(api.e2eeRecoveryVault.readEntry, { vaultId, entryId })).pipe(
-        Effect.flatMap(ciphertext)
-      ),
+    readEntry: (vaultId, entryId) => readEntry(vaultId, entryId).pipe(Effect.flatMap(ciphertext)),
     ...{
       readEntries: (vaultId: string, entryIds: readonly string[]) =>
-        rpc(async () => {
-          try {
-            return await options.client.query(readEntriesQuery, {
-              vaultId,
-              entryIds: [...entryIds],
-            });
-          } catch (error) {
-            if (
-              !(error instanceof Error) ||
-              !error.message.includes('Could not find public function') ||
-              !error.message.includes('e2eeRecoveryVault:readEntries')
+        boundedRecoveryRpc(
+          rpc(() =>
+            options.client.query(readEntriesQuery, { vaultId, entryIds: [...entryIds] })
+          ).pipe(
+            Effect.catchIf(
+              (error) =>
+                error instanceof Error &&
+                error.message.includes('Could not find public function') &&
+                error.message.includes('e2eeRecoveryVault:readEntries'),
+              () =>
+                Effect.forEach(entryIds, (entryId) => readEntry(vaultId, entryId), {
+                  concurrency: 4,
+                })
             )
-              throw error;
-            const rows: unknown[] = [];
-            for (let i = 0; i < entryIds.length; i += 4)
-              rows.push(
-                ...(await Promise.all(
-                  entryIds
-                    .slice(i, i + 4)
-                    .map((entryId) =>
-                      options.client.query(api.e2eeRecoveryVault.readEntry, { vaultId, entryId })
-                    )
-                ))
-              );
-            return rows;
-          }
-        }).pipe(Effect.flatMap((rows) => Effect.forEach(rows, ciphertext))),
+          )
+        ).pipe(Effect.flatMap((rows) => Effect.forEach(rows, ciphertext))),
     },
     readIndex: (vaultId) =>
       rpc(() => options.client.query(api.e2eeRecoveryVault.readIndex, { vaultId })).pipe(
@@ -322,11 +331,11 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
     commands
       .withPermit(
         Effect.gen(function* () {
-          yield* Effect.sync(check);
+          yield* Effect.try({ try: check, catch: recoveryFailure });
           return yield* work;
         })
       )
-      .pipe(Effect.uninterruptible, Effect.mapError(failure));
+      .pipe(Effect.uninterruptible, Effect.mapError(recoveryFailure));
   const summary = (vault: RecoveryVault): Effect.Effect<ClientRecoverySummary, unknown> =>
     Effect.gen(function* () {
       const index = yield* vault.readIndex();
@@ -418,7 +427,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
             (yield* rpc(() => options.client.query(api.e2eeRecoveryVault.hasAccountVault, {})))
               .exists
           )
-            return yield* Effect.fail({ code: 'conflict' });
+            return yield* Effect.fail({ code: 'exists' });
           const borrowed = new Set<Uint8Array>();
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
@@ -438,7 +447,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
       )
     );
   const read = <A, E>(work: Effect.Effect<A, E>) =>
-    work.pipe(Effect.uninterruptible, Effect.mapError(failure));
+    work.pipe(Effect.uninterruptible, Effect.mapError(recoveryFailure));
   return {
     /** Internal composition only: never return vault handles or secrets to product UI. */
     withVault: use,
@@ -451,7 +460,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
               (yield* rpc(() => options.client.query(api.e2eeRecoveryVault.hasAccountVault, {})))
                 .exists
             )
-              return yield* Effect.fail({ code: 'conflict' });
+              return yield* Effect.fail({ code: 'exists' });
             const journal = yield* clientRecoveryJournal(accountId, check, options.platform);
             return yield* Effect.gen(function* () {
               const vaults = yield* RecoveryVaults;

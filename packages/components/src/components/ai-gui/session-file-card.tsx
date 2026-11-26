@@ -311,7 +311,7 @@ export function SessionFileCardLayout({
   fileName: string;
   /** With the name, picks the kind of page the sheet draws. */
   mimeType?: string;
-  subtitle: string;
+  subtitle?: string;
   actionIcon: ReactNode;
   isInteractive?: boolean;
   isMuted?: boolean;
@@ -353,17 +353,19 @@ export function SessionFileCardLayout({
         />
         <span {...stylex.props(card.body)}>
           <span {...stylex.props(evidenceSurface.name, card.clip)}>{fileName}</span>
-          <span
-            {...stylex.props(
-              evidenceSurface.subtitle,
-              failed && evidenceSurface.failed,
-              card.clip,
-              card.figures
-            )}
-            title={subtitle}
-          >
-            {subtitle}
-          </span>
+          {subtitle ? (
+            <span
+              {...stylex.props(
+                evidenceSurface.subtitle,
+                failed && evidenceSurface.failed,
+                card.clip,
+                card.figures
+              )}
+              title={subtitle}
+            >
+              {subtitle}
+            </span>
+          ) : null}
         </span>
         {actionIcon ? (
           <span

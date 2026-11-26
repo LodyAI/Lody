@@ -691,6 +691,11 @@ export type CloudApi = {
     >;
     revoke: Mutation<{ shareId: string; expectedRevision: number }, SessionShareView>;
   };
+  analytics: {
+    getUsageSharing: Query<{ accountId?: string }, boolean>;
+    setUsageSharing: Mutation<{ enabled: boolean; accountId?: string }, null>;
+    getUsageSharingForCliToken: Query<{ cliToken: string }, boolean | null>;
+  };
   activity: {
     recordMyWorkspaceDailyActiveUser: Mutation<
       { workspaceId: string },

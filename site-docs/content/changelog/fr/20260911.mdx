@@ -1,0 +1,39 @@
+---
+title: "20260911"
+version: 0.93.3
+date: 2026-09-11
+description: "Ajout des fenêtres de bureau autonomes, du partage de discussions et de rapports d'utilisation, ainsi que d'améliorations aux contrôles d'agent, à la récupération de sessions, aux actions sur les fichiers et à la collaboration multi-machines."
+---
+
+Version 0.93.3
+
+### ✨ Nouvelles fonctionnalités
+
+- Transférez la propriété d'un espace de travail en toute sécurité tout en assurant la continuité des abonnements et de la facturation existants
+- Ouvrez des sessions et des espaces de travail dans des fenêtres de bureau indépendantes
+- Sélectionnez plusieurs messages de discussion et exportez-les sous forme d'images PNG, ou copiez directement les images générées dans la discussion
+- Mentionnez des rôles d'agent d'une machine à l'autre et visualisez les rôles temporairement indisponibles
+- Affichez l'identité des expéditeurs dans la discussion afin de mieux distinguer les messages lors de la collaboration
+- Exportez la consommation de jetons, les tendances d'activité et la répartition par modèle depuis la page Utilisation sous forme de rapports au format portrait ou paysage
+- Copiez le contexte complet au format Markdown depuis les menus de bifurcation de session, avec des exports de conversation améliorés
+- Mettez en pause, reprenez et effacez les objectifs Codex grâce à des contrôles dédiés
+- Laissez Codex et Grok fournir leurs propres titres de session, afin de réduire le travail en double et les temps d'attente
+- Préparez les environnements d'exécution d'agent plus tôt lors de l'intégration et affichez plus clairement les états d'attente
+- Privilégiez l'identité Git du propriétaire de la machine lors de la création de projets locaux
+
+### 🐛 Correctifs et améliorations
+
+- Correction d'objectifs qui ne pouvaient pas reprendre après une mise en pause et de contrôles qui pouvaient rester désactivés
+- Correction de sessions Codex bifurquées qui se bloquaient sur leur premier prompt et de conflits de prompts après annulation
+- Préservation du contexte de l'agent lorsque les identifiants expirent ou que l'identité change, réduisant les interruptions et les redémarrages en double
+- Amélioration de la compatibilité du mode Plan, des paramètres de DeepSeek Harness et de la récupération du cache de capacités ACP
+- Amélioration de la fiabilité des écritures d'historique, des mises à jour en streaming, des nouvelles tentatives d'accès aux machines et des longues chaînes de tâches asynchrones
+- Amélioration des liens vers les fichiers locaux, des actions d'ouverture système et du glisser-déposer de dossiers
+- Amélioration des interactions Mermaid afin que les diagrammes intégrés ne capturent plus le défilement, tandis que les diagrammes en plein écran prennent en charge le zoom et le déplacement
+- Correction de l'état de session qui ne se stabilisait pas une fois le compactage du contexte terminé
+- Amélioration des relations entre sessions enfants, des contrôles de repli de la barre latérale et des actions de bifurcation pendant le chargement
+- Unification du cycle de vie des raccourcis sur l'application de bureau pour une gestion plus fiable des fenêtres et des raccourcis clavier
+- Correction des mises à niveau de l'agent sous Windows et des accusés de réception du cycle de vie, et restauration des mises en page mobiles après fermeture du clavier
+- Amélioration du rythme de synchronisation mobile, du chargement de l'état des machines et des performances au premier chargement sur mobile sur le site web
+- Correction d'erreurs de permission occasionnelles lors de l'actualisation des appartenances
+- Merci aux contributeurs externes @EYHN, @slashdevcorpse, @ladydd, @hqhq1025 et @nzhl pour leurs améliorations sur le dépôt de dossiers, la synchronisation mobile, le suivi de la durée de travail, le comportement avec mouvement réduit, les sessions Codex bifurquées et le rendu du terminal

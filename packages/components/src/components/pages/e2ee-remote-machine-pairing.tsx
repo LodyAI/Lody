@@ -1,3 +1,8 @@
+import {
+  isLocalStorageFailure,
+  isRequestUnavailable,
+  requestFailureCode,
+} from '@/lib/e2ee-actionable-failure';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -49,6 +54,17 @@ const styles = stylex.create({
   },
   message: { margin: 0, color: colors.secondaryLabel, fontSize: text.footnoteSize },
 });
+function remotePairingFailureKey(cause: unknown) {
+  const code = requestFailureCode(cause);
+  if (code === 'e2ee_pairing_key_revoked') return 'e2ee.remoteMachine.keyRevoked';
+  if (/^(?:e2ee_(?:pairing_)?)?(?:expired|conflict)(?:_create_new_command)?$/.test(code ?? ''))
+    return 'e2ee.remoteMachine.expiredOrConflict';
+  if (/^(?:e2ee_(?:pairing_|management_)?)?(?:forbidden|unauthorized)$/.test(code ?? ''))
+    return 'e2ee.remoteMachine.forbidden';
+  if (isLocalStorageFailure(cause)) return 'e2ee.custody.unavailable.help';
+  if (isRequestUnavailable(cause)) return 'e2ee.accountPair.error.unavailable';
+  return 'e2ee.remoteMachine.error';
+}
 /** An expiring command transfers pins. A separate, material-bound click grants consent. */
 export function E2eeRemoteMachinePairing({
   workspaceId,
@@ -65,7 +81,7 @@ export function E2eeRemoteMachinePairing({
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   // A revoked identity cannot be readmitted; the machine must create a new one.
-  const [error, setError] = useState<false | 'generic' | 'key-revoked'>(false);
+  const [error, setError] = useState<ReturnType<typeof remotePairingFailureKey> | null>(null);
   const active = useRef(true);
   useEffect(() => {
     active.current = true;
@@ -87,16 +103,11 @@ export function E2eeRemoteMachinePairing({
   const run = async (work: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
-    setError(false);
+    setError(null);
     try {
       await work();
     } catch (cause) {
-      if (active.current)
-        setError(
-          cause instanceof Error && /\be2ee_pairing_key_revoked$/.test(cause.message)
-            ? 'key-revoked'
-            : 'generic'
-        );
+      if (active.current) setError(remotePairingFailureKey(cause));
     } finally {
       if (active.current) setBusy(false);
     }
@@ -118,13 +129,7 @@ export function E2eeRemoteMachinePairing({
         <Card.Description>{t('e2ee.remoteMachine.description')}</Card.Description>
       </Card.Header>
       <div {...stylex.props(styles.body)}>
-        {error && (
-          <p role="alert">
-            {t(
-              error === 'key-revoked' ? 'e2ee.remoteMachine.keyRevoked' : 'e2ee.remoteMachine.error'
-            )}
-          </p>
-        )}
+        {error && <p role="alert">{t(error)}</p>}
         {session && (
           <>
             <div {...stylex.props(styles.command)}>
@@ -161,7 +166,9 @@ export function E2eeRemoteMachinePairing({
             {t(
               preview.status === 'conflict' && preview.noAdmissionReserved
                 ? 'e2ee.remoteMachine.status.claimedByAnotherMachine'
-                : `e2ee.remoteMachine.status.${preview.status}`
+                : preview.status === 'expired' || preview.status === 'conflict'
+                  ? 'e2ee.remoteMachine.expiredOrConflict'
+                  : `e2ee.remoteMachine.status.${preview.status}`
             )}
           </p>
         )}

@@ -1,0 +1,67 @@
+---
+title: "20260413"
+version: 0.42.0
+date: 2026-04-13
+description: "推出全新同步引擎、多分頁工作階段、Diff 行級評論、VS Code 主題支援、對話搜尋以及遷移說明。"
+---
+
+### 破壞性變更與遷移說明
+
+- 更新後，您可能需要重新登入。
+- 如果您使用 GitHub Worktree，執行 Agent 的機器必須設定好您的 GitHub 身分（透過 `gh auth`）；否則系統將預設使用 `lody` 身分建立 Pull Request。
+- Lody 已切換至全新的同步引擎與資料結構。舊有的 Workspace 將不再可用，您需要建立新的 Workspace 才能繼續使用 Lody。
+- Lody 不再要求使用者的 GitHub 個人身分權限。因此，系統不再提供同一個 GitHub 儲存庫授權一次即可跨多個 Workspace 共享的功能，現在一個儲存庫僅會關聯至一個 Workspace。
+
+### ✨ 多分頁工作階段
+
+現在您可以在單一工作階段內開啟多個對話分頁與檔案檢視器。如同 VSCode 的分頁列一般，您可以一邊在左側與 Agent 對話，一邊在右側檢視檔案與 Diff，兩側互不干擾。子分頁會繼承父層的工作目錄，並支援拖曳排序與重新命名。
+
+<img src="/_docs-assets/20260413-multi-tab.png" alt="" />
+
+### 💬 Diff 行級評論
+
+現在您可以直接在 Diff 檢視器中新增評論。支援 Markdown、討論串回覆、將討論串標記為已解決、同步至 GitHub，以及一鍵傳送至對話視窗。
+
+<img src="/_docs-assets/20260413-diff-comment.png" alt="" />
+
+### 🎨 介面最佳化與 VSCode 主題支援
+
+- 新增對 VSCode 主題的相容支援，並內建多款優秀的開源主題（Vitesse、Gruvbox Material、Tokyo Night、One Dark Pro 等），開箱即可使用。非常感謝這些開源作者的傑出貢獻！
+  <img src="/_docs-assets/20260413-theme.png" alt="" />
+
+- 最佳化 Markdown 渲染與 Diff 載入體驗
+- 支援在對話內進行搜尋
+  <img src="/_docs-assets/20260413-session-find.png" alt="" />
+
+### 🖥️ Daemon 常駐模式
+
+CLI 現已支援 Daemon 模式，讓 Lody 在背景持續執行並自動重新啟動：
+
+```bash
+lody daemon start     # 啟動背景常駐程式
+lody daemon status    # 查看執行狀態
+lody daemon logs      # 檢視紀錄檔
+lody daemon stop      # 停止背景常駐程式
+```
+
+### 🔗 GitHub 整合強化
+
+- PR 的 CI 檢查狀態會即時同步至工作階段介面，無需切換到 GitHub 即可查看建置結果
+- 關聯 PR 的工作階段支援自動 commit 與 push
+
+### 🌐 同步與穩定性
+
+- 更換全新同步引擎，提升同步可靠性
+- CLI 資源限制支援 cgroup 感知，防止在 Linux 容器環境中發生卡死
+- ACP 閒置逾時縮短至 30 分鐘，以節省系統資源
+- 新增工作階段記憶體壓力自動回收機制
+
+### 🛠️ 修正與改善
+
+- 新增 Google、Apple 與 Discord 第三方登入。
+- 修正 Diff 載入與同步相關問題
+- 修正 GitHub 驗證 Token 的重新整理時機
+- 修正 Safari < 16.4 啟動當機的問題
+- 修正多處行動裝置介面排版問題
+- 減少 CLI 冗餘紀錄輸出與磁碟空間佔用
+- 工作階段預設改用 Prompt 開頭文字作為初始標題，不再顯示「Untitled」

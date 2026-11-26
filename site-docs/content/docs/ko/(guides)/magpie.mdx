@@ -1,0 +1,97 @@
+---
+title: "Magpie 연결"
+description: "명령어 하나로 서버에 Claude, Codex, Pi 및 기타 에이전트용 Magpie 제공자를 가져옵니다."
+---
+
+# Magpie 연결
+
+Magpie는 모델 제공자에 연결하고, Lody는 에이전트 설정을 생성합니다. 업스트림 API 키는 Magpie에 그대로 보관되며, Lody로 복사할 필요가 없습니다.
+
+## 시작하기 전에
+
+- **동일한 서버**에서 Magpie와 Lody 데몬을 실행하고, Magpie에서 모델을 하나 이상 활성화하세요.
+- Lody에 로그인하고 서버를 워크스페이스에 연결하세요. 자세한 내용은 [CLI 로그인](/ko/docs/cli#core-commands)을 참고하세요.
+- `import-magpie`를 지원하는 Lody CLI를 사용하세요. 이 명령어는 OSS 로컬 전용 모드가 아니라 클라우드 워크스페이스를 사용합니다.
+
+서버에서 명령어 지원 여부를 확인하고, 데몬을 시작한 다음 워크스페이스를 조회합니다.
+
+```bash
+lody agent-config import-magpie --help
+lody daemon start
+lody workspace list
+```
+
+데몬이 이미 실행 중이라면 데몬 시작 단계는 건너뛰세요. 아래의 `my-team`은 본인의 워크스페이스 ID, 이름 또는 슬러그(slug)로 바꾸어 입력하세요.
+
+## 모든 제공자 가져오기
+
+```bash
+lody agent-config import-magpie --workspace my-team --json
+```
+
+기본적으로 `http://127.0.0.1:3425`에 연결하여 일곱 개의 제공자를 가져옵니다.
+
+| `--targets` 값 | 설정 이름 |
+| --- | --- |
+| `claude` | Claude-magpie |
+| `codex` | Codex-magpie |
+| `pi` | Pi-magpie |
+| `dsh` | DSH-magpie |
+| `kimi` | Kimi Code-magpie |
+| `grok` | Grok-magpie |
+| `bub` | Bub-magpie |
+
+이 명령어는 **실행 중인 머신**으로만 가져오기를 수행합니다. `--machine` 옵션은 제공되지 않습니다. `127.0.0.1`은 사용자의 컴퓨터가 아니라 해당 서버를 가리킵니다.
+Bub을 사용하려면 `bub acp` 명령어와 ACP 플러그인이 미리 설치되어 있어야 합니다.
+
+### 에이전트 선택
+
+대상은 쉼표로 구분합니다. 예를 들어 Pi와 Codex만 가져오려면 다음과 같이 실행합니다.
+
+```bash
+lody agent-config import-magpie --workspace my-team --targets pi,codex --json
+```
+
+### 다른 포트 또는 가져오기 링크 사용
+
+다른 Magpie 포트를 사용하려면 `/v1`을 제외한 게이트웨이 루트 URL을 전달하세요.
+
+```bash
+lody agent-config import-magpie --workspace my-team --gateway http://127.0.0.1:4000 --json
+```
+
+Magpie 가져오기 링크가 있다면 전체 링크를 전달하세요.
+
+```bash
+lody agent-config import-magpie --workspace my-team --link 'lody://provider/import?v=1&data=…' --json
+```
+
+`--link`와 `--gateway` 중 하나만 사용해야 하며, 둘을 함께 사용할 수 없습니다. 링크를 사용하는 경우 해당 링크가 제공하는 모든 대상이 기본값으로 선택되며, `--targets`는 그중 일부만 선택할 때 사용할 수 있습니다.
+게이트웨이는 반드시 로컬 HTTP 루프백 주소(`127.0.0.1`, `localhost` 또는 `[::1]`)를 사용해야 합니다.
+
+## 결과 확인
+
+JSON의 `providers` 배열에는 각 대상의 `agentConfigId`와 `status`가 포함됩니다.
+
+| 상태 | 의미 |
+| --- | --- |
+| `queued` | 설정이 저장되었으며, 데몬이 런타임을 설치하거나 검증할 예정입니다 |
+| `preparing-runtime` / `verifying` | 기존 설정을 준비 중이거나 검증 중입니다 |
+| `awaiting-auth` | 기존 설정에 인증이 필요합니다 |
+| `created` | 설정은 저장되었지만 모델 요청은 아직 검증되지 않았습니다 |
+| `existing` | 이 게이트웨이와 에이전트 유형에 대한 설정이 이미 존재하며 그대로 유지됩니다 |
+
+Lody의 **Providers** 페이지에서 설정 진행 상황을 확인하세요. 준비가 완료되면 세션을 생성할 때 서버에서 해당 제공자를 선택할 수 있습니다.
+가져오기에 성공했다고 해서 업스트림 추론(inference)이 정상 작동하는 것까지 확인된 것은 아닙니다. 메시지를 보내 직접 확인하세요.
+
+`synced: false`는 설정이 로컬에는 저장되었지만 워크스페이스 동기화가 확인되지 않았음을 의미합니다. 연결을 복구한 뒤 가져오기를 다시 실행하세요.
+
+가져오기를 반복 실행하면 기존 설정은 유지되고, 실패한 설정은 원래 설정으로 다시 시도합니다.
+Pi가 지원되지 않는 경우 서버에서 Lody를 업데이트하고 데몬을 재시작하거나, `--targets`에서 `pi`를 제외하세요.
+
+## 모델 및 설정 업데이트
+
+모델 관리는 Magpie에서 수행하세요. Lody는 이후 실행 시 최신 카탈로그를 읽어 오며, 현재 실행 중인 세션에는 자동으로 반영되지 않습니다.
+생성된 네이티브 설정은 Lody가 관리합니다. 수동으로 편집한 내용은 다음 실행 시 덮어쓰일 수 있습니다.
+
+데스크톱에서 기존 Magpie 가져오기 링크를 열면 확인 대화상자가 표시되고 해당 데스크톱 머신으로 가져오기가 수행됩니다. 서버로 가져오려면 서버에서 위 명령어를 실행하세요.

@@ -51,13 +51,29 @@ export async function saveSessionFileToNativeShareSheet(args: NativeSaveArgs): P
   const { Filesystem, Directory } = await import('@capacitor/filesystem');
   const { Share } = await import('@capacitor/share');
 
-  const chunks = args.encryption ? protectedAttachmentChunks({ ...args, encryption: args.encryption }) : undefined;
-  const response = chunks ? new Response(new ReadableStream({
-    async pull(controller) { try { const next = await chunks.next(); if (next.done) controller.close(); else controller.enqueue(next.value); } catch (error) { controller.error(error); } },
-    async cancel() { await chunks.return(undefined); },
-  })) : await fetch(buildSessionFileDownloadUrl(workspaceId, sessionId, fileId), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const chunks = args.encryption
+    ? protectedAttachmentChunks({ ...args, encryption: args.encryption })
+    : undefined;
+  const response = chunks
+    ? new Response(
+        new ReadableStream({
+          async pull(controller) {
+            try {
+              const next = await chunks.next();
+              if (next.done) controller.close();
+              else controller.enqueue(next.value);
+            } catch (error) {
+              controller.error(error);
+            }
+          },
+          async cancel() {
+            await chunks.return(undefined);
+          },
+        })
+      )
+    : await fetch(buildSessionFileDownloadUrl(workspaceId, sessionId, fileId), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
   if (!response.ok) {
     throw new Error(`Failed to download file (${response.status})`);
   }
@@ -67,8 +83,9 @@ export async function saveSessionFileToNativeShareSheet(args: NativeSaveArgs): P
   const safeName = sanitizeCacheFileName(fileName || fileId);
   const cachePath = `lody-shared/${fileId}/${safeName}`;
 
-  try { await writeResponseToCache({ response, Filesystem, Directory, cachePath }); }
-  catch (error) {
+  try {
+    await writeResponseToCache({ response, Filesystem, Directory, cachePath });
+  } catch (error) {
     await Filesystem.deleteFile({ path: cachePath, directory: Directory.Cache }).catch(() => {});
     throw error;
   }

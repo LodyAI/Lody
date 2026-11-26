@@ -1,0 +1,55 @@
+---
+title: "소개"
+description: "Lody 문서 안내 지도입니다. Lody 설치 방법, 첫 번째 세션 실행, Codex 또는 Claude Code에서 전환하기, 각종 가이드와 기능 페이지를 어디서 찾을 수 있는지 안내합니다."
+---
+
+# Lody
+
+Lody.ai를 사용하면 데스크톱, 모바일, 그리고 모든 브라우저에서 코딩 에이전트를 병렬로 실행하고 팀과
+컨텍스트를 공유할 수 있습니다. Claude Code, Codex, Grok, Kimi Code, Devin, Pi, DeepSeek Harness,
+Bub, Dimcode 등 Lody의 모든 내장 프로바이더는 물론, 커스텀 ACP 에이전트와
+[ACP Registry](https://agentclientprotocol.com/get-started/registry)에 등록된 모든 CLI도 실행할 수 있습니다.
+
+## 여기서 시작하기
+
+<Cards>
+  <Card href="/ko/docs/quickstart" title="설치 및 로그인">
+    데스크톱 앱, 모바일 앱, 브라우저 또는 원격 머신의 CLI를 설정합니다.
+  </Card>
+  <Card href="/ko/docs/first-session" title="첫 번째 세션 실행하기">
+    프롬프트 입력부터 결과 리뷰까지 작은 작업 하나를 끝까지 진행해 봅니다. GitHub 연동이나 병렬 에이전트 없이도 시작할 수 있습니다.
+  </Card>
+  <Card href="/ko/docs/concepts" title="핵심 구조 이해하기">
+    모든 Lody 화면을 구성하는 몇 가지 핵심 객체와 이해하기 쉬운 용어집을 확인합니다.
+  </Card>
+  <Card href="/ko/docs/from-codex-claude-code" title="Codex 또는 Claude Code에서 전환하기">
+    그대로 유지되는 요소, Lody가 추가하는 기능, 그리고 마이그레이션 체크리스트를 살펴봅니다.
+  </Card>
+</Cards>
+
+## Lody의 강점
+
+- **작업을 병렬로 실행할 수 있습니다.** 각 세션마다 독립된 Git worktree가 할당되므로 에이전트들이 서로의 작업을 덮어쓰지
+  않습니다. 자세한 내용은 [병렬 코딩 에이전트](/ko/docs/parallel-agents)를 참고하세요.
+- **이미 신뢰하는 에이전트를 그대로 사용할 수 있습니다.** Lody는 Claude Code와 Codex뿐만 아니라 다양한 프로바이더를 기본으로
+  제공하며, ACP Registry의 모든 런타임과 커스텀 ACP 명령어도 지원합니다. 자세한 내용은
+  [Agent Config](/ko/docs/quickstart) 및 [CLI 런타임 유형](/ko/docs/cli-runtimes)을 참고하세요.
+- **에이전트가 작업하는 동안 실시간으로 리뷰할 수 있습니다.** 라운드 단위 diff, 줄 단위 코멘트, GitHub PR 리뷰 동기화를 지원합니다.
+  자세한 내용은 [Diff 뷰어](/ko/docs/diff-viewer) 및 [Diff 코멘트](/ko/docs/diff-comments)를 참고하세요.
+- **하나의 에이전트가 다른 에이전트들을 조율하게 할 수 있습니다.**
+  [에이전트 세션 제어](/ko/docs/session-orchestration)와
+  [멀티 에이전트 협업](/ko/docs/agent-collaboration)을 통해 작업을 나누고, 위임하고, 결과를 수집할 수 있습니다.
+- **팀원들과 진행 상황을 공유할 수 있습니다.** 대화 기록을 복사해 전달하는 대신
+  [세션 핸드오프](/ko/docs/session-handoff)로 실시간 세션을 공유하고, [팀 기능](/ko/docs/team)에서 작업 현황을 한눈에 파악할 수 있습니다.
+- **자리에서 벗어나서도 작업할 수 있습니다.** [모바일 액세스](/ko/docs/mobile)를 통해 iOS, Android 또는
+  모든 브라우저에서 결과를 리뷰하고 방향을 지시할 수 있습니다.
+- **CLI를 계속 실행 상태로 유지할 수 있습니다.** [데몬 모드](/ko/docs/cli#daemon-mode)로 오래 걸리는 작업을
+  백그라운드에서 실행하고 안전하게 복구할 수 있습니다.
+
+## 다음 단계
+
+<Cards>
+  <Card href="/ko/docs/quickstart" title="Lody 설치하기" />
+  <Card href="/ko/docs/first-session" title="첫 번째 세션 실행하기" />
+  <Card href="/ko/docs/concepts" title="개념 및 용어집 읽기" />
+</Cards>

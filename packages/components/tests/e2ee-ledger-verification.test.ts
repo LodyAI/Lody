@@ -133,9 +133,9 @@ describe('e2ee-ledger-verification', () => {
     expect(bytesToHex(extended.view.head.toBytes())).toBe(
       bytesToHex(fullHistory.view.head.toBytes())
     );
-    expect(bytesToHex(Result.getOrThrow(exportVerifiedState(extended.view)).stateDigest.toBytes())).toBe(
-      bytesToHex(exportedFull.stateDigest.toBytes())
-    );
+    expect(
+      bytesToHex(Result.getOrThrow(exportVerifiedState(extended.view)).stateDigest.toBytes())
+    ).toBe(bytesToHex(exportedFull.stateDigest.toBytes()));
     expect(extended.records.map((record) => record.hash)).toEqual(
       fullHistory.records.map((record) => record.hash)
     );

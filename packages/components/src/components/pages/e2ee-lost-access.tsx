@@ -426,11 +426,7 @@ export function E2eeLostAccessEntry({
         {t('e2ee.lostAccess.entry')}
       </Button>
       <Dialog.Root open={open} onOpenChange={change}>
-        <Dialog.Content
-          width={520}
-          xstyle={themeStyles.glyph}
-          data-e2ee-pairing-surface=""
-        >
+        <Dialog.Content width={520} xstyle={themeStyles.glyph} data-e2ee-pairing-surface="">
           <Dialog.Title>{t('e2ee.lostAccess.title')}</Dialog.Title>
           <E2eeLostAccess
             {...props}

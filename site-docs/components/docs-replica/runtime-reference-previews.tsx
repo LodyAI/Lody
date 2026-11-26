@@ -1,3 +1,4 @@
+import type { SiteLocale } from '@site/src/site-pages/shared';
 import type { LucideIcon } from 'lucide-react';
 import {
   ArrowUp,
@@ -23,7 +24,6 @@ import {
   Zap,
 } from 'lucide-react';
 import { ReplicaRunConfigTrigger } from '../landing-replica/composer-controls';
-import type { ReplicaLocale } from '../landing-replica/types';
 import { cn } from '../landing-replica/utils';
 
 /* Display-only previews for the docs' runtime reference and Claude/Codex
@@ -36,7 +36,7 @@ const PREVIEW_SHELL =
   'lody-app-preview overflow-hidden rounded-xl border border-border bg-background text-foreground shadow-sm';
 const CAPTION_CLASS = 'mt-2 text-center text-xs text-muted-foreground';
 
-type PreviewProps = { locale?: ReplicaLocale };
+type PreviewProps = { locale?: SiteLocale };
 
 // ─── Agent config type selector ─────────────────────────────────────────────
 // Source: packages/components/src/components/settings/agent-config-dialog.tsx
@@ -49,7 +49,7 @@ type AgentConfigCopy = {
   caption: string;
 };
 
-const AGENT_CONFIG_COPY: Record<ReplicaLocale, AgentConfigCopy> = {
+const AGENT_CONFIG_COPY: Record<SiteLocale, AgentConfigCopy> = {
   en: {
     title: 'Configuration Type',
     claude: 'Claude',
@@ -62,6 +62,47 @@ const AGENT_CONFIG_COPY: Record<ReplicaLocale, AgentConfigCopy> = {
     claude: 'Claude',
     codex: 'Codex',
     caption: '模拟选择器。Claude 用于 Claude 兼容端点，Codex 用于 OpenAI 运行时。',
+  },
+  'zh-hant': {
+    title: '設定類型',
+    claude: 'Claude',
+    codex: 'Codex',
+    caption: '模擬選擇器。Claude 用於 Claude 相容端點，Codex 用於 OpenAI 執行環境。',
+  },
+  ja: {
+    title: '構成タイプ',
+    claude: 'Claude',
+    codex: 'Codex',
+    caption:
+      'モックセレクターです。Claude 互換エンドポイントには Claude を、OpenAI ランタイムには Codex を選択します。',
+  },
+  ko: {
+    title: '구성 유형',
+    claude: 'Claude',
+    codex: 'Codex',
+    caption:
+      '모의 선택기입니다. Claude 호환 엔드포인트는 Claude를, OpenAI 런타임은 Codex를 선택하세요.',
+  },
+  es: {
+    title: 'Tipo de configuración',
+    claude: 'Claude',
+    codex: 'Codex',
+    caption:
+      'Selector de ejemplo. Elige Claude para endpoints compatibles con Claude o Codex para entornos de ejecución de OpenAI.',
+  },
+  fr: {
+    title: 'Type de configuration',
+    claude: 'Claude',
+    codex: 'Codex',
+    caption:
+      'Sélecteur factice. Choisissez Claude pour les points de terminaison compatibles avec Claude ou Codex pour les environnements d’exécution OpenAI.',
+  },
+  ru: {
+    title: 'Тип конфигурации',
+    claude: 'Claude',
+    codex: 'Codex',
+    caption:
+      'Демонстрационный список выбора. Выберите Claude для Claude-совместимых эндпоинтов или Codex для сред выполнения OpenAI.',
   },
 };
 
@@ -124,7 +165,7 @@ type CliRuntimeCopy = {
   caption: string;
 };
 
-const CLI_RUNTIME_COPY: Record<ReplicaLocale, CliRuntimeCopy> = {
+const CLI_RUNTIME_COPY: Record<SiteLocale, CliRuntimeCopy> = {
   en: {
     title: 'ACP Provider',
     subtitle: 'Runtimes from the ACP Registry',
@@ -137,6 +178,47 @@ const CLI_RUNTIME_COPY: Record<ReplicaLocale, CliRuntimeCopy> = {
     subtitle: '来自 ACP Registry 的运行时',
     experimental: '实验性',
     caption: '模拟注册表选择器。使用前需在目标机器上安装所选运行时。',
+  },
+  'zh-hant': {
+    title: 'ACP 執行環境',
+    subtitle: '來自 ACP Registry 的執行環境',
+    experimental: '實驗性',
+    caption: '模擬登錄檔選擇器。執行前需先在目標機器上安裝所選執行環境。',
+  },
+  ja: {
+    title: 'ACP プロバイダー',
+    subtitle: 'ACP Registry のランタイム',
+    experimental: '実験的',
+    caption:
+      'モックレジストリ選択画面です。実行する前に、対象マシンに選択したランタイムをインストールしてください。',
+  },
+  ko: {
+    title: 'ACP 프로바이더',
+    subtitle: 'ACP Registry의 런타임',
+    experimental: '실험적',
+    caption:
+      '모의 레지스트리 선택기입니다. 실행하기 전에 대상 머신에 선택한 런타임을 먼저 설치하세요.',
+  },
+  es: {
+    title: 'Proveedor ACP',
+    subtitle: 'Entornos de ejecución del registro ACP',
+    experimental: 'Experimental',
+    caption:
+      'Selector de registro de ejemplo. Instala el entorno de ejecución seleccionado en la máquina de destino antes de ejecutarlo.',
+  },
+  fr: {
+    title: 'Fournisseur ACP',
+    subtitle: 'Environnements d’exécution du registre ACP',
+    experimental: 'Expérimental',
+    caption:
+      'Sélecteur de registre factice. Installez l’environnement d’exécution choisi sur la machine cible avant de l’utiliser.',
+  },
+  ru: {
+    title: 'Провайдер ACP',
+    subtitle: 'Среды выполнения из реестра ACP',
+    experimental: 'Экспериментально',
+    caption:
+      'Демонстрационный выбор из реестра. Перед запуском установите выбранную среду выполнения на целевой машине.',
   },
 };
 
@@ -194,7 +276,7 @@ type FastModeCopy = {
   caption: string;
 };
 
-const FAST_MODE_COPY: Record<ReplicaLocale, FastModeCopy> = {
+const FAST_MODE_COPY: Record<SiteLocale, FastModeCopy> = {
   en: {
     model: 'gpt-5.5',
     thinking: 'Xhigh',
@@ -211,6 +293,59 @@ const FAST_MODE_COPY: Record<ReplicaLocale, FastModeCopy> = {
     on: '开',
     tradeoff: '权衡：',
     caption: 'Fast 模式会为后续轮次使用最快的推理档位——速度约提升 2.5 倍，但每个 token 成本更高。',
+  },
+  'zh-hant': {
+    model: 'gpt-5.5',
+    thinking: 'Xhigh',
+    fast: 'Fast',
+    on: '開',
+    tradeoff: '權衡：',
+    caption: 'Fast 模式會為後續回合使用最快的推論層級——速度約提升 2.5 倍，但每 token 成本較高。',
+  },
+  ja: {
+    model: 'gpt-5.5',
+    thinking: 'Xhigh',
+    fast: 'Fast',
+    on: 'オン',
+    tradeoff: 'トレードオフ：',
+    caption:
+      'Fast モードは以降のターンに最速の推論ティアを使用します。速度は約 2.5 倍になりますが、トークンあたりのコストが高くなります。',
+  },
+  ko: {
+    model: 'gpt-5.5',
+    thinking: 'Xhigh',
+    fast: 'Fast',
+    on: '켜짐',
+    tradeoff: '트레이드오프:',
+    caption:
+      'Fast 모드는 이후 턴에 가장 빠른 추론 티어를 사용합니다. 속도는 약 2.5배 빨라지지만 토큰당 비용이 더 높습니다.',
+  },
+  es: {
+    model: 'gpt-5.5',
+    thinking: 'Xhigh',
+    fast: 'Fast',
+    on: 'Activado',
+    tradeoff: 'Compromiso:',
+    caption:
+      'El modo Fast utiliza el nivel de inferencia más rápido para los siguientes turnos: aproximadamente 2,5× más rápido a un mayor coste por token.',
+  },
+  fr: {
+    model: 'gpt-5.5',
+    thinking: 'Xhigh',
+    fast: 'Fast',
+    on: 'Activé',
+    tradeoff: 'Compromis :',
+    caption:
+      'Le mode Fast utilise le niveau d’inférence le plus rapide pour les tours suivants : environ 2,5× plus rapide pour un coût par jeton plus élevé.',
+  },
+  ru: {
+    model: 'gpt-5.5',
+    thinking: 'Xhigh',
+    fast: 'Fast',
+    on: 'Вкл',
+    tradeoff: 'Компромисс:',
+    caption:
+      'Режим Fast использует самый быстрый уровень инференса для следующих ходов — примерно в 2,5 раза быстрее при более высокой стоимости за токен.',
   },
 };
 
@@ -271,7 +406,7 @@ type AskQuestionPreviewCopy = {
   caption: string;
 };
 
-const ASK_QUESTION_COPY: Record<ReplicaLocale, AskQuestionPreviewCopy> = {
+const ASK_QUESTION_COPY: Record<SiteLocale, AskQuestionPreviewCopy> = {
   en: {
     single: {
       badge: 'Single select',
@@ -366,6 +501,293 @@ const ASK_QUESTION_COPY: Record<ReplicaLocale, AskQuestionPreviewCopy> = {
       ],
     },
     caption: '模拟 AskUserQuestion 卡片。运行时可在任务执行中请求单选、多选或自定义回答。',
+  },
+  'zh-hant': {
+    single: {
+      badge: '單選',
+      question: '你吃了什麼？',
+      options: [
+        {
+          label: '早餐',
+          description: '早上的餐點——例如蛋、吐司、燕麥、粥',
+          selected: true,
+        },
+        {
+          label: '午餐',
+          description: '中午的餐點——例如三明治、沙拉、丼飯',
+        },
+        {
+          label: '晚餐',
+          description: '晚上的餐點——例如義大利麵、熱炒、火鍋',
+        },
+        {
+          label: '點心',
+          description: '兩餐之間的小食——例如水果、堅果、洋芋片',
+        },
+      ],
+      customPlaceholder: '輸入自訂回答……',
+    },
+    multi: {
+      badge: '多選',
+      question: '哪些限制條件最重要？',
+      options: [
+        {
+          label: '離線',
+          description: '沒有網路時也必須能運作',
+          selected: true,
+        },
+        {
+          label: '相容性',
+          description: '保留既有的公開 API',
+        },
+        {
+          label: '速度',
+          description: '優先採用延遲最低的路徑',
+          selected: true,
+        },
+      ],
+    },
+    caption: '模擬 AskUserQuestion 卡片。執行環境可在任務進行中請求單選、多選或自訂回答。',
+  },
+  ja: {
+    single: {
+      badge: '単一選択',
+      question: '何を食べましたか？',
+      options: [
+        {
+          label: '朝食',
+          description: '朝の食事 — 例：卵、トースト、オートミール、おかゆ',
+          selected: true,
+        },
+        {
+          label: '昼食',
+          description: '昼の食事 — 例：サンドイッチ、サラダ、丼もの',
+        },
+        {
+          label: '夕食',
+          description: '夜の食事 — 例：パスタ、炒め物、鍋',
+        },
+        {
+          label: '間食',
+          description: '食事の合間の軽食 — 例：フルーツ、ナッツ、チップス',
+        },
+      ],
+      customPlaceholder: 'カスタム回答を入力...',
+    },
+    multi: {
+      badge: '複数選択',
+      question: '重視する制約はどれですか？',
+      options: [
+        {
+          label: 'オフライン',
+          description: 'ネットワークなしでも動作し続ける必要がある',
+          selected: true,
+        },
+        {
+          label: '互換性',
+          description: '既存の公開 API を維持する',
+        },
+        {
+          label: '速度',
+          description: '最も低遅延なパスを優先する',
+          selected: true,
+        },
+      ],
+    },
+    caption:
+      'モック AskUserQuestion カードです。タスク実行中、ランタイムは単一選択・複数選択・自由入力の回答を求められることがあります。',
+  },
+  ko: {
+    single: {
+      badge: '단일 선택',
+      question: '무엇을 드셨나요?',
+      options: [
+        {
+          label: '아침',
+          description: '아침 식사 — 예: 달걀, 토스트, 오트밀, 죽',
+          selected: true,
+        },
+        {
+          label: '점심',
+          description: '점심 식사 — 예: 샌드위치, 샐러드, 덮밥',
+        },
+        {
+          label: '저녁',
+          description: '저녁 식사 — 예: 파스타, 볶음 요리, 전골',
+        },
+        {
+          label: '간식',
+          description: '식사 사이의 가벼운 먹거리 — 예: 과일, 견과류, 과자',
+        },
+      ],
+      customPlaceholder: '직접 답변 입력...',
+    },
+    multi: {
+      badge: '다중 선택',
+      question: '어떤 제약 조건이 중요한가요?',
+      options: [
+        {
+          label: '오프라인',
+          description: '네트워크 없이도 계속 동작해야 함',
+          selected: true,
+        },
+        {
+          label: '호환성',
+          description: '기존 공개 API를 유지해야 함',
+        },
+        {
+          label: '속도',
+          description: '가장 지연이 적은 경로를 우선함',
+          selected: true,
+        },
+      ],
+    },
+    caption:
+      '모의 AskUserQuestion 카드입니다. 런타임은 작업 실행 중에 단일 선택, 다중 선택 또는 직접 입력 답변을 요청할 수 있습니다.',
+  },
+  es: {
+    single: {
+      badge: 'Selección única',
+      question: '¿Qué comiste?',
+      options: [
+        {
+          label: 'Desayuno',
+          description: 'Comida de la mañana: p. ej., huevos, tostadas, avena',
+          selected: true,
+        },
+        {
+          label: 'Almuerzo',
+          description: 'Comida de mediodía: p. ej., sándwich, ensalada, bol de arroz',
+        },
+        {
+          label: 'Cena',
+          description: 'Comida de la noche: p. ej., pasta, salteado, olla caliente',
+        },
+        {
+          label: 'Merienda',
+          description: 'Bocado ligero entre comidas: p. ej., fruta, frutos secos, patatas',
+        },
+      ],
+      customPlaceholder: 'Escribe una respuesta personalizada...',
+    },
+    multi: {
+      badge: 'Selección múltiple',
+      question: '¿Qué restricciones importan?',
+      options: [
+        {
+          label: 'Sin conexión',
+          description: 'Debe seguir funcionando sin red',
+          selected: true,
+        },
+        {
+          label: 'Compatibilidad',
+          description: 'Mantener la API pública existente',
+        },
+        {
+          label: 'Velocidad',
+          description: 'Priorizar la ruta de menor latencia',
+          selected: true,
+        },
+      ],
+    },
+    caption:
+      'Tarjeta AskUserQuestion de ejemplo. El entorno de ejecución puede solicitar respuestas de selección única, múltiple o personalizadas durante una tarea.',
+  },
+  fr: {
+    single: {
+      badge: 'Choix unique',
+      question: 'Qu’avez-vous mangé ?',
+      options: [
+        {
+          label: 'Petit-déjeuner',
+          description: 'Repas du matin — ex. œufs, tartines, flocons d’avoine',
+          selected: true,
+        },
+        {
+          label: 'Déjeuner',
+          description: 'Repas de midi — ex. sandwich, salade, bol de riz',
+        },
+        {
+          label: 'Dîner',
+          description: 'Repas du soir — ex. pâtes, wok, fondue',
+        },
+        {
+          label: 'En-cas',
+          description: 'Collation entre les repas — ex. fruits, noix, chips',
+        },
+      ],
+      customPlaceholder: 'Saisir une réponse personnalisée...',
+    },
+    multi: {
+      badge: 'Choix multiple',
+      question: 'Quelles contraintes comptent ?',
+      options: [
+        {
+          label: 'Hors ligne',
+          description: 'Doit continuer à fonctionner sans réseau',
+          selected: true,
+        },
+        {
+          label: 'Compatibilité',
+          description: 'Préserver l’API publique existante',
+        },
+        {
+          label: 'Vitesse',
+          description: 'Privilégier le chemin à plus faible latence',
+          selected: true,
+        },
+      ],
+    },
+    caption:
+      'Carte AskUserQuestion factice. L’environnement d’exécution peut demander une réponse à choix unique, à choix multiple ou personnalisée pendant une tâche.',
+  },
+  ru: {
+    single: {
+      badge: 'Один вариант',
+      question: 'Что вы ели?',
+      options: [
+        {
+          label: 'Завтрак',
+          description: 'Утренний приём пищи — например, яйца, тосты, овсянка',
+          selected: true,
+        },
+        {
+          label: 'Обед',
+          description: 'Дневной приём пищи — например, сэндвич, салат, рис с гарниром',
+        },
+        {
+          label: 'Ужин',
+          description: 'Вечерний приём пищи — например, паста, жаркое, хот-пот',
+        },
+        {
+          label: 'Перекус',
+          description: 'Лёгкий перекус между приёмами пищи — например, фрукты, орехи, чипсы',
+        },
+      ],
+      customPlaceholder: 'Введите свой ответ...',
+    },
+    multi: {
+      badge: 'Несколько вариантов',
+      question: 'Какие ограничения важны?',
+      options: [
+        {
+          label: 'Офлайн',
+          description: 'Должно продолжать работать без сети',
+          selected: true,
+        },
+        {
+          label: 'Совместимость',
+          description: 'Сохранить существующий публичный API',
+        },
+        {
+          label: 'Скорость',
+          description: 'Отдавать предпочтение пути с минимальной задержкой',
+          selected: true,
+        },
+      ],
+    },
+    caption:
+      'Демонстрационная карточка AskUserQuestion. Во время выполнения задачи среда выполнения может запрашивать одиночный, множественный или произвольный ответ.',
   },
 };
 
@@ -471,7 +893,7 @@ type GoalCopy = {
   caption: string;
 };
 
-const GOAL_COPY: Record<ReplicaLocale, GoalCopy> = {
+const GOAL_COPY: Record<SiteLocale, GoalCopy> = {
   en: {
     label: 'Goal',
     status: 'Pursuing goal',
@@ -502,6 +924,102 @@ const GOAL_COPY: Record<ReplicaLocale, GoalCopy> = {
     tokensValue: '12.4K / 50K',
     progressValue: '25%',
     caption: '模拟目标横幅。目标进行中显示暂停，暂停后显示继续。时间与 token 数据为模拟值。',
+  },
+  'zh-hant': {
+    label: '目標',
+    status: '執行目標中',
+    objective: '說明遠端預覽的運作方式？',
+    pause: '暫停',
+    resume: '繼續',
+    clear: '清除',
+    elapsed: '已耗時',
+    tokens: 'tokens',
+    progress: '進度',
+    elapsedValue: '16s',
+    tokensValue: '12.4K / 50K',
+    progressValue: '25%',
+    caption:
+      '模擬目標橫幅。進行中的目標會顯示暫停，暫停時則顯示繼續。時間與 token 資料皆為模擬值。',
+  },
+  ja: {
+    label: 'ゴール',
+    status: '目標を実行中',
+    objective: 'リモートプレビューの仕組みを説明して',
+    pause: '一時停止',
+    resume: '再開',
+    clear: 'クリア',
+    elapsed: '経過時間',
+    tokens: 'トークン',
+    progress: '進捗',
+    elapsedValue: '16s',
+    tokensValue: '12.4K / 50K',
+    progressValue: '25%',
+    caption:
+      'モックのゴールバナーです。実行中のゴールでは「一時停止」、一時停止中では「再開」が表示されます。経過時間とトークン数はモック値です。',
+  },
+  ko: {
+    label: '목표',
+    status: '목표 수행 중',
+    objective: '원격 미리보기가 어떻게 동작하는지 설명해 줘',
+    pause: '일시정지',
+    resume: '재개',
+    clear: '지우기',
+    elapsed: '경과',
+    tokens: '토큰',
+    progress: '진행률',
+    elapsedValue: '16s',
+    tokensValue: '12.4K / 50K',
+    progressValue: '25%',
+    caption:
+      '모의 목표 배너입니다. 진행 중인 목표는 일시정지를, 일시정지된 목표는 재개를 표시합니다. 경과 시간과 토큰 데이터는 모의 값입니다.',
+  },
+  es: {
+    label: 'Objetivo',
+    status: 'Persiguiendo objetivo',
+    objective: '¿explicar cómo funciona la vista previa remota?',
+    pause: 'Pausar',
+    resume: 'Reanudar',
+    clear: 'Borrar',
+    elapsed: 'Transcurrido',
+    tokens: 'tokens',
+    progress: 'Progreso',
+    elapsedValue: '16s',
+    tokensValue: '12.4K / 50K',
+    progressValue: '25%',
+    caption:
+      'Banner de objetivo de ejemplo. Los objetivos activos muestran Pausar; los pausados muestran Reanudar. El tiempo y los tokens son sintéticos.',
+  },
+  fr: {
+    label: 'Objectif',
+    status: 'Objectif en cours',
+    objective: 'expliquer comment fonctionne l’aperçu à distance ?',
+    pause: 'Mettre en pause',
+    resume: 'Reprendre',
+    clear: 'Effacer',
+    elapsed: 'Écoulé',
+    tokens: 'jetons',
+    progress: 'Progression',
+    elapsedValue: '16s',
+    tokensValue: '12.4K / 50K',
+    progressValue: '25%',
+    caption:
+      'Bannière d’objectif factice. Les objectifs actifs affichent Mettre en pause ; ceux en pause affichent Reprendre. Le temps écoulé et les jetons sont factices.',
+  },
+  ru: {
+    label: 'Цель',
+    status: 'Выполнение цели',
+    objective: 'объяснить, как работает удалённый предпросмотр?',
+    pause: 'Пауза',
+    resume: 'Продолжить',
+    clear: 'Очистить',
+    elapsed: 'Прошло',
+    tokens: 'Токены',
+    progress: 'Прогресс',
+    elapsedValue: '16s',
+    tokensValue: '12.4K / 50K',
+    progressValue: '25%',
+    caption:
+      'Демонстрационный баннер цели. Для активных целей отображается «Пауза», для приостановленных — «Продолжить». Данные о времени и токенах являются примером.',
   },
 };
 

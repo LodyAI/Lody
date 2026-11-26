@@ -1,12 +1,30 @@
 import {
   autoDeliverOptionsSchema,
   type AutomationContinuation,
+  type AutomationReceipt,
   type AutomationRuleDraft,
   type AutomationSettings,
 } from '@lody/shared/automations';
 import type { Delivery } from '../storage/ledger';
 import { automationIdentity, type AutomationLedger } from '../storage/ledger';
 import { DELIVERY_EVENT_TYPE } from './delivery';
+
+export const isQuotaRecoveryReceipt = (receipt: AutomationReceipt): boolean =>
+  receipt.event.type === 'provider.quota.exhausted' &&
+  receipt.rule.handler.kind === 'policy' &&
+  receipt.rule.handler.policy === 'recover-capacity';
+
+/**
+ * Quota recovery without fresh availability waits either until the recorded reset
+ * estimate (to trigger a single refresh query) or at the `Number.MAX_SAFE_INTEGER`
+ * sentinel until an explicit capacity push bumps `capacityWakeRevision`.
+ */
+export const quotaRecoveryRetryAt = (receipt: AutomationReceipt, now: number): number => {
+  const estimatedReset = receipt.event.data.retryAt;
+  return typeof estimatedReset === 'number' && estimatedReset > now
+    ? estimatedReset
+    : Number.MAX_SAFE_INTEGER;
+};
 
 /** Product behavior lives here. User programs only report a condition result. */
 export function internalPolicy({ rule, event }: Delivery): AutomationContinuation[] {

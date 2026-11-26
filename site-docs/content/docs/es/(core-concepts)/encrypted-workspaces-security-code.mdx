@@ -1,0 +1,66 @@
+---
+title: "Código de seguridad"
+description: "Cómo funciona el código de seguridad en los espacios de trabajo cifrados de extremo a extremo de Lody: a partir de qué se calcula, qué significa una coincidencia o discrepancia y qué no puede demostrar."
+---
+
+# Código de seguridad
+
+El código de seguridad es una cadena de dígitos que confirma que **tú y un compañero de equipo tienen el mismo [registro de permisos](/es/docs/encrypted-workspaces-ledger)**: los mismos miembros, los mismos dispositivos y las mismas autorizaciones.
+
+Si tu código coincide con el que muestran otros miembros y tus otros dispositivos, la información de miembros y autorizaciones del espacio de trabajo es coherente.
+
+## Por qué existe
+
+Cada entrada del registro está firmada, por lo que el servidor no puede falsificar una. Sin embargo, podría **mostrar a distintas personas distintas versiones del registro**, por ejemplo, ocultándote la entrada que revocó un dispositivo. No puedes detectarlo mirando únicamente tu propia copia.
+
+Comparar los códigos que dos personas calculan de forma independiente lo revela.
+
+## A partir de qué se calcula
+
+El código es un resumen (digest) calculado sobre todo lo siguiente en conjunto:
+
+- La versión y el propósito del protocolo
+- El espacio de trabajo y su primera entrada (génesis)
+- La posición actual del registro (cuántas entradas tiene) y su última entrada
+- **El estado de autorización actual completo**: cada miembro, rol, dispositivo y clave pública
+
+Comparar solo la última entrada no es suficiente: un estado alterado puede ir acompañado de una última entrada con aspecto correcto. Por eso el estado de autorización real forma parte del código.
+
+El código QR también incluye la posición del registro, por lo que al escanearlo se puede saber qué parte está atrasada.
+
+## Qué significa cada resultado
+
+| Resultado | Significado | Qué hacer |
+| --- | --- | --- |
+| Coinciden | Aceptaron los mismos miembros, dispositivos y autorizaciones en la misma posición | Nada |
+| Una parte está desactualizada | Un registro es anterior; todo hasta ese punto es igual | Ambos actualicen y vuelvan a comparar |
+| Difieren | Misma posición, contenido distinto | No invites ni apruebes a nadie; avisa al propietario del espacio de trabajo |
+
+Una posición distinta no es un ataque; por lo general, una de las partes simplemente aún no se ha sincronizado.
+
+## Qué no puede demostrar
+
+- **Quién es la otra persona**: solo muestra que sus entradas coinciden. Asegúrate de estar comparando con el compañero de equipo que conoces.
+- **Que cada cambio pasado fuera razonable**: muestra que aceptaron el mismo estado, no que cada paso en él debiera haber ocurrido.
+- **Que estés a salvo de ahora en adelante**: cubre esa posición en ese momento. En cuanto llegan nuevas entradas, el código cambia; vuelve a comparar cuando importe.
+- **Mucho, si solo comparas con quien te invitó**: si esa persona y el servidor se coludieron, una coincidencia con ella demuestra poco. Compara con al menos otro miembro.
+
+## Cómo comparar
+
+<Steps>
+<Step>
+
+Ambos abran "Código de seguridad e historial" en la consola de cifrado y actualicen.
+
+</Step>
+<Step>
+
+Elijan "Comparar con un compañero de equipo" y escaneen el código QR en su pantalla, o lean los grupos de dígitos en voz alta.
+
+</Step>
+<Step>
+
+Actúen según el resultado. En persona, por videollamada o por teléfono, todo sirve; no se envíen el código entre ustedes únicamente a través del propio Lody.
+
+</Step>
+</Steps>

@@ -1,0 +1,83 @@
+---
+title: "ACP 與擴充功能支援一覽"
+description: "Lody 內建 ACP provider 的支援矩陣——包含標準 ACP 能力，以及各 provider 配接器透過 acp-extension-core 協商的 Lody 擴充功能。"
+---
+
+# ACP 與擴充功能支援一覽
+
+本頁面適用於從 Codex、Claude Code 或其他 ACP Agent 轉用 Lody 的讀者，說明有哪些能力可以沿用。文中會介紹什麼是 ACP、Lody 如何擴充它，以及每個內建 provider 所支援的功能。如果您尚未連接任何執行環境，請先參閱[從 Codex 或 Claude Code 轉用](/zh-hant/docs/from-codex-claude-code)或 [Agent Config](/zh-hant/docs/quickstart)。
+
+## 什麼是 ACP
+
+[Agent Client Protocol](https://agentclientprotocol.com/)（ACP）是用戶端（您使用的應用程式）與負責執行工作的 Agent 之間的開放式協定。Lody 是一個 ACP 用戶端：它會啟動 provider 的 ACP 伺服器、在 `initialize` 階段協商雙方能力，接著透過這同一條連線交換 prompt、串流更新、工具呼叫、權限請求與工作階段生命週期事件。
+
+ACP 僅涵蓋共通核心，因此兩個 ACP Agent 在選用功能上仍可能有差異：圖片、內嵌上下文、工作階段恢復或分支（fork）、MCP 傳輸協定、提問（elicitation）等等。這也是為什麼 Lody 會進行能力協商，而非預先假設它們存在。所有內建 provider 皆具備相同的基礎能力：文字 prompt、串流更新、工具呼叫、權限請求、取消操作，以及 Lody 提供的檔案系統與終端機回呼。
+
+## Lody 如何擴充 ACP
+
+Lody 自有的能力定義於 [`acp-extension-core`](https://github.com/LodyAI/acp-extension-core)，這是一套建立在 ACP v1 之上、與 provider 無關的契約。諸如串流子代理事件、用量統計、速率限制、持久目標與上下文壓縮等功能都需要一份穩定的共享描述，因此每項功能皆獨立進行版本控管，並在 `_meta.lody` 下各自宣告：
+
+- Agent 會在 `InitializeResponse.agentCapabilities._meta.lody` 中宣告其實作的能力；
+- 用戶端會在 `InitializeRequest.clientCapabilities._meta.lody` 中宣告自身支援的功能；
+- 缺少某個鍵值即表示對方不支援該功能，且支援其中一項功能絕不代表支援另一項功能。
+
+公開的 `acp-extension-*` 配接器會將各個執行環境轉換成這套契約格式，因此無論連線背後是哪個 provider，Lody 用戶端讀取到的資料結構都完全一致。自訂或來自登錄庫（registry）的 ACP Agent 也能實作相同的鍵值。確切的 payload 格式請參閱[能力目錄（capability catalog）](https://github.com/LodyAI/acp-extension-core#capability-catalog)。
+
+## 支援情況一覽
+
+下表結合了標準 ACP 能力（前綴為 `ACP：`）與 Lody 擴充功能（前綴為 `Lody：`）。九個 provider 皆具備上述的 ACP 基礎能力；僅下列選用能力會因 provider 而異。點擊 Provider 名稱即可前往對應的執行環境或配接器儲存庫。
+
+| Provider             | ACP：圖片 | ACP：內嵌上下文 | ACP：載入 | ACP：恢復 | ACP：Fork | ACP：額外目錄 | ACP：MCP | ACP：登出 | ACP：提問 | Lody：子代理事件 | Lody：工作階段標題 | Lody：用量 | Lody：速率限制 | Lody：依輪次 Fork | Lody：引導 | Lody：任務 | Lody：子代理 | Lody：持久目標 | Lody：上下文壓縮 |
+| -------------------- | --------- | --------------- | --------- | --------- | --------- | ------------- | -------- | --------- | --------- | ---------------- | ------------------ | ---------- | -------------- | ----------------- | ---------- | ---------- | ------------ | -------------- | ---------------- |
+| <a href="https://github.com/LodyAI/acp-extension-claude" target="_blank" rel="noreferrer"><strong>Claude Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-codex" target="_blank" rel="noreferrer"><strong>Codex</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-grok" target="_blank" rel="noreferrer"><strong>Grok</strong></a> | — | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓³ | — | — | — |
+| <a href="https://github.com/LodyAI/acp-extension-kimi" target="_blank" rel="noreferrer"><strong>Kimi Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ◐⁴ | ✓ | ✓ | ✓ | — | ✓¹ | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-devin" target="_blank" rel="noreferrer"><strong>Devin</strong></a> | ✓ | ✓ | ✓ | — | — | ✓ | HTTP+SSE | — | ✓ | ✓ | — | — | — | — | — | — | — | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-pi" target="_blank" rel="noreferrer"><strong>Pi</strong></a> | ✓ | ✓ | ✓ | ✓ | — | — | — | — | ✓ | ✓ | — | ✓ | — | — | ✓ | — | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-dsh" target="_blank" rel="noreferrer"><strong>DeepSeek Harness</strong></a> | ◐⁵ | — | ✓ | ✓ | ✓ | — | HTTP | — | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓¹ | ✓ | ✓ | ✓ |
+| <a href="https://github.com/bubbuild/bub" target="_blank" rel="noreferrer"><strong>Bub</strong></a> | — | — | ✓ | ✓ | — | — | HTTP+SSE | — | ✓ | — | — | — | — | — | ✓ | — | — | — | — |
+| <a href="https://github.com/arcships/dimcode" target="_blank" rel="noreferrer"><strong>Dimcode</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+圖例：
+
+- **✓** — provider 有宣告該能力（標準 ACP 能力會在 `initialize` 中宣告）。
+- **◐** — 僅部分宣告；請見下方附註。
+- **—** — provider 未宣告。
+
+### 擴充功能參考
+
+`Lody：` 欄位說明 provider 所宣告的能力。以下是各欄位背後的 provider 端能力：
+
+- **子代理事件** — 配接器透過 `_lody/subagents/event` 串流傳送子代理的快照、進度與輸出。
+- **工作階段標題** — 配接器產生標題，並以帶有 `_meta.lody.titleSource` 標記的標準 `session_info_update` 推送。
+- **用量** — 透過標準 `usage_update` 回報上下文與 token 用量統計，並包含各模型的總計。
+- **速率限制** — 透過 `_lody/rate_limits/update` 回報配額快照，並提供選用的 `_lody/rate_limits/get` 查詢。
+- **依輪次 Fork** — `session/fork` 可指定要從哪一個歷史輪次進行分支。
+- **引導** — 可透過 `_lody/session/steer` 或 `_meta.lody.steer` 將指引注入正在執行中的輪次。
+- **任務** — 透過一般工具呼叫生命週期回報背景或排程工作，並帶有 `_meta.lody.task`。
+- **子代理** — 子代理生命週期管理，以及選用的列表、取消與輸出查詢功能。
+- **持久目標** — 能在單一 prompt 結束後持續保留的工作階段目標，支援設定（set）、暫停（pause）、恢復（resume）與清除（clear）操作。
+- **上下文壓縮** — 將上下文壓縮與重試回報為帶有 `_meta.lody.activity` 的工具生命週期。
+
+附註：
+
+1. **任務：** Claude Code、Codex、Kimi Code 與 DeepSeek Harness 宣告的是背景任務；Grok 宣告的是排程任務。沒有任何一個 provider 同時宣告兩者。
+2. **子代理：** Claude Code 與 Codex 僅宣告生命週期，不宣告列表、取消或輸出查詢。
+3. **Grok 任務**僅支援排程任務。
+4. **Kimi Code 工作階段標題**僅在安裝的 Kimi 引擎支援其標題功能時才會宣告；否則將由 Lody 自行產生標題。
+5. **DeepSeek Harness 圖片輸入**取決於所選用的模型。僅當使用中的模型宣告支援圖片輸入時，配接器才會啟用此能力。
+6. **Dimcode MCP：** Dimcode 宣告支援 Streamable HTTP 與 SSE，但回報不支援 stdio MCP。
+
+在 `ACP：MCP` 欄位中，`HTTP+SSE` 表示 provider 同時宣告支援這兩種傳輸協定，`HTTP` 則表示僅宣告 HTTP。Stdio MCP 是常見的 ACP 基礎標準；Dimcode 為附註 6 中的例外情況。`Devin` 與 `Grok` 的標準 ACP 欄位反映的是其官方執行環境，而 Lody 欄位則顯示 Lody 相容性代理所額外提供的功能。`Bub` 與 `Dimcode` 是由 Lody 啟動的外部 ACP 伺服器；這兩列反映的是這些伺服器自行宣告的內容，包括它們實作的 Lody 擴充功能。
+
+上述支援資訊反映的是隨 Lody 配接器與外部 ACP 伺服器一同發布的能力宣告。Lody 會在工作階段開始時讀取協商結果，因此 provider 更新後，應用程式內顯示的能力可能會比本頁面更早變動。若想查看標準 ACP 實作的獨立版本化比較，請參閱 [ACP Wall](https://github.com/wibus-wee/acp-wall)。
+
+## 下一步
+
+<Cards>
+  <Card href="/zh-hant/docs/from-codex-claude-code" title="從 Codex 或 Claude Code 轉用" />
+  <Card href="/zh-hant/docs/quickstart" title="Agent Config" />
+  <Card href="/zh-hant/docs/cli-runtimes" title="CLI 執行環境類型" />
+  <Card href="/zh-hant/docs/concepts" title="概念與詞彙表" />
+</Cards>

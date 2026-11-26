@@ -1,0 +1,42 @@
+---
+title: "Workflow recommandé"
+description: "Workflow Lody recommandé pour découper les tâches, exécuter des agents en parallèle, relire les diffs, créer des PR et archiver les sessions terminées."
+---
+
+# Workflow recommandé
+
+Lody s'appuie actuellement sur l'[intégration GitHub](/fr/docs/github) et les [worktrees](/fr/docs/worktrees) comme fonctionnalités centrales ; nous vous recommandons donc d'en faire votre workflow par défaut.
+
+Avant de commencer, terminez la [configuration de démarrage rapide](/fr/docs/quickstart).
+
+## Découper le travail en petites tâches
+
+Comme les agents ont une fenêtre de contexte limitée, exécuter plusieurs petites tâches en parallèle donne généralement de meilleurs résultats que de confier une tâche vaste et complexe à une seule conversation. Avant de commencer, découpez votre travail en fonctionnalités ou correctifs atomiques. Vous pourrez ainsi tirer parti de l'isolation des fichiers au niveau des worktrees pour développer en parallèle et réduire les temps d'attente.
+
+## Développement parallèle
+
+Une fois les besoins découpés, décrivez une fonctionnalité ou un correctif par conversation dans la zone de saisie de la page d'accueil. Dans ce workflow, une conversation correspond à une fonctionnalité ou un correctif, et généralement à une PR. Vous pouvez lancer autant de conversations en parallèle que votre machine et votre capacité à jongler entre les contextes le permettent. Pour découvrir le modèle produit sous-jacent — worktrees isolés, agents mixtes et visibilité d'équipe — consultez [Agents de codage en parallèle](/fr/docs/parallel-agents).
+
+Lorsque Lody termine une étape, il envoie une [notification](/fr/docs/notification). Cliquez dessus pour accéder à la session correspondante. Si vous êtes à l'aise avec la lecture de code, passez directement en revue les fichiers modifiés dans Lody. Sinon, copiez le nom de la branche affichée sous cette session dans la barre latérale gauche et basculez sur cette branche dans votre environnement de développement habituel pour effectuer des tests de bout en bout.
+
+Une fois le résultat globalement prêt, cliquez sur **Create PR** au-dessus de la conversation. Lody crée une PR contenant le besoin complet et le résumé de l'implémentation, puis la lie à la conversation. Vous pouvez ensuite cliquer sur le bouton de la PR liée pour accéder directement à la PR sur GitHub.
+
+## Boucle de revue par IA
+
+Si vous connectez Claude Code, Codex, Devin ou des outils similaires à votre dépôt, ils peuvent relire chaque PR en détail. Une fois les commentaires de revue publiés, vous pouvez demander à Lody par exemple :
+`Récupérez les commentaires de la PR, évaluez la pertinence de chaque point, corrigez les problèmes avérés et marquez-les comme résolus ; sinon, répondez en expliquant votre raisonnement.`
+Lody récupère les commentaires de la PR, les évalue, applique les correctifs et pousse un nouveau commit. Cela déclenche le cycle de revue par IA suivant (automatiquement, ou manuellement via `@`) jusqu'à ce qu'il ne reste plus de problèmes évidents.
+
+## Archiver les sessions terminées
+
+Lorsqu'une PR est fusionnée, la session correspondante a rempli son rôle. Sauf si un bug lié apparaît, nous vous déconseillons de poursuivre un travail sans rapport dans la même session. Utilisez l'[action d'archivage](/fr/docs/session#archive-sessions) dans la barre latérale pour retirer les sessions terminées de votre liste active.
+
+L'archivage permet de libérer le répertoire du worktree géré tout en conservant la conversation et la branche locale. Sauvegardez d'abord hors du worktree les fichiers ignorés dont vous avez besoin ; consultez [Conservation et récupération des worktrees](/fr/docs/worktrees#automatic-cleanup).
+
+## Supprimer périodiquement les sessions archivées
+
+Lorsque vous n'avez plus besoin d'une conversation, [supprimez la session archivée](/fr/docs/session#delete-sessions) pour effacer définitivement son historique. Cette action ne supprime ni la branche Git locale conservée ni ses commits de sauvegarde ; elle ne permet donc pas de récupérer l'ensemble de l'espace disque du dépôt.
+
+## Projets hors GitHub
+
+Ce workflow est idéal pour les projets hébergés sur GitHub. Pour un projet qui n'est pas adossé à GitHub, ajoutez le répertoire en tant que [projet local](/fr/docs/local-project). Les projets locaux prennent tout de même en charge le chat, la liste des fichiers, la revue de diffs, l'accès mobile et Lody Preview, mais l'automatisation des PR et de la CI propre à GitHub n'est pas disponible.

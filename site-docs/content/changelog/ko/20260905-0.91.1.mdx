@@ -1,0 +1,16 @@
+---
+title: "20260905-0.91.1"
+version: 0.91.1
+date: 2026-09-05
+description: "전용 Claude Fable 주간 할당량 미터를 추가하고 Codex 모델의 Max 및 Ultra 추론 옵션을 수정했습니다."
+---
+
+버전 0.91.1
+
+### ✨ 새로운 기능
+
+- Claude 사용량 패널에서 이제 공용 주간 및 5시간 할당량과 별도로 Fable 전용 주간 할당량을 표시합니다([#407](https://github.com/LodyAI/Lody/pull/407), [Claude ACP #25](https://github.com/LodyAI/acp-extension-claude/pull/25), [Core #3](https://github.com/LodyAI/acp-extension-core/pull/3)).
+
+### 🐛 수정 및 개선 사항
+
+- GPT-6 Astra에서 Max 및 Ultra 추론 옵션이 누락되던 문제를 수정했습니다. 이제 사용 가능한 추론 수준이 각 모델의 기능에 맞게 표시되어 Luna에서는 지원되지 않는 Ultra 옵션이 더 이상 제공되지 않습니다([#406](https://github.com/LodyAI/Lody/pull/406)).

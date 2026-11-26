@@ -1,0 +1,39 @@
+---
+title: "Pestañas de sesión"
+description: "Permite que distintos agentes compartan un mismo espacio de trabajo de sesión de Lody mientras el chat principal, los chats secundarios, los archivos y los diffs permanecen abiertos."
+---
+
+# Pestañas de sesión
+
+Las pestañas de sesión permiten dividir una tarea en varias superficies de trabajo sin perder el contexto compartido. El objetivo no es solo tener más ventanas de chat: permite que **distintos agentes reutilicen el mismo espacio de trabajo**, de modo que ven los mismos archivos, la misma rama y los mismos cambios sin confirmar mientras cada conversación mantiene su propio historial. Puedes abrir y cerrar el chat principal y los chats secundarios, y usar vistas previas de archivos y vistas de diff junto a ellos.
+
+## Cuándo usar las pestañas
+
+- Mantener la implementación en curso en la pestaña principal mientras una pestaña secundaria revisa los cambios actuales.
+- Abrir un archivo o un diff junto al chat para poder hacer preguntas de seguimiento mientras lees el código.
+- Dividir una rama en varios enfoques, como “resumir este cambio”, “buscar riesgos” y “corregir los comentarios del PR”.
+
+## Crear un chat secundario
+
+1. Abre una sesión y haz clic en `+` en la barra de pestañas.
+2. La nueva pestaña hereda la máquina, el proyecto o repositorio, la rama, la configuración de agente, el modelo y los valores predeterminados de permisos de la sesión principal. Antes de enviar, puedes elegir cualquier Rol de agente vinculado a esa máquina; el Rol puede cambiar el borrador a otro tipo de agente.
+3. Envía el primer mensaje en la nueva pestaña. Lody crea una sesión secundaria con la configuración de ejecución y las instrucciones del Rol seleccionado. El título parte de la primera línea de tu prompt y puedes renombrarlo más adelante haciendo doble clic en la pestaña.
+
+Las pestañas secundarias comparten el mismo contexto de directorio de trabajo que la pestaña principal, pero cada pestaña conserva su propio historial de conversación. Esto las hace útiles para revisiones en paralelo y trabajo de seguimiento en torno a la misma tarea.
+
+## Pestañas de archivos y diffs
+
+- Haz clic en una ruta de archivo dentro de la conversación para abrir una pestaña de vista previa del archivo.
+- Haz clic en un archivo dentro de un diff a nivel de ronda para abrir una pestaña de diff.
+- Haz clic en archivos desde la barra lateral `Files` o `Changes` para abrirlos como pestañas de visor.
+
+En escritorio, las pestañas de visor crean un espacio de trabajo dividido: el chat permanece a la izquierda, mientras que el archivo o diff activo permanece a la derecha. En dispositivos móviles, el archivo o diff se abre como la superficie enfocada para facilitar la lectura en una pantalla pequeña.
+
+## Administrar pestañas
+
+- Arrastra las pestañas para reordenarlas. El orden se recuerda en el navegador actual.
+- Haz doble clic en una pestaña de chat para renombrarla.
+- Se pueden cerrar tanto las pestañas de conversación principal como las secundarias. El cierre se comparte en todo el espacio de trabajo; no detiene al agente, no archiva la conversación ni elimina su worktree.
+- Al cerrar la conversación activa se selecciona una pestaña contigua. Cuando no queda ninguna, se abre un borrador local de nueva conversación en el mismo espacio de trabajo; los borradores existentes conservan el texto introducido. Solo se crea una sesión real cuando envías el mensaje. Las conversaciones cerradas siguen disponibles para volver a abrirse.
+- El botón de historial muestra las conversaciones cerradas, incluidas las pestañas archivadas anteriormente. Al volver a abrir una conversación archivada, también se restaura desde el archivo.
+- Al volver a abrirla, la pestaña se vuelve visible para todos, pero solo se selecciona para ti. Las pestañas de archivos y diffs mantienen su comportamiento local actual.

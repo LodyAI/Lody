@@ -9,6 +9,7 @@ import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 export type WorkspaceScopeOptions = {
   workspaceId?: WorkspaceId | null;
   enabled?: boolean;
+  docMetaRequired?: boolean;
 };
 
 /**
@@ -40,6 +41,7 @@ export function useResolvedWorkspaceScope(options: WorkspaceScopeOptions = {}): 
     docMetaScope,
     organizationsReady: currentWorkspaceId !== null,
     expectedWorkspaceId: currentWorkspaceId,
+    docMetaRequired: options.docMetaRequired,
   });
   const readyWorkspaceId = scope.status === 'ready' ? scope.workspaceId : null;
   const requestedWorkspaceId =

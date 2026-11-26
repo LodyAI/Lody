@@ -25,6 +25,8 @@ import { personalEntryPins } from './entry-pins';
 import type { PersonalEntryRecovery } from './entry';
 import {
   makeClientRecovery,
+  recoveryFailure,
+  recoveryRpc,
   type ClientRecoveryOptions,
   type ClientRecoveryUnlock,
 } from './recovery';
@@ -74,26 +76,23 @@ export type RecoveryPasskeyState = {
 };
 type Observe = (progress: RecoveryWorkspaceProgress) => void;
 const workspaceWait = '30 seconds';
-const rpcTimeout = '90 seconds';
 export type RecoveryWorkspacesOptions = ClientRecoveryOptions & {
   readonly commands: PersonalEntryRecovery;
 };
 /** One vault unlock for the selected workspaces. The caller fixes platform and passkey; pins use that platform's constant namespace. */
 export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
-  const failure = () =>
-    new Error(options.platform === 'web' ? 'e2ee_browser_unlock_failed' : 'e2ee_recovery_failed');
   const recovery = makeClientRecovery(options);
   const pins = personalEntryPins(`lody-e2ee:${options.platform}:v1:entry-pins`);
   let disposed = false;
   const check = () => {
+    if (!options.enabled()) throw new Error('e2ee_recovery_disabled');
     const current = options.currentSession();
     if (
       disposed ||
-      !options.enabled() ||
       current?.accountId !== options.accountId ||
       current.sessionId !== options.sessionId
     ) {
-      throw failure();
+      throw new Error('e2ee_recovery_cancelled');
     }
   };
   const request = <A>(work: () => Promise<A>) =>
@@ -104,17 +103,10 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
         check();
         return value;
       },
-      catch: () => failure(),
+      catch: recoveryFailure,
     });
   const rpc = <A>(work: () => Promise<A>) =>
-    request(work).pipe(
-      Effect.interruptible,
-      Effect.timeoutOrElse({
-        duration: rpcTimeout,
-        orElse: () => Effect.fail(failure()),
-      }),
-      Effect.interruptible
-    );
+    recoveryRpc(work, check).pipe(Effect.mapError(recoveryFailure));
   const workspaceList = () => rpc(() => options.client.query(api.e2eeMembers.workspaces, {}));
   const pages = (workspaceId: string) =>
     readRecoveryHistory<E2eeWorkspaceHistoryPage, Error>((next) =>
@@ -261,10 +253,12 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                 error.message === 'e2ee_device_revoked',
               () =>
                 Effect.flatMap(routed(), (next) =>
-                  next === undefined ? restoreVia(undefined) : Effect.fail(failure())
+                  next === undefined
+                    ? restoreVia(undefined)
+                    : Effect.fail(new Error('e2ee_recovery_conflict'))
                 )
             ),
-            Effect.mapError(() => failure())
+            Effect.mapError(recoveryFailure)
           );
           return restoreOutcome(result);
         }
@@ -274,7 +268,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           options.client.query(api.e2eeRecoveryVault.replacementState, {})
         );
         if (vault.vaultId !== state.current || state.replacing !== null)
-          return yield* Effect.fail(failure());
+          return yield* Effect.fail(new Error('e2ee_recovery_conflict'));
         const pin = yield* pins.read(options.accountId, workspace.id);
         if (pin?.phase !== 'ready') return { outcome: 'not-admitted' } as const;
         const result = yield* request(() =>
@@ -295,11 +289,15 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                     : {}),
                 })
               ).pipe(
-                Effect.map((reply) => ({
-                  outcome:
-                    reply.status === 'committed' ? ('Committed' as const) : ('Conflict' as const),
-                  record: record.slice(),
-                }))
+                Effect.map((reply) => {
+                  const parsed = historyPage.safeParse(reply.historyPage);
+                  return {
+                    outcome:
+                      reply.status === 'committed' ? ('Committed' as const) : ('Conflict' as const),
+                    record: record.slice(),
+                    ...(parsed.success ? { historyPage: parsed.data } : {}),
+                  };
+                })
               ),
           })
         );
@@ -529,7 +527,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                   : { kind: 'saved' },
           });
         }
-        yield* Effect.try({ try: check, catch: failure });
+        yield* Effect.try({ try: check, catch: recoveryFailure });
         return {
           ...(state.current ? { methods: yield* recovery.methods(state.current) } : {}),
           hasVault: state.current !== null,
@@ -538,7 +536,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           uncovered,
         };
       })
-    ).pipe(Effect.mapError(() => failure()));
+    ).pipe(Effect.mapError(recoveryFailure));
   return {
     ...recovery,
     listWorkspaces: () => workspaceList(),

@@ -1,0 +1,34 @@
+---
+title: "Contexte, jetons et quota"
+description: "Suivez l'utilisation de la fenêtre de contexte, la consommation de jetons et les coûts, ainsi que le quota d'abonnement dans les paramètres Lody et la discussion de session."
+---
+
+# Contexte, jetons et quota
+
+Lody offre un moyen unifié de suivre l'utilisation de la fenêtre de contexte, la consommation et le coût en jetons, ainsi que le quota d'abonnement.
+
+## Capacité restante de la fenêtre de contexte
+
+Dans la discussion de session, chaque réponse de l'IA peut afficher le pourcentage restant de la fenêtre de contexte.
+
+Utilisez cet indicateur pour :
+
+- éviter le dépassement de contexte,
+- décider quand résumer la conversation ou démarrer une nouvelle session,
+- maintenir la stabilité des tâches de longue durée.
+
+<Callout type="warn" title="Compression du contexte">
+
+Vous pouvez exécuter manuellement la commande intégrée `/compact` dans Claude Code ou Codex pour compresser le contexte, mais Lody ne prend actuellement pas en charge la mise à jour d'interface correspondante : vous ne verrez donc aucune réponse de l'agent.
+
+</Callout>
+
+## Consommation de jetons et coût estimé
+
+Dans **Paramètres** -> **Statistiques**, vous pouvez consulter les tendances de consommation de jetons et le coût estimé sur les dernières 24 heures, les 7 derniers jours, les 30 derniers jours ou tout l'historique disponible. La vue d'ensemble indique également les membres actifs et les modèles utilisés, tandis que les graphiques répartissent l'utilisation par modèle et par membre. Sélectionnez un élément de légende d'un graphique pour vous concentrer sur cette série.
+
+<UsagePreview locale="fr" />
+
+## Visibilité du quota d'abonnement
+
+Dans **Paramètres** -> **Configuration d'agent** -> **Machines**, Lody affiche le quota restant ainsi que les heures d'actualisation pour les fenêtres d'abonnement prises en charge (par exemple, les fenêtres de 5 heures et de 7 jours).

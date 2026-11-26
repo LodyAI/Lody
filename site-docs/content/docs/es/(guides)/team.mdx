@@ -1,0 +1,83 @@
+---
+title: "Funciones de equipo"
+description: "Usa las funciones de equipo de Lody para invitar miembros, gestionar permisos, compartir sesiones, consultar el uso y controlar la visibilidad de las máquinas."
+---
+
+# Funciones de equipo
+
+Lody ha admitido la colaboración en equipo desde el primer día. Puedes compartir configuraciones de agente y el
+contexto completo de la conversación con tu equipo. Hay más capacidades de equipo planificadas, como documentos compartidos,
+menciones a miembros y gestión de tareas.
+
+Para invitar a un compañero de equipo **a una sesión de agente de programación existente** y que pueda continuar la misma
+conversación, diffs y worktree —no solo leer una transcripción—, consulta
+[Compartir una sesión de agente de programación](/es/docs/session-handoff). Un enlace para compartir es un registro, no esa
+transferencia en vivo: [Enlace para compartir vs. transferencia en vivo](/es/docs/compare/share-link-vs-live-handoff).
+
+Para ejecutar varios agentes a la vez —worktrees aislados, modelos combinados y sesiones visibles para el equipo—, consulta
+[Agentes de programación en paralelo](/es/docs/parallel-agents).
+
+## Invitar miembros
+
+Ve a **Configuración** -> **Espacio de trabajo** -> **General**, luego en la sección **Miembros** haz clic en **Invitar miembro**.
+Introduce el correo electrónico del miembro y elige su rol antes de enviar la invitación.
+
+Después de invitarlo, el miembro recibe una invitación por correo electrónico. También puedes copiar el enlace de invitación y enviarlo
+manualmente.
+
+## Cambiar permisos de miembros
+
+Los propietarios y administradores del espacio de trabajo pueden cambiar los permisos de un miembro desde la acción de editar en el lado derecho
+de la lista de miembros.
+
+## Eliminar miembros
+
+Los propietarios y administradores del espacio de trabajo pueden eliminar miembros mediante la acción de eliminar en el lado derecho de la
+lista de miembros.
+
+## Ver sesiones de otros miembros
+
+En la página de inicio, usa el filtro de la barra lateral para alternar entre **Mis tareas** y **Todas las tareas** (en
+móvil, **Tareas del equipo**). De forma predeterminada, la lista muestra **Todas las tareas**. Los avatares indican quién inició cada
+sesión.
+
+## Uso de tokens por miembro
+
+En **Configuración** -> **Uso de IA**, puedes ver el uso total de tokens de IA y los gráficos de tendencias. Usa
+**Por miembro** para revisar el desglose de uso por cada miembro.
+
+<img src="/_docs-assets/token-by-member.png" alt="" />
+
+## Visibilidad de máquinas del equipo
+
+Cada máquina que registras es **privada de forma predeterminada**. Unirte al espacio de trabajo de otra persona no
+expone tu propia máquina de desarrollo, y otros miembros no pueden verla en su lista de máquinas ni iniciar
+sesiones en ella.
+
+Cuando quieras que tus compañeros de equipo accedan a una máquina específica —por ejemplo, un servidor de compilación compartido o un
+worker en la nube—, puedes compartirla explícitamente con el espacio de trabajo.
+
+### Compartir una máquina
+
+1. Ve a **Configuración** -> **Máquinas**.
+2. Busca la máquina en **Mis máquinas**.
+3. Activa el interruptor **Compartir máquina**.
+
+La máquina aparecerá entonces en **Máquinas del equipo** para los demás miembros, quienes podrán seleccionarla al
+crear una sesión. Puedes desactivar el interruptor en cualquier momento; una vez que deja de compartirse, la máquina
+desaparece de las listas de máquinas de los demás miembros y sus barras laterales de sesiones dejan de recibir las
+conversaciones que se ejecutan en ella.
+
+Solo el propietario de una máquina puede cambiar su estado de uso compartido.
+
+### Qué significa «compartida»
+
+- **Visibilidad en la lista**: las máquinas compartidas aparecen en la sección `Team Machines` de la configuración de máquinas de cada
+  miembro. Las máquinas no compartidas permanecen únicamente en `My Machines` del propietario.
+- **Accesibilidad de sesiones**: las sesiones solo pueden crearse en máquinas a las que el creador tiene acceso:
+  sus propias máquinas, más cualquier máquina de equipo compartida en ese momento.
+- **Barra lateral de conversaciones**: las sesiones que se ejecutan en una máquina no compartida no se sincronizan en las
+  barras laterales de otros miembros.
+
+Unirse a un espacio de trabajo y conceder acceso a tus máquinas están completamente desacoplados: puedes invitar a
+compañeros de equipo sin preocuparte de que tu portátil personal se convierta en un worker compartido.

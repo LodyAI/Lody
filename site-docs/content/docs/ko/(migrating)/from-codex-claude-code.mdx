@@ -1,0 +1,155 @@
+---
+title: "Codex 또는 Claude Code에서 전환하기"
+description: "Lody와 Codex·Claude Code CLI의 관계를 설명합니다. 그대로 유지되는 부분, Lody가 추가하는 기능, 개념 대응표, 그리고 마이그레이션 체크리스트를 확인하세요."
+---
+
+# Codex 또는 Claude Code에서 전환하기
+
+기존에 쓰던 `codex`나 `claude` CLI를 멈출 필요는 없습니다. Lody는 [Agent Config](/ko/docs/quickstart)를 통해
+동일한 런타임을 그대로 실행하고, 그 위에 독립된 워크트리, 다중 세션 동시 실행, 실시간 diff 리뷰,
+팀 핸드오프, 모바일 액세스 같은 워크스페이스 환경을 더해 줍니다.
+
+<Callout title="핵심 요약">
+- 구독, API 키, 머신에 저장된 로그인 정보는 그대로 유지됩니다.
+- 세션은 CLI 대화 하나에 해당하는 Lody의 단위이며, Agent Config는 그 뒤에서 동작하는 런타임입니다.
+- Lody가 더하는 가치는 병렬 워크트리, 코드 리뷰, 공유, 오케스트레이션을 아우르는 워크스페이스 계층입니다.
+</Callout>
+
+## 그대로 유지되는 것
+
+- **런타임.** Lody는 동일한 에이전트 프로세스를 실행하므로 모델이나 CLI 고유의 동작을 대체하지 않습니다.
+- **인증 정보.** Lody는 머신에 이미 설정되어 있는 구독 로그인이나 환경 구성을 그대로 사용합니다. 자세한 내용은 [Agent Config](/ko/docs/quickstart)를 참고하세요.
+- **저장소 규칙.** 에이전트는 여전히 프로젝트 내부에서 실행되므로 `AGENTS.md`, `CLAUDE.md` 등 기존 프로젝트 지침 파일도 그대로 동작합니다.
+- **터미널.** 간단한 일회성 작업이라면 CLI를 직접 실행하는 것도 여전히 좋은 선택입니다.
+
+## 개념 대응표
+
+| 기존에 익숙한 방식 | Lody에서의 대응 개념 | 설명 |
+| --- | --- | --- |
+| 터미널의 `claude` 또는 `codex` | [Agent Config](/ko/docs/quickstart)를 사용하는 [세션](/ko/docs/session) | 동일한 런타임에 GUI, 모바일, 팀 협업 계층 추가 |
+| 하나의 저장소 체크아웃 | 세션당 하나의 [워크트리](/ko/docs/worktrees) | 여러 세션이 같은 파일을 두고 충돌하지 않음 |
+| 프롬프트와 그에 따른 편집 | [라운드(round)](/ko/docs/diff-viewer) | 각 라운드가 끝날 때마다 Lody가 diff를 표시 |
+| `--resume` 또는 `resume` | 사이드바에서 세션 다시 열기 | 대화, 브랜치, 워크트리가 하나로 묶여 유지됨 |
+| 수동 `git diff` 검토 | [Diff 뷰어](/ko/docs/diff-viewer) 및 [Diff 코멘트](/ko/docs/diff-comments) | 특정 줄에 코멘트를 남기고 GitHub PR과 동기화 |
+| 한 번에 터미널 하나씩 작업 | 여러 개의 [병렬 세션](/ko/docs/parallel-agents) | 각 작업마다 고유한 브랜치와 워크트리 할당 |
+| 슬래시 명령어 및 모드 | 런타임이 노출하는 [슬래시 명령어](/ko/docs/slash-commands) | Lody가 런타임의 지원 기능을 자동으로 탐색 |
+| 팀에 스크린샷이나 대화 기록 공유 | [세션 핸드오프](/ko/docs/session-handoff) | 실행 중인 실시간 세션에 팀원 초대 |
+
+각 기본 제공 프로바이더가 지원하는 선택적 ACP 및 Lody 확장 기능은
+[ACP 및 확장 기능 지원 현황](/ko/docs/acp-feature-support) 매트릭스에서 확인할 수 있습니다.
+
+## Lody가 추가로 제공하는 기능
+
+<Cards>
+  <Card href="/ko/docs/parallel-agents" title="병렬 작업">
+    파일 충돌 없이 여러 세션에서 서로 다른 작업을 동시에 실행합니다.
+  </Card>
+  <Card href="/ko/docs/agent-collaboration" title="멀티 에이전트 협업">
+    Claude Code, Codex, Kimi, Grok이 서로 작업을 위임하고 결과를 검토하게 할 수 있습니다.
+  </Card>
+  <Card href="/ko/docs/diff-comments" title="리뷰 루프">
+    변경된 줄에 코멘트를 남기고 해당 스레드를 에이전트에게 바로 전달합니다.
+  </Card>
+  <Card href="/ko/docs/session-handoff" title="팀 핸드오프">
+    대화 기록을 복사해 보내는 대신 팀원을 동일한 실시간 세션으로 초대합니다.
+  </Card>
+  <Card href="/ko/docs/mobile" title="모바일 및 원격 제어">
+    공유 머신에서 실행 중인 세션을 스마트폰으로 제어합니다.
+  </Card>
+  <Card href="/ko/docs/scheduled-tasks" title="예약 작업">
+    온라인 상태인 머신에서 주기적인 에이전트 작업을 실행합니다.
+  </Card>
+</Cards>
+
+## 마이그레이션 체크리스트
+
+<Steps>
+<Step>
+
+### 1. Lody 설치 및 로그인
+
+[빠른 시작](/ko/docs/quickstart) 가이드를 따라 진행하세요. 데스크톱 앱, 모바일 앱, 또는 원격 머신의
+CLI 중 편한 환경에서 시작할 수 있습니다.
+
+</Step>
+<Step>
+
+### 2. 기존 로그인 유지하기
+
+**Settings** -> **Agent Config**를 열고 사용 중인 각 런타임에 대한 설정을 추가하세요. 대부분의 경우
+새 자격 증명이 필요하지 않습니다. Lody는 머신에 이미 있는 구독 로그인이나 환경 구성을 그대로 사용합니다.
+
+</Step>
+<Step>
+
+### 3. 프로젝트 추가하기
+
+이미 작업 중인 디렉터리를 [로컬 프로젝트](/ko/docs/local-project)로 추가하거나, Pull Request와 CI 연동을 위해
+[GitHub 저장소](/ko/docs/github)를 연결하세요. 해당 로컬 프로젝트에서 이미 Codex나 Claude Code를 실행해 왔다면
+Lody가 기존 대화 기록을 가져와 이어서 작업할 수 있습니다.
+[코드 에이전트 기록 동기화](/ko/docs/local-project#sync-code-agent-history-codex-claude-code-and-more)를 참고하세요.
+
+</Step>
+<Step>
+
+### 4. 작은 세션 하나 실행해 보기
+
+CLI에서 한 번에 끝낼 수 있는 정도의 작업으로 [첫 번째 세션](/ko/docs/first-session)을 진행해 보세요.
+프로젝트, Agent Config, 모델이 의도한 대로 설정되었는지 확인합니다.
+
+</Step>
+<Step>
+
+### 5. 반복하는 설정 저장하기
+
+항상 같은 머신, 설정, 모델, 지침으로 비슷한 유형의 작업을 시작한다면 매번 모든 항목을 다시 선택하는 대신
+[Agent Role](/ko/docs/agent-roles)로 저장해 두세요.
+
+</Step>
+<Step>
+
+### 6. 필요할 때 워크스페이스 기능 하나씩 추가하기
+
+PR과 CI를 위해 GitHub를 연동하고, 작은 작업 두 개로 [병렬 세션](/ko/docs/parallel-agents)을 실행해 보거나,
+[세션 핸드오프](/ko/docs/session-handoff)로 팀원을 초대해 보세요. 필요한 기능부터 하나씩 도입할 수 있습니다.
+
+</Step>
+</Steps>
+
+## CLI가 여전히 더 적합한 경우
+
+<Callout type="info" title="상황에 맞게 터미널 활용하기">
+리뷰 이력을 남길 필요 없이 간단한 수정을 한 번만 하거나, 에이전트 자체를 디버깅할 때, 또는 Lody 데몬을 실행하고 싶지 않은 머신에서는 CLI를 직접 사용하는 편이 좋습니다. Lody는 워크트리, 검토 가능한 diff, 팀원과의 협업, 또는 다른 기기에서의 접근이 도움이 되는 작업에서 가장 큰 효과를 발휘합니다.
+</Callout>
+
+## 자주 묻는 질문
+
+### Lody가 Codex나 Claude Code CLI를 대체하나요?
+
+아니요. Lody는 해당 런타임을 비롯한 여러 런타임을 실행하고 그 주변에 워크스페이스 환경을 더해 줍니다. CLI 역시 계속 지원되는 작업 방식이며, 같은 머신에서 두 가지를 함께 사용할 수 있습니다.
+
+### API 키나 구독을 Lody로 옮겨야 하나요?
+
+아니요. 일반적인 경우 Lody는 머신에 이미 설정되어 있는 구독 로그인이나 환경 구성을 그대로 사용합니다. Lody가 어떤 런타임을 실행해야 하는지 알 수 있도록 [Agent Config](/ko/docs/quickstart)만 추가하면 되며, 자격 증명을 Lody로 이전할 필요는 없습니다.
+
+### 저장소에 있는 AGENTS.md나 CLAUDE.md를 계속 사용할 수 있나요?
+
+네. 에이전트는 여전히 저장소 내부에서 실행되므로 기존에 읽어 들이던 지침 파일들이 그대로 동작합니다.
+
+### `codex resume`이나 `claude --resume`처럼 대화를 이어서 진행하려면 어떻게 하나요?
+
+사이드바에서 해당 세션을 열면 됩니다. Lody는 대화 내용, 브랜치, 워크트리를 함께 보관합니다. 런타임이 네이티브 포크(fork)를 지원하는 경우에는 원본을 변경하지 않고 새로운 방향으로 이어갈 수 있도록 [포크](/ko/docs/session#fork-a-session)를 만들 수도 있습니다. 자세한 내용은 [세션](/ko/docs/session)을 참고하세요.
+
+### 스마트폰에서도 같은 세션에 접속해 Lody를 사용할 수 있나요?
+
+네. 실행 머신이 온라인 상태이고 동일한 Lody 워크스페이스에 로그인되어 있으면 가능합니다. 자세한 내용은 [모바일 액세스](/ko/docs/mobile)를 참고하세요.
+
+## 다음 단계
+
+<Cards>
+  <Card href="/ko/docs/first-session" title="첫 번째 세션" />
+  <Card href="/ko/docs/concepts" title="개념 및 용어집" />
+  <Card href="/ko/docs/workflow" title="권장 워크플로" />
+  <Card href="/ko/docs/parallel-agents" title="병렬 코딩 에이전트" />
+  <Card href="/ko/docs/acp-feature-support" title="ACP 및 확장 기능 지원 현황" />
+</Cards>

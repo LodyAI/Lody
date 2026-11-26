@@ -30,6 +30,22 @@ vi.mock('convex/react', () => ({
 
 import { RecoverableConvexBetterAuthProvider } from '../src/providers/recoverable-convex-better-auth-provider';
 
+function createSessionStore(read: () => unknown) {
+  const listeners = new Set<(value: unknown) => void>();
+  return {
+    store: {
+      get: read,
+      listen(listener: (value: unknown) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    },
+    publish() {
+      for (const listener of [...listeners]) listener(read());
+    },
+  };
+}
+
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -62,11 +78,15 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
         resolveToken = resolve;
       })
     );
+    const authSession = createSessionStore(() => ({
+      data: { session: { id: sessionId, token: `better-auth-${sessionId}` } },
+      isPending: false,
+      isRefetching: false,
+      error: null,
+      refetch: vi.fn(),
+    }));
     const authClient = {
-      useSession: () => ({
-        data: { session: { id: sessionId, token: `better-auth-${sessionId}` } },
-        isPending: false,
-      }),
+      $store: { atoms: { session: authSession.store } },
       convex: { token },
       crossDomain: { oneTimeToken: { verify: vi.fn() } },
       getSession: vi.fn(),
@@ -104,6 +124,7 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
     );
     const staleRecovery = requestCurrentConvexJwt(authClient);
     sessionId = 'session-b';
+    authSession.publish();
     await act(async () => {
       root.render(renderProvider());
     });
@@ -119,11 +140,15 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
         resolveToken = resolve;
       })
     );
+    const authSession = createSessionStore(() => ({
+      data: { session: { id: 'session-a', token: 'better-auth-session-a' } },
+      isPending: false,
+      isRefetching: false,
+      error: null,
+      refetch: vi.fn(),
+    }));
     const authClient = {
-      useSession: () => ({
-        data: { session: { id: 'session-a', token: 'better-auth-session-a' } },
-        isPending: false,
-      }),
+      $store: { atoms: { session: authSession.store } },
       convex: { token },
       crossDomain: { oneTimeToken: { verify: vi.fn() } },
       getSession: vi.fn(),
@@ -163,11 +188,15 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
       .fn()
       .mockReturnValueOnce(sessionAToken)
       .mockResolvedValueOnce({ data: { token: 'jwt-b' } });
+    const authSession = createSessionStore(() => ({
+      data: { session: { id: sessionId, token: `better-auth-${sessionId}` } },
+      isPending: false,
+      isRefetching: false,
+      error: null,
+      refetch: vi.fn(),
+    }));
     const authClient = {
-      useSession: () => ({
-        data: { session: { id: sessionId, token: `better-auth-${sessionId}` } },
-        isPending: false,
-      }),
+      $store: { atoms: { session: authSession.store } },
       convex: { token },
       crossDomain: { oneTimeToken: { verify: vi.fn() } },
       getSession: vi.fn(),
@@ -190,6 +219,7 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
     const staleRequest = providerMocks.auth!.fetchAccessToken({ forceRefreshToken: true });
 
     sessionId = 'session-b';
+    authSession.publish();
     await act(async () => {
       root.render(renderProvider());
     });
@@ -214,11 +244,15 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
     const tokenRequest = new Promise<{ data: { token: string } }>((resolve) => {
       resolveToken = resolve;
     });
+    const authSession = createSessionStore(() => ({
+      data: sessionId ? { session: { id: sessionId, token: 'better-auth-token' } } : null,
+      isPending: false,
+      isRefetching: false,
+      error: null,
+      refetch: vi.fn(),
+    }));
     const authClient = {
-      useSession: () => ({
-        data: sessionId ? { session: { id: sessionId, token: 'better-auth-token' } } : null,
-        isPending: false,
-      }),
+      $store: { atoms: { session: authSession.store } },
       convex: { token: vi.fn(() => tokenRequest) },
       crossDomain: { oneTimeToken: { verify: vi.fn() } },
       getSession: vi.fn(),
@@ -241,6 +275,7 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
     const staleRequest = providerMocks.auth!.fetchAccessToken({ forceRefreshToken: true });
 
     sessionId = null;
+    authSession.publish();
     await act(async () => {
       root.render(renderProvider());
     });
@@ -262,11 +297,15 @@ describe('RecoverableConvexBetterAuthProvider one-time token flow', () => {
     const signOutRequest = new Promise<void>((resolve) => {
       resolveSignOut = resolve;
     });
+    const authSession = createSessionStore(() => ({
+      data: { session: { id: 'session-a', token: 'better-auth-token' } },
+      isPending: false,
+      isRefetching: false,
+      error: null,
+      refetch: vi.fn(),
+    }));
     const authClient = {
-      useSession: () => ({
-        data: { session: { id: 'session-a', token: 'better-auth-token' } },
-        isPending: false,
-      }),
+      $store: { atoms: { session: authSession.store } },
       convex: { token: vi.fn(() => tokenRequest) },
       crossDomain: { oneTimeToken: { verify: vi.fn() } },
       getSession: vi.fn(),

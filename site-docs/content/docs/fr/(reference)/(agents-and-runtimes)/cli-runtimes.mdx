@@ -1,0 +1,58 @@
+---
+title: "Types de runtimes CLI"
+description: "Utilisez chaque runtime disponible via le registre ACP ou ajoutez votre propre commande de lancement compatible ACP."
+---
+
+# Types de runtimes CLI
+
+Lody prend en charge tous les runtimes CLI publiés dans le [registre ACP](https://agentclientprotocol.com/get-started/registry).
+La liste des runtimes disponibles est chargée depuis le registre ; cette page ne maintient donc pas de
+liste statique distincte de fournisseurs ou de commandes.
+
+<CliRuntimePreview locale="fr" />
+
+## Runtimes du registre
+
+1. Ouvrez **Paramètres** -> **Configuration d'agent**.
+2. Cliquez sur le bouton d'ajout.
+3. Saisissez un nom pour la configuration.
+4. Choisissez le type de CLI souhaité dans le sélecteur alimenté par le registre.
+5. Ajoutez les variables d'environnement requises.
+6. Cliquez sur **Test** lorsque le bouton s'affiche. Cela permet de vérifier que Lody peut lancer le runtime et lire
+   ses capacités, notamment les modèles pris en charge et les modes d'exécution.
+7. Enregistrez la configuration, puis sélectionnez-la lors de la création d'une conversation.
+
+La prise en charge du registre permet à Lody de suivre les nouvelles entrées de runtimes ACP à mesure qu'elles sont ajoutées en amont. La machine
+hôte doit tout de même disposer de la commande, de la connexion, des identifiants et des dépendances du runtime sélectionné,
+installés conformément à la documentation propre à ce runtime.
+
+## Agent ACP personnalisé
+
+Si votre agent est compatible ACP mais n'est pas publié dans le registre, choisissez **Custom ACP** dans
+**Paramètres** -> **Configuration d'agent**.
+
+1. Saisissez un nom pour la configuration.
+2. Définissez **Type de CLI** sur **Custom ACP**.
+3. Renseignez **Commande de lancement** avec la commande qui démarre l'agent via stdio.
+4. Ajoutez les variables d'environnement requises dans la même configuration d'agent.
+5. Cliquez sur **Test** pour vérifier que Lody peut lancer l'agent et lire ses capacités.
+6. Enregistrez la configuration, puis sélectionnez-la lors de la création d'une conversation.
+
+Exemple de commande de lancement :
+
+```bash
+npx -y my-acp-agent --stdio
+```
+
+La commande de lancement est analysée en une commande accompagnée de ses arguments, puis exécutée directement. Les guillemets sont
+pris en charge pour les arguments contenant des espaces, mais les fonctionnalités du shell telles que les tubes (pipes), les redirections, l'expansion de motifs (glob)
+et `$VARS` ne sont pas évaluées. Renseignez plutôt les variables d'environnement dans la configuration d'agent.
+
+## Remarques
+
+- Certains runtimes du registre peuvent encore être expérimentaux en amont.
+- Avant utilisation, assurez-vous que les identifiants de connexion requis sont déjà configurés sur l'hôte où la
+  CLI Lody s'exécute.
+- Les types de runtimes locaux nécessitent que la commande correspondante soit d'abord installée sur l'hôte.
+- La disponibilité des modèles dépend du runtime sélectionné, de l'état de l'installation locale et des
+  autorisations du compte.

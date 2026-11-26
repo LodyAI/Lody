@@ -1,0 +1,35 @@
+---
+title: "20260917-0.96.0"
+version: 0.96.0
+date: 2026-09-17
+description: "Amélioration des actions sur les fichiers, de la connexion sur l'application de bureau, de la récupération de session et de la collaboration entre agents."
+---
+
+Version 0.96.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Ajout d'un menu contextuel pour les liens de fichiers Markdown sur l'application de bureau, avec des actions pour copier le chemin, ouvrir le fichier, choisir une application ou l'afficher dans le Finder.
+- Ajout d'un panneau de diagnostic développeur sur l'application de bureau pour les métriques d'exécution et de performance.
+
+### 🐛 Correctifs et améliorations
+
+- Limitation par défaut du nombre d'aperçus de sessions de projets locaux, avec une option pour afficher toutes les sessions.
+- Masquage des cartes de demande de partage après publication.
+- Correction des chargements répétés dans le navigateur public lors des redirections, de la navigation dans l'historique et de la navigation au sein d'un même document.
+- Préservation du texte lors du collage de contenu copié depuis Word, PowerPoint et des applications similaires.
+- Affichage de la migration Pi uniquement sur les machines prises en charge.
+- Masquage de l'action Bifurquer tant qu'une réponse n'est pas terminée.
+- Correction d'un problème empêchant certains modules natifs d'agent de se charger sous macOS.
+- Amélioration de la récupération et des nouvelles tentatives lorsqu'une session Loro locale ne parvient pas à être rejointe.
+- Amélioration du contraste des contrôles de sélection multiple des archives dans les thèmes sombres.
+- Réouverture de la session enfant exacte lors de son ouverture depuis une carte de création après la fermeture de son onglet.
+- Conservation de la position de lecture lors du dépliage ou du repliage du contenu terminé.
+- Amélioration de l'affichage des sous-agents Devin dans les conversations.
+- Héritage du modèle et de la configuration d'exécution de la session cible pour les messages de suivi.
+- Amélioration de la connexion via le navigateur sur l'application de bureau afin d'éviter les états invalides causés par des rappels en double.
+- Mise à jour des versions des environnements d'exécution d'agent intégrés.
+
+### 🤝 Contributions de la communauté
+
+- Un grand merci au contributeur externe [@Astro-Han](https://github.com/Astro-Han) pour [#767](https://github.com/LodyAI/Lody/pull/767), qui améliore le rendu des sous-agents Devin.

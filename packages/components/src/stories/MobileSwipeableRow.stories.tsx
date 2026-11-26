@@ -105,11 +105,8 @@ function RowContent({ row, dimmed }: { row: Row; dimmed?: boolean }) {
       <div {...stylex.props(storyStyles.avatar)} />
       <div {...stylex.props(storyStyles.content)}>
         <div {...stylex.props(storyStyles.titleRow)}>
-          {row.pinned ? (
-            <Pin {...stylex.props(storyStyles.pin)} />
-          ) : null}
-          <span {...stylex.props(storyStyles.title, dimmed && storyStyles.dimmed)}
-          >
+          {row.pinned ? <Pin {...stylex.props(storyStyles.pin)} /> : null}
+          <span {...stylex.props(storyStyles.title, dimmed && storyStyles.dimmed)}>
             {row.title}
           </span>
         </div>

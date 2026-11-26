@@ -1,3 +1,5 @@
+import { managementFailureKind } from '@/lib/e2ee-actionable-failure';
+import { E2eeDiagnosticCode } from '@/components/e2ee-diagnostic-code';
 import { E2eeMemberActions, type E2eeMemberManagement } from './e2ee-member-actions';
 import * as stylex from '@stylexjs/stylex';
 import { Accordion } from '@lody/ui/accordion';
@@ -511,7 +513,7 @@ function FailurePanel(props: {
   return (
     <Alert.Root tone={failureTone(props.failure.kind)} data-failure-kind={props.failure.kind}>
       <Alert.Title>{t(card.title)}</Alert.Title>
-      <Alert.Description>{t(card.body, { code: props.failure.code })}</Alert.Description>
+      <Alert.Description>{t(card.body)}</Alert.Description>
       {confirmReset && (
         <Alert.Description>{t('e2ee.control.resetProgressWarning')}</Alert.Description>
       )}
@@ -545,6 +547,7 @@ function FailurePanel(props: {
           </>
         )}
       </Alert.Actions>
+      {props.failure.kind === 'server' && <E2eeDiagnosticCode code={props.failure.code} />}
       {report !== null && (
         <details open={copied === 'shown'}>
           <summary>{t('e2ee.control.diagnostics')}</summary>
@@ -782,22 +785,32 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
   // removed member's row for good.
   const [keyUpdate, setKeyUpdate] = useState<{
     readonly workspaceId: string;
-    readonly state: 'failed' | 'retrying' | 'retryFailed';
+    readonly message: string;
+    readonly retrying?: boolean;
   } | null>(null);
-  const keyUpdateState = keyUpdate?.workspaceId === props.workspaceId ? keyUpdate.state : null;
+  const keyUpdateState = keyUpdate?.workspaceId === props.workspaceId ? keyUpdate : null;
   const settleRotation = (replaced: boolean) =>
-    setKeyUpdate(replaced ? null : { workspaceId: props.workspaceId, state: 'failed' });
+    setKeyUpdate(
+      replaced ? null : { workspaceId: props.workspaceId, message: 'e2ee.members.rotateFailed' }
+    );
   const rotate = props.memberManagement?.rotate;
   const retryKeyUpdate = async (update: () => Promise<void>) => {
     const workspaceId = props.workspaceId;
     const settle = (next: typeof keyUpdate) =>
       setKeyUpdate((current) => (current?.workspaceId === workspaceId ? next : current));
-    settle({ workspaceId, state: 'retrying' });
+    settle({ workspaceId, message: 'e2ee.members.rotateRetrying', retrying: true });
     try {
       await update();
       settle(null);
-    } catch {
-      settle({ workspaceId, state: 'retryFailed' });
+    } catch (error) {
+      const kind = managementFailureKind(error);
+      settle({
+        workspaceId,
+        message:
+          kind === 'generic'
+            ? 'e2ee.members.rotateRetryFailed'
+            : `e2ee.members.rotateError.${kind}`,
+      });
     }
   };
 
@@ -849,17 +862,11 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
       )}
       {keyUpdateState && (
         <Alert.Root tone="warning" data-testid="e2ee-member-rotate-failed">
-          <Alert.Description>
-            {t(
-              keyUpdateState === 'retryFailed'
-                ? 'e2ee.members.rotateRetryFailed'
-                : 'e2ee.members.rotateFailed'
-            )}
-          </Alert.Description>
+          <Alert.Description role="status">{t(keyUpdateState.message)}</Alert.Description>
           <Alert.Actions>
             <Button
               data-testid="e2ee-member-rotate-retry"
-              disabled={!rotate || keyUpdateState === 'retrying'}
+              disabled={!rotate || keyUpdateState.retrying}
               onClick={() => {
                 if (rotate) void retryKeyUpdate(rotate);
               }}

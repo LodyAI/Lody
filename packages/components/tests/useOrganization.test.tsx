@@ -8,6 +8,7 @@ import { useE2eeWorkspaceRemoval } from '../src/components/pages/e2ee-workspace-
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { getCachedWorkspaceId } from '../src/lib/local-storage-cache';
 import { readPreferredWorkspaceSlug, writePreferredWorkspaceSlug } from '../src/lib/workspace';
+import { resolveOptimisticWorkspaceRouteGuard } from '../src/lib/workspace-route-guard';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   editSessionRunConfigDraftAtom,
@@ -265,12 +266,28 @@ describe('useOrganization setActive dedupe', () => {
     });
   }
 
-  it('opens a ledger-bound workspace with a full projected roster without Better Auth setActive', async () => {
+  it('keeps a newly joined encrypted deep link pending instead of redirecting to an existing workspace', async () => {
+    const workspaceName = 'cipher-team';
+    organizationMocks.encryptedWorkspaces = undefined;
+    await render(workspaceName, 0);
+    const { activeOrganization, error, organizations, organizationsLoading } =
+      latestOrganizationState!;
+    expect(
+      resolveOptimisticWorkspaceRouteGuard({
+        workspaceName,
+        organizations,
+        activeOrganization,
+        error,
+      })
+    ).not.toBe('redirect');
+    expect(organizationsLoading).toBe(true);
+    expect(organizations).toBeUndefined();
+
     organizationMocks.encryptedWorkspaces = [
       {
         id: 'encrypted',
         name: 'Cipher Team',
-        slug: 'cipher-team',
+        slug: workspaceName,
         contentMode: 'e2ee',
         contentModeVersion: 1,
         cryptoOrgId: '11'.repeat(32),
@@ -286,7 +303,8 @@ describe('useOrganization setActive dedupe', () => {
         ],
       },
     ];
-    await render('cipher-team', 0);
+    await render(workspaceName, 1);
+    expect(latestOrganizationState!.organizationsLoading).toBe(false);
     expect(latestOrganizationState!.activeOrganization).toMatchObject({
       id: 'encrypted',
       members: [{ userId: 'user-1', role: 'member' }],
@@ -331,11 +349,14 @@ describe('useOrganization setActive dedupe', () => {
   });
   it('isolates an unavailable encrypted directory from a healthy ordinary workspace and fails closed for an unknown encrypted target', async () => {
     organizationMocks.encryptedWorkspaces = undefined;
-    organizationMocks.directoryError = new Error('directory unavailable');
     await render('old-workspace', 0, true);
+    expect(latestOrganizationState!.organizationsLoading).toBe(false);
+    expect(latestGlobalState!.organizationsLoading).toBe(false);
+    organizationMocks.directoryError = new Error('directory unavailable');
+    await render('old-workspace', 1, true);
     expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
     expect(latestOrganizationState!.error).toBeNull();
-    await render('unknown-encrypted', 1, true);
+    await render('unknown-encrypted', 2, true);
     expect(latestOrganizationState!.activeOrganization).toBeNull();
     expect(latestOrganizationState!.organizationsError?.message).toContain(
       'Encrypted membership directory'

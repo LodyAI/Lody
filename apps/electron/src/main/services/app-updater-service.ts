@@ -2,7 +2,7 @@ import { startProcessLegacy } from '@lody/shared/node/process'
 import { appendFileSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, net } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { loadSparkleBridge, type SparkleBridge } from 'electron-sparkle-updater'
 import type {
@@ -22,6 +22,7 @@ import {
 import { readUpdaterReleaseMetadata } from './app-updater-metadata'
 import { sparkleEventToStatePatch } from './app-updater-sparkle-events'
 import {
+  findLatestSparkleFeedVersion,
   resolveSparkleAddonPath,
   resolveSparkleAppcastUrl,
   shouldUseSparkleUpdater,
@@ -95,6 +96,8 @@ export class AppUpdaterService {
   private installInFlight = false
   /** A Sparkle install this service started still holds the app-quitting flag. */
   private sparkleInstallRequested = false
+  private sparkleFeedPollInFlight = false
+  private lastSparkleSupersededKey: string | undefined
 
   constructor(private readonly options: { enabled?: boolean } = {}) {}
 
@@ -113,8 +116,10 @@ export class AppUpdaterService {
       })
       return
     }
-    // Sparkle schedules its own checks, which `stop()` leaves running.
-    if (this.sparkleBridge) return
+    if (this.sparkleBridge) {
+      this.startSparkleParkedUpdatePoll()
+      return
+    }
 
     const sparkleBridge = this.tryLoadSparkleBridge()
     if (sparkleBridge) {
@@ -125,6 +130,7 @@ export class AppUpdaterService {
         this.sparkleInstallRequested = false
       })
       sparkleBridge.setAutomaticChecks(true)
+      this.startSparkleParkedUpdatePoll()
       return
     }
 
@@ -172,9 +178,17 @@ export class AppUpdaterService {
       }
     }
     if (this.sparkleBridge) {
+      if (this.state.phase === 'checking' || this.state.phase === 'downloading') {
+        return {
+          started: false,
+          error: 'check_in_progress'
+        }
+      }
       try {
         this.setState({
           phase: 'checking',
+          availableVersion: undefined,
+          downloadedVersion: undefined,
           error: undefined,
           checkedAtMs: Date.now(),
           percent: undefined,
@@ -433,6 +447,58 @@ export class AppUpdaterService {
         console.log(`[sparkle] event handler failed: ${formatUnknownError(error)}`)
       }
     })
+  }
+
+  private startSparkleParkedUpdatePoll(): void {
+    if (this.intervalRef) return
+    this.intervalRef = setInterval(() => {
+      void this.checkForSupersedingSparkleUpdate()
+    }, UPDATE_CHECK_INTERVAL_MS)
+  }
+
+  private async checkForSupersedingSparkleUpdate(): Promise<void> {
+    if (!this.sparkleBridge || this.sparkleFeedPollInFlight || this.sparkleInstallRequested) return
+    if (this.state.phase !== 'downloaded') return
+    const downloadedVersion = readNonEmptyString(this.state.downloadedVersion)
+    if (!downloadedVersion) return
+
+    const feedUrl =
+      typeof this.sparkleBridge.getFeedUrl === 'function'
+        ? readNonEmptyString(this.sparkleBridge.getFeedUrl())
+        : undefined
+    if (!feedUrl) return
+
+    this.sparkleFeedPollInFlight = true
+    try {
+      const response = await net.fetch(feedUrl, {
+        signal: AbortSignal.timeout(15_000)
+      })
+      if (!response.ok) return
+      const xml = await response.text()
+      const latestVersion = findLatestSparkleFeedVersion(xml, { arch: process.arch })
+      if (
+        !latestVersion ||
+        latestVersion === downloadedVersion ||
+        latestVersion === this.state.currentVersion
+      ) {
+        return
+      }
+      if (
+        this.state.phase !== 'downloaded' ||
+        this.state.downloadedVersion !== downloadedVersion ||
+        this.sparkleInstallRequested
+      ) {
+        return
+      }
+      const supersedeKey = `${downloadedVersion}->${latestVersion}`
+      if (this.lastSparkleSupersededKey === supersedeKey) return
+      this.lastSparkleSupersededKey = supersedeKey
+      await this.checkForUpdates()
+    } catch {
+      return
+    } finally {
+      this.sparkleFeedPollInFlight = false
+    }
   }
 
   private isUpdaterEnabled(): boolean {

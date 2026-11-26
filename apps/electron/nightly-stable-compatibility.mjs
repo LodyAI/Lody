@@ -56,5 +56,5 @@ export async function verifyCompatibleStableRelease({
     throw new Error(
       `Compatible Stable ${minimumVersion} must be published before Nightly (available: ${manifest.version})`
     )
-  return minimumVersion
+  return manifest.version
 }

@@ -1,3 +1,4 @@
+import { writeUsageSharing, desktopUsageChoice } from '@lody/shared/node/usage-sharing'
 import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { assertProductWindowSender } from '../assert-sender'
 import {
@@ -11,8 +12,16 @@ import { isDefaultLodyProtocolClient, setDefaultLodyProtocolClient } from '../..
 import { parseAppIconName } from '../../services/app-icon-core'
 import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
-import { parseTodayWindowTarget } from '../../today-window-target'
-import { isTodayWindow, openTodayWindow } from '../../today-windows'
+import { isValidTodayWorkspace, parseTodayWindowTarget } from '../../today-window-target'
+import {
+  closeTodayWindow,
+  isTodayWindow,
+  openTodayWindow,
+  prepareTodayCompanion,
+  revealTodayWindow,
+  setActiveTodayWorkspace,
+  updateTodayCompanion
+} from '../../today-windows'
 import { openLinkInMainWindow } from '../../window'
 import { access } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
@@ -206,6 +215,60 @@ export class AppIpc extends ProductWindowIpcService {
     openTodayWindow(parseTodayWindowTarget(raw))
   }
 
+  @IpcMethod()
+  async prepareTodayCompanion(raw: { workspace: string; member?: string; date?: string }) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    if (!owner) throw new Error('Missing Today companion owner')
+    return prepareTodayCompanion(owner, parseTodayWindowTarget(raw))
+  }
+
+  @IpcMethod()
+  async updateTodayCompanion(
+    name: string,
+    action:
+      | { type: 'show' }
+      | { type: 'pin'; pinned: boolean }
+      | { type: 'target'; target: { workspace: string; member?: string; date?: string } }
+  ) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    if (!owner || typeof name !== 'string' || !action)
+      throw new Error('Invalid Today companion action')
+    if (action.type === 'show') return updateTodayCompanion(owner, name, action)
+    if (action.type === 'pin' && typeof action.pinned === 'boolean') {
+      return updateTodayCompanion(owner, name, action)
+    }
+    if (action.type === 'target') {
+      return updateTodayCompanion(owner, name, {
+        type: 'target',
+        target: parseTodayWindowTarget(action.target)
+      })
+    }
+    throw new Error('Invalid Today companion action')
+  }
+
+  /**
+   * Syncs whether the Today experiment is enabled and the active workspace slug
+   * so the OS-level toggle shortcut only registers while the experiment is on
+   * and knows which workspace to open.
+   */
+  @IpcMethod()
+  async syncTodayShortcutState(raw: { enabled: boolean; workspace?: string | null }) {
+    assertProductWindowSender(getIpcContext().event)
+    if (!raw || typeof raw !== 'object' || typeof raw.enabled !== 'boolean') {
+      throw new Error('Invalid Today shortcut state')
+    }
+    const workspace = raw.workspace ?? null
+    if (workspace !== null && !isValidTodayWorkspace(workspace)) {
+      throw new Error('Invalid Today workspace')
+    }
+    setActiveTodayWorkspace(workspace)
+    getIpcServiceDeps().globalShortcutsService.setShortcutEnabled('today.toggleWindow', raw.enabled)
+  }
+
   /** The Today window's pin: keep it above every other window. */
   @IpcMethod()
   async setTodayWindowAlwaysOnTop(enabled: boolean): Promise<boolean> {
@@ -218,6 +281,18 @@ export class AppIpc extends ProductWindowIpcService {
   @IpcMethod()
   async getTodayWindowAlwaysOnTop(): Promise<boolean> {
     return todayWindowSender().isAlwaysOnTop()
+  }
+
+  /** The Today window committed its bound day: a reopening window shows now. */
+  @IpcMethod()
+  async revealTodayWindow(bindingId: number): Promise<void> {
+    revealTodayWindow(todayWindowSender(), bindingId)
+  }
+
+  /** Closes for good, where the window's own close only parks it (experiment turned off). */
+  @IpcMethod()
+  async closeTodayWindow(): Promise<void> {
+    closeTodayWindow(todayWindowSender())
   }
 
   /** A conversation opened from the Today window shows in the primary window. */
@@ -366,6 +441,12 @@ export class AppIpc extends ProductWindowIpcService {
   async getFullscreen() {
     const { event } = getIpcContext()
     return BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false
+  }
+
+  @IpcMethod()
+  async isOnboardingCompleted() {
+    const state = await import('../../onboarding-state')
+    return state.isOnboardingCompleted()
   }
 
   @IpcMethod()
@@ -651,6 +732,17 @@ export class AppIpc extends ProductWindowIpcService {
         .filter(({ available }) => available)
         .map(({ launcherId }) => launcherId)
     }
+  }
+
+  @IpcMethod()
+  async setUsageSharingEnabled(enabled: boolean) {
+    if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean')
+    writeUsageSharing(enabled)
+  }
+
+  @IpcMethod()
+  async getUsageSharingEnabled() {
+    return desktopUsageChoice()
   }
 
   @IpcMethod()

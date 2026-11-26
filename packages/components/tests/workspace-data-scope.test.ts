@@ -99,4 +99,28 @@ describe('resolveWorkspaceDataScope', () => {
       })
     ).toEqual({ status: 'switching', targetSlug: 'workspace-b', blocker: 'workspace_id_mismatch' });
   });
+
+  it('lets a runtime-owned consumer skip the metadata scan but not the workspace fences', () => {
+    const runtime = createRuntime('workspace-b', 'workspace-b-id');
+    const resolve = (overrides: Partial<Parameters<typeof resolveWorkspaceDataScope>[0]>) =>
+      resolveWorkspaceDataScope({
+        targetSlug: 'workspace-b',
+        runtime,
+        runtimeInitFailure: null,
+        docMetaScope: createDocMetaScope(runtime, false),
+        organizationsReady: true,
+        expectedWorkspaceId: 'workspace-b-id',
+        docMetaRequired: false,
+        ...overrides,
+      });
+
+    expect(resolve({})).toMatchObject({ status: 'ready', runtime });
+    expect(resolve({ docMetaScope: null })).toMatchObject({ status: 'ready', runtime });
+    expect(resolve({ runtime: createRuntime('workspace-a', 'workspace-a-id') })).toMatchObject({
+      blocker: 'runtime_other_workspace',
+    });
+    expect(resolve({ expectedWorkspaceId: 'server-workspace-b-id' })).toMatchObject({
+      blocker: 'workspace_id_mismatch',
+    });
+  });
 });
