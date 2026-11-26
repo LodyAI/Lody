@@ -9,17 +9,85 @@ import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
 import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
 import { ScanLine } from 'lucide-react';
 
 const styles = stylex.create({
-  actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
-  code: { overflowWrap: 'anywhere', userSelect: 'all', fontFamily: 'monospace', margin: 0 },
-  qr: { backgroundColor: '#ffffff', padding: space[2], alignSelf: 'flex-start' },
-  error: { color: colors.secondaryLabel },
-  video: { width: '100%', maxWidth: 320 },
+  card: { width: '100%', maxWidth: '36rem' },
+  body: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  lead: {
+    margin: 0,
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    color: colors.label,
+  },
+  actions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[2],
+    paddingTop: space[1],
+  },
+  fingerprint: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: '6px 10px',
+    margin: 0,
+    paddingBlock: space[3],
+    paddingInline: space[4],
+    borderRadius: radius.medium,
+    backgroundColor: colors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    fontVariantNumeric: 'tabular-nums',
+    letterSpacing: '0.04em',
+    color: colors.label,
+    userSelect: 'all',
+  },
+  fingerprintCell: {
+    textAlign: 'center',
+  },
+  qr: {
+    backgroundColor: '#ffffff',
+    padding: space[2],
+    borderRadius: radius.medium,
+    boxShadow: '0 0 0 1px oklch(0 0 0 / 0.08)',
+    alignSelf: 'flex-start',
+    lineHeight: 0,
+  },
+  error: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  video: { width: '100%', maxWidth: 320, borderRadius: radius.medium },
+  rawDetails: {
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  rawSummary: { cursor: 'pointer', marginBottom: space[2] },
 });
+const fingerprintChunks = (value: string) => value.match(/.{1,4}/g) ?? [value];
+function FingerprintGrid({ value, testId }: { value: string; testId: string }) {
+  const chunks = fingerprintChunks(value);
+  return (
+    <p data-testid={testId} {...stylex.props(styles.fingerprint)}>
+      {chunks.map((chunk, index) => (
+        <span key={index} {...stylex.props(styles.fingerprintCell)}>
+          {chunk}
+          {index < chunks.length - 1 ? ' ' : ''}
+        </span>
+      ))}
+    </p>
+  );
+}
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
   | 'resetIdentity'
@@ -340,8 +408,17 @@ function PersonalPairingSession({
         setInput('');
       }
     });
+  const resetFlow = () => {
+    setOffer(null);
+    setPreview(null);
+    setJoining(null);
+    setInput('');
+    setInputError(undefined);
+    setCustodyMessage(undefined);
+    setPhase('idle');
+  };
   return (
-    <Card.Root>
+    <Card.Root xstyle={styles.card}>
       <span
         hidden
         data-testid="e2ee-personal-pairing-state"
@@ -383,27 +460,32 @@ function PersonalPairingSession({
           </Button>
         )}
       </div>
-      {offer && (
+      {offer && !preview && (
         <>
           <p>{t('e2ee.pair.transfer')}</p>
           <div {...stylex.props(styles.qr)}>
             <LedgerQrCode payload={JSON.stringify(offer)} size={200} label={t('e2ee.pair.code')} />
           </div>
-          <Textarea aria-label={t('e2ee.pair.code')} value={JSON.stringify(offer)} readOnly />
-          <Button
-            variant="secondary"
-            disabled={phase === 'busy' || recovering}
-            onClick={() => void inspect()}
-          >
-            {t('e2ee.pair.inspect')}
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={phase === 'busy' || recovering || phase === 'published'}
-            onClick={() => void cancel(offer.pairingSessionId)}
-          >
-            {t('common.cancel')}
-          </Button>
+          <details {...stylex.props(styles.rawDetails)}>
+            <summary {...stylex.props(styles.rawSummary)}>{t('e2ee.pair.showRawCode')}</summary>
+            <Textarea aria-label={t('e2ee.pair.code')} value={JSON.stringify(offer)} readOnly />
+          </details>
+          <div {...stylex.props(styles.actions)}>
+            <Button
+              variant="secondary"
+              disabled={phase === 'busy' || recovering}
+              onClick={() => void inspect()}
+            >
+              {t('e2ee.pair.inspect')}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={phase === 'busy' || recovering || phase === 'published'}
+              onClick={() => void cancel(offer.pairingSessionId)}
+            >
+              {t('common.cancel')}
+            </Button>
+          </div>
         </>
       )}
       {canRequest && !canEndorse && !joining && (
@@ -450,25 +532,47 @@ function PersonalPairingSession({
         </>
       )}
       {preview && (
-        <>
-          <p>{t('e2ee.pair.compare')}</p>
-          <p data-testid="e2ee-pair-preview-key" {...stylex.props(styles.code)}>
-            {preview.signingPublicKey}
-          </p>
-          <Button
-            disabled={phase === 'busy' || phase === 'published'}
-            onClick={() => void approve()}
-          >
-            {t(phase === 'retryPublication' ? 'e2ee.pair.retryPublication' : 'e2ee.pair.approve')}
-          </Button>
-        </>
+        <div {...stylex.props(styles.body)}>
+          <p {...stylex.props(styles.lead)}>{t('e2ee.pair.compare')}</p>
+          <FingerprintGrid value={preview.signingPublicKey} testId="e2ee-pair-preview-key" />
+          {offer && (
+            <details {...stylex.props(styles.rawDetails)}>
+              <summary {...stylex.props(styles.rawSummary)}>{t('e2ee.pair.offerSummary')}</summary>
+              <Textarea aria-label={t('e2ee.pair.code')} value={JSON.stringify(offer)} readOnly />
+            </details>
+          )}
+          <div {...stylex.props(styles.actions)}>
+            {phase === 'published' ? (
+              <Button variant="secondary" onClick={resetFlow}>
+                {t('e2ee.pair.pairAnother')}
+              </Button>
+            ) : (
+              <>
+                <Button disabled={phase === 'busy'} onClick={() => void approve()}>
+                  {t(
+                    phase === 'retryPublication'
+                      ? 'e2ee.pair.retryPublication'
+                      : 'e2ee.pair.approve'
+                  )}
+                </Button>
+                {offer && (
+                  <Button
+                    variant="secondary"
+                    disabled={phase === 'busy' || recovering}
+                    onClick={() => void cancel(offer.pairingSessionId)}
+                  >
+                    {t('common.cancel')}
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       )}
       {joining && (
-        <>
+        <div {...stylex.props(styles.body)}>
           {joining.signingPublicKey && (
-            <p data-testid="e2ee-pair-joining-key" {...stylex.props(styles.code)}>
-              {joining.signingPublicKey}
-            </p>
+            <FingerprintGrid value={joining.signingPublicKey} testId="e2ee-pair-joining-key" />
           )}
           <div {...stylex.props(styles.actions)}>
             <Button
@@ -492,7 +596,7 @@ function PersonalPairingSession({
               {t('common.cancel')}
             </Button>
           </div>
-        </>
+        </div>
       )}
       {phase !== 'idle' && phase !== 'busy' && (
         <p role={phase === 'error' ? 'alert' : 'status'} {...stylex.props(styles.error)}>

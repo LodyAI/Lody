@@ -31,6 +31,7 @@ export interface AcceptInvitationPageProps {
   onSwitchAccount?: () => void;
   onVerifyEmail?: () => void;
   onAccept?: () => void;
+  onOpenWorkspace?: () => void;
   onRetry?: () => void;
   onBackHome?: () => void;
 }
@@ -61,6 +62,7 @@ export function AcceptInvitationPage({
   onSwitchAccount,
   onVerifyEmail,
   onAccept,
+  onOpenWorkspace,
   onRetry,
   onBackHome,
 }: AcceptInvitationPageProps) {
@@ -148,6 +150,13 @@ export function AcceptInvitationPage({
             defaults="Welcome to <strong>{{workspace}}</strong> — taking you there now…"
             components={{ strong: <span {...stylex.props(styles.emphasis)} /> }}
           />
+        }
+        actions={
+          onOpenWorkspace ? (
+            <Button size="large" onClick={onOpenWorkspace}>
+              {t('invite.success.openWorkspace', 'Open workspace')}
+            </Button>
+          ) : undefined
         }
       />
     );

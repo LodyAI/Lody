@@ -7,6 +7,7 @@ import {
   e2eeCreationAvailability,
   e2eeCreationIntent,
   pendingCreationRemoved,
+  reconcilePendingE2eeWorkspaces,
 } from '../src/lib/create-e2ee-workspace';
 import type { PlatformE2eeWorkspaces } from '@lody/platform';
 import {
@@ -352,5 +353,65 @@ describe('permanently deleting a saved creation request', () => {
       active: [],
       archived: [request],
     });
+  });
+});
+
+describe('silent background reconciliation of leftover pending creations', () => {
+  const hash = 'ef'.repeat(32);
+  const first = {
+    accountId: 'account-A',
+    requestId: 'leftover-1',
+    name: 'Leftover',
+    slug: 'leftover',
+  };
+  const second = {
+    accountId: 'account-A',
+    requestId: 'leftover-2',
+    name: 'Stale',
+    slug: 'stale',
+  };
+
+  it('reconciles a committed request, writes genesis pin, and clears all leftover intents', async () => {
+    localStorage.clear();
+    savePendingE2eeWorkspace(localStorage, first);
+    savePendingE2eeWorkspace(localStorage, second);
+    const port = {
+      prepareCreation: async (input: typeof first) => ({
+        ...input,
+        genesisRecordHex: 'aa',
+        genesisHashHex: hash,
+        deviceCredentialHash: 'ee',
+      }),
+      create: async () => ({
+        workspaceId: 'ws-recovered',
+        name: first.name,
+        slug: first.slug,
+        contentMode: 'e2ee' as const,
+        contentModeVersion: 1 as const,
+        genesisHash: hash,
+        cryptoOrgId: hash,
+        activation: 'control-only' as const,
+      }),
+    } as unknown as PlatformE2eeWorkspaces;
+    const result = await reconcilePendingE2eeWorkspaces(port, localStorage, 'account-A');
+    expect(result?.workspaceId).toBe('ws-recovered');
+    expect(readE2eeGenesisPin(localStorage, 'account-A', 'ws-recovered')).toBe(hash);
+    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([]);
+  });
+
+  it('silently clears leftover intents and returns null when reconciliation fails', async () => {
+    localStorage.clear();
+    savePendingE2eeWorkspace(localStorage, first);
+    const port = {
+      prepareCreation: async () => {
+        throw new Error('network down');
+      },
+      create: async () => {
+        throw new Error('unused');
+      },
+    } as unknown as PlatformE2eeWorkspaces;
+    const result = await reconcilePendingE2eeWorkspaces(port, localStorage, 'account-A');
+    expect(result).toBeNull();
+    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([]);
   });
 });

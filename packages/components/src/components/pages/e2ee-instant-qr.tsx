@@ -58,6 +58,19 @@ export type InstantQrPhase =
   | { kind: 'failed'; error: string };
 
 const INSTANT_QR_POLL_MS = 900;
+const formatCountdown = (seconds: number) =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+function useInstantQrSecondsLeft(expiresAt: number | undefined) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (expiresAt === undefined) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [expiresAt]);
+  return expiresAt === undefined ? null : Math.max(0, Math.ceil((expiresAt - now) / 1000));
+}
 
 /**
  * One fresh approver-shows offer. The person showing this code on their own device is
@@ -176,17 +189,32 @@ const styles = stylex.create({
     gap: space[3],
     textAlign: 'center',
   },
+  rootCompact: {
+    gap: space[2],
+  },
   qr: {
     backgroundColor: '#ffffff',
     padding: space[2],
     borderRadius: radius.medium,
+    boxShadow: '0 0 0 1px oklch(0 0 0 / 0.08)',
     lineHeight: 0,
   },
   qrFaded: { opacity: 0.15, width: 212, height: 212 },
+  qrFadedCompact: { width: 180, height: 180 },
   frame: { position: 'relative', display: 'grid', placeItems: 'center' },
   overlay: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' },
   lead: { margin: 0, fontWeight: 600 },
-  quiet: { margin: 0, color: colors.secondaryLabel, fontSize: type.footnoteSize },
+  leadCompact: {
+    fontSize: type.subheadlineSize,
+    lineHeight: type.subheadlineLeading,
+    fontWeight: 500,
+  },
+  quiet: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: type.footnoteSize,
+    lineHeight: type.footnoteLeading,
+  },
   status: {
     margin: 0,
     display: 'inline-flex',
@@ -216,6 +244,10 @@ export function E2eeInstantQrApprove(props: {
   /** Called once a device joined through this code. */
   onJoined?: (deviceName: string) => void;
   pollMs?: number;
+  /** Compact density for dialogs where space is constrained. */
+  compact?: boolean;
+  /** Omit the inline expiry line when the parent header already displays it. */
+  hideExpiry?: boolean;
 }) {
   const { t } = useTranslation();
   const { phase, refresh } = useInstantQrOffer(props.runtime, {
@@ -235,6 +267,9 @@ export function E2eeInstantQrApprove(props: {
     if (joinedDevice !== null) joinedRef.current();
   }, [joinedDevice]);
   const unavailable = phase.kind === 'joining' || phase.kind === 'joined' ? phase.unavailable : [];
+  const secondsLeft = useInstantQrSecondsLeft(
+    phase.kind === 'showing' ? phase.expiresAt : undefined
+  );
   if (!supportsInstantQr(props.runtime)) return null;
   const pairingString = phase.kind === 'showing' ? phase.pairingString : null;
   return (
@@ -243,20 +278,25 @@ export function E2eeInstantQrApprove(props: {
         data-testid="e2ee-instant-qr"
         data-e2ee-pairing-surface=""
         data-phase={phase.kind}
-        {...stylex.props(styles.root)}
+        {...stylex.props(styles.root, props.compact && styles.rootCompact)}
       >
-        <p {...stylex.props(styles.lead)}>{t('e2ee.instantQr.lead')}</p>
+        <p {...stylex.props(styles.lead, props.compact && styles.leadCompact)}>
+          {t('e2ee.instantQr.lead')}
+        </p>
         <div {...stylex.props(styles.frame)}>
           {pairingString ? (
             <div {...stylex.props(styles.qr)}>
               <LedgerQrCode
                 payload={qrPayload(pairingString)}
-                size={196}
+                size={props.compact ? 164 : 196}
                 label={t('e2ee.accountPair.code.label')}
               />
             </div>
           ) : (
-            <div aria-hidden="true" {...stylex.props(styles.qr, styles.qrFaded)} />
+            <div
+              aria-hidden="true"
+              {...stylex.props(styles.qr, styles.qrFaded, props.compact && styles.qrFadedCompact)}
+            />
           )}
           {phase.kind === 'loading' && (
             <span {...stylex.props(styles.overlay)}>
@@ -266,13 +306,29 @@ export function E2eeInstantQrApprove(props: {
         </div>
         <div aria-live="polite">
           {phase.kind === 'showing' && (
-            <p {...stylex.props(styles.quiet)}>{t('e2ee.instantQr.help')}</p>
+            <>
+              <p {...stylex.props(styles.quiet)}>{t('e2ee.instantQr.help')}</p>
+              {!props.hideExpiry && secondsLeft !== null && secondsLeft < 60 * 60 && (
+                <p data-testid="e2ee-instant-qr-expiry" {...stylex.props(styles.quiet)}>
+                  {secondsLeft === 0
+                    ? t('e2ee.auto.expired.short')
+                    : t('e2ee.auto.expiresIn', { time: formatCountdown(secondsLeft) })}
+                </p>
+              )}
+            </>
           )}
           {phase.kind === 'joining' && (
-            <p role="status" {...stylex.props(styles.status)}>
-              <Spinner size="small" />
-              {t('e2ee.instantQr.joining', { device: phase.deviceName })}
-            </p>
+            <>
+              <p role="status" {...stylex.props(styles.status)}>
+                <Spinner size="small" />
+                {t('e2ee.instantQr.joining', { device: phase.deviceName })}
+              </p>
+              <div {...stylex.props(styles.actions)}>
+                <Button variant="ghost" size="small" onClick={refresh}>
+                  {t('common.cancel')}
+                </Button>
+              </div>
+            </>
           )}
           {phase.kind === 'joined' && (
             <p role="status" {...stylex.props(styles.status, styles.success)}>
@@ -343,7 +399,13 @@ export function E2eeAddDeviceCard(props: {
             </>
           ) : (
             <div {...stylex.props(styles.actions)}>
-              <Button data-testid="e2ee-add-device-show-qr" onClick={() => setShowing(true)}>
+              <Button
+                data-testid="e2ee-add-device-show-qr"
+                onClick={() => {
+                  setManual(false);
+                  setShowing(true);
+                }}
+              >
                 <QrCode size={16} aria-hidden="true" />
                 {t('e2ee.addDevice.showQr')}
               </Button>
@@ -351,7 +413,13 @@ export function E2eeAddDeviceCard(props: {
           )}
         </div>
       </Card.Root>
-      <Collapsible.Root open={manual} onOpenChange={setManual}>
+      <Collapsible.Root
+        open={manual}
+        onOpenChange={(next) => {
+          setManual(next);
+          if (next) setShowing(false);
+        }}
+      >
         <div {...stylex.props(styles.disclosure)}>
           <Collapsible.Trigger
             render={<Button variant="ghost" size="small" data-testid="e2ee-add-device-manual" />}

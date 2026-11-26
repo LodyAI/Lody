@@ -1,7 +1,8 @@
 import removalVector from '../../../e2ee-core/test/ledger-v1-vector.json';
 import type { Meta, StoryObj } from '@storybook/react';
-import { fn } from 'storybook/test';
+import { expect, fn, userEvent, within } from 'storybook/test';
 import { useState } from 'react';
+import { E2eeLedgerAudit } from '@/components/pages/e2ee-ledger-audit';
 import { E2eeWorkspaceControlPage } from '@/components/pages/e2ee-workspace-control-page';
 import { appendLedgerHistory, type VerifiedLedgerHistory } from '@/lib/e2ee-ledger-history';
 
@@ -265,6 +266,68 @@ export const MemberView: Story = {
 };
 export const OwnerMembersTab: Story = {
   args: { ...OwnerMemberControls.args, workspaceName: 'Cipher Lab', initialTab: 'members' },
+};
+export const MemberRemoveConfirm: Story = {
+  args: { ...OwnerMembersTab.args },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByTestId('e2ee-member-manage'));
+    const body = within(document.body);
+    await userEvent.click(await body.findByTestId('e2ee-member-remove'));
+    await expect(await body.findByTestId('e2ee-member-remove-dialog')).toBeVisible();
+  },
+};
+export const OwnershipTransferConfirm: Story = {
+  args: {
+    ...OwnerMembersTab.args,
+    memberManagement: {
+      actorRole: 'owner',
+      remove: fn(),
+      setRole: fn(),
+      transfer: fn(),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByTestId('e2ee-member-manage'));
+    const body = within(document.body);
+    await userEvent.click(await body.findByTestId('e2ee-member-transfer'));
+    await expect(await body.findByTestId('e2ee-member-transfer-dialog')).toBeVisible();
+  },
+};
+export const LedgerAuditRunning: Story = {
+  render: () => (
+    <div style={{ padding: 24 }}>
+      <E2eeLedgerAudit
+        workspaceId={page.workspaceId}
+        history={VerifiedLocalGenesis.args!.history!}
+        read={() => new Promise(() => {})}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button'));
+    await expect(await canvas.findByRole('status')).toBeVisible();
+  },
+};
+export const LedgerAuditFailed: Story = {
+  render: () => (
+    <div style={{ padding: 24 }}>
+      <E2eeLedgerAudit
+        workspaceId={page.workspaceId}
+        history={VerifiedLocalGenesis.args!.history!}
+        read={async () => {
+          throw new Error('e2ee_audit_failed');
+        }}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button'));
+    await expect(await canvas.findByRole('alert')).toBeVisible();
+  },
 };
 export const SecurityCodeTab: Story = {
   args: { ...TeamHistory.args, workspaceName: 'Cipher Lab', initialTab: 'security' },
