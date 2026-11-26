@@ -598,9 +598,12 @@ export function personalEntry(options: PersonalEntryOptions) {
       },
       recordCreated: async (input) => {
         if (!options.recordCreated) throw fail('unsupported');
-        const accountId = identity();
+        const creation = { ...input };
+        observe();
+        const accountId = await execute(resolveAccount());
         if (!accountId) throw fail('scope-mismatch');
-        await options.recordCreated({ ...input, accountId });
+        check(accountId);
+        await options.recordCreated({ ...creation, accountId });
         check(accountId);
       },
       open: async (id, observed, expected, owner) => {
@@ -760,7 +763,8 @@ export function personalEntry(options: PersonalEntryOptions) {
         call(id, 'acceptFeatureRpcResponse', [id, ...args]),
       managementState: (id) => call(id, 'managementState', [id]),
       updateKeys: (id) => call(id, 'updateKeys', [id]),
-      revokeDevice: (id, device) => call(id, 'revokeDevice', [id, device]),
+      revokeDevice: (id, device, confirmation) =>
+        call(id, 'revokeDevice', [id, device, confirmation]),
       removeMember: (id, member) => call(id, 'removeMember', [id, member]),
       setMemberRole: (id, member, role) => call(id, 'setMemberRole', [id, member, role]),
       // Team management on the portable runtime (admin side). The member relay port is
