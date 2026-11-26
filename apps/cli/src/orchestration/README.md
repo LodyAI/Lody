@@ -118,18 +118,18 @@ Explicit no-pause cancellation and Operation cancellation remain supported.
 
 Batch membership is immutable. History projection is an idempotent stable-ID write outside the transaction and grants no dispatch permission. Enforce unique release records, intent-to-automatic-batch binding, human-input-to-submittable-batch binding, and at most one live claim per result. Superseded batches retain member history; only current claims/bindings grant eligibility. Automatic batches require `memberCount > 0`, consistent with actual membership; both batch creation and submission fencing validate this condition.
 
-| Transition | Atomic write set and conditions |
-| --- | --- |
-| Completion → queued receipt/pending intent | Persist result and wake eligibility in the completion transaction. If idle, unpaused, unblocked, without accepted input or an existing live intent, record one pending intent. Busy/paused results stay queued |
-| First normal release → boundary record/pending intent | Atomically save the unique release record. Create one pending intent only if wakeable results remain and no queued input takes priority. Duplicate releases never grant another intent |
-| Pending intent → prepared/settled_empty | Conditionally claim intent, snapshot the current queue watermark, require a wakeable result and include all unconsumed/unclaimed results through that watermark. Only nonempty results atomically create fixed batch/members, live claims and input binding. Empty results atomically settle intent as terminal settled_empty without batch/execution or reactivation. Pending human input prevents this automatic branch |
-| Human input → prepared/original batch-free path | With results, bind trusted input receipt to a nonempty batch; without results, create no batch and retain the ordinary human-input path. Freeze original prompt/attachments/configuration |
-| Unsubmitted automatic batch → yield to human | Require old batch still prepared; supersede old intent/batch, transfer all live claims, create new fixed membership and human-input binding in one transaction. Failure rolls everything back; never release and bind in separate transactions |
-| Prepared → submitting | Under the shared gate, conditionally update owner/pause/acceptance sequence/execution identity/claim/binding, also verify automatic batch memberCount > 0, and persist unique submission token; immediately start transport afterward |
-| Begun, unsubmitted → withdrawn | Only the active execution with no release receipt, journaled resource, or fenced/submitted batch for its input may clear the active slot. Write no receipt and leave the input unfinished, so the same execution ID may begin it again and its prepared batch keeps its claims. A turn that stays pending after an unverified machine-access check uses this instead of release |
-| Prepared → paused/invalid | Require no submission fence; invalidate intent/binding and release claims as passive queued data, with pause in the same transaction; do not restore automatic eligibility |
-| Submitting → submitted/unknown | Persist receipt and retain non-resubmittable members. Unknown never returns to prepared/queued. Proven non-invocation records not_submitted for the recovery entry, without automatic replay |
-| Submitted/unknown → settled | Update settlement/consumption and Cause only; duplicate settlement is idempotent and invokes no provider. Settled uncertainty is not confirmed model success |
+| Transition                                            | Atomic write set and conditions                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Completion → queued receipt/pending intent            | Persist result and wake eligibility in the completion transaction. If idle, unpaused, unblocked, without accepted input or an existing live intent, record one pending intent. Busy/paused results stay queued                                                                                                                                                                                                            |
+| First normal release → boundary record/pending intent | Atomically save the unique release record. Create one pending intent only if wakeable results remain and no queued input takes priority. Duplicate releases never grant another intent                                                                                                                                                                                                                                    |
+| Pending intent → prepared/settled_empty               | Conditionally claim intent, snapshot the current queue watermark, require a wakeable result and include all unconsumed/unclaimed results through that watermark. Only nonempty results atomically create fixed batch/members, live claims and input binding. Empty results atomically settle intent as terminal settled_empty without batch/execution or reactivation. Pending human input prevents this automatic branch |
+| Human input → prepared/original batch-free path       | With results, bind trusted input receipt to a nonempty batch; without results, create no batch and retain the ordinary human-input path. Freeze original prompt/attachments/configuration                                                                                                                                                                                                                                 |
+| Unsubmitted automatic batch → yield to human          | Require old batch still prepared; supersede old intent/batch, transfer all live claims, create new fixed membership and human-input binding in one transaction. Failure rolls everything back; never release and bind in separate transactions                                                                                                                                                                            |
+| Prepared → submitting                                 | Under the shared gate, conditionally update owner/pause/acceptance sequence/execution identity/claim/binding, also verify automatic batch memberCount > 0, and persist unique submission token; immediately start transport afterward                                                                                                                                                                                     |
+| Begun, unsubmitted → withdrawn                        | Only the active execution with no release receipt, journaled resource, or fenced/submitted batch for its input may clear the active slot. Write no receipt and leave the input unfinished, so the same execution ID may begin it again and its prepared batch keeps its claims. A turn that stays pending after an unverified machine-access check uses this instead of release                                           |
+| Prepared → paused/invalid                             | Require no submission fence; invalidate intent/binding and release claims as passive queued data, with pause in the same transaction; do not restore automatic eligibility                                                                                                                                                                                                                                                |
+| Submitting → submitted/unknown                        | Persist receipt and retain non-resubmittable members. Unknown never returns to prepared/queued. Proven non-invocation records not_submitted for the recovery entry, without automatic replay                                                                                                                                                                                                                              |
+| Submitted/unknown → settled                           | Update settlement/consumption and Cause only; duplicate settlement is idempotent and invokes no provider. Settled uncertainty is not confirmed model success                                                                                                                                                                                                                                                              |
 
 Use `BEGIN IMMEDIATE` for claims. All batches snapshot the current watermark at claim. Wake eligibility grants admission, not a membership filter. The replacement batch may include newly available results; old membership history stays unchanged. Post-claim arrivals remain queued. History failure is pre-submission; uncertainty beyond the fence remains unknown and rebuilding history cannot restore submission eligibility.
 
@@ -157,6 +157,17 @@ Session/ACP consumers. It is not an old Delivery scheduler or data compatibility
 `operation_completion` and its stable `deliveryId` remain the batch member's display
 format; old per-member continuation statuses and notices are removed.
 
+## Chain depth cap
+
+An automatic batch at `LODY_MAX_CHAIN_DEPTH` still runs: that Turn can read its results
+and report, but the MCP guard stops it from delegating. A deeper batch marks its intent
+`depth_limited` and leaves its results queued, so the next human input claims them.
+`CoordinatorWorkflow.reportDepthLimitedResults` upserts one `agent_warning` notice
+(`source: delegationChainResultsHeld`) per such intent, then marks it
+`depth_limited_reported`. A failed write warns and is retried on the next reconciliation;
+it never blocks other reconciliation. Rationale:
+[bound agent message chains](../../../../.agents/notes/implemented/bug-fix/2026-10-11-bound-agent-message-chains.md).
+
 ## Message-author snapshots
 
 `operation_authors` stores source identity and per-target Role display snapshots in
@@ -169,7 +180,6 @@ Never reconstruct historical display details from current catalogs. See the [con
 
 Decision rationale, verification limits and future steer conditions are maintained in
 the [implementation record](../../../../.agents/notes/implemented/architecture/2026-10-12-operation-inbox.md).
-
 
 ## Silent target Stop
 

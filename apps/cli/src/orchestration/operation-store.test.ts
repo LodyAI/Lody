@@ -17,6 +17,8 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  LODY_CHAIN_DEPTH_SOFT_LIMIT,
+  LODY_MAX_CHAIN_DEPTH,
   LODY_OPERATION_COMPLETION_MAX_BYTES,
   type AcpCapabilityCacheEntry,
   type MachineId,
@@ -78,6 +80,62 @@ afterEach(async () => {
 });
 
 describe('LodyOperationStore', () => {
+  it('reports the remaining delegation chain budget once a dispatch passes the soft limit', async () => {
+    const store = await makeStore();
+    try {
+      const snapshotAt = (initiatorChainDepth: number) => {
+        const operationId = `depth-${initiatorChainDepth}`;
+        return store.snapshot(
+          store.accept({
+            ...baseInput(),
+            operationId,
+            initiatorChainDepth,
+            items: [
+              {
+                status: 'active' as const,
+                target: {
+                  sessionId: `target-${operationId}` as SessionId,
+                  userTurnId: operationId,
+                },
+                inputDurable: false,
+              },
+            ],
+          }).operation
+        );
+      };
+      expect(snapshotAt(LODY_CHAIN_DEPTH_SOFT_LIMIT - 1)).not.toHaveProperty('chainBudget');
+      expect(snapshotAt(LODY_CHAIN_DEPTH_SOFT_LIMIT)).toMatchObject({
+        chainBudget: {
+          hop: LODY_CHAIN_DEPTH_SOFT_LIMIT + 1,
+          max: LODY_MAX_CHAIN_DEPTH,
+          remaining: LODY_MAX_CHAIN_DEPTH - LODY_CHAIN_DEPTH_SOFT_LIMIT - 1,
+        },
+      });
+      const last = snapshotAt(LODY_MAX_CHAIN_DEPTH - 1);
+      expect(last).toMatchObject({
+        chainBudget: { hop: LODY_MAX_CHAIN_DEPTH, max: LODY_MAX_CHAIN_DEPTH, remaining: 0 },
+      });
+      if (!('chainBudget' in last) || !last.chainBudget) throw new Error('missing budget');
+      expect(last.chainBudget.warning).toContain(
+        `hop ${LODY_MAX_CHAIN_DEPTH} of ${LODY_MAX_CHAIN_DEPTH}`
+      );
+      expect(last.chainBudget.warning).toContain('0 hops remain');
+      const finished = store.finish(
+        'requester-1' as SessionId,
+        `depth-${LODY_MAX_CHAIN_DEPTH - 1}`,
+        {
+          type: 'result',
+          value: { items: [] },
+        }
+      );
+      expect(store.snapshot(finished)).toMatchObject({
+        state: 'finished',
+        chainBudget: { hop: LODY_MAX_CHAIN_DEPTH, remaining: 0 },
+      });
+    } finally {
+      store.close();
+    }
+  });
   it('memory repositories share the completion transaction and reject asynchronous transaction callbacks', async () => {
     await Effect.runPromise(
       Effect.scoped(
