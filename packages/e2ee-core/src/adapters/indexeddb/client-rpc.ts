@@ -177,6 +177,42 @@ export const indexedDbClientRpcOriginals = (input: IndexedDbClientRpcStoreOption
               })
             );
           }),
+        replaceSent: (key, expectedFrame, inputRecord) =>
+          attempt('ClientRpcOriginalStore', () => {
+            check(key);
+            if (
+              !boundedBytes(expectedFrame, MAX_ORIGINAL) ||
+              !boundedBytes(inputRecord.frame, MAX_ORIGINAL)
+            )
+              throw bad();
+            const expected = new Uint8Array(expectedFrame);
+            const original = record(inputRecord);
+            return db.run('ClientRpcOriginalStore', ['data'], 'readwrite', (tx, done) =>
+              tx.request(tx.store('data').get(requestKey('sent', key)), (value) => {
+                if (value !== undefined) {
+                  const saved = record(request(value, 'sent', key).record);
+                  if (!equal(saved.frame, expected)) {
+                    done(saved);
+                    return;
+                  }
+                }
+                writeRow(
+                  tx,
+                  'data',
+                  requestKey('sent', key),
+                  {
+                    version: 1 as const,
+                    binding,
+                    direction: 'sent' as const,
+                    key,
+                    record: original,
+                  },
+                  (x) => request(x, 'sent', key),
+                  (saved) => done(record(saved.record))
+                );
+              })
+            );
+          }),
         readResponse: (key, sequence) =>
           attempt('ClientRpcOriginalStore', () => {
             check(key, sequence);

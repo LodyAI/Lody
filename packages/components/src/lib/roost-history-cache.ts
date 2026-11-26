@@ -83,7 +83,7 @@ export function createRoostHistoryCache(scope: string, namespace?: string) {
   const open = () => {
     if (disposed) return Promise.reject(new Error('History cache is disposed'));
     if (!opening) {
-      opening = new Promise<IDBDatabase>((resolve, reject) => {
+      const currentOpen = new Promise<IDBDatabase>((resolve, reject) => {
         let blocked = false;
         const request = indexedDB.open(roostHistoryDatabase(namespace), 1);
         request.onupgradeneeded = () => {
@@ -103,18 +103,21 @@ export function createRoostHistoryCache(scope: string, namespace?: string) {
             db.close();
             reject(new Error('History cache is disposed'));
           } else {
-            db.onversionchange = (event) => {
-              if (namespace && event.newVersion === null) disposed = true;
+            db.onversionchange = () => {
               db.close();
-              opening = undefined;
+              if (opening === currentOpen) opening = undefined;
+            };
+            db.onclose = () => {
+              if (opening === currentOpen) opening = undefined;
             };
             resolve(db);
           }
         };
       }).catch((error) => {
-        opening = undefined;
+        if (opening === currentOpen) opening = undefined;
         throw error;
       });
+      opening = currentOpen;
     }
     return opening;
   };
@@ -125,18 +128,35 @@ export function createRoostHistoryCache(scope: string, namespace?: string) {
     mode: IDBTransactionMode,
     run: (tx: IDBTransaction, result: (value: T) => void) => void
   ): Promise<T> => {
-    const db = await open();
-    if (disposed) throw new Error('History cache is disposed');
-    return new Promise<T>((resolve, reject) => {
-      const tx = db.transaction([HEADS, ROWS], mode);
-      let value: T;
-      tx.oncomplete = () => resolve(value);
-      tx.onabort = () => reject(tx.error ?? new Error('History cache transaction aborted'));
-      tx.onerror = () => reject(tx.error);
-      run(tx, (result) => {
-        value = result;
-      });
-    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const currentOpen = open();
+      const db = await currentOpen;
+      if (disposed) throw new Error('History cache is disposed');
+      try {
+        return await new Promise<T>((resolve, reject) => {
+          const tx = db.transaction([HEADS, ROWS], mode);
+          let value: T;
+          tx.oncomplete = () => resolve(value);
+          tx.onabort = () => reject(tx.error ?? new Error('History cache transaction aborted'));
+          tx.onerror = () => reject(tx.error);
+          run(tx, (result) => {
+            value = result;
+          });
+        });
+      } catch (error) {
+        if (
+          attempt === 0 &&
+          !disposed &&
+          error instanceof DOMException &&
+          error.name === 'InvalidStateError'
+        ) {
+          if (opening === currentOpen) opening = undefined;
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error('History cache is disposed');
   };
   const getHead = () =>
     transact<RoostCachedHead | undefined>('readonly', (tx, done) => {
