@@ -157,6 +157,37 @@ describe('login page last-used method', () => {
     expect(buttonsMarkedLastUsed()).toEqual(['Continue with email']);
   });
 
+  // Entering the email view animates for 320ms before calling onEntered(). If a
+  // user has already focused the password field during that transition, the
+  // completion callback must not steal focus back to the email input (which
+  // would route password keystrokes into the visible email field).
+  it('does not steal focus from the password field when the email view transition completes', async () => {
+    vi.useFakeTimers();
+    try {
+      await render();
+      await click(/Continue with email/);
+
+      const stage = container.querySelector<HTMLElement>('[data-login-stage]');
+      const password = container.querySelector<HTMLInputElement>('#email-auth-password');
+      expect(stage?.dataset.loginPhase).toBe('moving');
+      expect(password).not.toBeNull();
+
+      await act(async () => {
+        password!.focus();
+      });
+      expect(document.activeElement).toBe(password);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(stage?.dataset.loginPhase).toBe('visible');
+      expect(document.activeElement).toBe(password);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // The iOS shell overlays the keyboard without resizing the WebView, and the
   // login route sits outside the workspace layouts that pad for it.
   it('scrolls the focused password field into the region above the iOS keyboard', async () => {
