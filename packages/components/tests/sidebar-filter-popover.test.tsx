@@ -229,6 +229,21 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     expect(ownerRow()?.textContent).toContain('Bob Chen');
   });
 
+  it('leaves the selection alone when Enter only confirms an IME composition', async () => {
+    const { latest } = renderOwnerFilter({ scope: 'team', memberIds: [] });
+    flushSync(() => {
+      ownerRow()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(ownerSearch()).not.toBeNull());
+    type(ownerSearch()!, 'bob');
+    flushSync(() => {
+      ownerSearch()!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true })
+      );
+    });
+    expect(latest()).toEqual({ scope: 'team', memberIds: [] });
+  });
+
   it('lists the people already chosen right after you when the list opens', async () => {
     renderOwnerFilter({ scope: 'team', memberIds: ['carol', 'm40', 'bob'] });
     expect(ownerRow()?.textContent).toContain('Carol Liu');

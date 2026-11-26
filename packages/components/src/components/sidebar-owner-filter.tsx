@@ -8,12 +8,13 @@ import {
 } from 'react';
 import { Check, Search, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { text } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
 import { UserAvatar } from '@/components/user-avatar';
 import { filterFuzzyOptions } from '@/lib/fuzzy-option-filter';
-import { menuStyles } from '@/ui/menu-styles';
+import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeRadius, themeSpace } from '../style/theme-scale.stylex';
 import { filterOptionStyles, filterOptionTypography } from './sidebar-filter-option-styles';
@@ -51,10 +52,42 @@ const SUMMARY_NAME_LIMIT = 2;
 
 const styles = stylex.create({
   panel: { display: 'flex', flexDirection: 'column', width: 240 },
+  /**
+   * The command palette's field, at popover scale: the panel is the field, so
+   * the input states no well and no ring, and a hairline parts it from the list.
+   */
+  field: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    flexShrink: 0,
+    height: 36,
+    paddingInline: space[3],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: colors.separator,
+    cursor: 'text',
+  },
+  fieldGlyph: { flexShrink: 0, width: 14, height: 14, color: colors.tertiaryLabel },
+  fieldInput: {
+    flexGrow: 1,
+    minWidth: 0,
+    height: '100%',
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    outlineStyle: 'none',
+    boxShadow: 'none',
+    backgroundColor: 'transparent',
+    color: colors.label,
+    fontFamily: 'inherit',
+    '::placeholder': { color: colors.tertiaryLabel, opacity: 1 },
+  },
   /** Eight rows, then the list scrolls under the fixed search field. */
   list: {
     display: 'flex',
     flexDirection: 'column',
+    padding: space[1],
     maxHeight: `calc(${themeSpace[7]} * 8)`,
     overflowX: 'hidden',
     overflowY: 'auto',
@@ -197,6 +230,8 @@ function OwnerFilterPanel({
 
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
+      // Enter that commits a Chinese/Japanese composition is not a pick.
+      if (isImeComposingNativeKeyboardEvent(event.nativeEvent)) return;
       event.preventDefault();
       const top = filtered[0];
       if (top) onToggleMember(top.userId);
@@ -219,8 +254,8 @@ function OwnerFilterPanel({
   const selected = new Set(selectedMemberIds);
   return (
     <div {...stylex.props(styles.panel)}>
-      <label {...stylex.props(menuStyles.searchShell)}>
-        <Search {...stylex.props(menuStyles.searchGlyph)} strokeWidth={1.75} aria-hidden="true" />
+      <label {...stylex.props(styles.field)}>
+        <Search {...stylex.props(styles.fieldGlyph)} strokeWidth={1.75} aria-hidden="true" />
         <input
           ref={inputRef}
           data-sidebar-owner-search=""
@@ -231,7 +266,7 @@ function OwnerFilterPanel({
           aria-label={labels.searchPlaceholder}
           autoComplete="off"
           spellCheck={false}
-          {...stylex.props(menuStyles.searchInput)}
+          {...stylex.props(styles.fieldInput, filterOptionTypography.option)}
         />
       </label>
       <div
@@ -303,7 +338,8 @@ export function OwnerFilterPopover({
 }
 
 const ownerPopoverStyles = stylex.create({
-  content: { padding: 'calc(var(--spacing) * 1)' },
+  /** Edge to edge: the field's hairline spans the panel; the list pads itself. */
+  content: { padding: 0, overflow: 'hidden' },
 });
 
 export type SidebarOwnerFilterBarProps = {
