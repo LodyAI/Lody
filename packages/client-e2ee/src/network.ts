@@ -7,6 +7,7 @@ import {
 } from '@lody/shared/transient-gateway';
 import { Cause, Effect, Exit, Result } from 'effect';
 import { z } from 'zod';
+import { ConvexError } from 'convex/values';
 import type { FunctionArgs, FunctionReference, FunctionReturnType } from 'convex/server';
 import {
   api,
@@ -226,15 +227,22 @@ export type PersonalCloudConnection = {
 };
 
 /** Retry only explicit gateway failures, before mapping away transport details. */
-const isTransientGatewayError = (cause: unknown): boolean => {
+export const isTransientGatewayError = (cause: unknown): boolean => {
   if (
     refusalCode(cause) !== null ||
     cause instanceof BackendError ||
-    cause instanceof BackendRefusal
+    cause instanceof BackendRefusal ||
+    cause instanceof ConvexError
   )
     return false;
   if (typeof cause !== 'object' || cause === null) return false;
-  const error = cause as { status?: unknown; statusCode?: unknown; message?: unknown };
+  const error = cause as {
+    status?: unknown;
+    statusCode?: unknown;
+    message?: unknown;
+    name?: unknown;
+  };
+  if (error.name === 'AbortError') return false;
   if (typeof error.message === 'string' && /e2ee_[a-z0-9_-]+/.test(error.message)) return false;
   const status = error.status ?? error.statusCode;
   if (status !== undefined) return isTransientGatewayStatus(status);
@@ -246,11 +254,11 @@ const isTransientGatewayError = (cause: unknown): boolean => {
   return reported !== null && isTransientGatewayStatus(Number(reported[1]));
 };
 
-export const gatewayRequest = (
-  work: () => Promise<unknown>,
+export const gatewayRequest = <A>(
+  work: () => Promise<A>,
   guard: Effect.Effect<unknown, unknown>,
   backoff: readonly number[] = TRANSIENT_GATEWAY_RETRY_DELAYS_MS
-): Effect.Effect<unknown, unknown> =>
+): Effect.Effect<A, unknown> =>
   Effect.gen(function* () {
     const delays = backoff.slice(0, TRANSIENT_GATEWAY_RETRY_DELAYS_MS.length);
     for (let attempt = 0; ; attempt++) {
@@ -258,6 +266,7 @@ export const gatewayRequest = (
       const result = yield* Effect.result(
         Effect.tryPromise({ try: work, catch: (cause) => cause })
       );
+      yield* guard;
       if (Result.isSuccess(result)) return result.success;
       if (!isTransientGatewayError(result.failure) || attempt >= delays.length)
         return yield* Effect.fail(result.failure);

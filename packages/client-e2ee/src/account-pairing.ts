@@ -166,15 +166,17 @@ export function makePersonalCloudAccountPairingPorts(
   const call = async <A>(work: () => Promise<A>): Promise<A> => {
     const exit = await runExit(
       Effect.gen(function* () {
-        if (!(yield* input.currentAccount())) return yield* Effect.fail(fail());
-        const value = yield* Effect.tryPromise({ try: work, catch: (cause) => cause }).pipe(
+        const account = yield* input.currentAccount();
+        if (!account) return yield* Effect.fail(fail());
+        const guard = Effect.gen(function* () {
+          if ((yield* input.currentAccount()) !== account) return yield* Effect.fail(fail());
+        });
+        return yield* gatewayRequest(work, guard, input.retryBackoffMs).pipe(
           Effect.timeoutOrElse({
             duration: input.requestTimeoutMs ?? 30_000,
             orElse: () => Effect.fail(fail()),
           })
         );
-        if (!(yield* input.currentAccount())) return yield* Effect.fail(fail());
-        return value;
       })
     );
     if (Exit.isSuccess(exit)) return exit.value;
@@ -224,8 +226,10 @@ export function makePersonalCloudAccountPairingPorts(
     relay: makePersonalCloudAccountPairingRelay(input),
     historyBatch,
     appendRecordsBatch,
-    appendRecord: (request: E2eeAppendRecordRequest) =>
-      call(() => input.client.action(api.e2eeWorkspaces.appendRecord, { ...request })),
+    appendRecord: (request: E2eeAppendRecordRequest) => {
+      const original = { ...request };
+      return call(() => input.client.action(api.e2eeWorkspaces.appendRecord, original));
+    },
     requester: {
       historyBatch,
       workspaces: async () =>
@@ -234,10 +238,12 @@ export function makePersonalCloudAccountPairingPorts(
           name: workspace.name,
           genesisHash: workspace.genesisHash,
         })),
-      history: (request: E2eeWorkspaceHistoryRequest) =>
-        call(async () =>
-          historyPage.parse(await input.client.action(api.e2eeWorkspaces.history, request))
-        ),
+      history: (request: E2eeWorkspaceHistoryRequest) => {
+        const original = structuredClone(request);
+        return call(async () =>
+          historyPage.parse(await input.client.action(api.e2eeWorkspaces.history, original))
+        );
+      },
     },
   };
 }
