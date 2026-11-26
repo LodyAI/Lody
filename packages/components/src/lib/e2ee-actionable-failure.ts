@@ -1,9 +1,26 @@
 import { isTransientConvexQueryError } from './authed-convex-query';
-import { isElectronRenderer } from './electron';
-import { isNativeAppShell } from './native-platform';
+
+type RuntimeGlobalWindow = {
+  __LODY_ELECTRON__?: unknown;
+  __LODY_NATIVE__?: unknown;
+  Capacitor?: {
+    isNativePlatform?: () => boolean;
+    getPlatform?: () => string;
+  };
+};
 
 export function isWebBrowserStorageRuntime(): boolean {
-  return typeof window !== 'undefined' && !isElectronRenderer() && !isNativeAppShell();
+  if (typeof window === 'undefined') return false;
+  const host = window as unknown as RuntimeGlobalWindow;
+  if (host.__LODY_ELECTRON__ === true || host.__LODY_NATIVE__ === true) return false;
+  try {
+    if (host.Capacitor?.isNativePlatform?.() === true) return false;
+    const platform = host.Capacitor?.getPlatform?.();
+    if (platform === 'ios' || platform === 'android') return false;
+  } catch {
+    /* Ignore non-standard Capacitor globals. */
+  }
+  return true;
 }
 
 export function localStorageFailureKey(surface: 'recovery' | 'create' | 'team'): string {
