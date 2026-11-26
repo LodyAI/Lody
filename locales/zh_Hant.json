@@ -6210,6 +6210,7 @@
   "sessions.fileViewer.selection.screenshotPreview": "已選取的螢幕截圖",
   "sidebar.filter.showBranchNames": "顯示分支",
   "sidebar.filter.hideEmptyProjects": "隱藏空專案",
+  "sidebar.filter.memberYou": "我",
   "sidebar.filter.detailsHeading": "詳細資訊",
   "login.lastUsed": "上次使用",
   "login.tagline": "為團隊現正使用的 Coding Agents 打造的共享工作區。",

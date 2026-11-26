@@ -6210,6 +6210,7 @@
   "sessions.fileViewer.selection.screenshotPreview": "Выбранный снимок экрана",
   "sidebar.filter.showBranchNames": "Показывать ветку",
   "sidebar.filter.hideEmptyProjects": "Скрывать пустые проекты",
+  "sidebar.filter.memberYou": "Вы",
   "sidebar.filter.detailsHeading": "Детали",
   "login.lastUsed": "Последний вход",
   "login.tagline": "Общее рабочее пространство для кодинг-агентов, которыми уже пользуется ваша команда.",

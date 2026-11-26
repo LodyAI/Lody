@@ -6210,6 +6210,7 @@
   "sessions.fileViewer.selection.screenshotPreview": "Captura seleccionada",
   "sidebar.filter.showBranchNames": "Mostrar rama",
   "sidebar.filter.hideEmptyProjects": "Ocultar proyectos vacíos",
+  "sidebar.filter.memberYou": "Tú",
   "sidebar.filter.detailsHeading": "Detalles",
   "login.lastUsed": "Último uso",
   "login.tagline": "Un espacio de trabajo compartido para los agentes de programación que tu equipo ya usa.",

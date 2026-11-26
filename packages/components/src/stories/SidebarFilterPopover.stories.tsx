@@ -3,7 +3,11 @@ import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 
-import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
+import {
+  SidebarFilterPopover,
+  type SidebarFilterMember,
+} from '@/components/sidebar-filter-popover';
+import { toggleTaskOwnerSelection } from '@/lib/session-visibility';
 import type { SidebarChatScope, SidebarOrganizeMode } from '@/atoms/sidebar-state';
 const storyLayoutStyles = stylex.create({
   caption: {
@@ -68,13 +72,24 @@ function FilterShell({
   organize: organizeArg,
   scope: scopeArg,
   defaultOpen,
+  members,
+  memberIds: memberIdsArg = [],
 }: {
   organize: SidebarOrganizeMode;
   scope: SidebarChatScope;
   defaultOpen?: boolean;
+  members?: SidebarFilterMember[];
+  memberIds?: string[];
 }) {
   const [organize, setOrganize] = useState<SidebarOrganizeMode>(organizeArg);
-  const [scope, setScope] = useState<SidebarChatScope>(scopeArg);
+  const [selection, setSelection] = useState<{
+    scope: SidebarChatScope;
+    memberIds: readonly string[];
+  }>({ scope: scopeArg, memberIds: memberIdsArg });
+  const scope = selection.scope;
+  const setScope = (next: SidebarChatScope) => setSelection({ scope: next, memberIds: [] });
+  const [open, setOpen] = useState(!!defaultOpen);
+  const currentUserId = members?.find((member) => member.isCurrentUser)?.userId;
   const [showUpdatedProjectNames, setShowUpdatedProjectNames] = useState(true);
   const [showBranchNames, setShowBranchNames] = useState(false);
   const [hideEmptyProjects, setHideEmptyProjects] = useState(true);
@@ -90,7 +105,10 @@ function FilterShell({
           </div>
           <div {...stylex.props(storyLayout.section)}>
             <span {...stylex.props(storyLayout.label)}>Scope:</span>{' '}
-            <span {...stylex.props(storyLayoutStyles.label)}>{scope}</span>
+            <span {...stylex.props(storyLayoutStyles.label)}>
+              {scope}
+              {selection.memberIds.length > 0 ? ` · ${selection.memberIds.join(', ')}` : ''}
+            </span>
           </div>
           <div {...stylex.props(storyLayout.section)}>
             <span {...stylex.props(storyLayout.label)}>Project line:</span>{' '}
@@ -117,6 +135,13 @@ function FilterShell({
           scope={scope}
           onOrganizeChange={setOrganize}
           onScopeChange={setScope}
+          members={members}
+          selectedMemberIds={selection.memberIds}
+          onToggleMember={(userId) =>
+            setSelection((prev) => toggleTaskOwnerSelection(prev, userId, currentUserId))
+          }
+          open={open}
+          onOpenChange={setOpen}
           showUpdatedProjectNames={showUpdatedProjectNames}
           onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
           showBranchNames={showBranchNames}
@@ -169,6 +194,35 @@ export const TeamScope: Story = {
   args: {
     organize: 'workspace',
     scope: 'team',
+  },
+};
+
+const teamMembers: SidebarFilterMember[] = [
+  { userId: 'u-me', name: 'Sam Lee', isCurrentUser: true },
+  { userId: 'u-alice', name: 'Alice Wang' },
+  { userId: 'u-bob', name: 'Bob Chen' },
+  { userId: 'u-carol', name: 'Carol Liu' },
+  { userId: 'u-dave', name: 'Dave Zhou' },
+];
+
+/** All Tasks narrowed to two teammates: their rows are ticked and the trigger carries a dot. */
+export const TeamMembersSelected: Story = {
+  args: {
+    organize: 'status',
+    scope: 'team',
+    members: teamMembers,
+    memberIds: ['u-alice', 'u-bob'],
+    defaultOpen: true,
+  },
+};
+
+/** My Tasks in a team workspace: only your own row is ticked. */
+export const TeamMembersMyTasks: Story = {
+  args: {
+    organize: 'status',
+    scope: 'my',
+    members: teamMembers,
+    defaultOpen: true,
   },
 };
 

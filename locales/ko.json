@@ -6210,6 +6210,7 @@
   "sessions.fileViewer.selection.screenshotPreview": "선택한 스크린샷",
   "sidebar.filter.showBranchNames": "브랜치 표시",
   "sidebar.filter.hideEmptyProjects": "빈 프로젝트 숨기기",
+  "sidebar.filter.memberYou": "나",
   "sidebar.filter.detailsHeading": "세부 정보",
   "login.lastUsed": "최근 사용",
   "login.tagline": "팀이 이미 사용 중인 코딩 에이전트를 위한 공유 워크스페이스.",

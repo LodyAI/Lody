@@ -144,4 +144,76 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     expect(onHideEmptyProjectsChange.mock.calls[0]?.[0]).toBe(false);
     expect(document.body.querySelector('[data-sidebar-filter-hide-empty-projects]')).not.toBeNull();
   });
+
+  it('lets a person tick teammates under Tasks, keeping the menu open', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const members = [
+      { userId: 'me', name: 'Sam', isCurrentUser: true },
+      { userId: 'alice', name: 'Alice' },
+      { userId: 'bob', name: 'Bob' },
+    ];
+
+    function StatefulFilter() {
+      const [selected, setSelected] = React.useState<string[]>([]);
+      return (
+        <SidebarFilterPopover
+          organize="workspace"
+          scope="team"
+          members={members}
+          selectedMemberIds={selected}
+          onToggleMember={(id) =>
+            setSelected((prev) =>
+              prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+            )
+          }
+        />
+      );
+    }
+    flushSync(() => {
+      root?.render(<StatefulFilter />);
+    });
+    const trigger = container.querySelector('button[aria-label="Filter sidebar"]');
+    flushSync(() => {
+      trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const memberRow = (name: string) =>
+      [...document.body.querySelectorAll('[role="menuitemcheckbox"]')].find((row) =>
+        row.textContent?.includes(name)
+      );
+    const allTasks = () =>
+      [...document.body.querySelectorAll('[role="menuitemradio"]')].find((row) =>
+        row.textContent?.includes('All Tasks')
+      );
+    expect(memberRow('Sam')?.textContent).toContain('You');
+    expect(memberRow('Alice')?.getAttribute('aria-checked')).toBe('false');
+    expect(allTasks()?.getAttribute('aria-checked')).toBe('true');
+
+    flushSync(() => {
+      memberRow('Alice')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(memberRow('Alice')?.getAttribute('aria-checked')).toBe('true');
+    expect(memberRow('Bob')?.getAttribute('aria-checked')).toBe('false');
+    expect(allTasks()?.getAttribute('aria-checked')).toBe('false');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(trigger?.hasAttribute('data-filter-active')).toBe(true);
+  });
+
+  it('lists no people in a single-member workspace', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    flushSync(() => {
+      root?.render(
+        <SidebarFilterPopover
+          organize="workspace"
+          scope="team"
+          members={[{ userId: 'me', name: 'Sam', isCurrentUser: true }]}
+          open
+        />
+      );
+    });
+    expect(document.body.querySelector('[role="menuitemcheckbox"]')).toBeNull();
+  });
 });

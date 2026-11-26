@@ -25,6 +25,7 @@ import { menuSeparatorClassName, menuStyles } from '@/ui/menu-styles';
 import { Switch } from '@lody/ui/switch';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import type { SidebarChatScope } from '@/atoms/sidebar-state';
+import { UserAvatar } from '@/components/user-avatar';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeRadius, themeSpace } from '../style/theme-scale.stylex';
 
@@ -122,6 +123,20 @@ const styles = stylex.create({
     cursor: 'pointer',
   },
   triggerGlyph: { width: '14px', height: '14px' },
+  triggerGlyphWrap: { position: 'relative', display: 'inline-flex' },
+  /** Marks a trigger whose Tasks filter narrows to chosen people. */
+  triggerActiveDot: {
+    position: 'absolute',
+    top: -2,
+    right: -3,
+    width: 6,
+    height: 6,
+    borderRadius: '50%',
+    backgroundColor: themeColors.primary,
+  },
+  memberYou: { flexShrink: 0, color: themeColors.mutedForeground },
+  /** Eight rows, then the list scrolls inside the menu. */
+  memberList: { maxHeight: `calc(${themeSpace[7]} * 8)`, overflowY: 'auto' },
 });
 
 export type { SidebarOrganizeMode, SidebarChatScope };
@@ -144,6 +159,7 @@ export type SidebarFilterLabels = {
   emptyAllTasks: string;
   emptyAllTasksHint: string;
   showAllTasksAction: string;
+  memberYou: string;
 };
 
 const defaultLabels: SidebarFilterLabels = {
@@ -164,6 +180,15 @@ const defaultLabels: SidebarFilterLabels = {
   emptyAllTasks: 'No tasks yet',
   emptyAllTasksHint: 'Tasks in this workspace will appear here.',
   showAllTasksAction: 'Show all tasks',
+  memberYou: 'You',
+};
+
+/** A workspace member the Tasks section can filter by. */
+export type SidebarFilterMember = {
+  userId: string;
+  name: string;
+  image?: string | null;
+  isCurrentUser?: boolean;
 };
 
 export type SidebarFilterPopoverProps = {
@@ -171,6 +196,12 @@ export type SidebarFilterPopoverProps = {
   scope: SidebarChatScope;
   onOrganizeChange?: (next: SidebarOrganizeMode) => void;
   onScopeChange?: (next: SidebarChatScope) => void;
+  /** Workspace members to filter All Tasks by; listed only when there are two or more. */
+  members?: readonly SidebarFilterMember[];
+  /** People chosen in the team scope; empty means every owner. */
+  selectedMemberIds?: readonly string[];
+  /** Ticks or unticks one person without closing the menu. */
+  onToggleMember?: (userId: string) => void;
   /** Whether Updated-mode rows show their project identity line. */
   showUpdatedProjectNames?: boolean;
   onShowUpdatedProjectNamesChange?: (next: boolean) => void;
@@ -217,6 +248,42 @@ function MenuOption({ label, icon: Icon, selected, onSelect }: MenuOptionProps) 
       <Icon {...stylex.props(styles.optionIcon)} strokeWidth={1.75} aria-hidden="true" />
       <span {...stylex.props(styles.optionLabel)}>{label}</span>
       {selected ? (
+        <Check {...stylex.props(styles.optionIcon)} aria-hidden="true" />
+      ) : (
+        <span {...stylex.props(styles.optionSpacer)} aria-hidden="true" />
+      )}
+    </button>
+  );
+}
+
+function MemberOption({
+  member,
+  checked,
+  youLabel,
+  onToggle,
+}: {
+  member: SidebarFilterMember;
+  checked: boolean;
+  youLabel: string;
+  onToggle?: (userId: string) => void;
+}) {
+  const optionProps = stylex.props(styles.option, typography.option);
+  return (
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={checked}
+      data-sidebar-filter-member={member.userId}
+      className={optionProps.className}
+      onClick={() => onToggle?.(member.userId)}
+    >
+      <UserAvatar
+        user={{ id: member.userId, name: member.name, image: member.image }}
+        size="mini"
+      />
+      <span {...stylex.props(styles.optionLabel)}>{member.name}</span>
+      {member.isCurrentUser ? <span {...stylex.props(styles.memberYou)}>{youLabel}</span> : null}
+      {checked ? (
         <Check {...stylex.props(styles.optionIcon)} aria-hidden="true" />
       ) : (
         <span {...stylex.props(styles.optionSpacer)} aria-hidden="true" />
@@ -274,6 +341,9 @@ export function SidebarFilterPopover({
   scope,
   onOrganizeChange,
   onScopeChange,
+  members,
+  selectedMemberIds = [],
+  onToggleMember,
   showUpdatedProjectNames = true,
   onShowUpdatedProjectNamesChange,
   showBranchNames = false,
@@ -303,6 +373,10 @@ export function SidebarFilterPopover({
     onOrganizeChange?.(next);
     handleOpenChange(false);
   };
+  const listedMembers = members && members.length > 1 ? members : null;
+  const filtersByMember = scope === 'team' && selectedMemberIds.length > 0;
+  const isMemberChecked = (member: SidebarFilterMember) =>
+    scope === 'my' ? !!member.isCurrentUser : selectedMemberIds.includes(member.userId);
   const handleScopeSelect = (next: SidebarChatScope) => {
     onScopeChange?.(next);
     handleOpenChange(false);
@@ -319,9 +393,15 @@ export function SidebarFilterPopover({
               icon
               aria-label={merged.triggerAriaLabel}
               data-state-open={open || undefined}
+              data-filter-active={filtersByMember || undefined}
               className={triggerClassName}
             >
-              <SlidersHorizontal {...stylex.props(styles.triggerGlyph)} strokeWidth={1.5} />
+              <span {...stylex.props(styles.triggerGlyphWrap)}>
+                <SlidersHorizontal {...stylex.props(styles.triggerGlyph)} strokeWidth={1.5} />
+                {filtersByMember ? (
+                  <span {...stylex.props(styles.triggerActiveDot)} aria-hidden="true" />
+                ) : null}
+              </span>
             </Button>
           )
         }
@@ -368,9 +448,22 @@ export function SidebarFilterPopover({
           <MenuOption
             label={merged.showAllTasks}
             icon={Users}
-            selected={scope === 'team'}
+            selected={scope === 'team' && !filtersByMember}
             onSelect={() => handleScopeSelect('team')}
           />
+          {listedMembers ? (
+            <div {...stylex.props(styles.memberList)}>
+              {listedMembers.map((member) => (
+                <MemberOption
+                  key={member.userId}
+                  member={member}
+                  checked={isMemberChecked(member)}
+                  youLabel={merged.memberYou}
+                  onToggle={onToggleMember}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className={menuSeparatorClassName} aria-hidden="true" />
         <div data-sidebar-filter-section="details">

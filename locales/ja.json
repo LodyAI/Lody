@@ -6210,6 +6210,7 @@
   "sessions.fileViewer.selection.screenshotPreview": "選択したスクリーンショット",
   "sidebar.filter.showBranchNames": "ブランチを表示",
   "sidebar.filter.hideEmptyProjects": "空のプロジェクトを非表示",
+  "sidebar.filter.memberYou": "自分",
   "sidebar.filter.detailsHeading": "詳細",
   "login.lastUsed": "前回使用",
   "login.tagline": "チームで活用中のコーディングエージェントのための共有ワークスペース。",

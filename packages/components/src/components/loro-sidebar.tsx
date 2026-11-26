@@ -688,6 +688,8 @@ export interface LoroSidebarProps {
   organizeMode?: LoroSidebarOrganizeMode;
   /** Current chat scope (My Tasks / All Tasks). Surfaced in the footer filter popover. */
   chatScope?: LoroSidebarChatScope;
+  /** All Tasks narrowed to chosen people; the empty state then offers to show every task. */
+  chatScopeNarrowed?: boolean;
   /** Items rendered when {@link organizeMode} is 'updated' or 'status'. */
   updatedItems?: SidebarUpdatedItem[];
   /** Pinned sessions rendered as a dedicated section above every organize mode. */
@@ -943,6 +945,7 @@ const defaultLabels: LoroSidebarLabels = {
     emptyAllTasks: 'No tasks yet',
     emptyAllTasksHint: 'Tasks in this workspace will appear here.',
     showAllTasksAction: 'Show all tasks',
+    memberYou: 'You',
   },
   updated: {
     heading: 'Chats',
@@ -1300,6 +1303,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   sessionListProps,
   organizeMode = 'workspace',
   chatScope = 'my',
+  chatScopeNarrowed = false,
   updatedItems,
   pinnedItems,
   pinnedSectionCollapsed = false,
@@ -1585,10 +1589,11 @@ export const LoroSidebar = memo(function LoroSidebar({
     !hasPinnedItems &&
     !afterSessionListContent &&
     !sessionListProps?.isLoading;
+  const chatScopeIsFiltered = chatScope === 'my' || chatScopeNarrowed;
   const workspaceEmptyState = isWorkspaceEmpty ? (
     <div {...stylex.props(shellStyles.emptyState)} data-sidebar-empty-state={chatScope}>
       <div {...stylex.props(shellStyles.emptyMark)}>
-        {chatScope === 'my' ? (
+        {chatScopeIsFiltered ? (
           <ListFilter
             {...stylex.props(shellStyles.emptyMarkGlyph)}
             strokeWidth={1.8}
@@ -1603,7 +1608,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         )}
       </div>
       <p className={cn(SIDEBAR_CONTROL_TEXT_CLASS, stylex.props(shellStyles.emptyTitle).className)}>
-        {chatScope === 'my' ? mergedLabels.filter.emptyMyTasks : mergedLabels.filter.emptyAllTasks}
+        {chatScopeIsFiltered ? mergedLabels.filter.emptyMyTasks : mergedLabels.filter.emptyAllTasks}
       </p>
       <p
         className={cn(
@@ -1611,11 +1616,11 @@ export const LoroSidebar = memo(function LoroSidebar({
           stylex.props(shellStyles.emptyDescription).className
         )}
       >
-        {chatScope === 'my'
+        {chatScopeIsFiltered
           ? mergedLabels.filter.emptyMyTasksHint
           : mergedLabels.filter.emptyAllTasksHint}
       </p>
-      {chatScope === 'my' && onChatScopeChange ? (
+      {chatScopeIsFiltered && onChatScopeChange ? (
         <Button
           type="button"
           variant="secondary"

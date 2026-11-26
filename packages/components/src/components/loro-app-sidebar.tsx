@@ -4,7 +4,11 @@ import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspac
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { E2eeMachineWindowPill, E2eeOfflineSummary } from '@/components/e2ee-offline-window';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
-import { isSessionInMyScope } from '@/lib/session-visibility';
+import {
+  isSessionInTaskOwnerFilter,
+  resolveTaskOwnerFilter,
+  toggleTaskOwnerSelection,
+} from '@/lib/session-visibility';
 import { E2eeDeviceRequestsButton } from '@/components/pages/e2ee-automatic-pairing';
 import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
@@ -417,7 +421,7 @@ import {
   useSnoozeSessionWithConfirmation,
 } from '@/components/sessions/session-sub-conversation-confirmation';
 import {
-  chatScopeAtom,
+  taskOwnerSelectionAtom,
   chatsCollapsedAtom,
   githubWorktreesSectionCollapsedAtom,
   projectGroupOrderAtom,
@@ -463,7 +467,10 @@ import {
   type LoroSidebarLabels,
   type LoroSidebarWorkspace,
 } from '@/components/loro-sidebar';
-import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
+import {
+  SidebarFilterPopover,
+  type SidebarFilterMember,
+} from '@/components/sidebar-filter-popover';
 import { Button } from '@lody/ui/button';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -2114,8 +2121,10 @@ export function LoroAppSidebar({
     return null;
   }, [location.pathname, selectedSessionId, activeNewSessionGroup, workspaceSlug]);
 
-  const [chatScope, setChatScope] = useAtom(chatScopeAtom);
+  const [taskOwnerSelection, setTaskOwnerSelection] = useAtom(taskOwnerSelectionAtom);
+  const chatScope = taskOwnerSelection.scope;
   const scope: SessionListScope = chatScope;
+  const { currentUserId: myAccountId } = useMySessionScope();
 
   // Local-project sessions bypass buildSessionListRows, so resolve their author
   // (creator) here from org members — only in team scope, mirroring the mapping's own
@@ -2144,6 +2153,33 @@ export function LoroAppSidebar({
   // are "always you", so an author avatar there would be redundant. Mirrors the
   // same gate in `buildSessionListRows` so both row paths agree.
   const isMultiMemberWorkspace = membersByUserId.size > 1;
+  const workspaceMemberIds = useMemo(() => [...membersByUserId.keys()], [membersByUserId]);
+  // `null` lists every owner: All Tasks with nobody chosen.
+  const taskOwnerFilter = useMemo(
+    () => resolveTaskOwnerFilter(taskOwnerSelection, myAccountId, workspaceMemberIds),
+    [taskOwnerSelection, myAccountId, workspaceMemberIds]
+  );
+  // The people still in effect, so a departed member never marks the filter as narrowed.
+  const selectedTaskOwnerIds = useMemo<readonly string[]>(
+    () => (chatScope === 'team' && taskOwnerFilter ? [...taskOwnerFilter] : []),
+    [chatScope, taskOwnerFilter]
+  );
+  const filterMembers = useMemo<SidebarFilterMember[]>(() => {
+    const listed: SidebarFilterMember[] = [];
+    for (const [userId, member] of membersByUserId) {
+      listed.push({
+        userId,
+        name: member.name?.trim() || userId,
+        image: member.image,
+        isCurrentUser: userId === myAccountId,
+      });
+    }
+    // You first, then teammates by name.
+    return listed.sort(
+      (a, b) =>
+        Number(!!b.isCurrentUser) - Number(!!a.isCurrentUser) || a.name.localeCompare(b.name)
+    );
+  }, [membersByUserId, myAccountId]);
   const resolveSessionAuthor = useCallback(
     (session: SessionMeta) =>
       scope === 'team' && isMultiMemberWorkspace
@@ -2161,9 +2197,15 @@ export function LoroAppSidebar({
   const [sidebarLastWidth, setSidebarLastWidth] = useAtom(sidebarLastWidthAtom);
   const handleChatScopeChanged = useCallback(
     (nextScope: SessionListScope) => {
-      setChatScope(nextScope);
+      setTaskOwnerSelection({ scope: nextScope, memberIds: [] });
     },
-    [setChatScope]
+    [setTaskOwnerSelection]
+  );
+  const handleToggleTaskOwner = useCallback(
+    (userId: string) => {
+      setTaskOwnerSelection(toggleTaskOwnerSelection(taskOwnerSelection, userId, myAccountId));
+    },
+    [setTaskOwnerSelection, taskOwnerSelection, myAccountId]
   );
   const handleOrganizeModeChange = useCallback(
     (nextMode: SidebarOrganizeMode) => {
@@ -2426,13 +2468,13 @@ export function LoroAppSidebar({
 
   // Shared by the task lists and the Workspace groups, which also render a
   // Local Project Session as a task row when it moves under its opener.
-  const { currentUserId: myAccountId } = useMySessionScope();
   const buildSidebarTaskRows = useCallback(
     (sourceSessions: SessionMeta[]) =>
       buildSessionListRows(
         sourceSessions,
         {
           scope,
+          ownerIds: taskOwnerFilter,
           currentUserId: myAccountId,
           defaultTitle: defaultSessionTitle,
           onlineMachineIds,
@@ -2458,6 +2500,7 @@ export function LoroAppSidebar({
       machineMetaMap,
       resolveOpenerRowId,
       scope,
+      taskOwnerFilter,
       sessionSidebarCodeChangesOnly,
       sessionSharingById,
       defaultSessionTitle,
@@ -2683,9 +2726,7 @@ export function LoroAppSidebar({
       // A multi-repository Session belongs to its Project group, even though
       // its legacy `project` projection names the first member's folder.
       if (session.projectRun) continue;
-      if (scope === 'my') {
-        if (!isSessionInMyScope(session, myAccountId)) continue;
-      }
+      if (!isSessionInTaskOwnerFilter(session, taskOwnerFilter)) continue;
 
       const key = `${session.machineId}:${project.localProjectId}`;
       const existing = map.get(key);
@@ -2705,7 +2746,7 @@ export function LoroAppSidebar({
     }
 
     return map;
-  }, [childSessionsByParent, scope, sessions, sessionsListLoading, myAccountId]);
+  }, [childSessionsByParent, taskOwnerFilter, sessions, sessionsListLoading]);
   // The ONE session-navigation callback for every sidebar surface (rows,
   // Updated items, keyboard nav). `tabSessionId` restores the precise child Tab
   // that "Go to Opener Session" points at.
@@ -3174,7 +3215,7 @@ export function LoroAppSidebar({
   // is built, so a section holding only them would render as a bare header.
   // Count what the scope hides by the section their pinned root names.
   const scopeHiddenCounts = useMemo(() => {
-    if (scope !== 'my' || sessionsListLoading) return undefined;
+    if (taskOwnerFilter === null || sessionsListLoading) return undefined;
     const listed = new Map<string, SessionMeta>();
     for (const session of selectSidebarTaskSessions(
       sessions,
@@ -3219,7 +3260,7 @@ export function LoroAppSidebar({
     }
     return Object.keys(counts).length > 0 ? counts : undefined;
   }, [
-    scope,
+    taskOwnerFilter,
     sessionsListLoading,
     sessions,
     visibleLocalProjectMap,
@@ -3530,6 +3571,7 @@ export function LoroAppSidebar({
         'Tasks in this workspace will appear here.'
       ),
       showAllTasksAction: t('sidebar.filter.showAllTasks', 'Show all tasks'),
+      memberYou: t('sidebar.filter.memberYou', 'You'),
     }),
     [t]
   );
@@ -3546,6 +3588,9 @@ export function LoroAppSidebar({
       scope={chatScope}
       onOrganizeChange={handleOrganizeModeChange}
       onScopeChange={handleChatScopeChanged}
+      members={filterMembers}
+      selectedMemberIds={selectedTaskOwnerIds}
+      onToggleMember={handleToggleTaskOwner}
       showUpdatedProjectNames={showUpdatedProjectNames}
       onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
       showBranchNames={showBranchNames}
@@ -4741,6 +4786,7 @@ export function LoroAppSidebar({
         sessionListProps={sidebarSessionListProps}
         organizeMode={organizeMode}
         chatScope={chatScope}
+        chatScopeNarrowed={selectedTaskOwnerIds.length > 0}
         pinnedItems={pinnedItems}
         pinnedSectionCollapsed={pinnedSectionCollapsed}
         pinnedSections={pinnedSections}

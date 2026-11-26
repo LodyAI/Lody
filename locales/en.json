@@ -6211,6 +6211,7 @@
   "sessions.fileViewer.selection.screenshotPreview": "Selected screenshot",
   "sidebar.filter.showBranchNames": "Show Branch",
   "sidebar.filter.hideEmptyProjects": "Hide Empty Projects",
+  "sidebar.filter.memberYou": "You",
   "sidebar.filter.detailsHeading": "Details",
   "login.lastUsed": "Last used",
   "login.tagline": "A shared workspace for the coding agents your team already uses.",
