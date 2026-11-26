@@ -476,4 +476,91 @@ describe('recovery vault password & passkey-first workflows', () => {
       )
     );
   });
+
+  it('verifies remote readback during createWithPassword without a redundant index read on openWithPassword', async () => {
+    const harness = makeStores();
+    let putImmutables = 0;
+    let entryReads = 0;
+    let batchReads = 0;
+    let indexReads = 0;
+    let tamperReadback = false;
+    const countedStore: RecoveryVaultStore['Service'] = {
+      ...harness.store,
+      putImmutable: (vaultId, entry) =>
+        Effect.suspend(() => {
+          putImmutables++;
+          return harness.store.putImmutable(vaultId, entry);
+        }),
+      readEntry: (vaultId, entryId) =>
+        Effect.gen(function* () {
+          entryReads++;
+          const stored = yield* harness.store.readEntry(vaultId, entryId);
+          if (tamperReadback && stored) {
+            const mutated = new Uint8Array(stored.body);
+            mutated[mutated.length - 1] ^= 1;
+            return { ...stored, body: mutated };
+          }
+          return stored;
+        }),
+      readEntries: (vaultId, entryIds) =>
+        Effect.suspend(() => {
+          batchReads++;
+          return Effect.forEach(entryIds, (entryId) => harness.store.readEntry(vaultId, entryId));
+        }),
+      readIndex: (vaultId) =>
+        Effect.suspend(() => {
+          indexReads++;
+          return harness.store.readIndex(vaultId);
+        }),
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          tamperReadback = true;
+          const tampered = yield* Effect.result(
+            createRecoveryVaultWithPassword({
+              locator: 'https://api.lody.test',
+              password: 'readback-check-password',
+              kdf: FAST_KDF,
+              store: countedStore,
+              local: harness.journal,
+            })
+          );
+          expect(Result.isFailure(tampered) ? tampered.failure : null).toMatchObject({
+            code: 'storage',
+          });
+
+          tamperReadback = false;
+          putImmutables = 0;
+          entryReads = 0;
+          batchReads = 0;
+          indexReads = 0;
+          const { vault } = yield* createRecoveryVaultWithPassword({
+            locator: 'https://api.lody.test',
+            password: 'readback-check-password',
+            kdf: FAST_KDF,
+            store: countedStore,
+            local: harness.journal,
+          });
+          expect(putImmutables).toBe(1);
+          expect(entryReads).toBe(2);
+          expect(batchReads).toBe(0);
+          expect(indexReads).toBe(1);
+
+          indexReads = 0;
+          batchReads = 0;
+          const opened = yield* openRecoveryVaultWithPassword({
+            vaultId: vault.vaultId,
+            locator: vault.locator,
+            password: 'readback-check-password',
+            store: countedStore,
+            local: harness.journal,
+          });
+          expect(opened.vaultId).toBe(vault.vaultId);
+          expect(indexReads).toBe(1);
+          expect(batchReads).toBe(1);
+        })
+      )
+    );
+  });
 });

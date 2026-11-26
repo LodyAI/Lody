@@ -17,6 +17,7 @@ function makeFakeIdb() {
   const stores = new Map<string, Map<string, Map<IDBValidKey, unknown>>>();
   let blockedRemaining = 0;
   let openCalls = 0;
+  const transactions: { mode: IDBTransactionMode; durability: unknown; metaGets: number }[] = [];
   const openHandles: {
     db: IDBDatabase;
     closed: boolean;
@@ -52,10 +53,16 @@ function makeFakeIdb() {
         dbStores.set(name, map);
         return makeObjectStore(map);
       },
-      transaction(tableNames: string[]) {
+      transaction(
+        tableNames: string[],
+        mode: IDBTransactionMode = 'readonly',
+        options?: IDBTransactionOptions
+      ) {
         if (handle.closed) {
           throw new DOMException('Database connection is closing', 'InvalidStateError');
         }
+        const record = { mode, durability: options?.durability, metaGets: 0 };
+        transactions.push(record);
         let aborted = false;
         let pending = 0;
         let completed = false;
@@ -103,7 +110,10 @@ function makeFakeIdb() {
               return req;
             };
             return {
-              get: (key: IDBValidKey) => schedule(() => map.get(key)),
+              get: (key: IDBValidKey) => {
+                if (name === 'meta' && key === 0) record.metaGets++;
+                return schedule(() => map.get(key));
+              },
               put: (value: unknown, key: IDBValidKey) =>
                 schedule(() => {
                   map.set(key, value);
@@ -177,6 +187,7 @@ function makeFakeIdb() {
   return {
     factory,
     openHandles,
+    transactions,
     setBlocked: (count: number) => {
       blockedRemaining = count;
     },
@@ -288,5 +299,31 @@ describe('DatabaseOwner multi-tab resilience', () => {
     const fallbackOwner = new DatabaseOwner(scope, 'opaque-db', 'create-or-open', simpleLayout);
     await Effect.runPromise(fallbackOwner.open);
     await Effect.runPromise(fallbackOwner.close);
+  });
+
+  it('uses relaxed durability for readonly transactions while strictly keeping strict durability for readwrite', async () => {
+    const fake = makeFakeIdb();
+    vi.stubGlobal('indexedDB', fake.factory);
+    const owner = new DatabaseOwner(scope, 'durability-check-db', 'create-or-open', simpleLayout);
+    await Effect.runPromise(owner.open);
+    const checkBinding = (row: unknown) => {
+      if (!row || typeof row !== 'object') throw new Error('missing meta');
+    };
+    const readVal = await Effect.runPromise(
+      owner.run('TestStore', ['items'], 'readonly', checkBinding, (tx, finish) => {
+        tx.request(tx.store('items').get('k'), (v) => finish(v ?? null));
+      })
+    );
+    expect(readVal).toBeNull();
+    await Effect.runPromise(
+      owner.run('TestStore', ['items'], 'readwrite', checkBinding, (tx, finish) => {
+        tx.request(tx.store('items').put('v1', 'k'), () => finish(undefined));
+      })
+    );
+    await Effect.runPromise(owner.close);
+    expect(fake.transactions).toEqual([
+      { mode: 'readonly', durability: 'relaxed', metaGets: 1 },
+      { mode: 'readwrite', durability: 'strict', metaGets: 2 },
+    ]);
   });
 });

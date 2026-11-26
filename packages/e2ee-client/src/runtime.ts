@@ -63,6 +63,14 @@ export interface PersonalRuntimeRecovery {
 const recoveries = new WeakMap<E2eeWorkspaceRuntime, PersonalRuntimeRecovery>();
 export const personalRuntimeRecovery = (runtime: E2eeWorkspaceRuntime) =>
   recoveries.get(runtime) ?? null;
+
+const keyReceivers = new WeakMap<
+  E2eeWorkspaceRuntime,
+  (workspaceId: string) => Promise<E2eeRuntimeStatus>
+>();
+/** Lightweight key-only reception on an already-open session (no leading full history fetch). */
+export const personalRuntimeReceiveKeys = (runtime: E2eeWorkspaceRuntime) =>
+  keyReceivers.get(runtime) ?? null;
 /** Real application ports for one pinned workspace. No backend or identity creation is implicit. */
 export interface PersonalRuntimeOptions<E> {
   /** Advertise remote CLI pairing only with actual persistent platform ports. */
@@ -418,6 +426,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
         const round = yield* Effect.result(
           session.keyRound(retry === 0 ? 'distribute' : 'full', [device])
         );
+        if (Result.isSuccess(round) && round.success.delivered.includes(device)) return 'delivered';
         const evidence = yield* Effect.result(session.keyDeliveryEvidence(device));
         if (Result.isSuccess(evidence) && evidence.success === 'delivered') return 'delivered';
         return Result.isSuccess(round) && Result.isSuccess(evidence)
@@ -1385,5 +1394,15 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
       ),
     setup: (input) => withSession(workspaceId, (session) => session.setupRecovery(input)),
   });
+  keyReceivers.set(exposed, (id) =>
+    run(
+      withSession(id, (session) =>
+        Effect.gen(function* () {
+          yield* installKeys(session, 'receive');
+          return yield* status(session);
+        })
+      )
+    )
+  );
   return Object.freeze(exposed);
 });

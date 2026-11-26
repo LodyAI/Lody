@@ -82,7 +82,9 @@ export const clientRecoveryJournal = (
         try: () =>
           new Promise<A>((resolve, reject) => {
             check();
-            const tx = db.transaction('journal', mode, { durability: 'strict' });
+            const tx = db.transaction('journal', mode, {
+              durability: mode === 'readonly' ? 'relaxed' : 'strict',
+            });
             let result: A,
               hasResult = false,
               failure: unknown;
@@ -104,7 +106,7 @@ export const clientRecoveryJournal = (
               }
             };
             try {
-              if (tx.durability !== 'strict') throw fail();
+              if (mode !== 'readonly' && tx.durability !== 'strict') throw fail();
               work(
                 tx.objectStore('journal'),
                 (value) => {

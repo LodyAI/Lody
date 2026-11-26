@@ -248,7 +248,7 @@ export class DatabaseOwner {
   ): Promise<A> {
     return new Promise<A>((resolve, reject) => {
       const tx = db.transaction([...new Set(['meta', ...tables])], mode, {
-        durability: 'strict',
+        durability: mode === 'readonly' ? 'relaxed' : 'strict',
       });
       let error: LocalStoreError | undefined,
         ready = false,
@@ -279,13 +279,20 @@ export class DatabaseOwner {
         error ??= storageFailure(name, tx.error);
       };
       tx.oncomplete = () => (ready ? resolve(value!) : reject(failure(name, 'corrupt')));
-      const finish = (result: A) =>
+      const finish = (result: A) => {
+        if (mode === 'readonly') {
+          if (ready) throw failure(name, 'corrupt');
+          value = result;
+          ready = true;
+          return;
+        }
         request(tx.objectStore('meta').get(0), (row) => {
           if (ready) throw failure(name, 'corrupt');
           checkBinding(row);
           value = result;
           ready = true;
         });
+      };
       request(tx.objectStore('meta').get(0), (row) => {
         checkBinding(row);
         work(transaction, finish);
