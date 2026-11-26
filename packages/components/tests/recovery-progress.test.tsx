@@ -172,3 +172,122 @@ it('prefers known vault unlock methods before an unknown passkey', () => {
   expect(preferredRecoveryUnlock({ ...passwordOnly, hasPasskey: true }, true)).toBe('passkey');
   expect(preferredRecoveryUnlock({ ...passwordOnly, hasPasskey: true }, false)).toBe('password');
 });
+
+it('forwards blocking workspace and step from desktop replacement Pending outcomes', async () => {
+  const { desktopRecoveryPort } =
+    await import('../src/components/settings/e2ee/recovery-desktop-port');
+  const e2ee = {
+    continueRecoveryReplacement: async () => ({
+      outcome: 'Pending' as const,
+      step: 'setup' as const,
+      workspace: 'Design Team',
+    }),
+    abandonRecoveryReplacement: async () => ({
+      outcome: 'Pending' as const,
+      step: 'revoke' as const,
+      workspace: 'Ops Vault',
+    }),
+  } as unknown as Parameters<typeof desktopRecoveryPort>[0];
+  const port = desktopRecoveryPort(e2ee);
+  expect(await port.replacement!.finish({ compromised: false })).toEqual({
+    outcome: 'Pending',
+    step: 'setup',
+    workspace: 'Design Team',
+  });
+  expect(await port.replacement!.abandon()).toEqual({
+    outcome: 'Pending',
+    step: 'revoke',
+    workspace: 'Ops Vault',
+  });
+});
+
+it('identifies the blocking workspace when vault replacement returns Pending and falls back when omitted', async () => {
+  const store = createStore();
+  store.set(e2eeRecoveryVaultEnabledAtom, true);
+  let nextFinishResult:
+    | { outcome: 'Pending'; step?: 'setup' | 'revoke'; workspace?: string }
+    | { outcome: 'Committed' } = {
+    outcome: 'Pending',
+    step: 'setup',
+    workspace: 'ws-2',
+  };
+  const never = () => new Promise<never>(() => {});
+  const port: RecoveryPort = {
+    plan: async () => ({
+      hasVault: true,
+      replacing: true,
+      methods: { hasFile: true, hasPassword: false, hasPasskey: false },
+      covered: [
+        { id: 'ws-1', name: 'Alpha', status: { kind: 'verified', update: 1 } },
+        { id: 'ws-2', name: 'Beta Vault', status: { kind: 'saved' } },
+      ],
+      uncovered: [],
+    }),
+    securityEvents: async () => [],
+    passkeyAvailable: async () => false,
+    create: null,
+    checkFile: null,
+    replacement: {
+      begin: async () => ({ outcome: 'begun' }),
+      finish: async () => nextFinishResult,
+      abandon: async () => ({ outcome: 'Committed' }),
+    },
+    setupWorkspace: never,
+    setupWorkspaces: never,
+    passkeyDefaultLabel: never,
+    addPasskey: never,
+    listPasskeys: never,
+    removePasskey: never,
+    restore: never,
+  };
+  const host = { port };
+  const i18n = createTestI18n({ keyLabels: true, exposeValues: true });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          <TestCloudPlatformProvider>
+            <Provider store={store}>
+              <E2eeRecoveryHostContext.Provider value={host}>
+                <RecoveryVaultSection accountId="account-a" />
+              </E2eeRecoveryHostContext.Provider>
+            </Provider>
+          </TestCloudPlatformProvider>,
+          i18n
+        )
+      )
+    );
+    const continueBtn = [...container.querySelectorAll('button')].find(
+      (el) => el.textContent === 'e2ee.recovery.replaceContinue'
+    );
+    expect(continueBtn).toBeDefined();
+    await act(async () => continueBtn!.click());
+    const finishBtn = [...document.body.querySelectorAll('button')].find(
+      (el) => el.textContent === 'e2ee.recovery.replaceFinish'
+    );
+    expect(finishBtn).toBeDefined();
+    await act(async () => finishBtn!.click());
+    expect(container.textContent).toContain(
+      'e2ee.recovery.replacePendingWorkspace {"workspace":"Beta Vault"}'
+    );
+
+    // When no workspace is returned, fall back smoothly to the generic pending notice.
+    nextFinishResult = { outcome: 'Pending' };
+    const continueBtn2 = [...container.querySelectorAll('button')].find(
+      (el) => el.textContent === 'e2ee.recovery.replaceContinue'
+    );
+    await act(async () => continueBtn2!.click());
+    const finishBtn2 = [...document.body.querySelectorAll('button')].find(
+      (el) => el.textContent === 'e2ee.recovery.replaceFinish'
+    );
+    await act(async () => finishBtn2!.click());
+    expect(container.textContent).toContain('e2ee.recovery.replacePending');
+    expect(container.textContent).not.toContain('e2ee.recovery.replacePendingWorkspace');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

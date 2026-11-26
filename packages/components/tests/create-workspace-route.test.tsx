@@ -179,6 +179,7 @@ vi.mock('@/lib/electron', async (importOriginal) => ({
 vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => false }));
 
 import { Route } from '../src/routes/workspace/create';
+import { E2eeActionTimeoutError } from '../src/providers/cloud-e2ee-workspaces';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -239,6 +240,56 @@ const typeInto = (id: string, value: string) =>
 
 describe('create workspace route encrypted creation (zero draft UI + silent reconciliation)', () => {
   const hash = 'bb'.repeat(32);
+
+  it('preserves pending intent on create timeout, unlocks the form, and reuses the same requestId on retry', async () => {
+    fixture.creationEnabled = true;
+    const seenRequestIds: string[] = [];
+    const navigate = vi.fn(async () => {});
+    fixture.router = { navigate } as unknown as AnyRouter;
+    fixture.create = vi.fn(async (request) => {
+      seenRequestIds.push(request.requestId);
+      if (seenRequestIds.length === 1) throw new E2eeActionTimeoutError('create', 30_000);
+      return {
+        workspaceId: 'ws-claimed',
+        name: request.name,
+        slug: request.slug,
+        contentMode: 'e2ee' as const,
+        contentModeVersion: 1 as const,
+        genesisHash: hash,
+        cryptoOrgId: hash,
+        activation: 'control-only' as const,
+      };
+    });
+    await render();
+    await typeInto('workspace-name', 'Private');
+    await typeInto('workspace-slug', 'private');
+    await act(async () =>
+      container!.querySelector<HTMLButtonElement>('[data-testid="e2ee-workspace-create"]')!.click()
+    );
+    await click('organization.createWorkspace');
+    expect(container!.textContent).toContain('e2ee.create.timeout');
+    expect(input('workspace-name').disabled).toBe(false);
+    const savedAfterTimeout = listPendingE2eeWorkspaces(localStorage, 'account');
+    expect(savedAfterTimeout).toHaveLength(1);
+    expect(savedAfterTimeout[0]).toMatchObject({
+      accountId: 'account',
+      name: 'Private',
+      slug: 'private',
+    });
+
+    // Retrying submits the exact same requestId so an already-committed workspace is claimed cleanly.
+    await click('organization.createWorkspace');
+    expect(seenRequestIds).toEqual([
+      savedAfterTimeout[0]!.requestId,
+      savedAfterTimeout[0]!.requestId,
+    ]);
+    expect(listPendingE2eeWorkspaces(localStorage, 'account')).toEqual([]);
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/workspace/e2ee/$workspaceId',
+      params: { workspaceId: 'ws-claimed' },
+      replace: true,
+    });
+  });
 
   it('returns to the editable form and discards pending intent when device confirmation is cancelled', async () => {
     fixture.creationEnabled = true;

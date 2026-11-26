@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MobileCreateWorkspaceSheet } from '../src/components/mobile/mobile-create-workspace-sheet';
+import { E2eeActionTimeoutError } from '../src/providers/cloud-e2ee-workspaces';
 import {
   listPendingE2eeWorkspaces,
   savePendingE2eeWorkspace,
@@ -259,6 +260,40 @@ describe('mobile encrypted workspace sheet', () => {
     expect(state.reconcilePending).toHaveBeenCalledTimes(1);
     expect(state.onOpenChange).toHaveBeenCalledWith(false);
     expect(state.onCreated).toHaveBeenCalledWith('recovered', 'ws-recovered');
+  });
+
+  it('preserves pending intent on timeout, unlocks the sheet, and reuses the same requestId on retry', async () => {
+    const seenRequestIds: string[] = [];
+    state.createPrepared.mockImplementation(
+      async (_port: unknown, _storage: unknown, intent: { requestId: string; slug: string }) => {
+        seenRequestIds.push(intent.requestId);
+        if (seenRequestIds.length === 1) throw new E2eeActionTimeoutError('create', 30_000);
+        return { workspaceId: 'ws-mobile-claimed', slug: intent.slug };
+      }
+    );
+    await renderSheet();
+    await typeInto(nameField(), 'Private');
+    await typeInto(slugField(), 'private');
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="mobile-create-workspace-encrypted"]')!
+        .click();
+    });
+    await act(async () => {
+      button('Create')!.click();
+      await Promise.resolve();
+    });
+    const saved = listPendingE2eeWorkspaces(localStorage, 'account-A');
+    expect(saved).toHaveLength(1);
+    expect(nameField().disabled).toBe(false);
+    expect(container.textContent).toContain('e2ee.create.timeout');
+
+    await act(async () => {
+      button('Create')!.click();
+      await Promise.resolve();
+    });
+    expect(seenRequestIds).toEqual([saved[0]!.requestId, saved[0]!.requestId]);
+    expect(state.onCreated).toHaveBeenCalledWith('private', 'ws-mobile-claimed');
   });
 
   it('waits for Convex auth readiness before reconciling a leftover pending request', async () => {
