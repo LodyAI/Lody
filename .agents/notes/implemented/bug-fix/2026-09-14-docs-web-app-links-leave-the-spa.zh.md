@@ -72,7 +72,7 @@ const APP_OWNED_PATHS = ['/login'];
   `acp-extension-*` 子模块包，否则 `packages/shared` 无法解析
   `acp-extension-dsh/capabilities`）。
 - `corepack pnpm run build` 构建成功；`out/client/docs/quickstart/index.html` 中该卡片预渲染为
-  `<a href="/login" data-card="true" …>`，没有额外的 `target` 或 `rel`。
+  `<a href="/login" rel="nofollow" data-card="true" …>`，没有额外的 `target`。
 - 在静态主机（`PORT=4183 pnpm --filter @lody/site-docs preview:static`，等价于 Cloudflare
   Pages）上，同样的点击在 `/docs/quickstart/` 和 `/zh/docs/quickstart/` 都会清除该标记——即真正的
   文档跳转，且停留在当前标签页——而相邻的「Download the desktop app」卡片标记仍在，保持客户端跳转。

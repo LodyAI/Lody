@@ -60,9 +60,9 @@ Add one test that asserts the status and version fields. Do not change other rou
 Lody создаст сессию и начнёт транслировать работу агента. **Раунд** — это один ход агента плюс внесённые им
 изменения в файлах. Пока выполняется раунд, вы можете:
 
-- отправить уточнение, чтобы [**направить (steer)**](/ru/docs/claude-codex-capabilities#steer-a-running-task) текущую задачу,
+- отправить уточнение, чтобы [**направить (steer)**](/ru/docs/claude-codex-capabilities#корректировка-steer-запущенной-задачи) текущую задачу,
   не дожидаясь её завершения;
-- задать вопрос в [**Side Chat**](/ru/docs/session#right-sidebar-browser-and-side-chat), не прерывая
+- задать вопрос в [**Side Chat**](/ru/docs/session#правая-боковая-панель-browser-и-side-chat), не прерывая
   основную задачу, если агент поддерживает нативное ветвление;
 - остановить ход, если агент движется в неверном направлении.
 
@@ -105,7 +105,7 @@ Read it once in a module constant instead, and keep the response shape the same.
   [рекомендуемый рабочий процесс](/ru/docs/workflow).
 - **Архивировать сессию.** Когда работа завершена, архивируйте сессию на боковой панели. При архивировании
   worktree освобождается, но ветка и диалог сохраняются, так что вы сможете восстановить сессию позже. Подробнее см. в разделе
-  [Архивирование сессий](/ru/docs/session#archive-sessions).
+  [Архивирование сессий](/ru/docs/session#архивирование-сессий).
 
 </Step>
 </Steps>
@@ -160,7 +160,7 @@ Read it once in a module constant instead, and keep the response shape the same.
 
 Она перемещается в список архива в правом нижнем углу боковой панели. Диалог и ветка
 сохраняются, а при восстановлении сессии worktree создаётся заново. Подробнее см. в разделе
-[Архивирование сессий](/ru/docs/session#archive-sessions).
+[Архивирование сессий](/ru/docs/session#архивирование-сессий).
 
 ## Далее
 

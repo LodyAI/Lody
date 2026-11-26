@@ -84,8 +84,8 @@ in `APP_OWNED_PATHS` before content links to it.
   submodule packages must be built first, or `packages/shared` fails to resolve
   `acp-extension-dsh/capabilities`).
 - `corepack pnpm run build` completes; `out/client/docs/quickstart/index.html`
-  prerenders the card as `<a href="/login" data-card="true" …>` with no `target` or
-  `rel` added.
+  prerenders the card as `<a href="/login" rel="nofollow" data-card="true" …>`
+  with no `target` added.
 - Against the static host (`PORT=4183 pnpm --filter @lody/site-docs preview:static`,
   the Cloudflare Pages equivalent), the same click now discards the marker — a real
   document navigation, same tab — on `/docs/quickstart/` and on `/zh/docs/quickstart/`,

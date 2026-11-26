@@ -12,6 +12,7 @@ import {
   switchSiteLocalePath,
 } from '../src/site-pages/shared.ts';
 import { brandTitle, pageHead } from './metadata.ts';
+import { appOwnedRel, isAppOwnedHref } from './site-url.mjs';
 
 await test('brandTitle appends | Lody when the title is unbranded', () => {
   assert.equal(brandTitle('Introduction'), 'Introduction | Lody');
@@ -124,6 +125,8 @@ await test('locale path helpers handle all 8 locales and zh-hant vs zh prefix pr
   );
   assert.equal(switchSiteLocalePath('/ja', 'en'), '/');
   assert.equal(switchSiteLocalePath('/', 'ru'), '/ru');
+  assert.equal(switchSiteLocalePath('/home', 'ja'), '/ja');
+  assert.equal(switchSiteLocalePath('/zh/home/', 'en'), '/');
   assert.equal(switchSiteLocalePath('/fr/docs/quickstart', 'es'), '/es/docs/quickstart');
 
   assert.equal(localePrefix('en'), '');
@@ -145,4 +148,32 @@ await test('page metadata never rewrites image URLs as directory pages', () => {
       new URL(image, 'https://lody.ai').toString()
     );
   }
+});
+
+await test('noindex compatibility pages can omit cross-page canonical and hreflang signals', () => {
+  const head = pageHead({
+    title: 'Lody - Run your agents in parallel, safely',
+    path: '/home',
+    locale: 'en-US',
+    canonical: false,
+    robots: { index: false, follow: true },
+  });
+  assert.equal(head.meta.find((entry) => entry.name === 'robots')?.content, 'noindex, follow');
+  assert.equal(
+    head.meta.some((entry) => entry.property === 'og:url'),
+    false
+  );
+  assert.deepEqual(head.links, []);
+});
+
+await test('app-owned auth entrypoints receive nofollow without losing existing rel tokens', () => {
+  assert.equal(isAppOwnedHref('/login'), true);
+  assert.equal(isAppOwnedHref('/login?next=%2Fapp'), true);
+  assert.equal(isAppOwnedHref('https://lody.ai/login'), true);
+  assert.equal(isAppOwnedHref('/docs/quickstart'), false);
+
+  assert.equal(appOwnedRel('/login'), 'nofollow');
+  assert.equal(appOwnedRel('/login', 'noreferrer'), 'noreferrer nofollow');
+  assert.equal(appOwnedRel('/login', 'nofollow noreferrer'), 'nofollow noreferrer');
+  assert.equal(appOwnedRel('/docs/quickstart', 'noreferrer'), 'noreferrer');
 });

@@ -54,8 +54,8 @@ description: "完整執行一次小型 Lody 工作階段——啟動工作階段
 
 Lody 會建立工作階段並即時串流呈現 Agent 的工作過程。一個**輪次（round）**就是一次 Agent 回覆加上它產生的檔案變更。在輪次進行期間，你可以：
 
-- 傳送後續指示來[**引導（steer）**](/zh-hant/docs/claude-codex-capabilities#steer-a-running-task)進行中的任務，而不必等待它結束；
-- 當 Agent 支援原生 fork 時，在[**側邊對話（Side Chat）**](/zh-hant/docs/session#right-sidebar-browser-and-side-chat)中提問，而不會打斷主任務；
+- 傳送後續指示來[**引導（steer）**](/zh-hant/docs/claude-codex-capabilities#引導執行中的任務steer)進行中的任務，而不必等待它結束；
+- 當 Agent 支援原生 fork 時，在[**側邊對話（Side Chat）**](/zh-hant/docs/session#右側邊欄瀏覽器與側邊對話)中提問，而不會打斷主任務；
 - 如果 Agent 朝錯誤方向前進，隨時停止這一輪。
 
 </Step>
@@ -89,7 +89,7 @@ Lody 會建立工作階段並即時串流呈現 Agent 的工作過程。一個**
 - **保留分支。** 從工作階段複製目前的分支名稱，在自己的編輯器中測試或推送。
 - **在本機開啟。** 在桌面版上，使用 **Open in** 在你的編輯器中開啟該 worktree。
 - **建立 Pull Request。** 針對 GitHub 工作階段，使用對話上方的 **Create PR**。Lody 會將 PR 關聯回該工作階段並同步 CI 狀態。這也是[推薦工作流程](/zh-hant/docs/workflow)的起點。
-- **封存工作階段。** 工作完成後，從側邊欄將其封存。封存會回收 worktree，但保留分支與對話記錄，方便日後隨時還原。請參閱[封存工作階段](/zh-hant/docs/session#archive-sessions)。
+- **封存工作階段。** 工作完成後，從側邊欄將其封存。封存會回收 worktree，但保留分支與對話記錄，方便日後隨時還原。請參閱[封存工作階段](/zh-hant/docs/session#封存工作階段)。
 
 </Step>
 </Steps>
@@ -131,7 +131,7 @@ Lody 會建立工作階段並即時串流呈現 Agent 的工作過程。一個**
 
 ### 封存後的工作階段會去哪裡？
 
-它會移至側邊欄右下角的封存清單。對話與分支都會保留下來，當你還原該工作階段時會重新建立 worktree。請參閱[封存工作階段](/zh-hant/docs/session#archive-sessions)。
+它會移至側邊欄右下角的封存清單。對話與分支都會保留下來，當你還原該工作階段時會重新建立 worktree。請參閱[封存工作階段](/zh-hant/docs/session#封存工作階段)。
 
 ## 下一步
 
