@@ -822,7 +822,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       await this.workspaceDocument.getOrCreateSessionDoc(config.sessionId!);
       this.logger.debug(`[${config.sessionId}] Session will enter create inner`);
       session = await withSlowOperationWarning(
-        this.createSessionInner(config, credentials),
+        this.createSessionInner(config, credentials, signal),
         this.logger,
         'session.createSessionInner',
         config.sessionId!
@@ -1701,7 +1701,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   private async createSessionInner(
     config: SessionConfig,
-    credentials: SessionCredentials = nativeSessionCredentials
+    credentials: SessionCredentials = nativeSessionCredentials,
+    signal?: AbortSignal
   ): Promise<Session> {
     let workdir: string | undefined = config.workdir;
     const repoId = config.repoId;
@@ -1863,10 +1864,20 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       );
     }
 
+    signal?.throwIfAborted();
     this.reportStartStage(config, 'sandbox');
     const sandbox = await this.sessionSandboxFactory(config.sessionId!);
     this.logger.debug(`[${config.sessionId}] Session sandbox: ${sandbox.description}`);
     const session = new Session(config, this.logger, workdir, sandbox, credentials);
+    if (signal?.aborted) {
+      await session.terminate(true).catch((terminateError: unknown) => {
+        recordIncompleteStartCleanup(signal.reason);
+        this.logger.error(
+          `[${config.sessionId}] Failed to terminate aborted session before registration: ${formatErrorWithCauses(terminateError)}`
+        );
+      });
+      signal.throwIfAborted();
+    }
     this.registerSessionEvents(session);
     this.sessions.set(config.sessionId!, session);
     try {
