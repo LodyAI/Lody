@@ -26,6 +26,20 @@ const UNRESERVED_REFUSALS = new Set([
   'free_workspace_limit_reached',
 ]);
 
+/** Server refusal codes that have translated `e2ee.create.reason.<code>` copy. */
+export const KNOWN_E2EE_CREATE_REFUSAL_CODES: ReadonlySet<string> = UNRESERVED_REFUSALS;
+
+/** Return the translation key for a known creation refusal, never leaking raw codes. */
+export function e2eeCreateRefusalReasonKey(
+  refusalCode: string | undefined,
+  i18n?: { exists?: (key: string) => boolean }
+): string | undefined {
+  if (!refusalCode) return undefined;
+  const key = `e2ee.create.reason.${refusalCode}`;
+  if (typeof i18n?.exists === 'function') return i18n.exists(key) ? key : undefined;
+  return KNOWN_E2EE_CREATE_REFUSAL_CODES.has(refusalCode) ? key : undefined;
+}
+
 /** The server error code of a Convex error, if any. */
 export function e2eeCreationErrorCode(error: unknown): string | undefined {
   if (typeof error !== 'object' || error === null || !('data' in error)) return undefined;

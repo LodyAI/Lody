@@ -11,6 +11,7 @@ import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import {
   createPreparedE2eeWorkspace,
+  e2eeCreateRefusalReasonKey,
   e2eeCreationErrorCode,
   isE2eeCreationNotEnabled,
   reconcilePendingE2eeWorkspaces,
@@ -300,11 +301,8 @@ export function MobileCreateWorkspaceSheet({
       }
       if (err instanceof Error && err.message === 'e2ee_creation_cancelled') return;
       if (encrypted) {
-        const refusalCode = e2eeCreationErrorCode(err);
-        const refusalReason =
-          refusalCode && i18n.exists(`e2ee.create.reason.${refusalCode}`)
-            ? t(`e2ee.create.reason.${refusalCode}`)
-            : undefined;
+        const refusalReasonKey = e2eeCreateRefusalReasonKey(e2eeCreationErrorCode(err), i18n);
+        const refusalReason = refusalReasonKey ? t(refusalReasonKey) : undefined;
         setCreateError(
           isE2eeCreationNotEnabled(err)
             ? t('e2ee.create.notEnabled')

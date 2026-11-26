@@ -14,6 +14,7 @@ import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-creation-option';
 import {
   createPreparedE2eeWorkspace,
+  e2eeCreateRefusalReasonKey,
   e2eeCreationErrorCode,
   isE2eeCreationNotEnabled,
   reconcilePendingE2eeWorkspaces,
@@ -524,11 +525,8 @@ function CreateWorkspaceAuthed({
         err instanceof ConvexError && err.data && typeof err.data === 'object'
           ? (err.data as { code?: unknown }).code
           : undefined;
-      const refusalCode = e2eeCreationErrorCode(err);
-      const refusalReason =
-        refusalCode && i18n.exists(`e2ee.create.reason.${refusalCode}`)
-          ? t(`e2ee.create.reason.${refusalCode}`)
-          : undefined;
+      const refusalReasonKey = e2eeCreateRefusalReasonKey(e2eeCreationErrorCode(err), i18n);
+      const refusalReason = refusalReasonKey ? t(refusalReasonKey) : undefined;
       setError(
         !useEncryption
           ? typeof code === 'string' && code in REFERRAL_ERROR_KEYS
