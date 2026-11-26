@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildFeishuCardPayload, sendFeishuAlert } from './feishu-alert.mjs';
 
@@ -64,7 +64,7 @@ export function extractPrivateFailureDetails(report) {
   return lines;
 }
 
-export function readLogTail(logPath, { maxLines = 25, maxChars = 1800 } = {}) {
+export function readLogTail(logPath, { maxLines = 40, maxChars = 3500 } = {}) {
   if (!logPath || !existsSync(logPath)) return '';
   const raw = readFileSync(logPath, 'utf8');
   // Strip ANSI escape sequences before trimming for Feishu markdown.
@@ -77,6 +77,18 @@ export function readLogTail(logPath, { maxLines = 25, maxChars = 1800 } = {}) {
   const tail = lines.slice(-maxLines).join('\n');
   if (tail.length <= maxChars) return tail;
   return `…${tail.slice(-(maxChars - 1))}`;
+}
+
+export function readNativeStartupLogTail(mainLogTail, { maxLines = 40, maxChars = 3500 } = {}) {
+  const match = /Native startup failed; see (\S+)/u.exec(mainLogTail || '');
+  if (!match) return '';
+  const harnessLog = match[1];
+  const allLog = join(dirname(harnessLog), 'all.log');
+  if (existsSync(allLog)) {
+    const tail = readLogTail(allLog, { maxLines, maxChars });
+    if (tail) return tail;
+  }
+  return readLogTail(harnessLog, { maxLines, maxChars });
 }
 
 async function main() {
@@ -102,7 +114,13 @@ async function main() {
     const suiteLabel = process.env.SELFHOST_SUITE_LABEL || '';
     const details = extractPrivateFailureDetails(report);
     const logTail = readLogTail(logPath);
+    const startupLogTail = readNativeStartupLogTail(logTail);
     const detailBlocks = [`**失败明细（仅内部群可见）**：\n${details.join('\n')}`];
+    if (startupLogTail) {
+      detailBlocks.push(
+        `**Native 启动日志末尾（仅内部群可见）**：\n\`\`\`\n${startupLogTail}\n\`\`\``
+      );
+    }
     if (logTail) {
       detailBlocks.push(`**日志末尾（仅内部群可见）**：\n\`\`\`\n${logTail}\n\`\`\``);
     }
