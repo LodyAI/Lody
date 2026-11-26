@@ -235,6 +235,32 @@ describe('Session observation', () => {
     ]);
   });
 
+  it("takes a reply stored before its question as that turn's reply", async () => {
+    const f = await fixture([
+      entry('u1', { status: 'handled' }),
+      entry('a1', { role: 'assistant', userTurnId: 'u1', finished: true }),
+      entry('assistant:u2', { role: 'assistant', userTurnId: 'u2', finished: false }),
+      entry('u2', { status: 'processing' }),
+    ]);
+    expect(f.observer.current?.latestTurn).toEqual({
+      userTurnId: 'u2',
+      assistantTurnId: 'assistant:u2',
+      state: 'running',
+    });
+    await f.update('u2', { status: 'handled' });
+    await f.update('assistant:u2', { finished: true });
+    expect(f.events.filter((event) => event.type === 'turn.finished')).toEqual([
+      {
+        type: 'turn.finished',
+        sessionId: 's',
+        userTurnId: 'u2',
+        assistantTurnId: 'assistant:u2',
+        outcome: 'completed',
+        durationMs: 0,
+      },
+    ]);
+  });
+
   it.each(['latestUserMsgId', 'processingUserMsgId'] as const)(
     'does not settle the previous turn while %s points to missing history',
     async (pointer) => {

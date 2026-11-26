@@ -139,14 +139,38 @@ export type EditableTailTurn = {
   readonly inputConfig?: unknown;
   readonly finished?: unknown;
   readonly acpTurnId?: unknown;
+  readonly userTurnId?: unknown;
 };
 
 export type EditableTail<T extends EditableTailTurn = EditableTailTurn> = {
   readonly userIndex: number;
+  /** First replaced row: `userIndex`, or its reply when stored before it. */
+  readonly tailStart: number;
   readonly turn: T;
   /** `acpTurnId` of the provider boundary preceding the tail, when there is one. */
   readonly forkTurnId?: string;
 };
+
+/**
+ * Where the tail of the user turn at `userIndex` begins. Concurrent Loro inserts
+ * can store rows of its turn before it: its reply, a standalone attachment and
+ * notices written in between. Those rows belong to the tail, not to the history
+ * the replacement keeps; notices before the earliest row of the turn do not.
+ */
+export function editableTailStart(
+  turns: readonly (EditableTailTurn | undefined)[],
+  userIndex: number
+): number {
+  const userTurnId = turns[userIndex]?.id;
+  if (typeof userTurnId !== 'string') return userIndex;
+  let start = userIndex;
+  for (let index = userIndex - 1; index >= 0; index -= 1) {
+    const row = turns[index];
+    if (row?.role === 'assistant' && row.userTurnId === userTurnId) start = index;
+    else if (row?.role !== 'system') break;
+  }
+  return start;
+}
 
 /**
  * Locate the editable tail: the last user turn, which must be `expectedUserTurnId`,
@@ -174,7 +198,8 @@ export function resolveEditableTail<T extends EditableTailTurn>(
     return null;
   }
 
-  for (let index = userIndex - 1; index >= 0; index -= 1) {
+  const tailStart = editableTailStart(turns, userIndex);
+  for (let index = tailStart - 1; index >= 0; index -= 1) {
     const entry = turns[index];
     if (!entry) continue;
     if (entry.role === 'user') return null;
@@ -182,10 +207,10 @@ export function resolveEditableTail<T extends EditableTailTurn>(
     if (entry.finished !== true || typeof entry.acpTurnId !== 'string' || !entry.acpTurnId) {
       return null;
     }
-    return { userIndex, turn, forkTurnId: entry.acpTurnId };
+    return { userIndex, tailStart, turn, forkTurnId: entry.acpTurnId };
   }
 
-  return { userIndex, turn };
+  return { userIndex, tailStart, turn };
 }
 
 /** A domain refusal the storage adapter reports as `rejected`, never as a write. */
@@ -219,7 +244,7 @@ export function planEditableTailReplacement(
   if (!tail || tail.forkTurnId !== input.expectedForkTurnId) {
     throw new EditableTailRefusedError('stale_boundary');
   }
-  const prefix = turns.slice(0, tail.userIndex);
+  const prefix = turns.slice(0, tail.tailStart);
   let previousUserTurnId: string | undefined;
   for (let index = prefix.length - 1; index >= 0; index -= 1) {
     const entry = prefix[index];

@@ -355,9 +355,14 @@ export class SessionObserver {
             this.active.delete(id);
             continue;
           }
-          const assistant = [...(this.assistants.get(id)?.entries() ?? [])]
-            .filter(([position]) => position > row.position)
-            .sort(([a], [b]) => a - b)[0]?.[1];
+          const replies = [...(this.assistants.get(id)?.entries() ?? [])];
+          const assistant =
+            replies
+              .filter(([position]) => position > row.position)
+              .sort(([a], [b]) => a - b)[0]?.[1] ??
+            replies
+              .filter(([position]) => position < row.position)
+              .sort(([a], [b]) => b - a)[0]?.[1];
           const next = projectTurn(row.scalars, assistant);
           const previous = this.turns.get(id);
           if (!this.initial) {

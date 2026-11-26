@@ -40,6 +40,7 @@ import { createHistoryWriter, type HistoryWriter } from '../history-writer';
 import type { SessionSnapshotService } from './snapshot';
 import {
   EditableTailRefusedError,
+  editableTailStart,
   planEditableTailReplacement,
   type EditableTailPlan,
 } from './planner';
@@ -738,7 +739,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
             let start = rows.length;
             for (let i = rows.length - 1; i >= 0; i--)
               if (rows[i]?.role === 'user') {
-                start = i;
+                start = editableTailStart(rows, i);
                 break;
               }
             return rows.slice(start).map((_, offset) => start + offset);

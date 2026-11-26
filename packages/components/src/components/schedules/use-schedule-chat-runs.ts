@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SessionHistory, SessionId } from '@lody/shared';
+import { repliedUserTurnId } from '@lody/shared/session-data';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 
 export type ScheduleChatRun = {
@@ -32,8 +33,10 @@ export function pickScheduleChatRuns(
   scheduleId: string
 ): ScheduleChatRun[] {
   const replies = new Map<string, RunMetadata>();
-  for (const turn of history)
-    if (turn.role !== 'user' && turn.userTurnId) replies.set(turn.userTurnId, turn);
+  for (const turn of history) {
+    const replied = repliedUserTurnId(turn);
+    if (replied) replies.set(replied, turn);
+  }
   return history
     .filter((turn) => turn.role === 'user' && runOf(turn) === scheduleId)
     .map((turn) => {

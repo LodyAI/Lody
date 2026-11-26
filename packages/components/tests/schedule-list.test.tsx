@@ -391,6 +391,38 @@ describe('run history of a schedule that posts into one chat', () => {
   });
 });
 
+describe('schedule run reply state ignores standalone attachment entries', () => {
+  it('keeps a finished run done when a fallback attachment entry follows its reply', async () => {
+    const { pickScheduleChatRuns } =
+      await import('../src/components/schedules/use-schedule-chat-runs');
+    const runs = pickScheduleChatRuns(
+      [
+        {
+          id: 'u1',
+          role: 'user',
+          timestamp: '2026-09-01T00:00:00Z',
+          scheduleRun: { scheduleId: 'journal', turnId: 'u1', title: 'J' },
+        },
+        {
+          id: 'assistant:u1',
+          role: 'assistant',
+          timestamp: '2026-09-01T00:00:01Z',
+          userTurnId: 'u1',
+          endedAt: 1,
+        },
+        {
+          id: 'assistant-file-1',
+          role: 'assistant',
+          timestamp: '2026-09-01T00:00:02Z',
+          userTurnId: 'u1',
+        },
+      ] as never,
+      'journal'
+    );
+    expect(runs.map((run) => [run.turnId, run.state])).toEqual([['u1', 'done']]);
+  });
+});
+
 /**
  * The product language is `zh_CN`, which every `Intl` constructor rejects with a
  * RangeError. These render the real components under it, because the pure

@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionHistory } from '@lody/shared';
-import { subscribeOnFrame, type ConversationView } from '@/lib/conversation-view';
+import {
+  subscribeOnFrame,
+  visitQuestionFirst,
+  type ConversationView,
+} from '@/lib/conversation-view';
 import { extractSearchBlocksForMessage, type SessionSearchBlock } from '@/lib/session-chat-search';
 
 const EMPTY_BLOCKS: SessionSearchBlock[] = [];
@@ -38,16 +42,23 @@ export function useIncrementalSearchBlocks(
       if (cancelled) return;
       const cache = cacheRef.current;
       const next: SessionSearchBlock[] = [];
-      for (let i = 0; i < view.turnCount; i += 1) {
-        const turn = view.turn(i);
-        if (!turn) continue;
-        let cached = cache.get(turn);
-        if (!cached || cached.index !== i) {
-          cached = { index: i, blocks: extractSearchBlocksForMessage(turn, i) };
-          cache.set(turn, cached);
+      visitQuestionFirst(
+        view,
+        (i) => {
+          const turn = view.turn(i);
+          if (!turn) return;
+          let cached = cache.get(turn);
+          if (!cached || cached.index !== i) {
+            cached = { index: i, blocks: extractSearchBlocksForMessage(turn, i) };
+            cache.set(turn, cached);
+          }
+          for (const block of cached.blocks) next.push(block);
+        },
+        (i) => {
+          const turn = view.turn(i);
+          return (turn?.items?.length ?? 0) > 0 || (turn?.plan?.length ?? 0) > 0;
         }
-        for (const block of cached.blocks) next.push(block);
-      }
+      );
       setBlocks(next);
     };
     // Hydration and streaming both rebuild at most once per frame.

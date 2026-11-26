@@ -10,6 +10,7 @@ export {
   createAssistantTurn,
   markTurnSeenBlocked,
   resolveEditableTail,
+  editableTailStart,
   planEditableTailReplacement,
   EditableTailRefusedError,
   type EditableTail,

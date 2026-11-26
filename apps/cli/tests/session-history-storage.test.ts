@@ -152,6 +152,18 @@ describe('stored history operations', () => {
     ]);
   });
 
+  it("reads a reply stored before its question as that question's output", async () => {
+    const { data } = makeHarness();
+    await data.commands.appendTurn(userTurn('before'));
+    await data.commands.appendTurn({ ...assistantTurn('assistant:user-1'), userTurnId: 'user-1' });
+    await data.commands.appendTurn(userTurn('user-1'));
+    expect((await data.history.readTurnOutput('user-1')).map((t) => t.id)).toEqual([
+      'user-1',
+      'assistant:user-1',
+    ]);
+    expect((await data.history.readTurnOutput('before')).map((t) => t.id)).toEqual(['before']);
+  });
+
   it('reads turns by business id and raw range', async () => {
     const { data } = makeHarness();
     await data.commands.appendTurn(userTurn('a'));
@@ -1371,6 +1383,89 @@ describe('stored history operations', () => {
       text: 'old',
       legacyField: 9,
     });
+  });
+
+  it('replaces a tail whose reply was stored before its question, forking at the earlier reply', async () => {
+    const harness = makeHarness();
+    const { data } = harness;
+
+    await data.commands.appendTurn(userTurn('u1'));
+    await data.commands.appendTurn({
+      ...assistantTurn('a1'),
+      userTurnId: 'u1',
+      acpTurnId: 'provider-1',
+    });
+    await data.commands.appendTurn({
+      ...assistantTurn('assistant:u2'),
+      userTurnId: 'u2',
+      acpTurnId: 'provider-2',
+    });
+    await data.commands.appendTurn(userTurn('u2'));
+
+    const stale = await data.commands.replaceEditableTail({
+      expectedUserTurnId: 'u2',
+      expectedForkTurnId: 'provider-2',
+      replacement: userTurn('u2-new', 'edited'),
+    });
+    expect(stale).toMatchObject({ status: 'rejected', reason: { code: 'stale_boundary' } });
+
+    const applied = await data.commands.replaceEditableTail({
+      expectedUserTurnId: 'u2',
+      expectedForkTurnId: 'provider-1',
+      replacement: userTurn('u2-new', 'edited'),
+    });
+    expect(applied.status).toBe('accepted');
+    if (applied.status !== 'accepted') return;
+    expect(applied.previousUserTurnId).toBe('u1');
+    expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'u2-new']);
+
+    await applied.rollback();
+    expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'assistant:u2', 'u2']);
+  });
+
+  it('replaces an earlier-stored reply with the rows of its turn written in between', async () => {
+    const harness = makeHarness();
+    const { data } = harness;
+
+    await data.commands.appendTurn(userTurn('u1'));
+    await data.commands.appendTurn({
+      ...assistantTurn('a1'),
+      userTurnId: 'u1',
+      acpTurnId: 'provider-1',
+    });
+    await data.commands.appendTurn({
+      ...assistantTurn('assistant:u2'),
+      userTurnId: 'u2',
+      acpTurnId: 'provider-2',
+    });
+    await data.commands.appendTurn({
+      id: 'warning',
+      role: 'system',
+      timestamp: '2026-01-01T00:00:02Z',
+      items: [{ type: 'system_notice', name: 'agent_warning', meta: { message: 'slow' } }],
+      fileDiff: [],
+    });
+    await data.commands.appendTurn({ ...assistantTurn('assistant-file-1'), userTurnId: 'u2' });
+    await data.commands.appendTurn(userTurn('u2'));
+
+    const applied = await data.commands.replaceEditableTail({
+      expectedUserTurnId: 'u2',
+      expectedForkTurnId: 'provider-1',
+      replacement: userTurn('u2-new', 'edited'),
+    });
+    expect(applied.status).toBe('accepted');
+    if (applied.status !== 'accepted') return;
+    expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'u2-new']);
+
+    await applied.rollback();
+    expect(harness.readStored().map((turn) => turn.id)).toEqual([
+      'u1',
+      'a1',
+      'assistant:u2',
+      'warning',
+      'assistant-file-1',
+      'u2',
+    ]);
   });
 
   it('rejects the compensation when the replaced range was edited by a peer', async () => {

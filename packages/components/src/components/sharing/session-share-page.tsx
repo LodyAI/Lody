@@ -29,6 +29,7 @@ import {
 } from '@/lib/session-share-navigation';
 import { buildOpenedBySessionTree } from '@/lib/session-opened-by-tree';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
+import { inQuestionFirstOrder } from '@/lib/conversation-view';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionChatStreamView, MessageRowView } from '../ai-gui/view';
 import { createSharedChatStreamBuilder } from './session-share-stream-items';
@@ -368,7 +369,7 @@ function ShareConversationPane({
     if (copying || snapshot.status !== 'ready') return;
     setCopying(true);
     try {
-      const history = conversationCopyRange(snapshot.history);
+      const history = conversationCopyRange(inQuestionFirstOrder(snapshot.history));
       const last = history.at(-1);
       const { markdown, stats } = buildConversationMarkdown({
         history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],

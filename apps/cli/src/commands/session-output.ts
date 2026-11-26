@@ -89,6 +89,12 @@ export function findAssistantEntryForUserTurn(
       return entry;
     }
   }
+  for (let index = userTurnIndex - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (repliedUserTurnId(entry) === userTurnId) {
+      return entry;
+    }
+  }
 
   return undefined;
 }

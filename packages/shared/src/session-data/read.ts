@@ -137,6 +137,12 @@ export function selectTurnOutput(
       }
       if (assistantFound && user.status !== 'failed') break;
     }
+    for (let j = i - 1; !assistantFound && j >= 0; j--) {
+      if (repliedUserTurnId(scalars(j)) !== userTurnId) continue;
+      const turn = body(j);
+      if (turn) selected.splice(1, 0, turn);
+      assistantFound = true;
+    }
     return selected;
   }
   return [];

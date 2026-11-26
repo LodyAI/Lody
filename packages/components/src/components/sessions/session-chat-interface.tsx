@@ -907,6 +907,7 @@ import {
   getPerformanceNowMs,
 } from '@/lib/posthog-analytics';
 import type { AnalyticsOutcome } from '@lody/shared';
+import { editableTailStart } from '@lody/shared/session-data';
 import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
 import {
   getPullRequestNumber,
@@ -3987,7 +3988,8 @@ export const SessionChatInterface = memo(
         return null;
       }
 
-      for (let index = userIndex - 1; index >= 0; index -= 1) {
+      const tailStart = editableTailStart(sessionHistory, userIndex);
+      for (let index = tailStart - 1; index >= 0; index -= 1) {
         const entry = sessionHistory[index];
         if (!entry) continue;
         if (entry.role === 'user') return null;
