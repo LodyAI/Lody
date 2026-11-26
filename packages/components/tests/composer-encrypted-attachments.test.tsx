@@ -802,7 +802,7 @@ it('retries transient 503 attachment chunks, clears rejected token cache, and pr
   sessionTextDraftsCache.delete(draftSessionId);
 
   // P1-3: transient 503 upload chunk retries and rejected token promise is cleared for next attempt.
-  vi.useFakeTimers();
+  const previousFetch = globalThis.fetch;
   try {
     let tokenCalls = 0;
     let uploadAttempts = 0;
@@ -841,18 +841,18 @@ it('retries transient 503 attachment chunks, clears rejected token cache, and pr
         file,
         kind: 'file',
         attachmentToken,
+        retryDelaysMs: [0, 0],
       })
     ).rejects.toThrow('temporary token failure');
 
-    const uploadPromise = uploadProtectedAttachment({
+    const uploaded = await uploadProtectedAttachment({
       workspaceId: 'ws-retry' as WorkspaceId,
       sessionId: 'sess-retry' as SessionId,
       file,
       kind: 'file',
       attachmentToken,
+      retryDelaysMs: [0, 0],
     });
-    await vi.advanceTimersByTimeAsync(150);
-    const uploaded = await uploadPromise;
     expect(uploadAttempts).toBe(2);
     expect(uploaded.encryption.parts).toEqual(['part-1']);
 
@@ -862,24 +862,18 @@ it('retries transient 503 attachment chunks, clears rejected token cache, and pr
       workspaceId: 'ws-retry' as WorkspaceId,
       sessionId: 'sess-retry' as SessionId,
       encryption: uploaded.encryption,
+      retryDelaysMs: [0, 0],
       attachmentToken: async () => {
         downloadTokenCalls += 1;
         throw new Error(`download token failed ${downloadTokenCalls}`);
       },
     });
     const iter = chunks[Symbol.asyncIterator]();
-    const nextOutcome = iter.next().then(
-      () => null,
-      (error) => error
-    );
-    await vi.advanceTimersByTimeAsync(150 + 450);
-    const downloadError = await nextOutcome;
-    expect(downloadError).toBeInstanceOf(Error);
+    await expect(iter.next()).rejects.toThrow('download token failed 3');
     // Token cache was cleared after each rejection so retries re-invoked attachmentToken.
     expect(downloadTokenCalls).toBe(3);
   } finally {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
+    vi.stubGlobal('fetch', previousFetch);
   }
 });
 

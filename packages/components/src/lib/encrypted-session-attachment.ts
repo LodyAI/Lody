@@ -41,27 +41,21 @@ const sleepWithAbort = (delayMs: number, signal?: AbortSignal): Promise<void> =>
 
 async function fetchWithTransientRetry(
   run: () => Promise<Response>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  delaysMs: readonly number[] = ATTACHMENT_TRANSIENT_RETRY_DELAYS_MS
 ): Promise<Response> {
   for (let attempt = 0; ; attempt += 1) {
     try {
       const response = await run();
-      if (
-        !TRANSIENT_HTTP_STATUSES.has(response.status) ||
-        attempt >= ATTACHMENT_TRANSIENT_RETRY_DELAYS_MS.length
-      ) {
+      if (!TRANSIENT_HTTP_STATUSES.has(response.status) || attempt >= delaysMs.length) {
         return response;
       }
     } catch (error) {
-      if (
-        signal?.aborted ||
-        isAbortError(error) ||
-        attempt >= ATTACHMENT_TRANSIENT_RETRY_DELAYS_MS.length
-      ) {
+      if (signal?.aborted || isAbortError(error) || attempt >= delaysMs.length) {
         throw error;
       }
     }
-    await sleepWithAbort(ATTACHMENT_TRANSIENT_RETRY_DELAYS_MS[attempt]!, signal);
+    await sleepWithAbort(delaysMs[attempt]!, signal);
   }
 }
 
@@ -73,6 +67,7 @@ export async function uploadProtectedAttachment(args: {
   attachmentToken?: () => Promise<string>;
   signal?: AbortSignal;
   onProgress?: (percent: number) => void;
+  retryDelaysMs?: readonly number[];
 }) {
   if (!args.attachmentToken) throw new Error('e2ee_attachment_unavailable');
   let tokenPromise: Promise<string> | undefined;
@@ -95,31 +90,35 @@ export async function uploadProtectedAttachment(args: {
     read: async (offset, length) =>
       new Uint8Array(await args.file.slice(offset, offset + length).arrayBuffer()),
     upload: async (bytes, index) => {
-      const response = await fetchWithTransientRetry(async () => {
-        const token = await getToken();
-        return fetch(
-          buildSessionFileApiUrl(
-            API_BASE_URL,
-            encryptedAttachmentPath(getSessionFileUploadApiPath(args.workspaceId), args.kind)
-          ),
-          {
-            method: 'POST',
-            signal: args.signal,
-            headers: {
-              Authorization: `Bearer ${token}`,
-              ...buildSessionFileUploadMetadataHeaders({
-                sessionId: args.sessionId,
-                fileName: 'attachment.bin',
-                mimeType: 'application/octet-stream',
-                sha256: attachmentSha256(bytes),
-                sizeBytes: bytes.length,
-                textPreview: false,
-              }),
-            },
-            body: bytes as Uint8Array<ArrayBuffer>,
-          }
-        );
-      }, args.signal);
+      const response = await fetchWithTransientRetry(
+        async () => {
+          const token = await getToken();
+          return fetch(
+            buildSessionFileApiUrl(
+              API_BASE_URL,
+              encryptedAttachmentPath(getSessionFileUploadApiPath(args.workspaceId), args.kind)
+            ),
+            {
+              method: 'POST',
+              signal: args.signal,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                ...buildSessionFileUploadMetadataHeaders({
+                  sessionId: args.sessionId,
+                  fileName: 'attachment.bin',
+                  mimeType: 'application/octet-stream',
+                  sha256: attachmentSha256(bytes),
+                  sizeBytes: bytes.length,
+                  textPreview: false,
+                }),
+              },
+              body: bytes as Uint8Array<ArrayBuffer>,
+            }
+          );
+        },
+        args.signal,
+        args.retryDelaysMs
+      );
       if (!response.ok) throw new Error(`Encrypted attachment upload failed (${response.status})`);
       const body: unknown = await response.json();
       const block = SessionInputBlockSchema.parse(
@@ -142,6 +141,7 @@ export function protectedAttachmentChunks(args: {
   encryption: EncryptedAttachment;
   attachmentToken?: () => Promise<string>;
   signal?: AbortSignal;
+  retryDelaysMs?: readonly number[];
 }) {
   let token: Promise<string> | undefined;
   const getToken = () => {
@@ -173,7 +173,8 @@ export function protectedAttachmentChunks(args: {
               headers: { Authorization: `Bearer ${await getToken()}` },
             }
           ),
-        args.signal
+        args.signal,
+        args.retryDelaysMs
       ),
   });
 }
