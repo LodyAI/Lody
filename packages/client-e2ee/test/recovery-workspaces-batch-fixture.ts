@@ -69,6 +69,9 @@ let loseAppendReply = false;
 let emptyMailbox = false;
 let historyReads = 0;
 let stagingReads = 0;
+let inlineAppendHistory: 'none' | 'contiguous' | 'gap' = 'none';
+let mailboxFetches: Array<{ workspaceId: string; recipient: string; kind?: string }> = [];
+let mailboxStatuses: Array<{ workspaceId: string; recipient: string }> = [];
 const stagedGroups = new Map<string, EpochStagedGroup>();
 /** Committed epochs whose envelopes have not reached staging yet. */
 const heldGroups = new Map<string, EpochStagedGroup>();
@@ -105,13 +108,30 @@ async function server(path: string, args: Record<string, unknown>) {
     }
   };
   if (path === 'e2eeWorkspaces:appendRecord') {
+    const startIndex = w!.records.length;
     append(w!, raw(String(args.recordHex)), args.credentialHash as string | undefined);
     if (loseAppendReply) {
       loseAppendReply = false;
       throw new Error('synthetic lost append reply');
     }
     await wait(); // Commit happened; acknowledgement is deliberately unknown.
-    return { status: 'committed', recordHash: args.requestId };
+    const page =
+      inlineAppendHistory === 'none'
+        ? undefined
+        : {
+            workspaceId: w!.id,
+            genesisHash: w!.genesisHash,
+            checkpoint: { headHash: hex(view(w!).head.toBytes()), length: w!.records.length },
+            startIndex: inlineAppendHistory === 'gap' ? w!.records.length + 1 : startIndex,
+            recordsHex: w!.records.slice(startIndex).map(hex),
+            position: `p1:${w!.id}:${w!.records.length}:opaque:0`,
+            nextCursor: null,
+          };
+    return {
+      status: 'committed',
+      recordHash: args.requestId,
+      ...(page ? { historyPage: page } : {}),
+    };
   }
   await wait();
   if (path === 'e2eeMembers:workspaces')
@@ -167,6 +187,11 @@ async function server(path: string, args: Record<string, unknown>) {
     );
     const recipient = w!.credentials.get(hash);
     if (!recipient) throw new Error('synthetic credential missing');
+    mailboxFetches.push({
+      workspaceId: w!.id,
+      recipient,
+      kind: view(w!).inspectState().devices.get(recipient)?.kind,
+    });
     const retained = epochZero.get(`${w!.id}:${recipient}`);
     const frame =
       retained ??
@@ -189,8 +214,11 @@ async function server(path: string, args: Record<string, unknown>) {
     };
   }
   if (path === 'e2eeMailbox:report' || path === 'e2eeMailbox:repair') return null;
-  if (path === 'e2eeMailbox:status')
+  if (path === 'e2eeMailbox:status') {
+    const slot = args.slot as { recipient: string };
+    mailboxStatuses.push({ workspaceId: w!.id, recipient: slot.recipient });
     return { ...(args.slot as object), revision: 1, status: 'InstallationReported' };
+  }
   if (path === 'e2eeEpochStaging:readGroup') {
     stagingReads++;
     const group = stagedGroups.get(w!.id);
@@ -438,12 +466,26 @@ export async function admitted() {
     })
   );
 }
+export function setInlineAppendHistory(mode: 'none' | 'contiguous' | 'gap') {
+  inlineAppendHistory = mode;
+}
+export function resetIoCounters() {
+  historyReads = 0;
+  stagingReads = 0;
+  mailboxFetches = [];
+  mailboxStatuses = [];
+}
+export async function setupWorkspace(id: string) {
+  return await run(engine.setup({ file }, [id]));
+}
 export function state() {
   return {
     stage,
     blocked,
     historyReads,
     stagingReads,
+    mailboxFetches: [...mailboxFetches],
+    mailboxStatuses: [...mailboxStatuses],
     failures,
     progress: snapshots.at(-1),
     snapshots,

@@ -289,12 +289,15 @@ const makeSession = Effect.fnUntraced(function* (input: {
   const mutex = yield* Semaphore.make(1);
   let readers = 0;
   const readsDrained = Deferred.makeUnsafe<void>();
+  const verifiedEntries = new Map<string, string>();
+  const ownedIndexes = new WeakSet<object>();
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       yield* mutex.withPermit(
         Effect.sync(() => {
           closed = true;
           master.fill(0);
+          verifiedEntries.clear();
         })
       );
       // Entry readers own independent key copies. Close stops admission, then
@@ -335,7 +338,9 @@ const makeSession = Effect.fnUntraced(function* (input: {
           );
     if (!remote) {
       if (pin) return yield* vaultError('rollback');
-      return { header: null, value: { entries: [] } as RecoveryVaultIndex };
+      const empty = { header: null, value: { entries: [] } as RecoveryVaultIndex };
+      ownedIndexes.add(empty);
+      return empty;
     }
     const header = yield* attempt(() => ownCiphertext(remote));
     if (header.entryId !== indexId(vaultId)) return yield* vaultError('authentication');
@@ -368,12 +373,15 @@ const makeSession = Effect.fnUntraced(function* (input: {
       }
     }
     yield* attempt(guard);
-    return { header, value };
+    const result = { header, value };
+    ownedIndexes.add(result);
+    return result;
   });
-  const readEntry = Effect.fnUntraced(function* (ref: RecoveryEntryReference, readMaster = master) {
-    yield* attempt(guard);
-    const remote = yield* store.readEntry(vaultId, ref.entryId);
-    if (!remote) return yield* vaultError('missing');
+  const decryptEntry = Effect.fnUntraced(function* (
+    ref: RecoveryEntryReference,
+    remote: VaultCiphertext,
+    readMaster = master
+  ) {
     const header = yield* attempt(() => ownCiphertext(remote));
     if (ciphertextDigest(header) !== ref.digest) return yield* vaultError('authentication');
     return yield* Effect.acquireUseRelease(
@@ -396,6 +404,14 @@ const makeSession = Effect.fnUntraced(function* (input: {
         }),
       (plain) => Effect.sync(() => plain.fill(0))
     );
+  });
+  const readEntry = Effect.fnUntraced(function* (ref: RecoveryEntryReference, readMaster = master) {
+    yield* attempt(guard);
+    const remote = yield* store.readEntry(vaultId, ref.entryId);
+    if (!remote) return yield* vaultError('missing');
+    const value = yield* decryptEntry(ref, remote, readMaster);
+    verifiedEntries.set(ref.entryId, ref.digest);
+    return value;
   });
   const upload = Effect.fnUntraced(function* (source: RecoveryPrivatePackage, entryId: string) {
     yield* attempt(guard);
@@ -430,7 +446,7 @@ const makeSession = Effect.fnUntraced(function* (input: {
             retired: false,
           };
           yield* Effect.acquireUseRelease(
-            readEntry(reference),
+            decryptEntry(reference, reread),
             (decoded) =>
               attempt(() => {
                 if (
@@ -441,6 +457,7 @@ const makeSession = Effect.fnUntraced(function* (input: {
               }),
             (decoded) => Effect.sync(() => wipeRecoveryPackage(decoded))
           );
+          verifiedEntries.set(reference.entryId, reference.digest);
           return reference;
         }),
       (owned) => Effect.sync(() => wipeRecoveryPackage(owned))
@@ -480,9 +497,10 @@ const makeSession = Effect.fnUntraced(function* (input: {
   });
   const reserve = Effect.fnUntraced(function* (
     candidate: RecoveryEntryReference,
-    replace: boolean = false
+    replace: boolean = false,
+    priorIndex?: Effect.Success<ReturnType<typeof index>>
   ) {
-    const before = yield* index(),
+    const before = priorIndex && ownedIndexes.has(priorIndex) ? priorIndex : yield* index(),
       existing = before.value.entries.find(
         (ref) =>
           !ref.retired &&
@@ -492,12 +510,14 @@ const makeSession = Effect.fnUntraced(function* (input: {
     if (existing && !replace) return { outcome: 'Existing' as const, reference: existing };
     if (replace && (!existing || candidate.generation <= existing.generation))
       return yield* vaultError('conflict');
-    // Decrypt candidate again before selecting it; uploading alone proves nothing.
-    yield* Effect.acquireUseRelease(
-      readEntry(candidate),
-      () => Effect.void,
-      (owned) => Effect.sync(() => wipeRecoveryPackage(owned))
-    );
+    // Decrypt candidate unless this session already read-back and decrypted this immutable digest.
+    if (verifiedEntries.get(candidate.entryId) !== candidate.digest) {
+      yield* Effect.acquireUseRelease(
+        readEntry(candidate),
+        () => Effect.void,
+        (owned) => Effect.sync(() => wipeRecoveryPackage(owned))
+      );
+    }
     const entries = before.value.entries.map((ref) =>
       existing && ref.entryId === existing.entryId ? { ...ref, retired: true } : ref
     );
@@ -642,7 +662,10 @@ const makeSession = Effect.fnUntraced(function* (input: {
     },
     upload: (value: RecoveryPrivatePackage, entryId = hex(random(32))) =>
       ownedOperation(upload(value, entryId)),
-    reserve: (candidate: RecoveryEntryReference) => ownedOperation(reserve(candidate)),
+    reserve: (
+      candidate: RecoveryEntryReference,
+      before?: Effect.Success<ReturnType<typeof index>>
+    ) => ownedOperation(reserve(candidate, false, before)),
     replace: (candidate: RecoveryEntryReference) => ownedOperation(reserve(candidate, true)),
     /** Whether an offline recovery file wrap (`entryId === vaultId`) exists on the service. */
     hasRecoveryFile: () =>
@@ -1024,6 +1047,7 @@ const makeSession = Effect.fnUntraced(function* (input: {
             revision: after.header.revision,
             digest: ciphertextDigest(after.header),
           });
+          verifiedEntries.delete(entryId);
           if (yield* store.readEntry(vaultId, entryId)) return yield* vaultError('storage');
           return yield* Effect.void;
         })
@@ -1042,17 +1066,16 @@ const makeSession = Effect.fnUntraced(function* (input: {
                 const value = useCanonicalSecret(plain, (decoded) =>
                   ownRecoveryPackage(decoded as RecoveryPrivatePackage)
                 );
-                return {
-                  reference: {
-                    genesis: value.genesis,
-                    membershipId: value.membershipId,
-                    generation: value.generation,
-                    entryId,
-                    digest: ciphertextDigest(header),
-                    retired: false,
-                  },
-                  value,
+                const reference: RecoveryEntryReference = {
+                  genesis: value.genesis,
+                  membershipId: value.membershipId,
+                  generation: value.generation,
+                  entryId,
+                  digest: ciphertextDigest(header),
+                  retired: false,
                 };
+                verifiedEntries.set(reference.entryId, reference.digest);
+                return { reference, value };
               }),
             (plain) => Effect.sync(() => plain.fill(0))
           );
