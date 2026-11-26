@@ -50,6 +50,7 @@ export class PromptShortcutRuntime {
   private snapshot: ShortcutRuntimeSnapshot;
   private workspaceIndex: {
     catalog: PromptShortcutCatalog;
+    write: boolean;
     close(): Promise<void>;
   } | null = null;
   private openingWorkspaceIndex: Promise<void> | null = null;
@@ -267,47 +268,60 @@ export class PromptShortcutRuntime {
     );
   }
 
-  private openWorkspaceIndex(): Promise<void> {
-    if (this.workspaceIndex) return Promise.resolve();
-    if (this.openingWorkspaceIndex) return this.openingWorkspaceIndex;
-    const id = getWorkspaceShortcutIndexStreamId(this.workspaceId);
-    const next = (async () => {
-      const sync = await this.remote!.acquire(
-        { kind: 'workspace-index', workspaceId: this.workspaceId },
-        this.canWrite
-      );
-      let releaseReplica: (() => Promise<void>) | undefined;
-      let unsubscribe: (() => void) | undefined;
-      let retained = false;
-      try {
-        const lease = await this.store.repo.acquireFlockDoc(id);
-        releaseReplica = () => lease.release();
-        const catalog = new PromptShortcutCatalog(lease.flock);
-        unsubscribe = lease.flock.subscribe(() => this.refreshIndexes());
-        await sync.join();
-        if (this.disposed) return;
-        this.workspaceIndex = {
-          catalog,
-          close: async () => {
+  private async openWorkspaceIndex(): Promise<void> {
+    while (!this.disposed) {
+      const desiredWrite = this.canWrite;
+      if (this.workspaceIndex && this.workspaceIndex.write === desiredWrite) return;
+      if (this.openingWorkspaceIndex) {
+        await this.openingWorkspaceIndex.catch(() => undefined);
+        continue;
+      }
+      const next = (async () => {
+        const previous = this.workspaceIndex;
+        const id = getWorkspaceShortcutIndexStreamId(this.workspaceId);
+        const sync = await this.remote!.acquire(
+          { kind: 'workspace-index', workspaceId: this.workspaceId },
+          desiredWrite
+        );
+        let releaseReplica: (() => Promise<void>) | undefined;
+        let unsubscribe: (() => void) | undefined;
+        let retained = false;
+        try {
+          const lease = await this.store.repo.acquireFlockDoc(id);
+          releaseReplica = () => lease.release();
+          const catalog = new PromptShortcutCatalog(lease.flock);
+          unsubscribe = lease.flock.subscribe(() => this.refreshIndexes());
+          await sync.join();
+          if (this.disposed) return;
+          this.workspaceIndex = {
+            catalog,
+            write: desiredWrite,
+            close: async () => {
+              unsubscribe?.();
+              await sync.release();
+              await lease.release();
+            },
+          };
+          retained = true;
+          if (previous) {
+            await previous.close();
+          }
+          this.refreshIndexes();
+        } finally {
+          if (!retained) {
             unsubscribe?.();
             await sync.release();
-            await lease.release();
-          },
-        };
-        retained = true;
-        this.refreshIndexes();
-      } finally {
-        if (!retained) {
-          unsubscribe?.();
-          await sync.release();
-          await releaseReplica?.();
+            await releaseReplica?.();
+          }
         }
-      }
-    })().finally(() => {
-      this.openingWorkspaceIndex = null;
-    });
-    this.openingWorkspaceIndex = next;
-    return next;
+      })().finally(() => {
+        if (this.openingWorkspaceIndex === next) {
+          this.openingWorkspaceIndex = null;
+        }
+      });
+      this.openingWorkspaceIndex = next;
+      await next;
+    }
   }
 
   private async syncLegacyIndexOnce(
@@ -639,6 +653,8 @@ export class PromptShortcutRuntime {
   }
 
   private async mutateWorkspaceIndex(mutate: (catalog: PromptShortcutCatalog) => void) {
+    this.assertWritable();
+    await this.openWorkspaceIndex();
     this.assertWritable();
     const sync = await this.remote!.acquire(
       { kind: 'workspace-index', workspaceId: this.workspaceId },
