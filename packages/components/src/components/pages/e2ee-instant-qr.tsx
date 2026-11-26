@@ -46,7 +46,7 @@ export const supportsInstantQr = (runtime: InstantQrRuntime | undefined) =>
 export type InstantQrPhase =
   | { kind: 'loading' }
   | { kind: 'showing'; pairingString: string; expiresAt: number }
-  | { kind: 'joining'; deviceName: string; unavailable: string[] }
+  | { kind: 'joining'; deviceName: string; unavailable: string[]; retrying?: boolean }
   | {
       kind: 'joined';
       deviceName: string;
@@ -90,6 +90,7 @@ export function useInstantQrOffer(
     let alive = true;
     let running = false;
     let settled = false;
+    let signedAwaitingDelivery = false;
     let offer: { pairingString: string; expiresAt: number } | null = null;
     /** The verified request this offer approves, latched once: every later tick
      * resumes the same approval with the same code, which never signs twice. */
@@ -110,7 +111,8 @@ export function useInstantQrOffer(
       if (!alive || running || settled || !offer) return;
       // A hidden window does not sign; it resumes as soon as it is shown again.
       if (document.visibilityState !== 'visible') return;
-      if (Date.now() >= offer.expiresAt) return finish({ kind: 'expired' });
+      if (Date.now() >= offer.expiresAt && !signedAwaitingDelivery)
+        return finish({ kind: 'expired' });
       running = true;
       try {
         if (!target) {
@@ -138,7 +140,15 @@ export function useInstantQrOffer(
         if (!alive) return;
         const outcomes = result.workspaces.map((workspace) => workspace.outcome);
         // Signed but not yet delivered: the next tick publishes the journaled original.
-        if (outcomes.includes('awaiting-delivery')) return;
+        if (outcomes.includes('awaiting-delivery')) {
+          signedAwaitingDelivery = true;
+          setPhase({
+            kind: 'joining',
+            deviceName: target.deviceName,
+            unavailable: target.unavailable,
+          });
+          return;
+        }
         finish(
           outcomes.includes('admitted')
             ? {
@@ -154,6 +164,13 @@ export function useInstantQrOffer(
         // A typed refusal is final; anything else retries the same code next tick.
         if (accountPairingErrorCode(failure))
           finish({ kind: 'failed', error: failureKey(failure) });
+        else if (target)
+          setPhase({
+            kind: 'joining',
+            deviceName: target.deviceName,
+            unavailable: target.unavailable,
+            retrying: true,
+          });
       } finally {
         running = false;
       }
@@ -323,6 +340,15 @@ export function E2eeInstantQrApprove(props: {
                 <Spinner size="small" />
                 {t('e2ee.instantQr.joining', { device: phase.deviceName })}
               </p>
+              {phase.retrying && (
+                <p
+                  role="status"
+                  data-testid="e2ee-instant-qr-retrying"
+                  {...stylex.props(styles.quiet)}
+                >
+                  {t('e2ee.instantQr.retrying')}
+                </p>
+              )}
               <div {...stylex.props(styles.actions)}>
                 <Button variant="ghost" size="small" onClick={refresh}>
                   {t('common.cancel')}

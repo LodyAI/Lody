@@ -191,7 +191,7 @@ describe('mobile encrypted workspace sheet', () => {
     expect(container.textContent).toContain('organization.workspaceSlugError.required');
   });
 
-  it('discards pending intent immediately on failure and keeps the form editable with no draft UI', async () => {
+  it('preserves pending intent on transient failure and keeps the form editable with no draft UI', async () => {
     state.createPrepared.mockRejectedValue(new Error('reply lost'));
     await renderSheet();
     await typeInto(nameField(), 'Private');
@@ -205,11 +205,31 @@ describe('mobile encrypted workspace sheet', () => {
       button('Create')!.click();
       await Promise.resolve();
     });
-    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([]);
+    const saved = listPendingE2eeWorkspaces(localStorage, 'account-A');
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ accountId: 'account-A', name: 'Private', slug: 'private' });
     expect(nameField().disabled).toBe(false);
     expect(container.textContent).toContain('e2ee.create.failed');
     expect(container.querySelector('[data-testid="e2ee-creation-requests"]')).toBeNull();
     expect(container.querySelector('[data-testid="mobile-create-workspace-resume"]')).toBeNull();
+  });
+
+  it('clears fresh pending intent when preparation is cancelled before submission', async () => {
+    state.createPrepared.mockRejectedValue(new Error('e2ee_creation_cancelled'));
+    await renderSheet();
+    await typeInto(nameField(), 'Private');
+    await typeInto(slugField(), 'private');
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="mobile-create-workspace-encrypted"]')!
+        .click();
+    });
+    await act(async () => {
+      button('Create')!.click();
+      await Promise.resolve();
+    });
+    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([]);
+    expect(container.textContent).not.toContain('e2ee.create.failed');
   });
 
   it('silently reconciles a leftover pending request on open and enters the workspace', async () => {

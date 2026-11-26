@@ -7248,5 +7248,7 @@
   "chat.runConfig.permissionDefaultSaved": "新しい会話はこの権限で始まります",
   "chat.runConfig.permissionDefaultFailed": "デフォルトの権限を保存できませんでした",
   "settings.agent.dialog.section.defaultPermission": "デフォルトの権限",
-  "settings.agent.dialog.defaultPermissionLastUsed": "前回選んだもの"
+  "settings.agent.dialog.defaultPermissionLastUsed": "前回選んだもの",
+  "e2ee.access.waitingKey.checkFailed": "現在キーを確認できません。接続を確認してもう一度お試しください。",
+  "e2ee.instantQr.retrying": "接続が中断されました。再試行しています…"
 }

@@ -490,7 +490,12 @@ function CreateWorkspaceAuthed({
         }
       }
     } catch (err) {
-      if (useEncryption && submittedIntent) {
+      if (
+        useEncryption &&
+        submittedIntent &&
+        err instanceof Error &&
+        err.message === 'e2ee_creation_cancelled'
+      ) {
         try {
           clearPendingE2eeWorkspace(localStorage, submittedIntent);
         } catch {

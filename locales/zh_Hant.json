@@ -7248,5 +7248,7 @@
   "chat.runConfig.permissionDefaultSaved": "新對話將預設使用這個權限",
   "chat.runConfig.permissionDefaultFailed": "預設權限儲存失敗",
   "settings.agent.dialog.section.defaultPermission": "預設權限",
-  "settings.agent.dialog.defaultPermissionLastUsed": "沿用上次選擇"
+  "settings.agent.dialog.defaultPermissionLastUsed": "沿用上次選擇",
+  "e2ee.access.waitingKey.checkFailed": "暫時無法檢查金鑰，請檢查網路連線後重試。",
+  "e2ee.instantQr.retrying": "連線中斷，正在重試…"
 }

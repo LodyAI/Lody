@@ -1558,6 +1558,36 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(counter.fullRefreshes).toBe(11);
   });
 
+  it('tracks the real refresh promise on manual key check and surfaces transient failures inline', async () => {
+    const firstManual = Promise.withResolvers<Error>();
+    const counter = lateKeyRuntime(Infinity, (refresh) =>
+      refresh === 5 ? firstManual.promise : null
+    );
+    await render();
+    for (const delay of [1_000, 2_000, 4_000]) await advanceFirstKeyPoll(delay);
+    expect(counter.fullRefreshes).toBe(4);
+    const checkAgain = container.querySelector<HTMLButtonElement>(
+      '[data-testid="e2ee-waiting-key-check"]'
+    )!;
+    expect(checkAgain.disabled).toBe(false);
+    await act(async () => checkAgain.click());
+    // Must stay disabled across the old 600ms mark while the real refresh is still in flight.
+    await advanceFirstKeyPoll(1_000);
+    expect(checkAgain.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="e2ee-waiting-key-error"]')).toBeNull();
+
+    await act(async () => firstManual.resolve(new Error('503 Service Unavailable')));
+    expect(checkAgain.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="e2ee-waiting-key-error"]')?.textContent).toBe(
+      'e2ee.access.waitingKey.checkFailed'
+    );
+
+    counter.installKey();
+    await act(async () => checkAgain.click());
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(container.querySelector('[data-testid="e2ee-waiting-key-error"]')).toBeNull();
+  });
+
   it.each(['leave workspace', 'unmount', 'switch account', 'sign out'] as const)(
     'clears a pending first-key recheck on %s',
     async (action) => {

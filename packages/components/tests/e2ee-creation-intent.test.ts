@@ -371,7 +371,7 @@ describe('silent background reconciliation of leftover pending creations', () =>
     slug: 'stale',
   };
 
-  it('reconciles a committed request, writes genesis pin, and clears all leftover intents', async () => {
+  it('reconciles a committed request, writes genesis pin, clears only that intent, and preserves remaining intents', async () => {
     localStorage.clear();
     savePendingE2eeWorkspace(localStorage, first);
     savePendingE2eeWorkspace(localStorage, second);
@@ -396,15 +396,54 @@ describe('silent background reconciliation of leftover pending creations', () =>
     const result = await reconcilePendingE2eeWorkspaces(port, localStorage, 'account-A');
     expect(result?.workspaceId).toBe('ws-recovered');
     expect(readE2eeGenesisPin(localStorage, 'account-A', 'ws-recovered')).toBe(hash);
-    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([]);
+    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([second]);
   });
 
-  it('silently clears leftover intents and returns null when reconciliation fails', async () => {
+  it('preserves pending intents on transient 503/network failure and recovers on retry', async () => {
     localStorage.clear();
     savePendingE2eeWorkspace(localStorage, first);
+    savePendingE2eeWorkspace(localStorage, second);
+    let fail = true;
+    const port = {
+      prepareCreation: async (input: typeof first) => ({
+        ...input,
+        genesisRecordHex: 'aa',
+        genesisHashHex: hash,
+        deviceCredentialHash: 'ee',
+      }),
+      create: async (request: { requestId: string; name: string; slug: string }) => {
+        if (fail) throw new Error('503 Service Unavailable');
+        return {
+          workspaceId: 'ws-recovered',
+          name: request.name,
+          slug: request.slug,
+          contentMode: 'e2ee' as const,
+          contentModeVersion: 1 as const,
+          genesisHash: hash,
+          cryptoOrgId: hash,
+          activation: 'control-only' as const,
+        };
+      },
+    } as unknown as PlatformE2eeWorkspaces;
+    const firstAttempt = await reconcilePendingE2eeWorkspaces(port, localStorage, 'account-A');
+    expect(firstAttempt).toBeNull();
+    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([first, second]);
+
+    fail = false;
+    const secondAttempt = await reconcilePendingE2eeWorkspaces(port, localStorage, 'account-A');
+    expect(secondAttempt?.workspaceId).toBe('ws-recovered');
+    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([second]);
+  });
+
+  it('returns null silently and preserves pending intents when preparation is cancelled', async () => {
+    localStorage.clear();
+    savePendingE2eeWorkspace(localStorage, first);
+    savePendingE2eeWorkspace(localStorage, second);
+    let prepareCalls = 0;
     const port = {
       prepareCreation: async () => {
-        throw new Error('network down');
+        prepareCalls += 1;
+        throw new Error('e2ee_creation_cancelled');
       },
       create: async () => {
         throw new Error('unused');
@@ -412,6 +451,41 @@ describe('silent background reconciliation of leftover pending creations', () =>
     } as unknown as PlatformE2eeWorkspaces;
     const result = await reconcilePendingE2eeWorkspaces(port, localStorage, 'account-A');
     expect(result).toBeNull();
+    expect(prepareCalls).toBe(1);
+    expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([first, second]);
+  });
+
+  it('clears only an intent rejected with UNRESERVED_REFUSALS and continues to reconcile the next', async () => {
+    localStorage.clear();
+    savePendingE2eeWorkspace(localStorage, first);
+    savePendingE2eeWorkspace(localStorage, second);
+    const port = {
+      prepareCreation: async (input: typeof first) => ({
+        ...input,
+        genesisRecordHex: 'aa',
+        genesisHashHex: hash,
+        deviceCredentialHash: 'ee',
+      }),
+      create: async (request: { requestId: string; name: string; slug: string }) => {
+        if (request.requestId === first.requestId) {
+          throw Object.assign(new Error('limit'), {
+            data: { code: 'free_workspace_limit_reached' },
+          });
+        }
+        return {
+          workspaceId: 'ws-second',
+          name: request.name,
+          slug: request.slug,
+          contentMode: 'e2ee' as const,
+          contentModeVersion: 1 as const,
+          genesisHash: hash,
+          cryptoOrgId: hash,
+          activation: 'control-only' as const,
+        };
+      },
+    } as unknown as PlatformE2eeWorkspaces;
+    const result = await reconcilePendingE2eeWorkspaces(port, localStorage, 'account-A');
+    expect(result?.workspaceId).toBe('ws-second');
     expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([]);
   });
 });

@@ -146,8 +146,8 @@ export async function createPreparedE2eeWorkspace(
 }
 
 /** Silently reconcile any leftover pending creation from an interrupted session.
- * Returns the created workspace on success; clears leftover intents and returns
- * null on any failure so the creation form is never blocked. */
+ * Returns the created workspace on success; clears an intent only when the server
+ * proves it holds no reservation, keeping unknown or cancelled outcomes for retry. */
 export async function reconcilePendingE2eeWorkspaces(
   port: PlatformE2eeWorkspaces,
   storage: Storage,
@@ -161,26 +161,18 @@ export async function reconcilePendingE2eeWorkspaces(
   } catch {
     return null;
   }
-  if (pendingList.length === 0) return null;
-  const [first, ...rest] = pendingList;
-  for (const stale of rest) {
+  for (const pending of pendingList) {
+    if (!isCurrent()) return null;
     try {
-      clearPendingE2eeWorkspace(storage, stale);
-    } catch {
-      // Best-effort cleanup of stale entries.
+      return await createPreparedE2eeWorkspace(port, storage, pending);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'e2ee_creation_cancelled') return null;
+      const code = e2eeCreationErrorCode(error);
+      if (code !== undefined && UNRESERVED_REFUSALS.has(code)) continue;
+      return null;
     }
   }
-  if (!first || !isCurrent()) return null;
-  try {
-    return await createPreparedE2eeWorkspace(port, storage, first);
-  } catch {
-    try {
-      clearPendingE2eeWorkspace(storage, first);
-    } catch {
-      // Best-effort cleanup on failure.
-    }
-    return null;
-  }
+  return null;
 }
 
 /** Creation stays behind both developer toggles. A saved request whose result may

@@ -368,6 +368,49 @@ describe('instant QR join and form-factor pairing', () => {
     expect(approvals).toHaveLength(3);
   });
 
+  it('surfaces transient retry status during joining and never overwrites awaiting-delivery as expired', async () => {
+    const { E2eeInstantQrApprove } = await import('../src/components/pages/e2ee-instant-qr');
+    const outcomes: ('awaiting-delivery' | 'admitted' | Error)[] = [
+      'awaiting-delivery',
+      new Error('503 Service Unavailable'),
+      'admitted',
+    ];
+    const runtime = {
+      accountPairingCode: async () => ({ pairingString: CODE, expiresAt: NOW + 1_500 }),
+      inspectAccountPairing: async () => preview,
+      approveAccountPairing: async () => {
+        const next = outcomes.shift()!;
+        if (next instanceof Error) throw next;
+        return {
+          workspaces: [
+            { workspaceId: 'w1', outcome: next },
+            { workspaceId: 'w2', outcome: next },
+          ],
+        };
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    const joined: string[] = [];
+    await act(async () =>
+      root.render(<E2eeInstantQrApprove runtime={runtime} onJoined={(d) => joined.push(d)} />)
+    );
+    await flush();
+    await tick(900);
+    await flush();
+    expect(text()).toContain('e2ee.instantQr.joining');
+    expect(container.querySelector('[data-testid="e2ee-instant-qr-retrying"]')).toBeNull();
+    // Advance past offer.expiresAt: awaiting-delivery must keep retrying instead of flipping to expired.
+    await tick(900);
+    await flush();
+    expect(text()).not.toContain('e2ee.instantQr.expired');
+    expect(container.querySelector('[data-testid="e2ee-instant-qr-retrying"]')?.textContent).toBe(
+      'e2ee.instantQr.retrying'
+    );
+    await tick(900);
+    await flush();
+    expect(text()).toContain('e2ee.instantQr.joined');
+    expect(joined).toEqual(['Synthetic phone']);
+  });
+
   it('offers a fresh code once the shown one expires, without signing', async () => {
     const { E2eeInstantQrApprove } = await import('../src/components/pages/e2ee-instant-qr');
     let offers = 0;

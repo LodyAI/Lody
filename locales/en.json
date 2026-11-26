@@ -7248,5 +7248,7 @@
   "chat.runConfig.permissionDefaultSaved": "New conversations will start with this permission",
   "chat.runConfig.permissionDefaultFailed": "Could not save the default permission",
   "settings.agent.dialog.section.defaultPermission": "Default permission",
-  "settings.agent.dialog.defaultPermissionLastUsed": "Last one I picked"
+  "settings.agent.dialog.defaultPermissionLastUsed": "Last one I picked",
+  "e2ee.access.waitingKey.checkFailed": "Couldn’t check for keys right now. Check your connection and try again.",
+  "e2ee.instantQr.retrying": "Connection interrupted. Retrying…"
 }
