@@ -273,7 +273,12 @@ export function MobileCreateWorkspaceSheet({
       handleClose(false);
       onCreated?.(targetSlug);
     } catch (err) {
-      if (encrypted && submitted) {
+      if (
+        encrypted &&
+        submitted &&
+        err instanceof Error &&
+        err.message === 'e2ee_creation_cancelled'
+      ) {
         try {
           clearPendingE2eeWorkspace(localStorage, submitted);
         } catch {

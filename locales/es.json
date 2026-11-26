@@ -7241,5 +7241,7 @@
   "e2ee.team.signedInAs": "Sesión iniciada como {{email}}",
   "e2ee.team.wrongEmailFor": "Esta invitación se envió a {{invited}}. Inicia sesión con ese correo para continuar.",
   "e2ee.auto.tab.qr": "Escanear QR",
-  "e2ee.auto.tab.code": "Ingresar código de 6 dígitos"
+  "e2ee.auto.tab.code": "Ingresar código de 6 dígitos",
+  "e2ee.access.waitingKey.checkFailed": "No se pudieron comprobar las claves ahora mismo. Comprueba tu conexión e inténtalo de nuevo.",
+  "e2ee.instantQr.retrying": "Conexión interrumpida. Reintentando…"
 }

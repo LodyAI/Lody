@@ -7241,5 +7241,7 @@
   "e2ee.team.signedInAs": "Signed in as {{email}}",
   "e2ee.team.wrongEmailFor": "This invitation was sent to {{invited}}. Sign in with that email address to continue.",
   "e2ee.auto.tab.qr": "Scan QR",
-  "e2ee.auto.tab.code": "Enter 6-digit code"
+  "e2ee.auto.tab.code": "Enter 6-digit code",
+  "e2ee.access.waitingKey.checkFailed": "Couldn’t check for keys right now. Check your connection and try again.",
+  "e2ee.instantQr.retrying": "Connection interrupted. Retrying…"
 }

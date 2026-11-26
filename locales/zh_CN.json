@@ -7241,5 +7241,7 @@
   "e2ee.team.signedInAs": "当前登录账号：{{email}}",
   "e2ee.team.wrongEmailFor": "此邀请发送给了 {{invited}}，请使用该邮箱登录以继续。",
   "e2ee.auto.tab.qr": "扫码授权",
-  "e2ee.auto.tab.code": "输入 6 位验证码"
+  "e2ee.auto.tab.code": "输入 6 位验证码",
+  "e2ee.access.waitingKey.checkFailed": "暂时无法检查密钥，请检查网络连接后重试。",
+  "e2ee.instantQr.retrying": "连接中断，正在重试…"
 }

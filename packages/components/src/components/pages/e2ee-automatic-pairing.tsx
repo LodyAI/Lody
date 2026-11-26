@@ -582,7 +582,8 @@ export function E2eeAutomaticPairingPage({
     }
   };
   const cancel = (manual = false) => {
-    if (busy) return;
+    ownerRef.current = { runtime, workspaceId };
+    setBusy(false);
     abandonQr(null);
     // The relay may queue the cancellation while offline: leaving never waits for it.
     // A request it misses still expires, and a new request replaces it.
@@ -829,7 +830,6 @@ export function E2eeAutomaticPairingPage({
                   <Button
                     xstyle={themeStyles.spaced3}
                     variant="secondary"
-                    disabled={busy}
                     onClick={() => cancel(true)}
                   >
                     {t('e2ee.auto.offline')}
@@ -858,7 +858,7 @@ export function E2eeAutomaticPairingPage({
                 {t('e2ee.auto.changeDevice')}
               </Button>
               {onManual && (
-                <Button variant="link" disabled={busy} onClick={() => cancel(true)}>
+                <Button variant="link" onClick={() => cancel(true)}>
                   {t('e2ee.auto.manual')}
                 </Button>
               )}
@@ -932,7 +932,7 @@ export function E2eeAutomaticPairingPage({
                   : t('e2ee.auto.expiry', { time: formatTime(state.expiresAt) })}
               </p>
             )}
-            <Button variant="ghost" disabled={busy} onClick={() => cancel()}>
+            <Button variant="ghost" onClick={() => cancel()}>
               {t('e2ee.auto.cancel')}
             </Button>
           </div>

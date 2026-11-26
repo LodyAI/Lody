@@ -7241,5 +7241,7 @@
   "e2ee.team.signedInAs": "Connecté en tant que {{email}}",
   "e2ee.team.wrongEmailFor": "Cette invitation a été envoyée à {{invited}}. Connectez-vous avec cette adresse pour continuer.",
   "e2ee.auto.tab.qr": "Scanner le QR",
-  "e2ee.auto.tab.code": "Saisir le code à 6 chiffres"
+  "e2ee.auto.tab.code": "Saisir le code à 6 chiffres",
+  "e2ee.access.waitingKey.checkFailed": "Impossible de vérifier les clés pour le moment. Vérifiez votre connexion et réessayez.",
+  "e2ee.instantQr.retrying": "Connexion interrompue. Nouvelle tentative…"
 }

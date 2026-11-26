@@ -7241,5 +7241,7 @@
   "e2ee.team.signedInAs": "{{email}}(으)로 로그인됨",
   "e2ee.team.wrongEmailFor": "이 초대는 {{invited}}로 전송되었습니다. 계속하려면 해당 이메일로 로그인하세요.",
   "e2ee.auto.tab.qr": "QR 스캔",
-  "e2ee.auto.tab.code": "6자리 코드 입력"
+  "e2ee.auto.tab.code": "6자리 코드 입력",
+  "e2ee.access.waitingKey.checkFailed": "지금은 키를 확인할 수 없습니다. 연결을 확인하고 다시 시도해 주세요.",
+  "e2ee.instantQr.retrying": "연결이 끊어졌습니다. 다시 시도하는 중…"
 }

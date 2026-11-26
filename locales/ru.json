@@ -7381,5 +7381,7 @@
   "e2ee.team.signedInAs": "Вход выполнен как {{email}}",
   "e2ee.team.wrongEmailFor": "Это приглашение отправлено на {{invited}}. Войдите с этим адресом, чтобы продолжить.",
   "e2ee.auto.tab.qr": "Сканировать QR",
-  "e2ee.auto.tab.code": "Ввести 6-значный код"
+  "e2ee.auto.tab.code": "Ввести 6-значный код",
+  "e2ee.access.waitingKey.checkFailed": "Не удалось проверить ключи сейчас. Проверьте подключение и повторите попытку.",
+  "e2ee.instantQr.retrying": "Соединение прервано. Повторная попытка…"
 }

@@ -169,6 +169,11 @@ const styles = stylex.create({
     fontSize: uiText.subheadlineSize,
     color: colors.secondaryLabel,
   },
+  waitingError: {
+    margin: 0,
+    fontSize: uiText.footnoteSize,
+    color: colors.destructive,
+  },
   waitingActions: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -232,7 +237,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const [hostIdentityWait, setHostIdentityWait] = useState<
     (Omit<HostIdentityStall, 'error'> & { workspaceId: string }) | null
   >(null);
-  const retryKeyUpdateRef = useRef<() => void>(() => {});
+  const retryKeyUpdateRef = useRef<() => Promise<void>>(async () => {});
   // Use workspaceSlug for runtime initialization (available immediately from URL)
   // Use workspaceId for WebSocket connections (requires server response)
   const routeWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
@@ -855,15 +860,17 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         retryAdmission((value) => value + 1);
       }
     };
-    const refreshNative = (): void => {
-      if (disposed || retired || firstKeySessionEnded || !nativeLease) return;
+    const runNativeRefresh = (reportFailure = false): Promise<void> => {
+      if (disposed || retired || firstKeySessionEnded || !nativeLease) return Promise.resolve();
       if (nativeRefresh) {
+        if (reportFailure) return nativeRefresh.then(() => runNativeRefresh(true));
         nativeRefreshAgain = true;
-        return;
+        return Promise.resolve();
       }
       const native = encryptedRuntime;
-      if (!native) return;
+      if (!native) return Promise.resolve();
       const leased = nativeLease;
+      let refreshError: unknown = null;
       const pending = native
         .refresh(leased, {
           keyMode: !nativeHasUsableKey && workspaceRuntime === null ? 'full' : 'none',
@@ -876,6 +883,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             handleMemberRemoval(lost);
             return;
           }
+          refreshError = error;
           // Reception failure stays retryable. Local edits remain intact; new
           // seals still require the verified current epoch key.
           try {
@@ -885,7 +893,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           }
         });
       nativeRefresh = pending;
-      void pending.finally(() => {
+      const done = pending.finally(() => {
         if (nativeRefresh === pending) nativeRefresh = null;
         if (nativeRefreshAgain && !disposed) {
           nativeRefreshAgain = false;
@@ -893,8 +901,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         }
         scheduleFirstKeyPoll();
       });
+      if (!reportFailure) {
+        void done;
+        return Promise.resolve();
+      }
+      return done.then(() => {
+        if (refreshError !== null) throw refreshError;
+      });
     };
-    retryKeyUpdateRef.current = refreshNative;
+    const refreshNative = (): void => {
+      void runNativeRefresh(false);
+    };
+    retryKeyUpdateRef.current = () => runNativeRefresh(true);
     window.addEventListener('online', refreshNative);
     const unsubscribeLedgerChange = accountId
       ? subscribeE2eeLedgerChanges(accountId, effectiveWorkspaceId, () => {
@@ -1548,6 +1566,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   const router = useRouter({ warn: false });
   const [checkingKey, setCheckingKey] = useState(false);
+  const [keyCheckError, setKeyCheckError] = useState(false);
+  const keyCheckGenerationRef = useRef(0);
 
   const openKeyWait = Boolean(
     keyReceptionWait &&
@@ -1557,6 +1577,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     keyReceptionWait.accountId === accountId &&
     keyReceptionWait.workspaceSlug === workspaceSlug
   );
+  useEffect(() => {
+    keyCheckGenerationRef.current += 1;
+    setCheckingKey(false);
+    setKeyCheckError(false);
+  }, [openKeyWait, effectiveWorkspaceId, accountId]);
   const saveKeyNotice =
     keyReceptionWait &&
     keyReceptionWait.phase === 'save' &&
@@ -1569,7 +1594,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       <WorkspaceKeyReceptionNotice
         workspaceId={effectiveWorkspaceId}
         waiting={keyReceptionWait}
-        onCheckAgain={() => retryKeyUpdateRef.current()}
+        onCheckAgain={() => {
+          void retryKeyUpdateRef.current().catch(() => {});
+        }}
       />
     ) : null;
 
@@ -1612,6 +1639,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             <p role="status" {...stylex.props(styles.waitingText)}>
               {t('e2ee.content.receivingNewKeySlow')}
             </p>
+            {keyCheckError && (
+              <p
+                role="alert"
+                data-testid="e2ee-waiting-key-error"
+                {...stylex.props(styles.waitingError)}
+              >
+                {t('e2ee.access.waitingKey.checkFailed')}
+              </p>
+            )}
             <div {...stylex.props(styles.waitingActions)}>
               <Button
                 type="button"
@@ -1619,9 +1655,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                 data-testid="e2ee-waiting-key-check"
                 disabled={checkingKey}
                 onClick={() => {
+                  if (checkingKey) return;
+                  const generation = ++keyCheckGenerationRef.current;
                   setCheckingKey(true);
-                  retryKeyUpdateRef.current();
-                  setTimeout(() => setCheckingKey(false), 600);
+                  setKeyCheckError(false);
+                  void retryKeyUpdateRef
+                    .current()
+                    .catch(() => {
+                      if (keyCheckGenerationRef.current === generation) setKeyCheckError(true);
+                    })
+                    .finally(() => {
+                      if (keyCheckGenerationRef.current === generation) setCheckingKey(false);
+                    });
                 }}
               >
                 {checkingKey && <Spinner size="small" />}

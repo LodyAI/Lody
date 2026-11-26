@@ -268,7 +268,7 @@ describe('create workspace route encrypted creation (zero draft UI + silent reco
     expect(container!.querySelector('[data-testid="e2ee-creation-requests"]')).toBeNull();
   });
 
-  it('discards pending intent immediately on unknown/network failure instead of locking a draft', async () => {
+  it('preserves pending intent on transient/network failure so later reconciliation can claim it', async () => {
     fixture.creationEnabled = true;
     fixture.create = vi.fn(async () => {
       throw new Error('reply lost');
@@ -281,7 +281,9 @@ describe('create workspace route encrypted creation (zero draft UI + silent reco
     );
     await click('organization.createWorkspace');
     expect(container!.textContent).toContain('e2ee.create.failed');
-    expect(listPendingE2eeWorkspaces(localStorage, 'account')).toEqual([]);
+    const saved = listPendingE2eeWorkspaces(localStorage, 'account');
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ accountId: 'account', name: 'Private', slug: 'private' });
     expect(input('workspace-name').disabled).toBe(false);
     expect(input('workspace-name').value).toBe('Private');
     expect(button('e2ee.create.resume')).toBeUndefined();
@@ -319,14 +321,14 @@ describe('create workspace route encrypted creation (zero draft UI + silent reco
     });
   });
 
-  it('silently clears a leftover pending request on mount when reconciliation fails without showing errors or draft UI', async () => {
+  it('preserves a leftover pending request on mount when reconciliation hits a transient error without showing errors or draft UI', async () => {
     savePendingE2eeWorkspace(localStorage, pending);
     fixture.create = vi.fn(async () => {
       throw new Error('server unreachable');
     });
     await render();
     expect(fixture.create).toHaveBeenCalledTimes(1);
-    expect(listPendingE2eeWorkspaces(localStorage, 'account')).toEqual([]);
+    expect(listPendingE2eeWorkspaces(localStorage, 'account')).toEqual([pending]);
     expect(container!.textContent).not.toContain('e2ee.create.failed');
     expect(container!.querySelector('[data-testid="e2ee-creation-requests"]')).toBeNull();
     expect(input('workspace-name').disabled).toBe(false);
