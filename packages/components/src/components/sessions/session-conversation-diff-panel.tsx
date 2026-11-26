@@ -24,10 +24,15 @@ import {
 } from '@lody/shared';
 import { Toggle } from '@lody/ui/toggle';
 import { ToggleGroup } from '@lody/ui/toggle-group';
-import { useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { usePostHog } from '@/lib/posthog-context';
 import { toast } from '@/lib/toast';
 import { currentWorkspaceIdAtom, userAtom } from '@/atoms';
+import { allChangesDiffScopeAtom } from '@/atoms/settings';
+import {
+  resolveAllChangesScopePolicy,
+  resolveAllChangesUiState,
+} from '@/lib/session-all-changes-scope';
 import { getDurationSinceMs, getPerformanceNowMs } from '@/lib/posthog-analytics';
 import {
   captureDiffCommentGithubThreadCreated,
@@ -326,11 +331,8 @@ export type SessionConversationDiffPanelProps = {
   focusComment?: DiffCommentFocusTarget | null;
   focusRequestSeq?: number;
   mode?: 'conversation' | 'base';
-  /** All Changes comparison scope; the panel falls back to `branch` when omitted. */
-  allChangesScope?: CodeCollabAllChangesScope;
   /** Whether the target daemon advertises the scope protocol capability. */
   allChangesScopeSupported?: boolean;
-  onAllChangesScopeChange?: (scope: CodeCollabAllChangesScope) => void;
   refreshToken?: number;
   session?: SessionMeta | null;
   workspaceSession?: SessionMeta | null;
@@ -610,9 +612,7 @@ function SessionConversationDiffPanelImpl({
   focusComment,
   focusRequestSeq,
   mode = 'conversation',
-  allChangesScope,
   allChangesScopeSupported = false,
-  onAllChangesScopeChange,
   refreshToken: _refreshToken,
   session,
   workspaceSession,
@@ -726,6 +726,13 @@ function SessionConversationDiffPanelImpl({
     enabled: active && !isBaseMode,
     requestScope: diffRequestScope,
   });
+  const [preferredAllChangesScope, setPreferredAllChangesScope] = useAtom(allChangesDiffScopeAtom);
+  const { requestScope: effectiveScope } = resolveAllChangesScopePolicy({
+    session,
+    workspaceSession,
+    preferredScope: preferredAllChangesScope,
+    scopeSupported: allChangesScopeSupported,
+  });
   const allChangesDiffData = useSessionAllChangesDiffData({
     sessionId,
     filePaths: normalizedInputPaths,
@@ -733,7 +740,7 @@ function SessionConversationDiffPanelImpl({
     fileProvider,
     fileProviderPending,
     enabled: active && isBaseMode,
-    scope: allChangesScope ?? 'branch',
+    scope: effectiveScope,
     viewport: { scrollContainer: viewportNode, priorityPath: focusFilePath ?? null },
   });
   const { loadPaths, registerPath, anchorTarget } = isBaseMode
@@ -770,7 +777,6 @@ function SessionConversationDiffPanelImpl({
     : null;
   const allChangesUnavailableMessage = isBaseMode ? allChangesDiffData.unavailableMessage : null;
   const allChangesBatchReady = isBaseMode ? allChangesDiffData.batchReady : false;
-  const effectiveScope = allChangesScope ?? 'branch';
   const {
     sourceSessionId: prSessionId,
     repoFullName,
@@ -1008,34 +1014,34 @@ function SessionConversationDiffPanelImpl({
     [t]
   );
 
-  const allChangesBaseValue =
-    allChangesBase === null
-      ? '…'
-      : allChangesBase === 'diff-store'
-        ? t('sessions.fileDiff.baseSessionChanges', 'Session changes')
-        : /^[0-9a-f]{12,}$/i.test(allChangesBase)
-          ? allChangesBase.slice(0, 7)
-          : allChangesBase;
-  const allChangesBasePrefix =
-    effectiveScope === 'uncommitted'
-      ? 'HEAD'
-      : session?.baseBranch?.trim() || t('sessions.fileDiff.baseBranchFallback', 'Branch base');
+  const allChangesUi = resolveAllChangesUiState({
+    session,
+    workspaceSession,
+    preferredScope: preferredAllChangesScope,
+    scopeSupported: allChangesScopeSupported,
+    allChangesBase,
+    focusFilePath,
+  });
   const allChangesBaseLabel =
-    allChangesBase === 'diff-store'
-      ? allChangesBaseValue
-      : `${allChangesBasePrefix} · ${allChangesBaseValue}`;
+    allChangesUi.base.kind === 'loading'
+      ? '…'
+      : allChangesUi.base.kind === 'session-changes'
+        ? t('sessions.fileDiff.baseSessionChanges', 'Session changes')
+        : allChangesUi.base.kind === 'head'
+          ? `HEAD · ${allChangesUi.base.ref}`
+          : `${allChangesUi.base.branchName ?? t('sessions.fileDiff.baseBranchFallback', 'Branch base')} · ${allChangesUi.base.ref}`;
 
   const baseHeader = isBaseMode ? (
     <div {...stylex.props(styles.baseHeader)}>
-      {allChangesScopeSupported && onAllChangesScopeChange ? (
+      {allChangesUi.canToggleScope ? (
         <ToggleGroup<CodeCollabAllChangesScope>
           size="mini"
           shape="pill"
           aria-label={t('sessions.fileDiff.scopeLabel', 'Comparison scope')}
-          value={[effectiveScope]}
+          value={[allChangesUi.requestScope]}
           onValueChange={(value) => {
             const next = value[0];
-            if (next) onAllChangesScopeChange(next);
+            if (next) setPreferredAllChangesScope(next);
           }}
         >
           <Toggle value="branch">{t('sessions.fileDiff.scopeBranch', 'Branch')}</Toggle>
@@ -1054,6 +1060,18 @@ function SessionConversationDiffPanelImpl({
     </div>
   ) : null;
 
+  const emptyScopeText =
+    allChangesUi.emptyReason === 'focus-no-uncommitted-changes'
+      ? t('sessions.fileDiff.focusNoUncommittedChanges', 'This file has no uncommitted changes.')
+      : allChangesUi.emptyReason === 'no-uncommitted-changes'
+        ? t('sessions.fileDiff.noUncommittedChanges', 'No uncommitted changes.')
+        : allChangesUi.emptyReason === 'focus-no-branch-changes'
+          ? t(
+              'sessions.fileDiff.focusNoBranchChanges',
+              'This file has no changes against the branch base.'
+            )
+          : t('sessions.fileDiff.noChanges', 'No changes.');
+
   const baseEmptyText = !isBaseMode
     ? null
     : allChangesUnavailableScopeReason !== null || allChangesUnavailableMessage !== null
@@ -1070,14 +1088,7 @@ function SessionConversationDiffPanelImpl({
           : (allChangesUnavailableMessage ?? t('sessions.fileDiff.unavailable', 'Diff unavailable'))
       : normalizedPaths.length === 0
         ? allChangesBatchReady
-          ? effectiveScope === 'uncommitted'
-            ? t('sessions.fileDiff.noUncommittedChanges', 'No uncommitted changes.')
-            : focusFilePath
-              ? t(
-                  'sessions.fileDiff.focusNoBranchChanges',
-                  'This file has no changes against the branch base.'
-                )
-              : t('sessions.fileDiff.noChanges', 'No changes.')
+          ? emptyScopeText
           : t('sessions.fileDiff.loadingChanges', 'Loading changes…')
         : null;
 
@@ -1152,9 +1163,9 @@ function SessionConversationDiffPanelImpl({
 
   const panelContent = (
     <div {...stylex.props(styles.panelContent)}>
-      {focusPathOutsideAllChangesScope ? (
+      {focusPathOutsideAllChangesScope && allChangesUi.focusOutsideScopeReason !== null ? (
         <div {...stylex.props(styles.emptyMessage)}>
-          {effectiveScope === 'uncommitted'
+          {allChangesUi.focusOutsideScopeReason === 'focus-no-uncommitted-changes'
             ? t(
                 'sessions.fileDiff.focusNoUncommittedChanges',
                 'This file has no uncommitted changes.'
@@ -1251,9 +1262,7 @@ export const areSessionConversationDiffPanelPropsEqual = (
   areDiffCommentFocusTargetsEqual(prev.focusComment, next.focusComment) &&
   prev.focusRequestSeq === next.focusRequestSeq &&
   prev.mode === next.mode &&
-  prev.allChangesScope === next.allChangesScope &&
   prev.allChangesScopeSupported === next.allChangesScopeSupported &&
-  prev.onAllChangesScopeChange === next.onAllChangesScopeChange &&
   prev.refreshToken === next.refreshToken &&
   prev.session === next.session &&
   prev.workspaceSession === next.workspaceSession &&

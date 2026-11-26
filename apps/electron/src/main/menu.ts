@@ -1,4 +1,4 @@
-import { productWindows } from './window-state'
+import { getCompanionWindowOwner, productWindows } from './window-state'
 import { requestRendererReload } from './renderer-recovery'
 import { app, BrowserWindow, Menu, shell } from 'electron'
 import { closeFocusedTabOrWindow } from './close-focused-tab-or-window'
@@ -41,7 +41,7 @@ function sendMenuAction(action: string): void {
   if (!window || window.isDestroyed()) {
     window = menuOptions.openOrFocusMainWindow()
   }
-  const contents = window.webContents
+  const contents = (getCompanionWindowOwner(window) ?? window).webContents
   if (contents.isDestroyed()) {
     return
   }
@@ -64,7 +64,9 @@ function handleCloseFocusedTabOrWindow(targetWindow?: Electron.BaseWindow): void
   closeFocusedTabOrWindow({
     focused,
     mainWindow:
-      focused && productWindows.has(focused) ? focused : (menuOptions?.getMainWindow() ?? null),
+      focused && productWindows.has(focused) && !getCompanionWindowOwner(focused)
+        ? focused
+        : (menuOptions?.getMainWindow() ?? null),
     sendCloseCurrentTabOrWindow: () => sendMenuAction('close-current-tab-or-window')
   })
 }

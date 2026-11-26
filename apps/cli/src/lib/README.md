@@ -243,7 +243,11 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   assistant models through shallow scalar/count reads of already-open documents.
   It compares current catalog metadata on each reconciliation so stale overwrites
   are repaired on the next history change or flush.
-  Loro 1.17.0 and LoroRepo 0.24.0 preserve received remote updates that are still
+  At startup the daemon configures Loro's WASM-wide budget. Reclamation starts
+  at 200 MiB of live allocations and aims for 160 MiB. Loro checks a 512 MiB
+  hard budget for both live allocations and linear memory at its admission
+  points. The daemon logs allocated WASM pages, which stay reserved until exit.
+  Loro and LoroRepo preserve received remote updates that are still
   waiting for causal dependencies through the existing SQLite journal. A durable
   save does not establish complete synchronization or advance another replica's
   cursor. See the [persistence decision](../../../../.agents/notes/implemented/bug-fix/2026-10-22-loro-pending-persistence.md).

@@ -74,6 +74,43 @@ See the [attachment draft Spec](../../../../specs/session-files.md).
 | Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)                               | Reconcile owned Roles after matching runtime probes.                                       |
 | Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication.                                   |
 
+## Session access room
+
+`useSessionAccess` is only a React projection of the shared session-access room.
+`acquireSessionAccessStore` owns one ref-counted room per platform port, account and
+workspace; the room owns its live port subscription, browser resume/online listeners
+and refresh single-flight. Consumers subscribe to its snapshot, so mounting another
+sidebar or history surface does not add another resume request. A notification that
+arrives during a read queues one follow-up rather than starting overlapping reads.
+The room preserves snapshot identity when grants are unchanged, so a successful
+resume read does not force a React render. Keep browser lifecycle listeners and
+refresh ownership in the room, not in session-access consumers.
+
+## Auth and session supervisors
+
+`getStableSessionSupervisor` and `acquireStableSessionSupervisor` share one
+ref-counted Better Auth supervisor per auth client. The supervisor owns the session
+atom and stable-session policy: retry/grace state, current-credential 401
+verification, boot-failure publication, browser resume and keepalive refreshes.
+`StableSessionProvider` only borrows/releases that room and projects its external
+snapshot, so another auth consumer does not add listeners or retry budgets.
+Convex's auth mismatch recovery is a separate ref-counted room from
+`getAuthRecoverySupervisor`/`acquireAuthRecoverySupervisor`; it owns the per-session
+attempt budget, deadlines, visibility/network pause, pending Convex reset and
+automatic-command fence. `AuthenticatedConvexProvider` only bridges the SDK auth
+snapshot, borrows/releases the room, projects its snapshot and renders the existing
+nonmodal recovery notice. The Convex adapter may still observe SDK auth state because
+`ConvexProviderWithAuth` is a React API, but it does not own session reads, retry
+budgets or browser lifecycle work.
+
+React projections of these rooms go through `lib/external-snapshot.ts`'s
+`useExternalSnapshot`, the single adapter over React's `useSyncExternalStore`:
+business modules must not hand-wire the primitive, because its lease ordering
+and subscribe/re-seed sequence are easy to get wrong. The adapter keys the room
+lease on the room itself, so a fresh inline `acquire` closure per render does
+not release and re-acquire the supervisor (that churn used to drop in-flight
+401 verification).
+
 ## MCP default readiness
 
 `use-session-mcp-selection.ts` allows default-derived sends after the local catalog
@@ -126,16 +163,23 @@ profile data can still show a fallback. Evidence and limits:
 
 ## Cloud query recovery
 
-`use-recoverable-convex-query.ts` owns the authenticated query adapter. Each client,
-session and semantic query shares one watch and three retries after 1, 2 and 4 seconds.
-All consumers release the failed watch before a new one starts, which waits for a
-server update rather than reading the SDK's cached error. Opaque server failures
-return loading during bounded recovery; application errors and exhausted failures throw to the nearest
-boundary. Auth expiry continues through the central supervisor and retains only a
-matching committed snapshot. Brief success and temporary auth skips do not replenish
-attempts; 30 seconds of continuously observed success resets the budget. Skipped or
-unmounted queries stop retries, and session/query identity fences callbacks and results.
-Public queries and local-only clients keep their existing behavior.
+`use-recoverable-convex-query.ts` owns both the authenticated and public query adapters
+(`useRecoverableConvexQuery`, `useOptionalRecoverableConvexQuery`,
+`usePublicConvexQuery`, `useOptionalPublicConvexQuery`). Raw `convex/react` `useQuery`
+is forbidden by the platform boundary check so backend errors can never throw into React
+render. Each client, session and semantic query shares one watch and three retries after
+1, 2 and 4 seconds. All consumers release the failed watch before a new one starts, which
+waits for a server update rather than reading the SDK's cached error. Opaque server
+failures return loading during bounded recovery; structured errors (such as `ConvexError`)
+and exhausted failures are reported once per outage episode to `client-log.ts` and
+redacted telemetry, then contained as `undefined` in `useCloudQuery` (never throwing into
+render, and never returning stale authorization rows). Consumers that display an inline
+failure notice or retry action read `useCloudQueryState` from `@lody/platform/react`.
+Auth expiry continues through the central supervisor and retains only a matching
+committed snapshot. Brief success and temporary auth skips do not replenish attempts;
+30 seconds of continuously observed success resets the budget. Skipped or unmounted
+queries stop retries, and session/query identity fences callbacks and results. Local-only
+clients keep their existing behavior.
 See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-10-cloud-query-server-recovery.md).
 
 `providers/cloud-platform-api.ts` also admits imperative queries, subscriptions,

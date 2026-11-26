@@ -15,6 +15,7 @@ import { readUpdaterReleaseMetadata } from './app-updater-metadata.ts'
 import { sparkleEventToStatePatch } from './app-updater-sparkle-events.ts'
 import {
   DEFAULT_SPARKLE_APPCAST_URL,
+  findLatestSparkleFeedVersion,
   resolveSparkleAddonPath,
   resolveSparkleAppcastUrl,
   shouldConstructUpdaterEnabled,
@@ -426,4 +427,36 @@ void test('ignores unknown or malformed Sparkle events', () => {
   assert.equal(sparkleEventToStatePatch(null, NOW), null)
   assert.equal(sparkleEventToStatePatch('checking', NOW), null)
   assert.equal(sparkleEventToStatePatch({ type: 'error' }, NOW), null)
+})
+
+void test('extracts the newest matching Sparkle feed version while ignoring CDATA and deltas', () => {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <item>
+      <sparkle:version>1.0.9</sparkle:version>
+      <sparkle:shortVersionString>0.116.0-nightly.9</sparkle:shortVersionString>
+      <sparkle:hardwareRequirements>x64</sparkle:hardwareRequirements>
+      <enclosure url="https://updates.example.com/x64.zip" />
+    </item>
+    <item>
+      <description><![CDATA[<sparkle:shortVersionString>9.9.9</sparkle:shortVersionString>]]></description>
+      <sparkle:deltas><enclosure sparkle:version="0.115.0" /></sparkle:deltas>
+      <sparkle:version>1.0.8</sparkle:version>
+      <sparkle:shortVersionString>0.116.0-nightly.8</sparkle:shortVersionString>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <enclosure url="https://updates.example.com/arm64.zip" />
+    </item>
+  </channel>
+</rss>`
+
+  assert.equal(findLatestSparkleFeedVersion(xml, { arch: 'arm64' }), '0.116.0-nightly.8')
+  assert.equal(findLatestSparkleFeedVersion(xml, { arch: 'x64' }), '0.116.0-nightly.9')
+  assert.equal(
+    findLatestSparkleFeedVersion(
+      '<rss><channel><item><enclosure sparkle:shortVersionString="0.116.1" /></item></channel></rss>'
+    ),
+    '0.116.1'
+  )
+  assert.equal(findLatestSparkleFeedVersion('<rss><channel /></rss>'), undefined)
 })

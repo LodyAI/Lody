@@ -19,6 +19,7 @@ beforeEach(async () => {
   vi.resetModules();
   fixture.local = false;
   fixture.userData = await mkdtemp(join(tmpdir(), 'lody-telemetry-main-'));
+  vi.stubEnv('LODY_DATA_DIR', fixture.userData);
   bodies = [];
   server = createServer((request, response) => {
     void (async () => {
@@ -46,9 +47,10 @@ afterEach(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await rm(fixture.userData, { recursive: true, force: true });
 });
-it('sends a redacted main exception through the real SDK', async () => {
+it('sends a redacted main exception through the real SDK by default and honors opt-out', async () => {
   const { captureElectronMainException } =
     await import('../../../apps/electron/src/main/posthog-error-reporting');
+  const { writeUsageSharing } = await import('@lody/shared/node/usage-sharing');
   await captureElectronMainException(new RangeError('PRIVATE_MESSAGE'), {
     component: 'PRIVATE_COMPONENT',
     extra: {
@@ -57,13 +59,23 @@ it('sends a redacted main exception through the real SDK', async () => {
       nested: { path: 'PRIVATE_PATH' },
     },
   });
-  expect(bodies.length).toBeGreaterThan(0);
-  expect(JSON.stringify(bodies)).toContain('forbidden');
-  expect(JSON.stringify(bodies)).toContain(
-    'lody-redacted-v1:electron:main:unknown:unhandledRejection:RangeError:forbidden'
-  );
-  expect(JSON.stringify(bodies)).toContain('1.0.0');
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).toMatchObject({
+    batch: [
+      {
+        properties: {
+          $process_person_profile: false,
+          platform: 'electron',
+          $exception_list: [{ type: 'RangeError', value: 'forbidden' }],
+        },
+      },
+    ],
+  });
   expect(JSON.stringify(bodies)).not.toContain('PRIVATE_');
+
+  writeUsageSharing(false);
+  await captureElectronMainException(new Error('after opt-out'));
+  expect(bodies).toHaveLength(1);
 });
 it('keeps local main telemetry and its install-id file disabled', async () => {
   fixture.local = true;

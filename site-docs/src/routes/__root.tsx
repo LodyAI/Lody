@@ -6,7 +6,47 @@ import { createRootRoute, HeadContent, Outlet, Scripts, useLocation } from '@tan
 const description =
   'Lody is an AI coding-agent workspace for running multiple agents in parallel with isolated Git worktrees, real-time diff review, GitHub integration, mobile access, and team collaboration.';
 const googleAnalyticsMeasurementId = 'G-JSXEKG6RRV';
-const vibeloftAuthKey = import.meta.env.VITE_VIBELOFT_WEB_AUTH_KEY?.trim();
+
+const europeConsentRegions = [
+  'AT',
+  'BE',
+  'BG',
+  'CH',
+  'CY',
+  'CZ',
+  'DE',
+  'DK',
+  'EE',
+  'ES',
+  'FI',
+  'FR',
+  'GB',
+  'GR',
+  'HR',
+  'HU',
+  'IE',
+  'IS',
+  'IT',
+  'LI',
+  'LT',
+  'LU',
+  'LV',
+  'MT',
+  'NL',
+  'NO',
+  'PL',
+  'PT',
+  'RO',
+  'SE',
+  'SI',
+  'SK',
+];
+
+const gaConsentModeV2Script = `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}window.gtag=gtag;
+gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'denied',functionality_storage:'granted',security_storage:'granted',region:${JSON.stringify(europeConsentRegions)},wait_for_update:500});
+gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'granted',functionality_storage:'granted',security_storage:'granted'});
+try{var c=window.localStorage.getItem('lody:cookie-consent');if(c==='granted'||c==='denied'){gtag('consent','update',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:c});}}catch(e){}
+window.addEventListener('load',function(){var s=document.createElement('script');s.async=true;s.src='https://www.googletagmanager.com/gtag/js?id=${googleAnalyticsMeasurementId}';s.onload=function(){gtag('js',new Date());gtag('config','${googleAnalyticsMeasurementId}',{anonymize_ip:true});};document.head.appendChild(s);});`;
 
 export const Route = createRootRoute({
   head: () => ({
@@ -35,26 +75,8 @@ export const Route = createRootRoute({
     ],
     scripts: [
       {
-        children: `(function(c,l,a,r,i,t,y){
-    c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
-    t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
-    y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
-})(window, document, "clarity", "script", "z359h8fnzs");`,
+        children: gaConsentModeV2Script,
       },
-      {
-        children: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}
-window.addEventListener('load',function(){var s=document.createElement('script');s.async=true;s.src='https://www.googletagmanager.com/gtag/js?id=${googleAnalyticsMeasurementId}';s.onload=function(){gtag('js',new Date());gtag('config','${googleAnalyticsMeasurementId}');};document.head.appendChild(s);});`,
-      },
-      ...(vibeloftAuthKey
-        ? [
-            {
-              defer: true,
-              src: 'https://vibeloft.ai/telemetry/v1.js',
-              'data-vl-product-id': '791c7291-4457-4767-93e2-212a37340f20',
-              'data-vl-auth-key': vibeloftAuthKey,
-            },
-          ]
-        : []),
     ],
   }),
   component: RootDocument,

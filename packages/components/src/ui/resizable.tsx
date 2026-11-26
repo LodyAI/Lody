@@ -46,31 +46,6 @@ const styles = stylex.create({
       translate: { default: '-50% 0', ':is([data-panel-group-direction="vertical"])': '0 -50%' },
     },
   },
-  edge: {
-    backgroundColor: 'transparent',
-    transitionProperty: 'opacity',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    '::after': {
-      content: '""',
-      insetBlock: themeSpace[0],
-      top: themeSpace[0],
-      bottom: themeSpace[0],
-      left: themeSpace[0],
-      width: '2px',
-      translate: '0 0',
-      transitionProperty:
-        'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
-      transitionDuration: '150ms',
-      transitionTimingFunction: 'var(--default-transition-timing-function)',
-      transitionDelay: { default: null, ':is([data-resize-handle-state="hover"])': '150ms' },
-      backgroundColor: {
-        default: null,
-        ':is([data-resize-handle-state="hover"])': `color-mix(in oklab, ${themeColors.sidebarRing} 50%, transparent)`,
-        ':is([data-resize-handle-state="drag"])': `color-mix(in oklab, ${themeColors.sidebarRing} 70%, transparent)`,
-      },
-    },
-  },
   grip: {
     backgroundColor: themeColors.border,
     zIndex: 10,
@@ -114,23 +89,17 @@ const ResizablePanel = React.forwardRef<
 
 function ResizableHandle({
   withHandle,
-  appearance,
   className,
   children,
   ...props
 }: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle> & {
   /** Registry grip. Ignored when `children` supplies the handle's own visual. */
   withHandle?: boolean;
-  /** A two-pixel leading edge with the session panel's delayed hover and drag ink. */
-  appearance?: 'edge';
 }) {
   return (
     <ResizablePrimitive.PanelResizeHandle
       data-slot="resizable-handle"
-      {...withClassName(
-        stylex.props(stylex.defaultMarker(), styles.handle, appearance === 'edge' && styles.edge),
-        className
-      )}
+      {...withClassName(stylex.props(stylex.defaultMarker(), styles.handle), className)}
       {...props}
     >
       {children ??

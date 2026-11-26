@@ -151,11 +151,21 @@ describe('encrypted workspace control page recovery', () => {
       value: { writeText: () => Promise.reject(new Error('denied')) },
     });
     render({ failure: { kind: 'server', code: 'bad-signature' } });
+    const code = container!.querySelector('details code');
+    expect(code?.textContent).toBe('bad-signature');
+    expect(code?.closest('details')?.open).toBe(false);
+    const paragraphs = container!.querySelectorAll('[data-failure-kind="server"] p');
+    expect(
+      [...paragraphs].find(
+        (p) => !p.closest('details') && p.textContent === 'e2ee.control.failure.server'
+      )
+    ).toBeDefined();
     await act(async () => {
       button('e2ee.control.copyDiagnostics')!.click();
       await Promise.resolve();
     });
-    expect(container!.querySelector('details')?.open).toBe(true);
+    const report = container!.querySelector('pre')?.closest('details');
+    expect(report?.open).toBe(true);
     expect(container!.textContent).toContain('lody-e2ee-workspace-diagnostics');
   });
 });
@@ -332,6 +342,10 @@ describe('encrypted workspace control page reading', () => {
     const workspace = { removed: [] as string[], keyReplaced: 0, keyFailures: 0 };
     // Like the encryption console: a management result reloads the verified ledger, and
     // no member controls are offered while it reloads.
+    let failRetry!: (code: string) => void;
+    const retryFailure = new Promise<string>((resolve) => {
+      failRetry = resolve;
+    });
     function Console() {
       const [state, setState] = useState<{ history: VerifiedLedgerHistory; loading: boolean }>({
         history: before,
@@ -351,6 +365,10 @@ describe('encrypted workspace control page reading', () => {
             rotate: async () => {
               if (workspace.keyFailures > 0) {
                 workspace.keyFailures -= 1;
+                if (workspace.keyFailures === 0) {
+                  const code = await retryFailure;
+                  throw Object.assign(new Error('Connection interrupted'), { code });
+                }
                 throw new Error('e2ee_restart-required');
               }
               workspace.keyReplaced += 1;
@@ -419,7 +437,10 @@ describe('encrypted workspace control page reading', () => {
     const retry = () =>
       document.querySelector('[data-testid="e2ee-member-rotate-retry"]') as HTMLButtonElement;
     await act(async () => retry().click());
-    expect(notice()?.textContent).toContain('e2ee.members.rotateRetryFailed');
+    expect(notice()?.textContent).toContain('e2ee.members.rotateRetrying');
+    expect(retry().disabled).toBe(true);
+    await act(async () => failRetry('network'));
+    expect(notice()?.textContent).toContain('e2ee.members.rotateError.network');
     await act(async () => retry().click());
     expect(workspace.keyReplaced).toBe(2);
     expect(notice()).toBeNull();
@@ -436,7 +457,11 @@ describe('encrypted workspace control page reading', () => {
 
 it('requires confirmation, carries the member incarnation, and hides forbidden member controls', async () => {
   const remove = vi.fn(async () => {}),
-    setRole = vi.fn(async () => {});
+    setRole = async () => {
+      throw new Error(
+        "Error invoking remote method 'e2ee:setMemberRole': Error: e2ee_member_management_conflict"
+      );
+    };
   const member = {
     ordinal: 2,
     membershipId: '12'.repeat(16),
@@ -475,6 +500,9 @@ it('requires confirmation, carries the member incarnation, and hides forbidden m
   expect(
     document.querySelector('[data-testid="e2ee-member-role"]')?.getAttribute('data-membership-id')
   ).toBe(member.membershipId);
+  await act(async () => action('e2ee.members.promote').click());
+  expect(container.textContent).toContain('e2ee.members.error.conflict');
+  await act(async () => container!.querySelector('button')!.click());
   await act(async () => action('e2ee.members.remove').click());
   expect(remove).not.toHaveBeenCalled();
   expect(

@@ -21,6 +21,7 @@ export type AutomationSessionAdmission = {
 };
 
 export type SessionEditAccess = 'yes' | 'no' | 'unknown';
+export type SessionNativeActivity = 'idle' | 'running' | 'background';
 
 /** Existing Session owner; Automations cannot commit lifecycle changes through metadata alone. */
 export class SessionAutomationAuthority {
@@ -31,14 +32,15 @@ export class SessionAutomationAuthority {
       machineId: string;
       hasOtherWork(sessionId: SessionId): boolean;
       hasGoal(sessionId: SessionId): Promise<boolean>;
-      nativeActivity(sessionId: SessionId): 'idle' | 'running' | 'background' | 'unknown';
+      nativeActivity(sessionId: SessionId): SessionNativeActivity;
       author(sessionId: SessionId): string | undefined;
       canEdit(sessionId: SessionId, userId: string): Promise<SessionEditAccess>;
     }
   ) {}
 
+  private observations: import('./automation-observations').AutomationObservationSink | undefined;
   private pendingAutomationWork:
-    | ((sessionId: string, excludingInvocationId?: string) => boolean)
+    | ((sessionId: SessionId, excludingInvocationId?: string) => boolean)
     | undefined;
   setPendingWork(check: SessionAutomationAuthority['pendingAutomationWork']): void {
     this.pendingAutomationWork = check;
@@ -46,7 +48,11 @@ export class SessionAutomationAuthority {
   setObservations(
     sink: import('./automation-observations').AutomationObservationSink | undefined
   ): void {
+    this.observations = sink;
     this.deps.execution.setAutomationObservations(sink);
+  }
+  notifyNativeIdle(sessionId: SessionId): void {
+    this.observations?.idle?.(sessionId);
   }
   refreshCapacity(bindingId: string) {
     return this.deps.execution.refreshProviderRateLimits(
@@ -130,7 +136,6 @@ export class SessionAutomationAuthority {
     if (this.pendingAutomationWork?.(meta.id, excludingInvocationId))
       return { value: 'no', reason: 'automation_work_pending' };
     const native = this.deps.nativeActivity(meta.id);
-    if (native === 'unknown') return { value: 'unknown', reason: 'native_activity_unobserved' };
     if (native !== 'idle') return { value: 'no', reason: 'native_work_active' };
     return { value: 'yes', reason: 'session_settled' };
   }

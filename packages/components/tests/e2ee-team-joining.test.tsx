@@ -101,11 +101,67 @@ describe('encrypted team joining', () => {
   };
   const button = (key: string) =>
     [...container.querySelectorAll('button')].find((item) => item.textContent === key)!;
+  it('rechecks an approval hint immediately and waits for the verified key before opening', async () => {
+    const { PlatformContext } = await import('@lody/platform/react');
+    const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
+    let hint: ReturnType<typeof application> | undefined;
+    let state = 'pending';
+    let ready = false;
+    const platform = {
+      ...TEST_CLOUD_PLATFORM,
+      cloudApi: {
+        ...TEST_CLOUD_PLATFORM.cloudApi!,
+        useQueryState: <Args, Value>(operation: { name: string }, args: Args | 'skip') => ({
+          data: (operation.name === 'e2eeMembers:claim' && args !== 'skip' ? hint : undefined) as
+            | Value
+            | undefined,
+          error: null,
+          retry: () => {},
+        }),
+      },
+    };
+    const props = {
+      offer,
+      runtime: {
+        pendingMemberJoin: async () => ({ offer, requestId: 'original' }),
+        prepareMemberJoin: async () => {
+          throw new Error('The saved request should be resumed');
+        },
+        claimMemberJoin: async () => ({ state, ready }),
+      },
+      accountId: 'account',
+      emailVerified: true,
+      watchClaim: true,
+      onSignInRequested: () => {},
+      onEmailVerificationRequested: () => {},
+      onWorkspaceRequested: () => {},
+      onHomeRequested: () => {},
+    };
+    const showJoin = () =>
+      render(
+        <PlatformContext.Provider value={platform}>
+          <E2eeMemberJoin {...props} />
+        </PlatformContext.Provider>
+      );
+    await showJoin();
+    expect(container.textContent).toContain('e2ee.team.waitingApproval');
+    state = 'committed';
+    hint = { ...application('original', 'link'), state: 'committed' };
+    await showJoin();
+    expect(container.textContent).toContain('e2ee.team.waitingKey');
+    expect(button('e2ee.team.openWorkspace')).toBeUndefined();
+    ready = true;
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(button('e2ee.team.openWorkspace')).toBeDefined();
+  });
+
   it('recovers the saved original after expiry and separates membership from key readiness', async () => {
     let installed = false;
+    let unexpectedSubmission = false;
     const runtime = {
       pendingMemberJoin: async () => ({ offer, requestId: 'original' }),
       prepareMemberJoin: async () => {
+        unexpectedSubmission = true;
         throw new Error('must not replace saved request');
       },
       claimMemberJoin: async () => {
@@ -135,33 +191,33 @@ describe('encrypted team joining', () => {
       'key'
     );
     // Key delivery needs an administrator device; the joining member is told so.
-    expect(container.textContent).toContain('e2ee.team.waitingKeyAdminOnline');
+    expect(container.textContent).toContain('e2ee.team.waitingKeyGuide');
     expect(button('e2ee.team.submit')).toBeUndefined();
-    // Committed but not ready: the member claims again 3 s later, not 10 s.
+    // Once approved, the first key recheck starts at 500 ms and backs off.
     expect(claims).toBe(1);
-    await act(async () => vi.advanceTimersByTime(3_000));
-    await settle();
+    await act(async () => vi.advanceTimersByTimeAsync(499));
+    expect(claims).toBe(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(claims).toBe(2);
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(claims).toBe(3);
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(claims).toBe(4);
     // The fast cadence is bounded; after two minutes it returns to 10 s.
-    for (let elapsed = 3_000; elapsed < 120_000; elapsed += 3_000) {
-      await act(async () => vi.advanceTimersByTime(3_000));
-      await settle();
-    }
+    await act(async () => vi.advanceTimersByTimeAsync(120_500 - 3500));
     const slow = claims;
-    await act(async () => vi.advanceTimersByTime(3_000));
-    await settle();
+    await act(async () => vi.advanceTimersByTimeAsync(9999));
     expect(claims).toBe(slow);
-    await act(async () => vi.advanceTimersByTime(7_000));
-    await settle();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(claims).toBe(slow + 1);
     // After the fast window the member is told why it is still waiting, and can retry.
     expect(container.textContent).toContain('e2ee.team.waitingKeySlow');
-    await act(async () => button('e2ee.team.retry').click());
+    await act(async () => button('e2ee.team.checkKeyAgain').click());
     await settle();
+    expect(unexpectedSubmission).toBe(false);
     expect(claims).toBe(slow + 2);
     expect(container.textContent).not.toContain('e2ee.team.waitingKeySlow');
-    await act(async () => vi.advanceTimersByTime(3_000));
-    await settle();
+    await act(async () => vi.advanceTimersByTimeAsync(500));
     expect(claims).toBe(slow + 3);
     installed = true;
     await act(async () => window.dispatchEvent(new Event('online')));
@@ -490,7 +546,11 @@ describe('encrypted team joining', () => {
         offer={emailOffer}
         runtime={{
           pendingMemberJoin: async () => ({ offer: emailOffer, requestId: 'email-req' }),
-          prepareMemberJoin: async () => ({ offer: emailOffer, requestId: 'email-req', state: 'pending' }),
+          prepareMemberJoin: async () => ({
+            offer: emailOffer,
+            requestId: 'email-req',
+            state: 'pending',
+          }),
           claimMemberJoin: async () => ({ state: 'pending', ready: false }),
         }}
         accountId="account"
@@ -559,7 +619,8 @@ describe('encrypted team joining', () => {
       state: 'pending' | 'delivering' | 'delivered' | 'failed';
       code?: string;
     }[] = [];
-    const retried: string[] = [];
+    const retryResponse = deferred<'network'>();
+    let retryFailed = false;
     const confirmation = deferred<{
       admitted: boolean;
       keyPending: boolean;
@@ -583,7 +644,11 @@ describe('encrypted team joining', () => {
           },
           memberKeyDeliveries: async () => ({ items: delivery }),
           retryMemberKeyDelivery: async (_workspace, id) => {
-            retried.push(id);
+            if (!retryFailed) {
+              const code = await retryResponse.promise;
+              retryFailed = true;
+              throw Object.assign(new Error('Connection interrupted'), { code });
+            }
             delivery = [{ requestId: id, state: 'pending' }];
             return delivery[0]!;
           },
@@ -620,8 +685,12 @@ describe('encrypted team joining', () => {
     await settle();
     expect(row()?.textContent).toContain('e2ee.team.keyFailed');
     await act(async () => button('e2ee.team.keyRetry').click());
-    await settle();
-    expect(retried).toEqual([request.requestId]);
+    expect(button('e2ee.team.keyRetry').disabled).toBe(true);
+    expect(row()?.textContent).toContain('e2ee.team.keyRetrying');
+    await act(async () => retryResponse.resolve('network'));
+    expect(row()?.textContent).toContain('e2ee.team.keyRetryError.network');
+    expect(button('e2ee.team.keyRetry').disabled).toBe(false);
+    await act(async () => button('e2ee.team.keyRetry').click());
     expect(row()?.textContent).toContain('e2ee.team.keySending');
     delivery = [{ requestId: request.requestId, state: 'delivered' }];
     await act(async () => vi.advanceTimersByTime(10_000));
@@ -829,5 +898,35 @@ describe('encrypted team joining', () => {
     const data = new URLSearchParams(path!.slice(path!.indexOf('#') + 1)).get('e2ee')!;
     expect(parseMemberOffer(data, offer.token)).toEqual(offer);
     expect(parseMemberOffer(data, '99'.repeat(32))).toBeNull();
+  });
+  it('hides sign-out verification and switch-account actions while session hydration is loading', async () => {
+    const onEmailVerificationRequested = vi.fn();
+    await render(
+      <E2eeMemberJoin
+        offer={offer}
+        accountId="account"
+        email="a@synthetic.test"
+        emailVerified={undefined}
+        loading={true}
+        preview={{
+          status: 'available',
+          offer,
+          workspaceName: 'Team',
+          workspaceSlug: 'team',
+          recipientEmailMasked: 'b***@synthetic.test',
+          matchesRecipient: false,
+        }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={onEmailVerificationRequested}
+        onWorkspaceRequested={() => {}}
+        onHomeRequested={() => {}}
+      />
+    );
+    await settle();
+    expect(container.textContent).toContain('e2ee.team.loading');
+    expect(button('e2ee.team.verify')).toBeUndefined();
+    expect(button('e2ee.team.switchAccount')).toBeUndefined();
+    expect(button('e2ee.team.signIn')).toBeUndefined();
+    expect(onEmailVerificationRequested).not.toHaveBeenCalled();
   });
 });

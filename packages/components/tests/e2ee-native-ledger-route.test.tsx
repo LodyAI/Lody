@@ -1974,7 +1974,9 @@ it.each(['unavailable', 'invalid-state'] as const)(
       expect(checkpoint?.length).toBe(2);
       rejectRead = true;
       await act(async () => {
-        await expect(fixture.management!.setRole('0b'.repeat(16), 'admin')).rejects.toThrow();
+        await expect(fixture.management!.setRole('0b'.repeat(16), 'admin')).rejects.toThrow(
+          'e2ee_management_refresh_unconfirmed'
+        );
       });
       expect(f.readers()).toBe(1);
       expect(container.querySelector('[data-control-state]')?.textContent).toBe('failed');

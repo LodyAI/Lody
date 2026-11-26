@@ -65,9 +65,9 @@
   proves nothing. The approver skips a workspace whose session fails instead of
   failing the list.
 - Hosts build pairing cloud ports with `makePersonalCloudAccountPairingPorts`, which fences
-  each call on a signed-in account and bounds it. `personalEntry` bounds append, list and
-  history again on its executor's clock, since one unanswered call blocks every later
-  serial pairing operation. A timeout is retryable, never access loss.
+  each attempt on the original signed-in account and bounds the whole call. `personalEntry`
+  bounds append, list and history again on its executor's clock, since one unanswered
+  call blocks every later serial pairing operation. A timeout is retryable, never access loss.
 
 - Forward `irohReady`, `irohCall` and `irohPath` only when the wrapper passes `iroh`.
   Hosts without the port keep encrypted Streams RPC. `irohPath` must reach the
@@ -81,9 +81,9 @@
   cancelled pin's offer. Exact loss of a retained identity during restore cancels its
   pin, and the engine retries once with the account offer so the host replaces it.
 - `makeClientRecovery` and `makeRecoveryWorkspaces` bound remote Convex RPCs at 90 s
-  (leaving file/passkey ceremonies uncapped) so a dead WebSocket releases `commands`
-  and `active`. `makeRecoveryWorkspaces` unlocks the vault once for the selected
-  workspaces and reports each separately. Only a
+  including retry delays, so a dead WebSocket releases `commands` and `active`.
+  File/passkey ceremonies stay uncapped. `makeRecoveryWorkspaces` unlocks the vault
+  once for the selected workspaces and reports each separately. Only a
   committed, verified setup is recoverable. A timed-out 30 s wait is unconfirmed: it
   does not cancel the producer, journal, or submission. The pin database is
   `lody-e2ee:<platform>:v1:entry-pins` from the caller's fixed `web` or `mobile`

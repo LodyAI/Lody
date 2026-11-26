@@ -234,6 +234,7 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
       envPrefix,
       define: {
         ...viteEnvDefine,
+        __LODY_ELECTRON_RENDERER__: 'true',
         __BUILD_DATE__: JSON.stringify(buildDate),
         __GIT_COMMIT__: JSON.stringify(gitCommit),
         __APP_VERSION__: JSON.stringify(releaseProfile.version),

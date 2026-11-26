@@ -104,6 +104,7 @@ const STATES: SessionAutoDelivery[] = (
     { state: 'stalled', reason: 'ci_limit' },
     { state: 'stalled', reason: 'merge_blocked' },
     { state: 'stalled', reason: 'no_new_commit' },
+    { state: 'stalled', reason: 'request_blocked', blockReason: 'permission_unconfirmed' },
     { state: 'stalled', reason: 'stopped' },
   ] as const
 ).map((status) => ({ ...status, updatedAt: 1_700_000_000_000 }));
@@ -117,7 +118,7 @@ export const ConversationStatusLine: Story = {
         <div {...stylex.props(themeStyles.notesStack)}>
           {STATES.map((status) => (
             <SessionAutoDeliveryNote
-              key={`${status.state}-${status.reason ?? ''}`}
+              key={`${status.state}-${status.state === 'stalled' ? status.reason : ''}`}
               status={status}
               now={1_700_000_060_000}
               options={DEFAULT_AUTO_DELIVER_OPTIONS}

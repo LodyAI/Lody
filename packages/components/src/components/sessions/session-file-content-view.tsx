@@ -1,4 +1,4 @@
-import { control, radius as sharedRadius } from '@lody/ui/tokens/scales.stylex';
+import { control, radius as sharedRadius, text } from '@lody/ui/tokens/scales.stylex';
 import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { ReadOnlyHtmlPreview } from './read-only-html-preview';
 import { PagedFileViewer } from './paged-file-viewer';
@@ -327,7 +327,7 @@ const styles = stylex.create({
     backgroundColor: 'hsl(var(--background))',
     paddingInline: '8px',
     fontSize: '11px',
-    lineHeight: 1,
+    lineHeight: text.captionLeading,
     color: 'hsl(var(--muted-foreground))',
   },
   statusItems: {

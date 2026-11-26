@@ -477,6 +477,18 @@ describe('Today zoomed subtree', () => {
 });
 
 describe('Today snapshot caches', () => {
+  it('shows restored descendants once after undoing a subtree deletion', () => {
+    const { doc, outline, ids } = build('parent\n  child\n    grandchild\nother');
+    const undo = createTodayPageUndo(doc, { setTimer: () => () => {} });
+    const before = outline.getSnapshot().visible.map((node) => node.id);
+
+    undo.structural(() => outline.deleteNodes([idOf(ids, 'parent')]));
+    expect(outline.getSnapshot().visible.map((node) => node.id)).toEqual([idOf(ids, 'other')]);
+    expect(undo.undo()).toBe(true);
+    expect(outline.getSnapshot().visible.map((node) => node.id)).toEqual(before);
+    undo.dispose();
+  });
+
   it('match a page opened afresh after every local edit, undo, redo and merged peer edit', () => {
     let seed = 11;
     const random = () => {
@@ -683,5 +695,26 @@ describe('Today page undo', () => {
     ctx.doc.getMap('today').set('v', 1);
     ctx.doc.commit({ origin: 'sys:init' });
     expect(ctx.undo.canUndo()).toBe(false);
+  });
+
+  it('recovers and commits text edits when Loro UndoManager is not ready after a checkout', () => {
+    const peerDoc = new LoroDoc();
+    const peerOutline = openTodayOutline(peerDoc);
+    const created = peerOutline.insertFirst('from-peer') as { nodeId: string };
+
+    const ctx = setup();
+    ctx.doc.import(peerDoc.export({ mode: 'update' }));
+    ctx.doc.checkout([]);
+    ctx.doc.checkoutToLatest();
+
+    type(ctx, created.nodeId, 9, '+local');
+    expect(ctx.outline.getNode(created.nodeId as never)?.text).toBe('from-peer+local');
+    expect(ctx.undo.canUndo()).toBe(true);
+
+    peerDoc.import(ctx.doc.export({ mode: 'update', from: peerDoc.version() }));
+    expect(peerOutline.getNode(created.nodeId as never)?.text).toBe('from-peer+local');
+
+    ctx.undo.undo();
+    expect(ctx.outline.getNode(created.nodeId as never)?.text).toBe('from-peer');
   });
 });

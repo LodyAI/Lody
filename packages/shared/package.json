@@ -23,6 +23,10 @@
       "types": "./src/notifications/index.ts",
       "import": "./src/notifications/index.ts"
     },
+    "./loro-wasm-budget": {
+      "types": "./src/loro-wasm-budget.ts",
+      "import": "./src/loro-wasm-budget.ts"
+    },
     "./loro-sync-errors": {
       "types": "./src/loro-sync-errors/index.ts",
       "import": "./src/loro-sync-errors/index.ts"

@@ -10428,7 +10428,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://loro.dev",
       "description": "Loro CRDTs is a high-performance CRDT framework that makes your app state synchronized, collaborative and maintainable effortlessly.",
       "versions": [
-        "1.17.0"
+        "1.19.1"
       ]
     },
     {

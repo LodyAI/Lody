@@ -1,3 +1,5 @@
+import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-failure';
+import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
 import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
 import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { themeSpace as appSpace } from '../../style/theme-scale.stylex';
@@ -106,13 +108,15 @@ function carriedCode(cause: unknown, depth = 0): string | null {
 /** Only an outage retries quietly; a refusal says what went wrong instead of blaming the
  * connection. */
 export function automaticPairingErrorKey(cause: unknown): string {
-  const known = accountPairingErrorCode(cause);
+  const known =
+    accountPairingErrorCode(cause) ?? accountPairingErrorCode({ code: requestFailureCode(cause) });
   if (known) return `e2ee.accountPair.error.${known}`;
   const code = carriedCode(cause)?.replace(/^e2ee_/, '') ?? null;
-  if (code === null || /^(?:network|closed|offline|timeout|unavailable)$/.test(code))
-    return 'e2ee.auto.connectionRetry';
-  if (/pairing-unavailable|account_pairing_disabled/.test(code))
+  if (/^(?:pairing-unavailable|account_pairing_disabled)$/.test(code ?? ''))
     return 'e2ee.accountPair.error.pairing-unavailable';
+  const custody = custodyFailureMessage(classifyE2eeControlFailure(cause).kind);
+  if (custody) return custody;
+  if (code === 'closed' || isRequestUnavailable(cause)) return 'e2ee.auto.connectionRetry';
   return 'e2ee.accountPair.error.failed';
 }
 const ComparisonCode = ({ code, hint }: { code: string; hint: string }) => {
@@ -935,7 +939,9 @@ export function E2eeAutomaticPairingInbox({
   const [inbox, setInbox] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<
-    { kind: 'retry' } | { kind: 'mismatch'; attemptsLeft: number } | null
+    | { kind: 'retry' | 'refused'; key: string }
+    | { kind: 'mismatch'; attemptsLeft: number }
+    | null
   >(null);
   const [code, setCode] = useState('');
   // The typed code belongs to one request. A poll that briefly omits it closes the dialog,
@@ -1134,7 +1140,7 @@ export function E2eeAutomaticPairingInbox({
   };
   const act = async (approve: boolean, entered = code) => {
     const target = current;
-    if (!target || busy || !runtime) return;
+    if (!target || busy || !runtime || error?.kind === 'refused') return;
     if (approve && (target.phase !== 'waiting' || !/^\d{6}$/.test(entered))) return;
     const owner = actionOwner.current;
     setBusy(target.id);
@@ -1152,7 +1158,8 @@ export function E2eeAutomaticPairingInbox({
       }
     } catch (cause) {
       if (owner !== actionOwner.current) return;
-      const refusal = accountPairingErrorCode(cause);
+      const refusal =
+        accountPairingErrorCode(cause) ?? accountPairingErrorCode({ code: requestFailureCode(cause) });
       if (refusal === 'pairing-code-locked') {
         settled.current.add(target.id);
         deferred.current.add(target.id);
@@ -1164,7 +1171,19 @@ export function E2eeAutomaticPairingInbox({
         const left = (cause as { attemptsLeft?: unknown }).attemptsLeft;
         setCode('');
         setError({ kind: 'mismatch', attemptsLeft: typeof left === 'number' ? left : 1 });
-      } else setError({ kind: 'retry' });
+      } else {
+        const key = automaticPairingErrorKey(cause);
+        const terminal =
+          refusal === 'pairing-expired' ||
+          refusal === 'pairing-used' ||
+          refusal === 'pairing-tampered' ||
+          refusal === 'pairing-elsewhere' ||
+          refusal === 'pairing-update-required';
+        setError({
+          kind: terminal ? 'refused' : 'retry',
+          key: key === 'e2ee.auto.connectionRetry' ? 'e2ee.accountPair.error.unavailable' : key,
+        });
+      }
     } finally {
       if (owner === actionOwner.current) setBusy(null);
     }
@@ -1380,7 +1399,7 @@ export function E2eeAutomaticPairingInbox({
                     xstyle={themeStyles.glyph5}
                     size="large"
                     data-testid="e2ee-approval-scan-start"
-                    disabled={Boolean(busy)}
+                    disabled={Boolean(busy) || error?.kind === 'refused'}
                     onClick={() => {
                       setScanNotice(null);
                       setScanning(true);
@@ -1424,7 +1443,9 @@ export function E2eeAutomaticPairingInbox({
                     placeholder="000000"
                     aria-invalid={error?.kind === 'mismatch' || undefined}
                     aria-describedby={error ? 'e2ee-approval-code-error' : undefined}
-                    disabled={Boolean(busy) || current.phase !== 'waiting'}
+                    disabled={
+                      Boolean(busy) || current.phase !== 'waiting' || error?.kind === 'refused'
+                    }
                     onChange={(event) => {
                       // Full-width IME digits (１２３) become ASCII before filtering.
                       setCode(event.target.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6));
@@ -1454,7 +1475,7 @@ export function E2eeAutomaticPairingInbox({
                 <div {...stylex.props(themeStyles.column4)}>
                   <Button
                     variant="destructive"
-                    disabled={Boolean(busy)}
+                    disabled={Boolean(busy) || error?.kind === 'refused'}
                     onClick={() => void act(false)}
                   >
                     {t('e2ee.auto.notMine')}
@@ -1467,6 +1488,7 @@ export function E2eeAutomaticPairingInbox({
                     disabled={
                       Boolean(busy) ||
                       current.phase !== 'waiting' ||
+                      error?.kind === 'refused' ||
                       !/^\d{6}$/.test(code) ||
                       current.expiresAt <= Date.now()
                     }
@@ -1475,14 +1497,19 @@ export function E2eeAutomaticPairingInbox({
                     {t(busy ? 'e2ee.auto.confirming' : 'e2ee.auto.authorize')}
                   </Button>
                 </div>
-                {error?.kind === 'retry' && (
+                {(error?.kind === 'retry' || error?.kind === 'refused') && (
                   <p
                     id="e2ee-approval-code-error"
                     role="alert"
                     {...stylex.props(themeStyles.hint5)}
                   >
-                    {t('e2ee.auto.approvalRetry')}
+                    {t(error.key)}
                   </p>
+                )}
+                {error?.kind === 'refused' && (
+                  <Button variant="secondary" onClick={later}>
+                    {t('common.close')}
+                  </Button>
                 )}
                 <p {...stylex.props(themeStyles.hint19)}>
                   {t('e2ee.auto.laterHint')}

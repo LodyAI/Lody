@@ -7,11 +7,17 @@ import type {
   ConditionObservation,
 } from '@lody/shared/automations';
 import { AutomationLedger, type Delivery } from '../storage/ledger';
-import { internalPolicy } from '../policies/session';
+import { IN_FLIGHT_STATES, TERMINAL_STATES } from '../storage/schema';
+import { internalPolicy, isQuotaRecoveryReceipt, quotaRecoveryRetryAt } from '../policies/session';
 
-export type ActionAuthorization = ConditionObservation & {
-  terminalState?: 'failed' | 'superseded';
-};
+export type ActionAuthorization =
+  | { value: 'yes'; reason: string }
+  | {
+      value: 'no' | 'unknown';
+      reason: string;
+      retryAt?: number;
+      terminalState?: 'failed' | 'superseded';
+    };
 export type ActionResult = Pick<AutomationReceipt, 'state'> &
   Partial<Pick<AutomationReceipt, 'reason' | 'retryAt' | 'sessionId' | 'prepared'>>;
 
@@ -46,12 +52,12 @@ export class Automations extends Context.Service<
     cancel(id: string): Effect.Effect<void, unknown>;
   }
 >()('lody/automations/Runtime') {
-  static layer(ledger: AutomationLedger) {
+  static layer(ledger: AutomationLedger, sharedSignal?: Queue.Queue<void>) {
     return Layer.effect(
       Automations,
       Effect.gen(function* () {
         const host = yield* AutomationHost;
-        const signal = yield* Queue.dropping<void>(1);
+        const signal = sharedSignal ?? (yield* Queue.dropping<void>(1));
         const gate = Semaphore.makeUnsafe(1);
         const active = new Map<string, Deferred.Deferred<void>>();
         const checking = new Map<
@@ -137,11 +143,7 @@ export class Automations extends Context.Service<
           const now = yield* Clock.currentTimeMillis;
           return yield* Effect.try(() => {
             const current = ledger.receipt(receipt.id);
-            const wokeDuringCheck =
-              receipt.event.type === 'provider.quota.exhausted' &&
-              receipt.rule.handler.kind === 'policy' &&
-              receipt.rule.handler.policy === 'recover-capacity' &&
-              current?.capacityWakeRevision !== receipt.capacityWakeRevision;
+            const wokeDuringCheck = current?.capacityWakeRevision !== receipt.capacityWakeRevision;
             return ledger.update(
               receipt.id,
               receipt.state,
@@ -150,12 +152,13 @@ export class Automations extends Context.Service<
             );
           });
         });
-        const check = Effect.fn('Automations.check')(function* (receipt: AutomationReceipt) {
+        const check = Effect.fn('Automations.check')(function* (
+          receipt: AutomationReceipt
+        ): Effect.fn.Return<ActionAuthorization, unknown> {
           const current = ledger.rule(receipt.rule.id);
-          if (!current?.enabled)
-            return { value: 'no', reason: 'rule_disabled' } as ConditionObservation;
+          if (!current?.enabled) return { value: 'no', reason: 'rule_disabled' };
           if (!current.grants.actions.includes(receipt.intent.action.kind))
-            return { value: 'no', reason: 'grant_revoked' } as ConditionObservation;
+            return { value: 'no', reason: 'grant_revoked' };
           const authorization = yield* host.authorize(receipt);
           if (authorization.value !== 'yes') return authorization;
           if (receipt.intent.guard) {
@@ -164,26 +167,21 @@ export class Automations extends Context.Service<
           }
           if (receipt.intent.condition)
             return yield* host.condition(receipt.intent.condition, receipt);
-          return { value: 'yes', reason: 'eligible' } as ConditionObservation;
+          return { value: 'yes', reason: 'eligible' };
         });
         const advance = Effect.fn('Automations.advance')(function* (receipt: AutomationReceipt) {
           const now = yield* Clock.currentTimeMillis;
-          const quotaRecovery =
-            receipt.event.type === 'provider.quota.exhausted' &&
-            receipt.rule.handler.kind === 'policy' &&
-            receipt.rule.handler.policy === 'recover-capacity';
+          const quotaRecovery = isQuotaRecoveryReceipt(receipt);
           if (receipt.state === 'cancelling') {
             const result = yield* host.cancel(receipt);
             yield* persist(receipt, {
               ...result,
-              state: ['cancelled', 'settled', 'failed', 'superseded'].includes(result.state)
-                ? result.state
-                : 'cancelling',
+              state: TERMINAL_STATES.has(result.state) ? result.state : 'cancelling',
               retryAt: now + 15_000,
             });
             return;
           }
-          if (['submitting', 'queued', 'running', 'unknown'].includes(receipt.state)) {
+          if (IN_FLIGHT_STATES.has(receipt.state)) {
             // A lost acknowledgement is a reconciliation problem, never permission to resubmit.
             const result = yield* host.reconcile(receipt);
             yield* persist(receipt, { retryAt: now + 15_000, ...result });
@@ -214,23 +212,17 @@ export class Automations extends Context.Service<
             observation = yield* check(receipt);
           }
           if (observation.value !== 'yes') {
-            const estimatedReset = receipt.event.data.retryAt;
             yield* persist(receipt, {
               state:
-                'terminalState' in observation &&
-                (observation.terminalState === 'failed' ||
-                  observation.terminalState === 'superseded')
-                  ? observation.terminalState
-                  : observation.reason.startsWith('guard:') && observation.value === 'no'
-                    ? 'superseded'
-                    : 'blocked',
+                observation.terminalState ??
+                (observation.reason.startsWith('guard:') && observation.value === 'no'
+                  ? 'superseded'
+                  : 'blocked'),
               reason: observation.reason,
               retryAt:
                 observation.retryAt ??
                 (quotaRecovery && observation.reason.startsWith('capacity_')
-                  ? typeof estimatedReset === 'number' && estimatedReset > now
-                    ? estimatedReset
-                    : Number.MAX_SAFE_INTEGER
+                  ? quotaRecoveryRetryAt(receipt, now)
                   : now + 15_000),
             });
             return;
@@ -387,9 +379,7 @@ export class Automations extends Context.Service<
             }
             const receipt = yield* Effect.try(() => ledger.receipt(id));
             if (!receipt) return;
-            if (
-              ['submitting', 'queued', 'running', 'unknown', 'cancelling'].includes(receipt.state)
-            ) {
+            if (IN_FLIGHT_STATES.has(receipt.state) || receipt.state === 'cancelling') {
               // Revoke admission before awaiting the owner; this fence survives restart.
               const fenced = yield* persist(receipt, {
                 state: 'cancelling',

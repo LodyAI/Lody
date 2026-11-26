@@ -3,9 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
   getScheduleRegistryFlockDocId,
-  readScheduleRegistryRows,
+  ScheduleRegistryRowSchema,
   ScheduleRuntimeRowSchema,
+  ScheduleTombstoneSchema,
   type ScheduleDocument,
+  type ScheduleRegistryRow,
+  type ScheduleRuntimeRow,
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
@@ -76,30 +79,98 @@ export function useScheduleRegistrySync(): void {
         if (!local) {
           const handle = await runtime.repo.openFlockDoc(roomId);
           if (disposed) return;
-          const update = () => {
+          // Catch-up delivers dozens of batches in one microtask drain; none may re-scan.
+          const registry = {
+            schedules: new Map<string, ScheduleRegistryRow>(),
+            tombstones: new Set<string>(),
+            runtimes: new Map<string, ScheduleRuntimeRow>(),
+          };
+          const publish = () => {
             if (disposed) return;
-            const scan = [...handle.flock.scan()];
-            const rows = readScheduleRegistryRows(scan);
+            const rows = [...registry.schedules.values()].filter(
+              (entry) => !registry.tombstones.has(entry.scheduleId)
+            );
             setSnapshot((current) => ({
               workspaceId: runtime.workspaceId,
               rows,
-              runtimes: scan.flatMap((entry) => {
-                if (entry.key[0] !== 'runtime') return [];
-                const parsed = ScheduleRuntimeRowSchema.safeParse(entry.value);
-                return parsed.success &&
-                  entry.key[1] === parsed.data.scheduleId &&
-                  entry.key[2] === parsed.data.machineId
-                  ? [parsed.data]
-                  : [];
-              }),
+              runtimes: [...registry.runtimes.values()],
               // An empty local scan is not authoritative until first sync.
               ready: rows.length > 0 || synced || !!current.error,
               retrying: synced ? false : current.retrying,
               error: synced ? undefined : current.error,
             }));
           };
+          const runtimeKey = (scheduleId: string, machineId: string) =>
+            `${scheduleId}\u0000${machineId}`;
+          const applyEvent = (event: { key: readonly unknown[]; value?: unknown }) => {
+            const [family, id, machineId] = event.key;
+            if (family === 'schedule' && typeof id === 'string' && event.key.length === 2) {
+              if (event.value === undefined) {
+                registry.schedules.delete(id);
+                return;
+              }
+              const parsed = ScheduleRegistryRowSchema.safeParse(event.value);
+              if (parsed.success && parsed.data.scheduleId === id)
+                registry.schedules.set(id, parsed.data);
+              else registry.schedules.delete(id);
+              return;
+            }
+            if (family === 'tombstone' && typeof id === 'string' && event.key.length === 2) {
+              if (event.value === undefined) {
+                registry.tombstones.delete(id);
+                return;
+              }
+              if (ScheduleTombstoneSchema.safeParse(event.value).success)
+                registry.tombstones.add(id);
+              return;
+            }
+            if (
+              family === 'runtime' &&
+              typeof id === 'string' &&
+              typeof machineId === 'string' &&
+              event.key.length === 3
+            ) {
+              const key = runtimeKey(id, machineId);
+              if (event.value === undefined) {
+                registry.runtimes.delete(key);
+                return;
+              }
+              const parsed = ScheduleRuntimeRowSchema.safeParse(event.value);
+              if (
+                parsed.success &&
+                parsed.data.scheduleId === id &&
+                parsed.data.machineId === machineId
+              )
+                registry.runtimes.set(key, parsed.data);
+              else registry.runtimes.delete(key);
+            }
+          };
+          const rescan = () => {
+            registry.schedules.clear();
+            registry.tombstones.clear();
+            registry.runtimes.clear();
+            const scan = [...handle.flock.scan()];
+            for (const entry of scan) applyEvent(entry);
+          };
           stage = 'scan';
-          off = handle.flock.subscribe(update);
+          const update = () => {
+            if (disposed) return;
+            rescan();
+            publish();
+          };
+          off = handle.flock.subscribe((batch) => {
+            if (disposed) return;
+            const events = (
+              batch as { events?: { key: readonly unknown[]; value?: unknown }[] } | undefined
+            )?.events;
+            if (!events) {
+              update();
+              return;
+            }
+            if (events.length === 0) return;
+            for (const event of events) applyEvent(event);
+            publish();
+          });
           update();
           local = { handle, update };
         }

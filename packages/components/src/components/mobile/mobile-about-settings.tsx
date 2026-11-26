@@ -15,6 +15,7 @@ import {
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from '@/components/settings/open-source-attributions-dialog';
 import { JoinCommunityButton } from '@/components/settings/join-community-dialog';
+import { UsageSharingRow } from '@/components/settings/usage-sharing-row';
 import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { getDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
@@ -259,6 +260,8 @@ export function MobileAboutSettings() {
               </MobileSettingsRow>
             </MobileSettingsRowGroup>
           </MobileSettingsSection>
+
+          <UsageSharingRow mobile />
 
           {updaterState && phase !== 'disabled' ? (
             <MobileSettingsSection title={t('settings.about.updatesTitle', 'Updates')}>

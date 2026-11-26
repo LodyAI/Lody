@@ -40,6 +40,11 @@ The developer preference controls new creation, not access to existing workspace
 
 The ledger user ID is the signed-in account ID in a frozen 32-byte encoding, computed locally before signing; the service checks it names the authenticated account ([decision](../notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.md)). Each request ID freezes account, name, slug and genesis. An unknown cloud result retries the same bytes, and never switches mode or replaces identity. Independent windows retain independent pending requests; completing one must not remove another. Pending intents are parsed per canonical request key; malformed JSON or a mismatched key remains byte-for-byte in storage for reconciliation and cannot block healthy or new requests. Archiving a saved request only writes a per-request display marker (`lody-e2ee-pending-creation-archived:<account>:<request>`): the request record, its slug reservation evidence and host-prepared identity stay unchanged, nothing is cancelled on the server, and restore resumes the same request. Archived requests are never resumed automatically; a submit in flight keeps its request even if another window archives it, and a late unknown result leaves it archived. Completing or removing a request also drops its marker. Deleting a saved request is permanent and confirmed first: the same request is reconciled with the server, a workspace it already created is deleted through `e2eeWorkspaces:deleteWorkspace` to release its allowance slot, and only then is the request removed. A refusal that proves no reservation (including `free_workspace_limit_reached`, checked only after the retained-receipt lookup) removes it without creating anything; an unknown result or a failed workspace deletion keeps the request, archived state included. Host-retained keys are not deleted. Host storage owns interrupted key preparation. Missing protected material after an interrupted preparation fails visibly instead of silently creating replacement keys.
 
+If the device confirmation is explicitly cancelled during preparation of a fresh
+request, the creation page removes that intent and returns to the editable form.
+Cancelling preparation for an existing request keeps the original available for
+reconciliation because an earlier submission may have committed.
+
 The cloud response binds the product workspace ID to `contentMode=e2ee`, version 1 and `cryptoOrgId=genesisHash`. It identifies an encrypted organization within the existing cloud service; it does not select another deployment. The ordinary workspace-creation API cannot create or convert an encrypted workspace. Server account membership authorizes reading public control records, not decrypting content or enrolling a device.
 
 ## History and runtime boundary
@@ -108,6 +113,12 @@ failure leaves verified history and manual refresh available. With a live verifi
 version, the team-management host no longer polls its ledger; request and key-delivery
 polling keep their separate roles. The cloud ledger-head query must be deployed
 before the subscribing client.
+
+The member join page also watches the authenticated claim status for its active
+request. A state change wakes the host's existing claim immediately. Only the
+host's verified result can advance membership or open the workspace. A timer
+covers missed notifications. Once the host confirms admission, early key checks
+back off from 500 ms to 3 s, then return to 10 s after two minutes.
 
 ## Ledger compatibility
 

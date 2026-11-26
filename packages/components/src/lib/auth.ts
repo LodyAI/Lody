@@ -21,19 +21,32 @@ type BetterAuthClientPlugin = NonNullable<BetterAuthClientOptions['plugins']>[nu
 type CreateLodyAuthClientOptions<Plugins extends BetterAuthClientPlugin[]> = {
   additionalPlugins?: Plugins;
   disableDefaultFetchPlugins?: boolean;
+  disableCrossDomain?: boolean;
 };
+
+const sessionSignalPlugin = () => ({
+  id: 'lody-session-signal',
+  getActions: (_$fetch: unknown, $store: { notify: (signal: string) => void }) => ({
+    updateSession: () => {
+      $store.notify('$sessionSignal');
+    },
+  }),
+});
 
 const createBaseLodyAuthClient = <const Plugins extends BetterAuthClientPlugin[] = []>(
   options: CreateLodyAuthClientOptions<Plugins> = {}
 ) => {
   const additionalPlugins = options.additionalPlugins ?? [];
+  const crossDomainPlugin = options.disableCrossDomain
+    ? (sessionSignalPlugin() as unknown as ReturnType<typeof crossDomainClient>)
+    : crossDomainClient();
 
   const client = createAuthClient({
     baseURL: import.meta.env.VITE_CONVEX_SITE_URL,
     plugins: [
       organizationClient(),
       convexClient(),
-      crossDomainClient(),
+      crossDomainPlugin,
       ...additionalPlugins,
     ] as const,
     disableDefaultFetchPlugins: options.disableDefaultFetchPlugins || false,

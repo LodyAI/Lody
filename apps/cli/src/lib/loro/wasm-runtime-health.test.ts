@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { LoroDoc } from 'loro-crdt';
+import { getGlobalMemoryBudget, LoroDoc, setGlobalMemoryBudget } from 'loro-crdt';
+import { configureLoroWasmBudget, LORO_WASM_HARD_LIMIT_BYTES } from '@lody/shared/loro-wasm-budget';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '@/utils/logger';
 import {
@@ -9,7 +10,6 @@ import {
   resetWasmRuntimeHealthForTests,
   resolveLoroWasmMemory,
   startWasmHeapMonitor,
-  WASM32_MEMORY_LIMIT_BYTES,
   type WasmFault,
 } from './wasm-runtime-health';
 
@@ -115,27 +115,55 @@ describe('Loro WebAssembly heap', () => {
     doc.free();
   });
 
-  it('warns once per threshold as the heap nears the 4 GiB limit', () => {
+  it('rejects an oversized import before growing the daemon WASM heap', async () => {
+    const previousBudget = getGlobalMemoryBudget();
+    const memory = await resolveLoroWasmMemory();
+    configureLoroWasmBudget();
+    const doc = new LoroDoc();
+
+    try {
+      expect(getGlobalMemoryBudget()).toMatchObject({
+        maxHeapBytes: 512 * 1024 * 1024,
+        maxWasmLinearBytes: 512 * 1024 * 1024,
+        highWatermarkBytes: 200 * 1024 * 1024,
+        targetWatermarkBytes: 160 * 1024 * 1024,
+      });
+      const before = memory?.buffer.byteLength;
+      const oversized = new Uint8Array(LORO_WASM_HARD_LIMIT_BYTES + 1);
+      expect(() => doc.import(oversized)).toThrow(
+        expect.objectContaining({ code: 'MemoryLimitExceeded', kind: 'GlobalBudget' })
+      );
+      expect(memory?.buffer.byteLength).toBe(before);
+      doc.getMap('test').set('afterRejection', true);
+      doc.tryCommit();
+      expect(doc.toJSON()).toEqual({ test: { afterRejection: true } });
+    } finally {
+      doc.free();
+      setGlobalMemoryBudget(previousBudget);
+    }
+  });
+
+  it('warns once per threshold as the heap nears the configured budget', () => {
     const logger = createTestLogger();
-    let bytes: number | null = 1024 * 1024 * 1024;
+    let bytes: number | null = 128 * 1024 * 1024;
     const monitor = startWasmHeapMonitor(logger, () => bytes, {
       setInterval: () => ({}),
       clearInterval: () => {},
     });
     expect(logger.warn).not.toHaveBeenCalled();
 
-    bytes = WASM32_MEMORY_LIMIT_BYTES * 0.8;
+    bytes = LORO_WASM_HARD_LIMIT_BYTES * 0.8;
     monitor.sample();
     monitor.sample();
-    bytes = WASM32_MEMORY_LIMIT_BYTES * 0.95;
+    bytes = LORO_WASM_HARD_LIMIT_BYTES * 0.95;
     monitor.sample();
     bytes = null;
     monitor.sample();
 
     const warnings = vi.mocked(logger.warn).mock.calls.map(([message]) => String(message));
     expect(warnings).toHaveLength(2);
-    expect(warnings[0]).toContain('80% of its 4 GiB limit');
-    expect(warnings[1]).toContain('95% of its 4 GiB limit');
+    expect(warnings[0]).toContain('80% of its 512MiB budget');
+    expect(warnings[1]).toContain('95% of its 512MiB budget');
     expect(vi.mocked(logger.debug)).toHaveBeenCalledTimes(4);
   });
 });

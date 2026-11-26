@@ -148,7 +148,7 @@
     "@sorbetai/control": "0.1.0-alpha.23",
     "better-sqlite3": "catalog:",
     "ignore": "7.0.5",
-    "loro-crdt": "1.17.0",
+    "loro-crdt": "1.19.1",
     "tinypool": "^1.0.0",
     "typescript": "^5.9.3"
   },

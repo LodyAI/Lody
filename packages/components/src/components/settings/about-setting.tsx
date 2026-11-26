@@ -16,6 +16,7 @@ import { settingContainerClass } from '.';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from './open-source-attributions-dialog';
 import { JoinCommunityDialog } from './join-community-dialog';
+import { UsageSharingRow } from './usage-sharing-row';
 import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { getDownloadPageUrl, getNightlyDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
@@ -475,20 +476,32 @@ export function AboutSettingsComponent() {
                 </span>
               )}
               {isDownloaded ? (
-                <Button
-                  size="small"
-                  onClick={() => {
-                    void handleQuitAndInstall();
-                  }}
-                  disabled={isInstalling}
-                >
-                  {isInstalling ? (
-                    <Spinner size="small" />
-                  ) : (
-                    <Download {...stylex.props(styles.icon)} />
-                  )}
-                  {t('settings.about.updateAndRestart')}
-                </Button>
+                <>
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    onClick={() => {
+                      void handleCheckForUpdates();
+                    }}
+                    disabled={isChecking || isInstalling}
+                  >
+                    {t('settings.about.checkForUpdates')}
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void handleQuitAndInstall();
+                    }}
+                    disabled={isInstalling}
+                  >
+                    {isInstalling ? (
+                      <Spinner size="small" />
+                    ) : (
+                      <Download {...stylex.props(styles.icon)} />
+                    )}
+                    {t('settings.about.updateAndRestart')}
+                  </Button>
+                </>
               ) : (
                 <Button
                   variant="secondary"
@@ -544,6 +557,7 @@ export function AboutSettingsComponent() {
           }
           onTriggerDoubleClick={() => setDeveloperModeRevealed(true)}
         />
+        <UsageSharingRow />
         {showDeveloperModeSwitch && (
           <CompactRow
             label={t('settings.about.developerMode', 'Developer mode')}

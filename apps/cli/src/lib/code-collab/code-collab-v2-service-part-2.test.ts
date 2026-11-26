@@ -723,7 +723,7 @@ describe('CodeCollabV2Service text RPC boundary', () => {
           ok: true,
           ownerSessionId: SESSION_ID,
           workspaceRoot,
-          allChangesBaseBranch: 'refs/heads/main',
+          allChanges: { scope: 'branch', baseBranch: 'refs/heads/main' },
         }),
         publishFileIndex,
       });
@@ -778,7 +778,7 @@ describe('CodeCollabV2Service text RPC boundary', () => {
             ok: true,
             ownerSessionId: SESSION_ID,
             workspaceRoot,
-            allChangesBaseBranch: 'refs/heads/main',
+            allChanges: { scope: 'branch', baseBranch: 'refs/heads/main' },
           }),
           publishFileIndex,
         });

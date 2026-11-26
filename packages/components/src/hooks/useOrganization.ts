@@ -313,7 +313,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     directoryNeeded && encryptedWorkspaces === undefined ? encryptedDirectory.error : null;
   const organizationsPending =
     ordinaryOrganizationsPending ||
-    (ordinaryOrganizations?.length === 0 && encryptedWorkspaces === undefined && !directoryError);
+    (directoryNeeded && encryptedWorkspaces === undefined && !directoryError);
   const selectedEncryptedId =
     selectedEncryptedWorkspace?.accountId === user?.id ? selectedEncryptedWorkspace?.id : null;
   const encryptedActive = encryptedOrganizations?.find((workspace) =>

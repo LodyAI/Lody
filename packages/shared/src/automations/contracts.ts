@@ -46,11 +46,9 @@ export const automationConditionSchema = z
   })
   .strict();
 export type AutomationCondition = z.infer<typeof automationConditionSchema>;
-export type ConditionObservation = {
-  value: 'yes' | 'no' | 'unknown';
-  reason: string;
-  retryAt?: number;
-};
+export type ConditionObservation =
+  | { value: 'yes'; reason: string }
+  | { value: 'no' | 'unknown'; reason: string; retryAt?: number };
 
 export const automationTargetSchema = z.discriminatedUnion('kind', [
   z

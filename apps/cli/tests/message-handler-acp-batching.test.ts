@@ -2955,7 +2955,7 @@ describe('MessageHandler ACP batching', () => {
           ok: true,
           ownerSessionId: sessionId,
           workspaceRoot: '/tmp',
-          allChangesBaseBranch: 'main',
+          allChanges: { scope: 'branch', baseBranch: 'main' },
         })
         .mockRejectedValueOnce(new Error('transient persistence failure'))
         .mockResolvedValueOnce({ ok: false, code: 'workspace_unavailable' });
@@ -3148,4 +3148,116 @@ describe('MessageHandler ACP batching', () => {
       await destroyRepoOnRealTimers(repo);
     }
   }, 120_000);
+
+  it('settles non-sessionActivity live agents via lateActivity and notifies idle on native work clear', async () => {
+    const sessionId = 'session-native-settle' as SessionId;
+    const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+    let liveProcess = true;
+    let reportsActivity = false;
+    let nativeWork: 'running' | 'background' | null = null;
+    const sessionStub = {
+      hasLiveAgentProcess: () => liveProcess,
+      agentClient: {
+        reportsSessionActivity: () => reportsActivity,
+        getNativeWork: () => nativeWork,
+      },
+    };
+    const { handler, repo, workspaceDocument } = await createHandlerHarness(
+      [sessionId],
+      () =>
+        ({
+          on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+            const list = listeners.get(event) ?? [];
+            list.push(listener);
+            listeners.set(event, list);
+          }),
+          setRequestPermissionHandler: vi.fn(),
+          getSession: vi.fn((id: SessionId) => (id === sessionId ? sessionStub : null)),
+          getPendingSession: vi.fn(() => undefined),
+          cleanUp: vi.fn(async () => {}),
+        }) as unknown as SessionManager
+    );
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'm-1',
+      userId: 'u-1',
+      cliType: 'builtin',
+      agentType: 'antigravity',
+      isArchived: false,
+    };
+    (workspaceDocument as Record<string, unknown>).peekSessionDoc = vi.fn(() => undefined);
+    (workspaceDocument.repo as Record<string, unknown>).listDoc = vi.fn(async () => [
+      { docId: getSessionRoomId(sessionId), meta: sessionMeta },
+    ]);
+    workspaceDocument.repo.getDocMeta.mockImplementation(async (roomId?: string) =>
+      roomId === getSessionRoomId(sessionId) ? { meta: sessionMeta } : undefined
+    );
+
+    try {
+      (
+        handler as unknown as {
+          executionService: { setOperationInbox(inbox: unknown): void };
+        }
+      ).executionService.setOperationInbox({});
+      const authority = handler.getAutomationSessionAuthority();
+      const woken: SessionId[] = [];
+      authority.setObservations({
+        stage: () => {},
+        turn: async () => {},
+        capacity: async () => {},
+        idle: (id) => woken.push(id),
+      });
+
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'yes',
+        reason: 'group_settled',
+      });
+
+      const presence = (
+        handler as unknown as {
+          sessionActivePresence: SessionActivePresenceControllerLegacy;
+        }
+      ).sessionActivePresence;
+      presence.native.noteLateActivity(sessionId);
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'no',
+        reason: 'native_work_active',
+      });
+      presence.native.clearLateActivity(sessionId);
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'yes',
+        reason: 'group_settled',
+      });
+
+      reportsActivity = true;
+      nativeWork = 'background';
+      for (const listener of listeners.get('onNativeWorkChanged') ?? []) {
+        listener(sessionId, 'background');
+      }
+      expect(woken).toEqual([]);
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'no',
+        reason: 'native_work_active',
+      });
+
+      nativeWork = null;
+      for (const listener of listeners.get('onNativeWorkChanged') ?? []) {
+        listener(sessionId, null);
+      }
+      expect(woken).toEqual([sessionId]);
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'yes',
+        reason: 'group_settled',
+      });
+
+      nativeWork = 'running';
+      liveProcess = false;
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'yes',
+        reason: 'group_settled',
+      });
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
 });

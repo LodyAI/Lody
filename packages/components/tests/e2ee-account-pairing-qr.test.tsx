@@ -311,7 +311,7 @@ describe('instant QR join and form-factor pairing', () => {
       expect(joined).toEqual(['Synthetic phone']);
       await act(async () => root.render(<></>));
       await flush();
-      expect(replay()).not.toBeNull();
+      expect(replay()).toBeNull();
     } finally {
       removeTelemetryScope();
     }

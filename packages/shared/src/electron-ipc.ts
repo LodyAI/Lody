@@ -771,7 +771,7 @@ export type ElectronLocalPlatformSnapshot = {
   workspace: ElectronImplicitLocalWorkspace;
 };
 
-export type GlobalShortcutId = 'app.focus';
+export type GlobalShortcutId = 'app.focus' | 'today.toggleWindow';
 export const GLOBAL_SHORTCUT_TRIGGERED_CHANNEL = 'app.globalShortcut';
 
 /**
@@ -781,6 +781,7 @@ export const GLOBAL_SHORTCUT_TRIGGERED_CHANNEL = 'app.globalShortcut';
  */
 export const GLOBAL_SHORTCUT_DEFAULTS: Record<GlobalShortcutId, string | null> = {
   'app.focus': 'Mod+Shift+l',
+  'today.toggleWindow': 'Alt+Shift+n',
 };
 
 /** Rewrite the pre-TanStack `$mod` token and normalize surrounding token whitespace. */

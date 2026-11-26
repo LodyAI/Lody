@@ -57,11 +57,18 @@ describe('ConvexProvider auth recovery', () => {
       .fn()
       .mockResolvedValueOnce({ data: { token: 'jwt-1' } })
       .mockResolvedValueOnce({ data: { token: 'jwt-2' } });
-    const authClient = {
-      useSession: () => ({
+    const authSession = {
+      get: () => ({
         data: { session: { id: 'same-session', token: 'better-auth-token' } },
         isPending: false,
+        isRefetching: false,
+        error: null,
+        refetch: vi.fn(),
       }),
+      listen: () => () => {},
+    };
+    const authClient = {
+      $store: { atoms: { session: authSession } },
       convex: { token },
       crossDomain: { oneTimeToken: { verify: vi.fn() } },
       getSession: vi.fn(),
@@ -116,11 +123,18 @@ describe('ConvexProvider auth recovery', () => {
       .fn()
       .mockReturnValueOnce(firstToken)
       .mockResolvedValueOnce({ data: { token: 'jwt-recovered' } });
-    const authClient = {
-      useSession: () => ({
+    const authSession = {
+      get: () => ({
         data: { session: { id: 'same-session', token: 'better-auth-token' } },
         isPending: false,
+        isRefetching: false,
+        error: null,
+        refetch: vi.fn(),
       }),
+      listen: () => () => {},
+    };
+    const authClient = {
+      $store: { atoms: { session: authSession } },
       convex: { token },
       crossDomain: { oneTimeToken: { verify: vi.fn() } },
       getSession: vi.fn(),

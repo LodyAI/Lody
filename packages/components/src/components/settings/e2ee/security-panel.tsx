@@ -1,3 +1,9 @@
+import {
+  isLocalStorageFailure,
+  managementFailureKind,
+  requestFailureCode,
+} from '@/lib/e2ee-actionable-failure';
+import { e2eeAccessLoss } from '@/lib/e2ee-member-removal';
 import type { E2eeDeviceProfile, E2eeWorkspaceMemberProfiles } from '@lody/cloud-api';
 import type { E2eeManagementState } from '@lody/platform';
 import { useTranslation } from 'react-i18next';
@@ -95,28 +101,37 @@ function Glyph(props: { children: ReactNode; tone?: 'secure' | 'attention' }) {
 type ErrorAction = 'retry' | 'console';
 /** One card per failure: a conclusion, the reason with what is still safe, and the one
  * next step that does something. Restart and operator work have no button here. */
-function errorCard(error: string): { kind: string; action?: ErrorAction } {
-  if (error === 'e2ee_restart-required') return { kind: 'restart' };
-  if (error === 'e2ee_local-history-recovery-required' || error === 'e2ee_trusted-pin-unavailable')
+function errorCard(error: unknown): { kind: string; action?: ErrorAction } {
+  const cause = typeof error === 'string' ? new Error(error) : error;
+  const code = requestFailureCode(cause);
+  if (e2eeAccessLoss(cause) || code === 'e2ee_device_revoked' || code === 'e2ee_member_removed')
+    return { kind: 'revoked' };
+  if (code === 'e2ee_restart-required' || code === 'restart-required') return { kind: 'restart' };
+  if (code === 'e2ee_local-history-recovery-required' || code === 'e2ee_trusted-pin-unavailable')
     return { kind: 'localRecovery', action: 'console' };
-  if (error === 'e2ee_management_operator_required') return { kind: 'operator' };
-  if (
-    /e2ee_(?:custody_unavailable|missing-binding|account_unavailable|not_open|account_mismatch)/.test(
-      error
-    )
-  )
+  if (code === 'e2ee_management_operator_required') return { kind: 'operator' };
+  if (/^e2ee_(?:missing-binding|account_unavailable|not_open|account_mismatch)$/.test(code ?? ''))
     return { kind: 'identity', action: 'console' };
-  if (error === 'e2ee_rotation_candidate_unavailable')
-    return { kind: 'candidate', action: 'retry' };
-  if (error === 'e2ee_management_unauthorized') return { kind: 'manager' };
-  if (error === 'e2ee_management_conflict') return { kind: 'conflict', action: 'retry' };
-  return { kind: 'retry', action: 'retry' };
+  if (code === 'e2ee_rotation_candidate_unavailable') return { kind: 'candidate', action: 'retry' };
+  if (code === 'e2ee_invalid-input' || code === 'invalid-input')
+    return { kind: 'invalid', action: 'retry' };
+  if (isLocalStorageFailure(cause)) return { kind: 'storage', action: 'retry' };
+  switch (managementFailureKind(cause)) {
+    case 'unauthorized':
+      return { kind: 'manager' };
+    case 'conflict':
+      return { kind: 'conflict', action: 'retry' };
+    case 'network':
+      return { kind: 'network', action: 'retry' };
+    default:
+      return { kind: 'retry', action: 'retry' };
+  }
 }
 
 interface PanelState {
   state?: E2eeManagementState;
   busy?: boolean;
-  error?: string;
+  error?: unknown;
   /** A link join request waits for this manager's approval. */
   joinRequests?: boolean;
 }
@@ -174,7 +189,7 @@ export function E2eeAttentionRows({
 }
 
 function ErrorRow(props: {
-  error: string;
+  error: unknown;
   busy?: boolean;
   onRetry: () => void;
   /** Absent inside the console itself. */
@@ -207,7 +222,7 @@ function ErrorRow(props: {
   );
 }
 
-const effectiveError = (state: E2eeManagementState | undefined, error: string | undefined) =>
+const effectiveError = (state: E2eeManagementState | undefined, error: unknown) =>
   error ?? (state?.recoveryIssue ? 'e2ee_rotation_candidate_unavailable' : undefined);
 
 /** Settings entry for an encrypted workspace: one status line, the work that needs a
@@ -236,18 +251,16 @@ export function E2eeSecurityPanel({
       <CompactSection title={t('e2ee.security.title')}>
         <CompactRow
           leading={
-            <Glyph tone={state ? 'secure' : 'attention'}>
-              {state ? <ShieldCheck size={16} /> : <ShieldQuestion size={16} />}
+            <Glyph tone={cardOpensConsole ? 'attention' : 'secure'}>
+              {cardOpensConsole ? <ShieldQuestion size={16} /> : <ShieldCheck size={16} />}
             </Glyph>
           }
-          label={t(
-            state || cardOpensConsole ? 'e2ee.security.current' : 'e2ee.security.identityMissing'
-          )}
+          label={t('e2ee.security.current')}
         >
           {/* The primary step leads, so a wrapped row on a phone never strands the
               help icon in the glyph column. */}
           {/* Adding a device is the everyday task; everything else is one step further. */}
-          {onOpenConsole && state && (
+          {onOpenConsole && !cardOpensConsole && (
             <Button
               data-testid="e2ee-security-add-device"
               disabled={busy}
@@ -257,15 +270,11 @@ export function E2eeSecurityPanel({
             </Button>
           )}
           {onOpenConsole && !cardOpensConsole && (
-            <Button
-              variant={state ? 'secondary' : 'primary'}
-              disabled={busy}
-              onClick={() => onOpenConsole()}
-            >
+            <Button variant="secondary" disabled={busy} onClick={() => onOpenConsole()}>
               {t('e2ee.security.openConsole')}
             </Button>
           )}
-          {state && (
+          {!cardOpensConsole && (
             <Tooltip.Root>
               <Tooltip.Trigger
                 render={
@@ -286,7 +295,7 @@ export function E2eeSecurityPanel({
           onReview={onOpenConsole && (() => onOpenConsole('members'))}
         />
         <E2eeWaitingRequestsCallout />
-        {error && (
+        {error != null && (
           <ErrorRow
             error={error}
             busy={busy}
@@ -360,10 +369,10 @@ export function E2eeDevicesPanel({
   const updating = busy || !!state?.updateInProgress;
   return (
     <div {...stylex.props(styles.panel)}>
-      {(state?.rotationRequired || state?.updatePending || error) && (
+      {(state?.rotationRequired || state?.updatePending || error != null) && (
         <CompactSection>
           <E2eeAttentionRows state={state} busy={busy} onUpdate={onUpdate} />
-          {error && <ErrorRow error={error} busy={busy} onRetry={onRetry} />}
+          {error != null && <ErrorRow error={error} busy={busy} onRetry={onRetry} />}
         </CompactSection>
       )}
       {state && state.devices.length > 0 && (

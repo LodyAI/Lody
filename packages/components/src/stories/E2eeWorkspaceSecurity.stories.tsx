@@ -54,6 +54,15 @@ export const IdentityLostError: Story = {
 export const RestartRequired: Story = {
   args: { state: { ...state, updatePending: true }, error: 'e2ee_restart-required' },
 };
+export const LocalSecurityStorageUnavailable: Story = {
+  args: { error: { _tag: 'PersonalHostError', code: 'storage' } },
+};
+export const DeviceRevoked: Story = {
+  args: { state: undefined, error: 'e2ee_device_revoked' },
+};
+export const ServiceUnreachable: Story = {
+  args: { error: { _tag: 'PersonalHostError', code: 'network' } },
+};
 export const CandidateRecovery: Story = {
   args: {
     error: 'e2ee_rotation_candidate_unavailable',

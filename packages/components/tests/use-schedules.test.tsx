@@ -53,10 +53,11 @@ function harness(workspaceId = 'workspace-a', initialRows = [row]) {
   let scanFailure = false;
   let pendingOpen: ReturnType<typeof deferred> | undefined;
   let pendingJoin: ReturnType<typeof deferred> | undefined;
-  const listeners = new Set<() => void>();
+  const listeners = new Set<(batch: { events: { key: unknown[]; value?: unknown }[] }) => void>();
   const rooms = new Set<object>();
   const syncs: ReturnType<typeof deferred>[] = [];
   let opens = 0;
+  let scans = 0;
   const runtime = {
     workspaceId,
     contentMode: 'plaintext',
@@ -68,10 +69,13 @@ function harness(workspaceId = 'workspace-a', initialRows = [row]) {
         return {
           flock: {
             scan: () => {
+              scans++;
               if (scanFailure) throw new Error('scan failed');
               return rows.map((value) => ({ key: ['schedule', value.scheduleId], value }));
             },
-            subscribe: (listener: () => void) => {
+            subscribe: (
+              listener: (batch: { events: { key: unknown[]; value?: unknown }[] }) => void
+            ) => {
               listeners.add(listener);
               return () => {
                 listeners.delete(listener);
@@ -110,6 +114,12 @@ function harness(workspaceId = 'workspace-a', initialRows = [row]) {
     get opens() {
       return opens;
     },
+    get scans() {
+      return scans;
+    },
+    emitEvents: (events: { key: unknown[]; value?: unknown }[]) => {
+      listeners.forEach((listener) => listener({ events }));
+    },
     failOpen: (value: boolean) => {
       openFailure = value;
     },
@@ -125,8 +135,18 @@ function harness(workspaceId = 'workspace-a', initialRows = [row]) {
       return pendingJoin;
     },
     replaceRows: (value: typeof rows) => {
+      const events: { key: unknown[]; value?: unknown }[] = [];
+      const nextIds = new Set(value.map((entry) => entry.scheduleId));
+      for (const previous of rows)
+        if (!nextIds.has(previous.scheduleId))
+          events.push({ key: ['schedule', previous.scheduleId], value: undefined });
+      for (const entry of value) {
+        const previous = rows.find((candidate) => candidate.scheduleId === entry.scheduleId);
+        if (!previous || JSON.stringify(previous) !== JSON.stringify(entry))
+          events.push({ key: ['schedule', entry.scheduleId], value: entry });
+      }
       rows = value;
-      listeners.forEach((listener) => listener());
+      listeners.forEach((listener) => listener({ events }));
     },
   };
 }
@@ -275,6 +295,74 @@ describe('Schedule Registry recovery', () => {
     await act(async () => vi.advanceTimersByTimeAsync(1000));
     expect(h.rooms.size).toBe(1);
     expect(h.opens).toBe(1);
+  });
+
+  it('applies steady-state event batches incrementally without rescanning the registry', async () => {
+    const h = harness();
+    await mount(h);
+    await act(async () => h.syncs[0]!.resolve());
+    const scansAfterSync = h.scans;
+    for (let batch = 0; batch < 10; batch++) {
+      await act(async () =>
+        h.emitEvents([
+          {
+            key: ['schedule', `drain-${batch}`],
+            value: { ...row, scheduleId: `drain-${batch}`, title: `Drain ${batch}` },
+          },
+        ])
+      );
+    }
+    expect(h.scans).toBe(scansAfterSync);
+    expect(snapshot().rows).toHaveLength(11);
+    expect(snapshot().rows.some((entry) => entry.title === 'Drain 5')).toBe(true);
+  });
+
+  it('applies runtime and tombstone events incrementally', async () => {
+    const h = harness();
+    await mount(h);
+    await act(async () => h.syncs[0]!.resolve());
+    const runtimeRow = {
+      scheduleId: row.scheduleId,
+      machineId: 'machine',
+      activationId: 'activation',
+      observedDefinitionFingerprint: row.definitionFingerprint,
+      updatedAt: 1,
+    };
+    await act(async () =>
+      h.emitEvents([{ key: ['runtime', row.scheduleId, 'machine'], value: runtimeRow }])
+    );
+    expect(snapshot().runtimes).toHaveLength(1);
+    expect(snapshot().runtimes[0]).toMatchObject({
+      scheduleId: row.scheduleId,
+      machineId: 'machine',
+    });
+    await act(async () =>
+      h.emitEvents([
+        { key: ['tombstone', row.scheduleId], value: { deletedAt: 1, actorId: 'owner' } },
+      ])
+    );
+    expect(snapshot().rows).toEqual([]);
+    expect(snapshot().runtimes).toHaveLength(1);
+    await act(async () => h.emitEvents([{ key: ['tombstone', row.scheduleId], value: undefined }]));
+    expect(snapshot().rows).toHaveLength(1);
+    await act(async () =>
+      h.emitEvents([{ key: ['runtime', row.scheduleId, 'machine'], value: undefined }])
+    );
+    expect(snapshot().runtimes).toEqual([]);
+  });
+
+  it('drops rows whose event payload fails validation instead of keeping stale state', async () => {
+    const h = harness();
+    await mount(h);
+    await act(async () => h.syncs[0]!.resolve());
+    await act(async () =>
+      h.emitEvents([{ key: ['schedule', row.scheduleId], value: { broken: true } }])
+    );
+    expect(snapshot().rows).toEqual([]);
+    await act(async () =>
+      h.emitEvents([{ key: ['runtime', row.scheduleId, 'machine'], value: { broken: true } }])
+    );
+    expect(snapshot().runtimes).toEqual([]);
   });
 
   it.each(['open', 'join', 'sync'] as const)(

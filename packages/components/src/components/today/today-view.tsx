@@ -32,6 +32,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  GLOBAL_SHORTCUT_DEFAULTS,
   TODAY_MENTION_CHAR,
   buildTodayLink,
   getSessionRoomId,
@@ -43,6 +44,7 @@ import {
   type TodayRichText,
 } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { Kbd } from '@lody/ui/kbd';
 import { Menu } from '@lody/ui/menu';
 import { Popover } from '@lody/ui/popover';
 import { Toggle } from '@lody/ui/toggle';
@@ -64,6 +66,7 @@ import {
 import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { runtimeAtom } from '@/atoms/runtime';
+import { useGlobalShortcuts } from '@/hooks/use-global-shortcuts';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { UserAvatar } from '../user-avatar';
@@ -93,6 +96,7 @@ import type { TodayNodeId } from '@lody/shared';
 import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-stream';
 import { TodayBreadcrumb, type TodayCrumb } from './today-breadcrumb';
 import { useTodayClock } from './use-today-clock';
+import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
 
 /**
  * What a Today surface shows: a member's stream around `date`, or with
@@ -107,6 +111,11 @@ export type TodayOpenSession = (target: { sessionId: SessionId; workspaceId: str
 export const TODAY_READABLE_WIDTH = 720;
 
 const styles = stylex.create({
+  tooltipWithShortcut: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[2],
+  },
   root: {
     position: 'relative',
     display: 'flex',
@@ -243,10 +252,12 @@ export function TodayView(props: {
   onTogglePin?: () => void;
   /** Rendered as the desktop's standalone Today window. */
   standalone?: boolean;
+  ownerWindow?: Window;
+  onDayReady?: () => void;
   onOpenSession?: TodayOpenSession;
 }) {
   const { t, i18n } = useTranslation();
-  const scope = useResolvedWorkspaceScope();
+  const scope = useResolvedWorkspaceScope({ docMetaRequired: false });
   const activeRuntime = useAtomValue(runtimeAtom);
   const runtime =
     scope.enabled && activeRuntime && scope.workspaceId === activeRuntime.workspaceId
@@ -254,7 +265,7 @@ export function TodayView(props: {
       : null;
   const self = useAtomValue(userAtom)?.id ?? null;
   const userId = props.target.member ?? self;
-  const today = useTodayClock();
+  const today = useTodayClock(undefined, props.ownerWindow);
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
   const anchor = props.target.date ? (parseTodayDate(props.target.date) ?? undefined) : undefined;
   const [registered, setRegistered] = useState<readonly TodayDate[]>([]);
@@ -278,6 +289,7 @@ export function TodayView(props: {
     setRegistered([]);
     setEmpty(new Set());
     if (!runtime || !userId) return undefined;
+    markTodayWindowBoot('view-runtime');
     return runtime.todayPages.observeDates(userId, setRegistered);
   }, [runtime, userId]);
 
@@ -384,6 +396,12 @@ export function TodayView(props: {
     return restoreScrollAnchor(controller?.getSurface() ?? null, anchor);
   }, [controller, focusDate]);
 
+  const { shortcuts: globalShortcuts } = useGlobalShortcuts();
+  const toggleWindowEntry = globalShortcuts.find((entry) => entry.id === 'today.toggleWindow');
+  const toggleWindowBinding = toggleWindowEntry
+    ? toggleWindowEntry.binding
+    : GLOBAL_SHORTCUT_DEFAULTS['today.toggleWindow'];
+
   if (!runtime || !userId) return null;
   const toolbarSurface: TodayToolbarSurface = standalone
     ? 'standalone'
@@ -460,7 +478,16 @@ export function TodayView(props: {
                       </Button>
                     }
                   />
-                  <Tooltip.Content side="bottom">{openWindowLabel}</Tooltip.Content>
+                  <Tooltip.Content side="bottom">
+                    {toggleWindowBinding ? (
+                      <span {...stylex.props(styles.tooltipWithShortcut)}>
+                        {openWindowLabel}
+                        <Kbd>{formatKeyBinding(toggleWindowBinding)}</Kbd>
+                      </span>
+                    ) : (
+                      openWindowLabel
+                    )}
+                  </Tooltip.Content>
                 </Tooltip.Root>
               ) : null}
               {props.onTogglePin ? (
@@ -572,6 +599,7 @@ export function TodayView(props: {
                 date={date}
                 today={today}
                 isTop={index === 0}
+                onPageReady={index === 0 ? props.onDayReady : undefined}
                 onEmptyChange={onEmptyChange}
                 zoomRoot={zoomRoot}
                 onOpenDay={focusDate ? undefined : nav.openDay}
@@ -691,7 +719,7 @@ function TodayNodeMenu(props: {
   const node = store.outline.getNode(nodeId);
   const positioned = useMemo(
     () =>
-      anchor instanceof HTMLElement
+      'getBoundingClientRect' in anchor
         ? anchor
         : {
             getBoundingClientRect: () => new DOMRect(anchor.x, anchor.y, 0, 0),

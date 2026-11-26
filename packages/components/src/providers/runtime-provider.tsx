@@ -1,8 +1,8 @@
+import * as stylex from '@stylexjs/stylex';
 import { roostHistoryDatabase } from '../lib/roost-history-cache';
 import { subscribeAttachmentWorkspaceMode } from '@/lib/attachment-workspace-access';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { onIpcEvent } from '@/lib/electron-ipc-client';
-import { useTranslation } from 'react-i18next';
 import { desktopWindowId } from '@/lib/desktop-window';
 import {
   e2eeAccessLoss,
@@ -34,7 +34,7 @@ import {
 } from '../components/workspace-key-reception-notice';
 import { WorkspaceHostIdentityNotice } from '../components/workspace-host-identity-notice';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { atom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
 import {
   authTokenAtom,
@@ -76,7 +76,9 @@ import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-poli
 import type { EagerSyncSurface } from './background-sync-coordinator';
 import { resolveEffectiveWorkspaceId } from './resolve-effective-workspace-id';
 import { getLocalWorkspaceSlug, useImplicitLocalWorkspace } from './local-platform-provider';
+import { getAppWindowLocation } from '@/lib/app-location';
 import { isTodayWindow, isWarmWindow } from '@/lib/desktop-window';
+import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { maybeClearLodyCacheOnBoot } from '@/lib/clear-local-cache';
 import { describeErrorType } from '@/lib/workspace-data-scope';
@@ -118,7 +120,23 @@ type SavedMode = {
   pendingCreation: boolean;
   error: unknown;
 };
-const FIRST_KEY_RECEPTION_RETRY_MS = [1_000, 2_000, 4_000, 8_000] as const;
+const FIRST_KEY_RECEPTION_RETRY_MS = [1_000, 2_000, 4_000] as const;
+const styles = stylex.create({
+  firstKeyNotice: {
+    position: 'fixed',
+    // Keep the action reachable above the workspace admission BootShell (z-index 30).
+    zIndex: 31,
+    bottom: 'env(safe-area-inset-bottom, 0px)',
+    insetInline: 0,
+    marginInline: 'auto',
+    maxWidth: '36rem',
+  },
+});
+type RuntimeKeyReceptionWait = KeyReceptionWait & {
+  accountId: string | null;
+  workspaceSlug: string;
+  phase: 'open' | 'save';
+};
 const noSavedMode: SavedMode = { evidence: new Map(), pendingCreation: false, error: null };
 
 const isEncryptedDescriptor = (
@@ -160,11 +178,12 @@ const resolveRuntimeEagerSyncSurface = (): EagerSyncSurface => {
   return 'web';
 };
 
+const deferredDocMetaSubscriptionAtom = atom(undefined);
+
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   const platform = usePlatform();
-  const { t } = useTranslation();
   const [keyUpdateWorkspace, setKeyUpdateWorkspace] = useState<string | null>(null);
-  const [keyReceptionWait, setKeyReceptionWait] = useState<KeyReceptionWait | null>(null);
+  const [keyReceptionWait, setKeyReceptionWait] = useState<RuntimeKeyReceptionWait | null>(null);
   // Non-terminal: the workspace stays open and unclassified while the host is re-asked.
   const [hostIdentityWait, setHostIdentityWait] = useState<
     (Omit<HostIdentityStall, 'error'> & { workspaceId: string }) | null
@@ -191,7 +210,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const setControlConnectionState = useSetAtom(lodyControlConnectionStateAtom);
   const setRuntimeInitializing = useSetAtom(runtimeInitializingAtom);
   const setBrowserOnline = useSetAtom(browserOnlineAtom);
-  useAtomValue(docMetaSubscriptionAtom);
+  const isLocalPlatform = platform.sync.mode === 'local';
+  const todayPath = isLocalPlatform && isTodayWindow() ? getAppWindowLocation().pathname : null;
+  const deferDocMeta = todayPath === '/' || todayPath?.endsWith('/today-window');
+  useAtomValue(deferDocMeta ? deferredDocMetaSubscriptionAtom : docMetaSubscriptionAtom);
   useAtomValue(localProbeEffectAtom);
   const clearDocMetaCache = useSetAtom(clearDocMetaCacheAtom);
   const clearPresenceStates = useSetAtom(clearLodyPresenceStatesAtom);
@@ -227,7 +249,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   // Local (open-source) platform: the effective workspace id is the CLI's
   // implicit workspace — no cached/server id arbitration, no auth involved.
-  const isLocalPlatform = platform.sync.mode === 'local';
   const offlineEncryptedCandidate =
     !isLocalPlatform &&
     Boolean(platform.e2eeWorkspaces) &&
@@ -626,6 +647,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     setKeyUpdateWorkspace(null);
     setKeyReceptionWait(null);
     setHostIdentityWait(null);
+    const waitForKey = (phase: RuntimeKeyReceptionWait['phase']) =>
+      setKeyReceptionWait((previous) =>
+        previous?.workspaceId === effectiveWorkspaceId && previous.phase === phase
+          ? previous
+          : { workspaceId: effectiveWorkspaceId, accountId, workspaceSlug, phase }
+      );
     let disposed = false;
     // Set when background verification closes a provisionally opened runtime.
     let retired = false;
@@ -711,32 +738,53 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let nativeHasUsableKey = false;
     let nativeRefresh: Promise<void> | null = null;
     let nativeRefreshAgain = false;
-    const firstKeyPoll = (() => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      let attempts = 0;
-      return {
-        stop: () => {
-          clearTimeout(timer);
-          timer = undefined;
-        },
-        next: (poll: () => void): boolean => {
-          if (timer !== undefined) return true;
-          const delay = FIRST_KEY_RECEPTION_RETRY_MS[attempts];
-          if (delay === undefined) return false;
-          attempts++;
-          timer = setTimeout(() => {
-            timer = undefined;
-            poll();
-          }, delay);
-          return true;
-        },
-      };
-    })();
+    let firstKeyWaiting = false;
+    let firstKeySessionEnded = false;
+    let nativeAccessLossReported = false;
+    let firstKeyPollTimer: ReturnType<typeof setTimeout> | undefined;
+    let firstKeyPollAttempts = 0;
+    let unsubscribeFirstKeySession: (() => void) | undefined;
+    const clearFirstKeyPoll = () => {
+      clearTimeout(firstKeyPollTimer);
+      firstKeyPollTimer = undefined;
+    };
+    const stopFirstKeyReception = () => {
+      clearFirstKeyPoll();
+      unsubscribeFirstKeySession?.();
+      unsubscribeFirstKeySession = undefined;
+      if (firstKeyWaiting) {
+        firstKeyWaiting = false;
+        setKeyReceptionWait(null);
+      }
+    };
+    const scheduleFirstKeyPoll = () => {
+      if (
+        disposed ||
+        retired ||
+        !firstKeyWaiting ||
+        nativeHasUsableKey ||
+        firstKeySessionEnded ||
+        nativeAccessLossReported ||
+        nativeRefresh ||
+        firstKeyPollTimer !== undefined
+      )
+        return;
+      const delay = FIRST_KEY_RECEPTION_RETRY_MS[firstKeyPollAttempts];
+      if (delay === undefined) return;
+      firstKeyPollTimer = setTimeout(() => {
+        firstKeyPollTimer = undefined;
+        // A manual check or ledger hint may have started a check in the meantime.
+        // Its completion schedules the next timer without spending an attempt.
+        if (nativeRefresh) return;
+        firstKeyPollAttempts++;
+        refreshNative();
+      }, delay);
+    };
     let nativeLedgerStatus: import('@lody/platform').E2eeRuntimeStatus | undefined;
     let unsubscribeNativeLedger: (() => void) | undefined;
     const acceptStatus = async (status: import('@lody/platform').E2eeRuntimeStatus) => {
       const native = encryptedRuntime;
-      if (!native || !nativeLease || disposed || retired) return;
+      if (!native || !nativeLease || disposed || retired || firstKeySessionEnded) return;
       const leased = nativeLease;
       nativeLedgerStatus = status;
 
@@ -753,17 +801,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         if (encryptedAccess.phase() === 'ready') setKeyUpdateWorkspace(null);
       }
       if (
+        firstKeyWaiting &&
         !nativeHasUsableKey &&
-        workspaceRuntime === null &&
+        !nativeAccessLossReported &&
         (status.hasCurrentKey || status.writeEpoch != null)
       ) {
         nativeHasUsableKey = true;
-        firstKeyPoll.stop();
+        stopFirstKeyReception();
         retryAdmission((value) => value + 1);
       }
     };
     const refreshNative = (): void => {
-      if (disposed || retired || !nativeLease) return;
+      if (disposed || retired || firstKeySessionEnded || !nativeLease) return;
       if (nativeRefresh) {
         nativeRefreshAgain = true;
         return;
@@ -777,7 +826,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         })
         .then(acceptStatus)
         .catch(async (error: unknown) => {
-          if (disposed || retired) return;
+          if (disposed || retired || firstKeySessionEnded) return;
           const lost = e2eeAccessLoss(error);
           if (lost) {
             handleMemberRemoval(lost);
@@ -798,14 +847,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           nativeRefreshAgain = false;
           refreshNative();
         }
-        if (
-          !disposed &&
-          !retired &&
-          !nativeRefresh &&
-          !nativeHasUsableKey &&
-          workspaceRuntime === null
-        )
-          if (!firstKeyPoll.next(refreshNative)) setRuntimeInitializing(false);
+        scheduleFirstKeyPoll();
       });
     };
     retryKeyUpdateRef.current = refreshNative;
@@ -813,19 +855,25 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const unsubscribeLedgerChange = accountId
       ? subscribeE2eeLedgerChanges(accountId, effectiveWorkspaceId, () => {
           const native = encryptedRuntime;
-          if (disposed || retired || !native || !nativeLease) return;
+          if (disposed || retired || firstKeySessionEnded || !native || !nativeLease) return;
           void native
             .status(nativeLease)
             .then(acceptStatus)
-            .catch(() => {
-              if (!disposed && !retired) setKeyUpdateWorkspace(effectiveWorkspaceId);
+            .catch((error: unknown) => {
+              if (disposed || retired || firstKeySessionEnded) return;
+              const lost = e2eeAccessLoss(error);
+              if (lost) handleMemberRemoval(lost);
+              else setKeyUpdateWorkspace(effectiveWorkspaceId);
             });
         })
       : () => {};
     // Main recorded a credential-confirmed loss for this workspace. Revocation keeps
     // membership visible, so only this native refresh can surface the exact reason.
     const unsubscribeAccessLost = onIpcEvent('e2ee.accessLost', ({ workspaceId }) => {
-      if (workspaceId === effectiveWorkspaceId) refreshNative();
+      if (workspaceId !== effectiveWorkspaceId) return;
+      nativeAccessLossReported = true;
+      clearFirstKeyPoll();
+      refreshNative();
     });
     let encryptedAccess: ReturnType<typeof createE2eeContent> | null = null;
     const disposeRuntime = (): Promise<void> => {
@@ -1032,7 +1080,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const retire = () => {
       if (retired) return;
       retired = true;
-      firstKeyPoll.stop();
+      stopFirstKeyReception();
       initializationAbort.abort(new Error('Runtime disposed'));
       setRuntime(null);
       setRuntimeInitializing(false);
@@ -1168,15 +1216,30 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             void retryRetiredEncryptedWorkspaceCleanup(removalScope).catch((error) => {
               logRuntimeOperationError('retired encrypted workspace cleanup', error);
             });
-            refreshNative();
-            if (!status.hasCurrentKey && status.writeEpoch == null) {
+            if (disposed || retired) return;
+            if (!nativeHasUsableKey) {
+              firstKeyWaiting = true;
+              waitForKey('open');
+              const checkSession = () => {
+                const session = platform.identity.session.get();
+                if (
+                  (session.status === 'unauthenticated' && !session.uncertain) ||
+                  (session.status === 'authenticated' && session.user.id !== accountId)
+                ) {
+                  firstKeySessionEnded = true;
+                  stopFirstKeyReception();
+                }
+              };
+              unsubscribeFirstKeySession = platform.identity.session.subscribe(checkSession);
+              checkSession();
               setRuntime(null);
               clearDocMetaCache();
               clearPresenceStates();
-              // First reception owns initialization until its pending work settles.
-              // Ending it here would redirect the route and retire that same reader.
+              // Keep the route and its manual check available after polling stops.
+              refreshNative();
               return;
             }
+            refreshNative();
             encryptedAccess = createE2eeContent({
               runtime: native,
               workspaceId: effectiveWorkspaceId,
@@ -1192,12 +1255,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                   return;
                 }
                 setKeyUpdateWorkspace(effectiveWorkspaceId);
-                if (source === 'seal')
-                  setKeyReceptionWait((previous) =>
-                    previous?.workspaceId === effectiveWorkspaceId
-                      ? previous
-                      : { workspaceId: effectiveWorkspaceId }
-                  );
+                if (source === 'seal') waitForKey('save');
               },
               onPhase: (phase) => {
                 if (disposed || retired) return;
@@ -1246,7 +1304,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // loro-repo/streams-crdt/flock stay out of the boot chunk: this provider
         // module is statically reachable from the root route, so the workspace
         // runtime stack loads only once a workspace runtime is actually needed.
+        markTodayWindowBoot('runtime-start');
         const { createWorkspaceRuntime } = await import('./create-workspace-runtime');
+        markTodayWindowBoot('runtime-module');
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },
           ...(!isLocalPlatform && !encryptedAccess && !storedDescriptor
@@ -1314,6 +1374,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           // The owner's cleanup or the retirement chain disposes it once.
           return;
         }
+        markTodayWindowBoot('runtime-ready');
         setRuntime(workspaceRuntime);
         // Local runtime (IndexedDB-backed Loro repo) is ready — unblock UI
         // rendering immediately. WebSocket sync state is tracked separately
@@ -1359,7 +1420,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         workspaceSlug,
       });
       disposed = true;
-      firstKeyPoll.stop();
+      stopFirstKeyReception();
       window.removeEventListener('online', retryContentAdmission);
       window.removeEventListener('online', refreshNative);
       unsubscribeLedgerChange();
@@ -1441,22 +1502,29 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     };
   }, [setBrowserOnline]);
 
+  const keyNotice =
+    keyReceptionWait &&
+    keyReceptionWait.workspaceId === effectiveWorkspaceId &&
+    keyReceptionWait.accountId === accountId &&
+    keyReceptionWait.workspaceSlug === workspaceSlug &&
+    (keyReceptionWait.phase === 'open'
+      ? runtime === null
+      : keyUpdateWorkspace === runtime?.workspaceId &&
+        runtime?.workspaceId === effectiveWorkspaceId &&
+        runtime?.workspaceSlug === workspaceSlug) ? (
+      <WorkspaceKeyReceptionNotice
+        workspaceId={effectiveWorkspaceId}
+        waiting={keyReceptionWait}
+        onCheckAgain={() => retryKeyUpdateRef.current()}
+      />
+    ) : null;
   return (
     <>
-      {keyUpdateWorkspace === runtime?.workspaceId &&
-        runtime?.workspaceId === effectiveWorkspaceId &&
-        runtime?.workspaceSlug === workspaceSlug &&
-        keyReceptionWait?.workspaceId === effectiveWorkspaceId && (
-          <div>
-            <WorkspaceKeyReceptionNotice
-              workspaceId={effectiveWorkspaceId}
-              waiting={keyReceptionWait}
-            />{' '}
-            <button type="button" onClick={() => retryKeyUpdateRef.current()}>
-              {t('e2ee.content.retryKeyUpdate')}
-            </button>
-          </div>
-        )}
+      {keyNotice && keyReceptionWait?.phase === 'open' ? (
+        <div {...stylex.props(styles.firstKeyNotice)}>{keyNotice}</div>
+      ) : (
+        keyNotice
+      )}
       {hostIdentityWait?.workspaceId === effectiveWorkspaceId && (
         <WorkspaceHostIdentityNotice
           code={hostIdentityWait.code}

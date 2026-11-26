@@ -128,6 +128,7 @@ export default defineConfig((context) => {
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
       define: {
         ...viteEnvDefine,
+        __LODY_ELECTRON_RENDERER__: 'true',
         __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
         __GIT_COMMIT__: JSON.stringify(getGitCommitHash()),
         __APP_VERSION__: JSON.stringify(getAppVersion())

@@ -6,6 +6,7 @@ import {
   type CloudActionFunction,
   type CloudMutation,
   type CloudMutationFunction,
+  type CloudQueryState,
   type OptionalCloudArgsOrSkip,
   type CloudQuery,
 } from './cloud-api';
@@ -55,6 +56,8 @@ function requireCloudApi(platform: PlatformProvider, capability: PlatformCapabil
   return platform.cloudApi;
 }
 
+const noopRetry = () => {};
+
 /**
  * Capabilities are immutable for a mounted PlatformProvider, so the selected
  * hook implementation cannot change during the component lifetime. Local
@@ -73,6 +76,30 @@ export function useCloudQuery<Args, Result>(
     operation,
     (args[0] ?? {}) as Args | 'skip',
   );
+}
+
+/**
+ * Non-throwing cloud query state with explicit `error` and `retry` for surfaces
+ * that display an inline failure or recovery control.
+ */
+export function useCloudQueryState<Args, Result>(
+  operation: CloudQuery<Args, Result>,
+  ...args: OptionalCloudArgsOrSkip<NoInfer<Args>>
+): CloudQueryState<Result> {
+  const platform = usePlatform();
+  if (!platform.capabilities.has(operation.capability)) {
+    return { data: undefined, error: null, retry: noopRetry };
+  }
+  const cloudApi = requireCloudApi(platform, operation.capability);
+  const resolvedArgs = (args[0] ?? {}) as Args | 'skip';
+  if (cloudApi.useQueryState) {
+    return cloudApi.useQueryState(operation, resolvedArgs);
+  }
+  return {
+    data: cloudApi.useQuery(operation, resolvedArgs),
+    error: null,
+    retry: noopRetry,
+  };
 }
 
 export function useCloudMutation<Args, Result>(

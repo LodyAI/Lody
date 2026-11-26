@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { SessionChatActionContext } from '../src/components/ai-gui/view';
+import { SessionReadonlyContext } from '../src/components/ai-gui/session-readonly-context';
 import {
   resolveSessionFileOpenTarget,
   resolveDirectMarkdownFileOpenTarget,
@@ -279,7 +280,11 @@ it.each(['/tmp/image # 中文.png', '/tmp/question?.txt', '/tmp/file:123', '/tmp
           )
         )
       );
-      await act(async () => (container.querySelector('button') as HTMLButtonElement).click());
+      const button = container.querySelector('button') as HTMLButtonElement;
+      expect(button.textContent).toBe('attachment');
+      expect(button.querySelector('[title]')).toBeNull();
+      expect(button.disabled).toBe(false);
+      await act(async () => button.click());
       expect(opened).toBe(filePath);
     } finally {
       await act(async () => root.unmount());
@@ -287,6 +292,170 @@ it.each(['/tmp/image # 中文.png', '/tmp/question?.txt', '/tmp/file:123', '/tmp
     }
   }
 );
+
+it('omits the local-only subtitle on the original computer while keeping remote unavailability and failure feedback', async () => {
+  await initI18n('zh_CN');
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    const localStore = createStore();
+    localStore.set(currentWorkspaceIdAtom, 'workspace' as never);
+    localStore.set(localProbeResultAtom, { ok: true, machineId: 'local' });
+    let openedPath: string | undefined;
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store: localStore },
+          createElement(
+            SessionChatActionContext.Provider,
+            {
+              value: {
+                openLocalFile: (path: string) => {
+                  openedPath = path;
+                },
+              },
+            },
+            createElement(LocalAttachmentCard, {
+              sessionId: 'session' as never,
+              attachment: {
+                type: 'local_attachment',
+                path: '/synthetic/pasted-text.txt',
+                machineId: 'local',
+                kind: 'file',
+                fileName: 'pasted-text.txt',
+                mimeType: 'text/plain',
+                sizeBytes: 12,
+              },
+            })
+          )
+        )
+      )
+    );
+    const localButton = container.querySelector('button') as HTMLButtonElement;
+    expect(localButton.textContent).toBe('pasted-text.txt');
+    expect(localButton.textContent).not.toContain('仅在原电脑上可用');
+    expect(localButton.querySelector('[title]')).toBeNull();
+    expect(localButton.disabled).toBe(false);
+    await act(async () => localButton.click());
+    expect(openedPath).toBe('/synthetic/pasted-text.txt');
+
+    openedPath = undefined;
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store: localStore },
+          createElement(
+            SessionReadonlyContext.Provider,
+            { value: { renderImage: () => null, renderFiles: () => null } },
+            createElement(
+              SessionChatActionContext.Provider,
+              {
+                value: {
+                  openLocalFile: (path: string) => {
+                    openedPath = path;
+                  },
+                },
+              },
+              createElement(LocalAttachmentCard, {
+                sessionId: 'session' as never,
+                attachment: {
+                  type: 'local_attachment',
+                  path: '/synthetic/pasted-text.txt',
+                  machineId: 'local',
+                  kind: 'file',
+                  fileName: 'pasted-text.txt',
+                  mimeType: 'text/plain',
+                  sizeBytes: 12,
+                },
+              })
+            )
+          )
+        )
+      )
+    );
+    const readonlyLocalButton = container.querySelector('button') as HTMLButtonElement;
+    expect(readonlyLocalButton.textContent).toBe('pasted-text.txt');
+    expect(readonlyLocalButton.querySelector('[title]')).toBeNull();
+    expect(readonlyLocalButton.disabled).toBe(true);
+    await act(async () => readonlyLocalButton.click());
+    expect(openedPath).toBeUndefined();
+
+    let remoteDownloadRequested = false;
+    const remoteStore = createStore();
+    remoteStore.set(currentWorkspaceIdAtom, 'workspace' as never);
+    remoteStore.set(runtimeAtom, {
+      requestFileDownloadChunk: async () => {
+        remoteDownloadRequested = true;
+        return { status: 'error', code: 'machine_offline' };
+      },
+    } as unknown as WorkspaceRuntime);
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store: remoteStore },
+          createElement(
+            SessionReadonlyContext.Provider,
+            { value: { renderImage: () => null, renderFiles: () => null } },
+            createElement(LocalAttachmentCard, {
+              sessionId: 'session' as never,
+              attachment: {
+                type: 'local_attachment',
+                path: '/synthetic/pasted-text.txt',
+                machineId: 'origin-machine',
+                kind: 'file',
+                fileName: 'pasted-text.txt',
+                mimeType: 'text/plain',
+                sizeBytes: 12,
+              },
+            })
+          )
+        )
+      )
+    );
+    const readonlyRemoteButton = container.querySelector('button') as HTMLButtonElement;
+    expect(readonlyRemoteButton.disabled).toBe(true);
+    expect(readonlyRemoteButton.textContent).toContain('pasted-text.txt');
+    expect(readonlyRemoteButton.textContent).toContain('仅在原电脑上可用');
+    expect(readonlyRemoteButton.querySelector('svg')).toBeNull();
+    await act(async () => readonlyRemoteButton.click());
+    expect(remoteDownloadRequested).toBe(false);
+
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store: remoteStore },
+          createElement(LocalAttachmentCard, {
+            sessionId: 'session' as never,
+            attachment: {
+              type: 'local_attachment',
+              path: '/synthetic/pasted-text.txt',
+              machineId: 'origin-machine',
+              kind: 'file',
+              fileName: 'pasted-text.txt',
+              mimeType: 'text/plain',
+              sizeBytes: 12,
+            },
+          })
+        )
+      )
+    );
+    const remoteButton = container.querySelector('button') as HTMLButtonElement;
+    expect(remoteButton.disabled).toBe(false);
+    expect(remoteButton.textContent).toContain('从原电脑下载');
+    expect(remoteButton.querySelector('svg')).not.toBeNull();
+    await act(async () => remoteButton.click());
+    expect(remoteDownloadRequested).toBe(true);
+    expect(remoteButton.textContent).toContain('无法下载，请确认原电脑在线且文件仍然存在。');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
 
 describe('attachment preview routing', () => {
   const markdown = file({ fileName: 'notes.md', mimeType: 'text/markdown' });

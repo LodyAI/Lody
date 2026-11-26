@@ -39,7 +39,7 @@ export const toggleSurface = stylex.create({
     fontFamily: 'inherit',
     fontWeight: 500,
     letterSpacing: text.controlTracking,
-    lineHeight: 1,
+    lineHeight: text.subheadlineLeading,
     // Round rather than the squircle: a spread box-shadow ring does not track
     // a superellipse corner (see the note in `field/well.ts`).
     cornerShape: corner.round,
@@ -64,6 +64,7 @@ export const toggleSurface = stylex.create({
     paddingInline: toggle.paddingXMini,
     borderRadius: toggle.radiusMini,
     fontSize: toggle.textMini,
+    lineHeight: text.footnoteLeading,
   },
   small: {
     height: toggle.heightSmall,
