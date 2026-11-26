@@ -13,9 +13,9 @@ import { LODY_APP_INFO_UPDATED_EVENT } from '@/lib/native-app-info';
 import { recordClientError } from '@/lib/client-log';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 const refreshAtom = atom(0);
-const snapshotAtom = atom<
-  { key: string; data?: E2eeManagementState; isError: boolean } | undefined
->(undefined);
+const snapshotAtom = atom<{ key: string; data?: E2eeManagementState; error?: unknown } | undefined>(
+  undefined
+);
 const styles = stylex.create({
   icon: { position: 'relative', display: 'inline-flex', width: '100%', height: '100%' },
   dot: {
@@ -54,7 +54,8 @@ export function useSecurityState() {
     if (!encrypted || !matchesAccount) setSnapshot(undefined);
   }, [encrypted, matchesAccount, setSnapshot]);
   useEffect(() => {
-    if (!workspaceId || !mode?.accountId || !native?.managementState) {
+    const accountId = mode?.accountId;
+    if (!workspaceId || !accountId || !native?.managementState) {
       loadRef.current = undefined;
       return undefined;
     }
@@ -76,30 +77,33 @@ export function useSecurityState() {
             const shouldRefresh = nextForceRefresh;
             nextForceRefresh = false;
             // Offline refresh cannot erase verified local facts or pause the workspace.
+            let refreshError: unknown;
             if (shouldRefresh) {
               try {
                 await native.refresh(workspaceId, { keyMode: 'none' });
-              } catch {
-                /* Retry on the next probe. */
+              } catch (cause) {
+                refreshError = cause ?? 'e2ee_management_retry';
               }
             }
             if (!active) return;
-            const data = await native.managementState!(workspaceId);
-            if (shouldRefresh && active && mode.accountId)
-              notifyE2eeLedgerChanged(mode.accountId, workspaceId);
-            if (active) setSnapshot({ key, data, isError: false });
+            try {
+              const data = await native.managementState!(workspaceId);
+              if (active) setSnapshot({ key, data, error: refreshError });
+              if (shouldRefresh && refreshError === undefined && active)
+                notifyE2eeLedgerChanged(accountId, workspaceId);
+            } catch (cause) {
+              if (active)
+                setSnapshot((previous) => ({
+                  key,
+                  data: previous?.key === key ? previous.data : undefined,
+                  error: refreshError ?? cause ?? 'e2ee_management_retry',
+                }));
+            }
             if (queued) {
               nextForceRefresh = queuedForceRefresh;
               queuedForceRefresh = false;
             }
           } while (queued && active);
-        } catch {
-          if (active)
-            setSnapshot((previous) => ({
-              key,
-              data: previous?.key === key ? previous.data : undefined,
-              isError: true,
-            }));
         } finally {
           inFlight = undefined;
         }
@@ -126,7 +130,7 @@ export function useSecurityState() {
   const matchesSnapshot = encrypted && snapshot?.key === key;
   const state = {
     data: matchesSnapshot ? snapshot.data : undefined,
-    isError: matchesSnapshot ? snapshot.isError : false,
+    error: matchesSnapshot ? snapshot.error : undefined,
     refetch: async () => {
       bump((n) => {
         const next = n + 1;

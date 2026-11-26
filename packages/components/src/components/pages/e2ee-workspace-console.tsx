@@ -864,6 +864,8 @@ export function E2eeWorkspaceConsole({
           failure: classifyE2eeControlFailure(error),
           nativeStatus: undefined,
         }));
+      // A read failure after commit cannot prove the action was refused.
+      if (work) throw new Error('e2ee_management_refresh_unconfirmed', { cause: error });
       throw error;
     }
   };
@@ -1182,5 +1184,11 @@ export function E2eeWorkspaceConsole({
 }
 
 const themeStyles = stylex.create({
-  hint: { paddingInline: appSpace[4], paddingBlock: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint: {
+    paddingInline: appSpace[4],
+    paddingBlock: appSpace[2],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
 });

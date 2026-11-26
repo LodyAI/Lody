@@ -64,3 +64,21 @@ export function isLocalStorageFailure(error: unknown): boolean {
     )
   );
 }
+
+/** Display classification for management actions. This never changes access or retries a write. */
+export function managementFailureKind(error: unknown) {
+  const code = requestFailureCode(error);
+  if (
+    /^(?:e2ee_(?:member_)?(?:management_)?|member_)?(?:unauthorized|forbidden|device_revoked|member_removed)$/.test(
+      code ?? ''
+    ) ||
+    code === 'revoked'
+  )
+    return 'unauthorized';
+  if (
+    /^(?:e2ee_(?:member_)?(?:management_)?|member_)?(?:conflict|history-conflict)$/.test(code ?? '')
+  )
+    return 'conflict';
+  if (isRequestUnavailable(error)) return 'network';
+  return 'generic';
+}

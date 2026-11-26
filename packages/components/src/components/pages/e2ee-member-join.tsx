@@ -3,7 +3,7 @@ import {
   isRequestUnavailable,
   requestFailureCode,
 } from '@/lib/e2ee-actionable-failure';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { useCloudQueryState, usePlatform } from '@lody/platform/react';
@@ -95,6 +95,7 @@ type Runtime = Pick<
 type Props = {
   offer: E2eeMemberOffer;
   runtime?: Runtime;
+  watchClaim?: boolean;
   accountId: string | null;
   email?: string;
   emailVerified?: boolean;
@@ -109,7 +110,7 @@ type Props = {
 };
 const CLAIM_INTERVAL_MS = 10_000;
 /** While the request is committed and the key not yet installed. */
-const KEY_WAIT_INTERVAL_MS = 3_000;
+const KEY_WAIT_INTERVALS_MS = [500, 1000, 2000, 3000];
 /** Upper bound of the faster cadence, after which claims return to 10 s. */
 const KEY_WAIT_FAST_MS = 120_000;
 export function E2eeMemberJoinSurface(
@@ -134,6 +135,7 @@ export function E2eeMemberJoinSurface(
     <E2eeMemberJoin
       {...props}
       runtime={platform.e2eeWorkspaces?.runtime}
+      watchClaim
       accountId={session.data?.user.id ?? null}
       email={session.data?.user.email}
       emailVerified={session.isOptimistic ? undefined : session.data?.user.emailVerified}
@@ -155,12 +157,37 @@ function memberJoinFailureKey(cause: unknown) {
   if (isRequestUnavailable(cause)) return 'e2ee.team.error.network';
   return 'e2ee.team.retryOriginal';
 }
+function MemberClaimHint({
+  workspaceId,
+  requestId,
+  wake,
+}: {
+  workspaceId: string;
+  requestId: string;
+  wake: RefObject<((reset?: boolean) => void) | undefined>;
+}) {
+  const { data } = useCloudQueryState(cloudOperations.e2eeMembers.claim, {
+    workspaceId,
+    requestId,
+  });
+  const state = data?.state;
+  const lastState = useRef<typeof state>(undefined);
+  useEffect(() => {
+    if (!state || lastState.current === state) return;
+    lastState.current = state;
+    // Relay status only wakes the host. The original claim still verifies admission and keys.
+    if (state !== 'pending') wake.current?.();
+  }, [state, wake]);
+  return null;
+}
+
 export function E2eeMemberJoin(props: Props) {
   return <JoinSession key={`${props.accountId}:${props.offer.token}`} {...props} />;
 }
 function JoinSession({
   offer,
   runtime,
+  watchClaim,
   accountId,
   email,
   emailVerified,
@@ -183,7 +210,7 @@ function JoinSession({
   const [recovering, setRecovering] = useState(Boolean(accountId && runtime?.pendingMemberJoin));
   const [error, setError] = useState<ReturnType<typeof memberJoinFailureKey> | null>(null);
   const [checkingKey, setCheckingKey] = useState(false);
-  const [retry, setRetry] = useState(0);
+  const wake = useRef<((reset?: boolean) => void) | undefined>(undefined);
   // The fast claim window ended while committed: say why the member is still waiting.
   const [slowWait, setSlowWait] = useState(false);
   const live = useRef(true);
@@ -230,17 +257,21 @@ function JoinSession({
   }, [runtime, accountId, offer]);
   const requestId = request?.requestId;
   const requestTerminal = request ? ['rejected', 'cancelled'].includes(request.state) : false;
+  const claimActive = Boolean(
+    requestId && runtime?.claimMemberJoin && (!ready || unconfirmed) && !requestTerminal
+  );
   useEffect(() => {
-    if (!requestId || !runtime?.claimMemberJoin || (ready && !unconfirmed) || requestTerminal)
-      return undefined;
+    if (!requestId || !runtime?.claimMemberJoin || !claimActive) return undefined;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // Committed but not ready means the key is in flight: claim sooner, for a bounded time.
+    let checking = false;
+    let wakePending = false;
     let committedSince: number | undefined;
-    let delay = CLAIM_INTERVAL_MS;
+    let keyWaitAttempt = 0;
     setSlowWait(false);
     const claim = async () => {
-      delay = CLAIM_INTERVAL_MS;
+      let delay = CLAIM_INTERVAL_MS;
+      checking = true;
       setCheckingKey(true);
       try {
         const result = await runtime.claimMemberJoin!(offer.workspaceId, requestId);
@@ -254,28 +285,46 @@ function JoinSession({
         if (result.ready || ['rejected', 'cancelled'].includes(result.state)) return;
         if (result.state === 'committed') {
           committedSince ??= Date.now();
-          if (Date.now() - committedSince < KEY_WAIT_FAST_MS) delay = KEY_WAIT_INTERVAL_MS;
-          else setSlowWait(true);
+          if (Date.now() - committedSince < KEY_WAIT_FAST_MS) {
+            delay = KEY_WAIT_INTERVALS_MS[keyWaitAttempt]!;
+            keyWaitAttempt = Math.min(keyWaitAttempt + 1, KEY_WAIT_INTERVALS_MS.length - 1);
+          } else setSlowWait(true);
         }
       } catch (cause) {
         if (!disposed) setError(memberJoinFailureKey(cause));
       } finally {
+        checking = false;
         if (!disposed) setCheckingKey(false);
       }
-      if (!disposed) timer = setTimeout(() => void claim(), delay);
+      if (disposed) return;
+      if (wakePending) {
+        wakePending = false;
+        void claim();
+      } else {
+        timer = setTimeout(() => void claim(), delay);
+      }
     };
-    const reconnect = () => {
+    const recheck = (reset = false) => {
       clearTimeout(timer);
-      setRetry((value) => value + 1);
+      if (reset) {
+        committedSince = undefined;
+        keyWaitAttempt = 0;
+        setSlowWait(false);
+      }
+      if (checking) wakePending = true;
+      else void claim();
     };
+    const reconnect = () => recheck(true);
+    wake.current = recheck;
     window.addEventListener('online', reconnect);
     void claim();
     return () => {
       disposed = true;
+      wake.current = undefined;
       clearTimeout(timer);
       window.removeEventListener('online', reconnect);
     };
-  }, [runtime, offer.workspaceId, requestId, requestTerminal, ready, unconfirmed, retry]);
+  }, [runtime, offer.workspaceId, requestId, claimActive]);
   const accept = async () => {
     if (working.current || !runtime?.prepareMemberJoin) return;
     working.current = true;
@@ -323,6 +372,14 @@ function JoinSession({
   else if (available?.matchesRecipient === false) message = 'e2ee.team.wrongEmail';
   return (
     <main data-testid="e2ee-invitation" {...stylex.props(styles.page)}>
+      {watchClaim && accountId && requestId && claimActive && (
+        <MemberClaimHint
+          key={requestId}
+          workspaceId={offer.workspaceId}
+          requestId={requestId}
+          wake={wake}
+        />
+      )}
       <div {...stylex.props(styles.card)}>
         <Card.Root>
           <Card.Header>
@@ -360,7 +417,7 @@ function JoinSession({
                     slowWait && <p role="status">{t('e2ee.team.waitingKeySlow')}</p>
                   )}
                   <div {...stylex.props(styles.actions)}>
-                    <Button disabled={checkingKey} onClick={() => setRetry((value) => value + 1)}>
+                    <Button disabled={checkingKey} onClick={() => wake.current?.(true)}>
                       {t('e2ee.team.checkKeyAgain')}
                     </Button>
                   </div>
@@ -406,7 +463,7 @@ function JoinSession({
                 <Button
                   disabled={busy}
                   onClick={() => {
-                    setRetry((value) => value + 1);
+                    wake.current?.(true);
                     void accept();
                   }}
                 >

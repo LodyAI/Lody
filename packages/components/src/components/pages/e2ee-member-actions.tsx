@@ -1,3 +1,4 @@
+import { managementFailureKind } from '@/lib/e2ee-actionable-failure';
 import { workspaceTransferErrorKey } from '../settings/workspace-transfer-errors';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -47,8 +48,7 @@ export function E2eeMemberActions(props: {
   const [confirming, setConfirming] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const [pending, setPending] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [transferError, setTransferError] = useState<string>();
+  const [failure, setFailure] = useState<string>();
   const [rotateAfter, setRotateAfter] = useState(true);
   const { member, management } = props;
   if (member.role === 'owner') return null;
@@ -56,14 +56,19 @@ export function E2eeMemberActions(props: {
   const role = member.role === 'admin' ? 'member' : 'admin';
   const run = async (work: () => Promise<void>) => {
     setPending(true);
-    setFailed(false);
-    setTransferError(undefined);
+    setFailure(undefined);
     try {
       await work();
       setConfirming(false);
     } catch (error) {
-      setTransferError(transferring ? workspaceTransferErrorKey(error) : undefined);
-      setFailed(true);
+      const kind = managementFailureKind(error);
+      setFailure(
+        transferring
+          ? workspaceTransferErrorKey(error)
+          : kind === 'generic'
+            ? 'e2ee.members.failed'
+            : `e2ee.members.error.${kind}`
+      );
     } finally {
       setPending(false);
     }
@@ -104,7 +109,7 @@ export function E2eeMemberActions(props: {
               data-testid="e2ee-member-transfer"
               data-membership-id={member.membershipId}
               onClick={() => {
-                setFailed(false);
+                setFailure(undefined);
                 setTransferring(true);
               }}
             >
@@ -116,7 +121,7 @@ export function E2eeMemberActions(props: {
               data-testid="e2ee-member-remove"
               tone="destructive"
               onClick={() => {
-                setFailed(false);
+                setFailure(undefined);
                 // Each removal starts from the recommended choice.
                 setRotateAfter(true);
                 setConfirming(true);
@@ -127,9 +132,9 @@ export function E2eeMemberActions(props: {
           )}
         </Menu.Content>
       </Menu.Root>
-      {failed && !confirming && (
+      {failure && !confirming && !transferring && (
         <Alert.Root tone="warning">
-          <Alert.Description>{t(transferError ?? 'e2ee.members.failed')}</Alert.Description>
+          <Alert.Description>{t(failure)}</Alert.Description>
         </Alert.Root>
       )}
       <Dialog.Root
@@ -158,9 +163,9 @@ export function E2eeMemberActions(props: {
             <li>{t('e2ee.members.transferEffectYou')}</li>
             <li>{t('e2ee.members.transferEffectRecord')}</li>
           </ul>
-          {failed && (
+          {failure && (
             <Alert.Root tone="warning">
-              <Alert.Description>{t(transferError ?? 'e2ee.members.failed')}</Alert.Description>
+              <Alert.Description>{t(failure)}</Alert.Description>
             </Alert.Root>
           )}
           <Dialog.Footer>
@@ -213,9 +218,9 @@ export function E2eeMemberActions(props: {
               {t('e2ee.members.rotateWithRemoval')}
             </label>
           )}
-          {failed && (
+          {failure && (
             <Alert.Root tone="warning">
-              <Alert.Description>{t(transferError ?? 'e2ee.members.failed')}</Alert.Description>
+              <Alert.Description>{t(failure)}</Alert.Description>
             </Alert.Root>
           )}
           <Dialog.Footer>
