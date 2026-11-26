@@ -1107,6 +1107,50 @@ export class InboxSqlite {
       .all(batch.batchId, after, limit)
       .map((row) => this.decodeMember(row));
   }
+  memberSources(batch: InboxBatch): Array<{ sequence: number; sourceTurnId?: string }> {
+    return (
+      this.db
+        .prepare(
+          'SELECT r.sequence,r.source_turn_id FROM inbox_results r JOIN inbox_members m USING(sequence) WHERE m.batch_id=? ORDER BY r.sequence'
+        )
+        .all(batch.batchId) as { sequence: number; source_turn_id: string | null }[]
+    ).map((row) => ({
+      sequence: row.sequence,
+      ...(row.source_turn_id ? { sourceTurnId: row.source_turn_id } : {}),
+    }));
+  }
+  narrow(batch: InboxBatch, executionId: string, drop: readonly number[]): InboxBatch | undefined {
+    return this.transaction(() => {
+      const current = this.state(batch);
+      const stored = this.getBatch(batch.batchId, batch);
+      if (
+        !stored ||
+        stored.state !== 'prepared' ||
+        current.active_execution !== executionId ||
+        current.active_input !== batch.inputId
+      )
+        return undefined;
+      const removed = new Set(drop);
+      const members = this.memberSources(batch);
+      const kept = members.filter((member) => !removed.has(member.sequence)).length;
+      if (!kept) return undefined;
+      for (const member of members) {
+        if (!removed.has(member.sequence)) continue;
+        this.db
+          .prepare('DELETE FROM inbox_members WHERE batch_id=? AND sequence=?')
+          .run(batch.batchId, member.sequence);
+        this.db
+          .prepare(
+            'UPDATE inbox_results SET claim=NULL WHERE sequence=? AND claim=? AND consumed=0'
+          )
+          .run(member.sequence, batch.batchId);
+      }
+      this.db
+        .prepare('UPDATE inbox_batches SET member_count=? WHERE batch_id=?')
+        .run(kept, batch.batchId);
+      return this.getBatch(batch.batchId, batch);
+    });
+  }
   private decodeBatch(row: unknown): InboxBatch {
     const r = BatchRow.parse(row);
     return {

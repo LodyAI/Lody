@@ -114,6 +114,20 @@ describe('current Inbox scheduling contract', () => {
       trace('result', 'human', 'schedule', 'withdraw', 'schedule', 'submit', 'withdraw', 'normal')
     ).toMatchObject({ active: 'none', receipts: [[1]], consumed: [1], human: false });
   });
+  it('a narrowed continuation submits only its authorized results and requeues the rest once', () => {
+    const narrowed = trace('result', 'result', 'schedule', 'narrow', 'submit', 'normal');
+    expect(narrowed).toMatchObject({ receipts: [[1]], consumed: [1], queue: [2], pending: [2] });
+    expect(
+      stepOrchestrationModel(stepOrchestrationModel(narrowed, 'schedule'), 'failed')
+    ).toMatchObject({ receipts: [[1]], consumed: [1], queue: [2], pending: [] });
+  });
+  it('withdrawing a continuation that awaits evidence keeps its intent', () => {
+    expect(trace('result', 'schedule', 'withdraw', 'schedule', 'submit', 'normal')).toMatchObject({
+      receipts: [[1]],
+      consumed: [1],
+      pending: [],
+    });
+  });
   it('failure retains results without automatic intent', () => {
     expect(trace('human', 'schedule', 'submit', 'result', 'failed', 'schedule')).toMatchObject({
       active: 'none',

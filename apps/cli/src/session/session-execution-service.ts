@@ -5120,19 +5120,7 @@ export class SessionExecutionService {
         }
         this.liveInboxExecutionIds.add(runtime.inboxOwner.id);
         inboxBatch = runtime.inboxOwner.batch;
-        if (inboxBatch) {
-          try {
-            runtime.inboxNotificationWork = {
-              userId: inboxBatch.userId,
-              originTurnIds: this.notificationWork?.originsForBatch(inboxBatch) ?? [],
-            };
-          } catch (error) {
-            // Missing notification provenance must not prevent actual work.
-            this.deps.logger.warn(
-              `[${sessionId}] Cannot read notification origins: ${formatErrorMessage(error)}`
-            );
-          }
-        }
+        if (inboxBatch) this.trackInboxNotificationWork(sessionId, runtime, inboxBatch);
       }
     } catch (cause) {
       // Both pre-prompt exits below settle the user input without running it,
@@ -5679,7 +5667,10 @@ export class SessionExecutionService {
               const gate = self.deps.encryptedExecution;
               if (!gate && !self.deps.encryptedWorkspace) return undefined;
               yield* abortIfCancelled();
-              const authorized = gate && userTurnId ? yield* self.tryPromise(scope) : [];
+              const continuation =
+                !userTurnId && runtime.inboxOwner?.batch ? runtime.inboxOwner : undefined;
+              const authorized =
+                gate && (userTurnId || continuation) ? yield* self.tryPromise(scope) : [];
               const result =
                 gate && userTurnId
                   ? yield* gate.claim({
@@ -5690,7 +5681,17 @@ export class SessionExecutionService {
                       requesterUserId: options.invocation?.requesterUserId,
                       inputConfig: options.invocation?.inputConfig,
                     })
-                  : { state: 'denied' as const };
+                  : gate && continuation
+                    ? yield* self.claimInboxContinuation(gate, continuation, {
+                        sessionId,
+                        localProjectIds: authorized,
+                      })
+                    : { state: 'denied' as const };
+              if (continuation) {
+                inboxBatch = continuation.batch;
+                if (inboxBatch && runtime.inboxNotificationWork)
+                  self.trackInboxNotificationWork(sessionId, runtime, inboxBatch);
+              }
               if (result.state === 'pending-evidence') {
                 runtime.withdrawInboxExecution = true;
                 return yield* Effect.fail(new SessionTurnExecutionDeferred());
@@ -5749,7 +5750,7 @@ export class SessionExecutionService {
                 userTurnId,
                 reason: 'turn_pre_prompt_failed',
                 message:
-                  result.state === 'completed'
+                  result.state === 'completed' || (continuation && result.state === 'uncertain')
                     ? 'This encrypted turn already finished and will not be started again.'
                     : result.state === 'denied' && result.reason
                       ? encryptedRefusalMessage(result.reason)
@@ -7031,6 +7032,64 @@ export class SessionExecutionService {
     }
     const branch = this.resolveGitHubProjectBranch(meta, preferredBranch);
     return { kind: 'github', repoFullName, branch };
+  }
+
+  private trackInboxNotificationWork(
+    sessionId: SessionId,
+    runtime: TurnRuntimeState,
+    batch: InboxBatch
+  ): void {
+    try {
+      runtime.inboxNotificationWork = {
+        userId: batch.userId,
+        originTurnIds: this.notificationWork?.originsForBatch(batch) ?? [],
+      };
+    } catch (error) {
+      // Missing notification provenance must not prevent actual work.
+      this.deps.logger.warn(
+        `[${sessionId}] Cannot read notification origins: ${formatErrorMessage(error)}`
+      );
+    }
+  }
+
+  private claimInboxContinuation(
+    gate: EncryptedAgentExecution,
+    owner: InboxExecutionHandle,
+    input: { sessionId: SessionId; localProjectIds: readonly LocalProjectId[] }
+  ): Effect.Effect<import('@/lib/e2ee/agent-execution').EncryptedExecutionClaim, unknown> {
+    const self = this;
+    const pending = { state: 'pending-evidence' as const };
+    return Effect.gen(function* () {
+      for (;;) {
+        const batch = owner.batch;
+        if (!batch) return { state: 'denied' as const };
+        const members = yield* self.tryPromise(() => owner.sources());
+        const sourceTurnIds = [...new Set(members.flatMap((member) => member.sourceTurnId ?? []))];
+        if (!sourceTurnIds.length) return { state: 'denied' as const };
+        let refused = new Set<string | undefined>(
+          members.some((member) => !member.sourceTurnId) ? [undefined] : []
+        );
+        if (!refused.size) {
+          const result = yield* gate.claimContinuation({
+            workspaceId: self.deps.workspaceId,
+            sessionId: input.sessionId,
+            inputId: batch.inputId,
+            requesterUserId: batch.userId,
+            sourceTurnIds,
+            localProjectIds: [...input.localProjectIds],
+          });
+          if (result.state !== 'partial') return result;
+          refused = new Set(result.denied);
+        }
+        const drop = members
+          .filter((member) => refused.has(member.sourceTurnId))
+          .map((member) => member.sequence);
+        self.deps.logger.info(
+          `[${input.sessionId}] Encrypted continuation keeps ${drop.length} unauthorized result(s) queued`
+        );
+        if (!(yield* self.tryPromise(() => owner.narrow(drop)))) return pending;
+      }
+    });
   }
 
   /** Encrypted starts run as the verified signer; a row's `userId` stays display data. */

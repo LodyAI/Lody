@@ -24,6 +24,7 @@ export type InboxEvent =
   | 'failed'
   | 'restart'
   | 'withdraw'
+  | 'narrow'
   | 'duplicate_release';
 export const initialOrchestrationModelState = (): InboxModel => ({
   next: 1,
@@ -126,11 +127,16 @@ export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): I
       }
       break;
     case 'withdraw':
-      // An unverified human execution returns its input before submission.
-      if (s.active !== 'human' || s.submitted) break;
+      // Unverified input returns before submission; an automatic batch keeps its intent.
+      if ((s.active !== 'human' && s.active !== 'automatic') || s.submitted) break;
+      if (s.active === 'human') s.human = true;
+      else s.pending = [...s.batch];
       s.active = 'none';
       s.batch = [];
-      s.human = true;
+      break;
+    case 'narrow':
+      if (s.active !== 'automatic' || s.submitted || s.batch.length < 2) break;
+      s.batch = s.batch.slice(0, 1);
       break;
     case 'duplicate_release':
       break; // duplicate release cannot create another intent
@@ -158,6 +164,7 @@ export function enumerateOrchestrationModel(depth = 8) {
     'failed',
     'restart',
     'withdraw',
+    'narrow',
     'duplicate_release',
   ];
   const initial = initialOrchestrationModelState();
