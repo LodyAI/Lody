@@ -112,6 +112,40 @@ describe('durable Operation inbox', () => {
     f.sql.release({ ...human, executionId: 'human-execution', outcome: 'normal' });
     expect(f.sql.begin(automated, 'event-execution')).toBe(true);
   });
+  it('stores result continuations without the delegating Automation origin', () => {
+    const f = fixture();
+    f.store.accept({
+      workspaceId: 'workspace' as WorkspaceId,
+      ownerMachineId: 'machine' as MachineId,
+      requesterSessionId: 'A' as SessionId,
+      requesterUserId: 'human',
+      operationId: 'from-automation',
+      kind: 'session_chat',
+      canonicalCommand: { operationId: 'from-automation' },
+      frozenContinuationConfig: {
+        sourceTurnId: 'automation-turn',
+        inputConfig: {
+          prompt: 'ci failed',
+          _lodyAutomation: {
+            invocationId: 'invocation',
+            ruleId: 'rule',
+            ruleRevision: 1,
+            eventRef: 'event',
+            authorizationUserId: 'human',
+          },
+        },
+      },
+      initiatorChainDepth: 0,
+      createdAt: '2026-10-12T00:00:00.000Z',
+      deadlineAt: '2026-10-13T00:00:00.000Z',
+      items: [],
+    });
+    f.store.finish('A' as SessionId, 'from-automation', { type: 'result', value: { items: [] } });
+    const [intent] = f.sql.pending('workspace');
+    expect(intent?.input.kind).toBe('automatic');
+    expect(intent?.input.config).not.toHaveProperty('_lodyAutomation');
+    expect(intent?.input.config).toMatchObject({ prompt: 'ci failed' });
+  });
   it('an idle wakeable receipt survives reopen and duplicate release creates no second intent', () => {
     const f = fixture();
     f.start();
@@ -728,6 +762,74 @@ describe('Inbox recovery and retained settlement', () => {
     );
     expect(received).toEqual([['first'], ['second']]);
     expect(f.sql.pending('workspace')).toEqual([]);
+  });
+
+  it('backs off relaunching a batch whose launch returned without consuming it', async () => {
+    const f = fixture();
+    f.add('one');
+    const attempts: string[] = [];
+    let refuse = true;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const consumed = yield* Deferred.make<void>();
+          let inbox: OperationInbox['Service'];
+          const execution = Layer.succeed(InboxExecution, {
+            ready: () => true,
+            admit: () => true,
+            report: () => Effect.void,
+            launch: (batch) =>
+              Effect.gen(function* () {
+                attempts.push(batch.batchId);
+                if (refuse) return;
+                expect(yield* inbox.begin(batch, 'exec')).toBe(true);
+                yield* inbox.submit(batch, batch, 'exec', () => undefined);
+                yield* inbox.settle(batch, 'settled');
+                yield* inbox.release({ ...batch, executionId: 'exec', outcome: 'normal' });
+                yield* Deferred.succeed(consumed, undefined);
+              }),
+          });
+          yield* Effect.gen(function* () {
+            inbox = yield* OperationInbox;
+            yield* TestClock.adjust(0);
+            expect(attempts).toHaveLength(1);
+            for (let i = 0; i < 5; i++) yield* inbox.wake;
+            yield* TestClock.adjust(0);
+            expect(attempts).toHaveLength(1);
+            for (const delay of [1_000, 2_000, 4_000]) {
+              const before = attempts.length;
+              yield* TestClock.adjust(delay - 1);
+              yield* TestClock.adjust(0);
+              expect(attempts).toHaveLength(before);
+              yield* TestClock.adjust(1);
+              yield* TestClock.adjust(0);
+              expect(attempts).toHaveLength(before + 1);
+            }
+            refuse = false;
+            const before = attempts.length;
+            yield* inbox.release({
+              ...f.input,
+              sessionId: 'B',
+              executionId: 'other',
+              outcome: 'normal',
+            });
+            yield* TestClock.adjust(0);
+            yield* Deferred.await(consumed);
+            expect(attempts).toHaveLength(before + 1);
+            expect(new Set(attempts).size).toBe(1);
+            expect(f.sql.pending('workspace')).toEqual([]);
+            yield* TestClock.adjust(60_000);
+            expect(attempts).toHaveLength(before + 1);
+          }).pipe(
+            Effect.provide(
+              OperationInbox.layer('workspace', 'owner').pipe(
+                Layer.provide(Layer.merge(inboxRepositoryLayer(f.sql), execution))
+              )
+            )
+          );
+        })
+      ).pipe(Effect.provide(TestClock.layer()))
+    );
   });
 });
 

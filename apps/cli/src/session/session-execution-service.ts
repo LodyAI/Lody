@@ -585,7 +585,7 @@ export type PreparedSessionDispatchOptions = {
   dispatchSource: SessionDispatchSource;
   accessPromise: Promise<MachineAccessVerification>;
   requestPromise: Promise<PreparedSessionDispatchRequest>;
-  onExecutionDeferred?: () => void | Promise<void>;
+  onExecutionDeferred?: (wait?: 'automation-admission') => void | Promise<void>;
   onAccessAllowed: () => void | Promise<void>;
   onAccessDenied: (
     reason: MachineAccessVerification & { outcome: 'denied' }
@@ -3228,9 +3228,9 @@ export class SessionExecutionService {
             return undefined;
           })
       );
-      if (visibleOutcome === 'execution-deferred') {
-        await options.onExecutionDeferred?.();
-      }
+      if (visibleOutcome === 'execution-deferred') await options.onExecutionDeferred?.();
+      if (visibleOutcome === 'automation-admission-blocked')
+        await options.onExecutionDeferred?.('automation-admission');
       if (
         outcome === 'unknown' ||
         visibleOutcome === 'duplicate' ||
