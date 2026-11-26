@@ -481,9 +481,80 @@ describe('SessionExecutionService', () => {
       mcp: ['server-a'],
       reuse: true,
     },
-  ])(
+    {
+      scenario: 'edited MCP configuration under the same ID',
+      live: true,
+      previousMcp: ['server-a'],
+      mcp: ['server-a'],
+      mounted: { fingerprint: 'stdio-config' },
+      current: { fingerprint: 'http-config' },
+    },
+    {
+      scenario: 'unchanged MCP configuration',
+      live: true,
+      previousMcp: ['server-a', 'server-b'],
+      mcp: ['server-b', 'server-a'],
+      mounted: { fingerprint: 'same-config' },
+      current: { fingerprint: 'same-config' },
+      reuse: true,
+    },
+    {
+      scenario: 'an unreadable MCP catalog',
+      live: true,
+      previousMcp: ['server-a'],
+      mcp: ['server-a'],
+      mounted: { fingerprint: 'same-config' },
+      current: { fingerprint: undefined },
+      reuse: true,
+    },
+    {
+      scenario: 'an MCP catalog that was unavailable at startup',
+      live: true,
+      previousMcp: ['server-a'],
+      mcp: ['server-a'],
+      mounted: { fingerprint: undefined },
+      current: { fingerprint: 'readable-config' },
+    },
+    {
+      scenario: 'a local sign-out while the MCP catalog is unreadable',
+      live: true,
+      previousMcp: ['server-a'],
+      mcp: ['server-a'],
+      mounted: { fingerprint: 'same-config', authRevisions: { 'server-a': 1 } },
+      current: { fingerprint: undefined, authRevisions: { 'server-a': 2 } },
+    },
+    {
+      scenario: 'an MCP configuration edited while the ACP was starting',
+      live: true,
+      starting: true,
+      previousMcp: ['server-a'],
+      mcp: ['server-a'],
+      mounted: { fingerprint: 'config-a' },
+      current: { fingerprint: 'config-b' },
+    },
+    {
+      scenario: 'an unchanged MCP configuration while the ACP was starting',
+      live: true,
+      starting: true,
+      previousMcp: ['server-a'],
+      mcp: ['server-a'],
+      mounted: { fingerprint: 'config-a' },
+      current: { fingerprint: 'config-a' },
+      reuse: true,
+    },
+  ] as Array<{
+    scenario: string;
+    live: boolean;
+    starting?: boolean;
+    memory?: { providerId: string; memoryId: string };
+    previousMcp?: string[];
+    mcp?: string[];
+    mounted?: { fingerprint: string | undefined; authRevisions?: Record<string, number> };
+    current?: { fingerprint: string | undefined; authRevisions?: Record<string, number> };
+    reuse?: boolean;
+  }>)(
     'restores ACP with frozen configuration after $scenario',
-    async ({ live, memory, previousMcp, mcp, reuse }) => {
+    async ({ live, starting, memory, previousMcp, mcp, mounted, current, reuse }) => {
       const mcpServerIds = mcp as SessionConfig['mcpServerIds'] | undefined;
       const events: string[] = [];
       const codexAuth = {
@@ -535,13 +606,26 @@ describe('SessionExecutionService', () => {
       };
 
       let retired = !live;
+      let ready = !starting;
       const oldSession = {
         ...restoredSession,
+        get acpSessionId() {
+          return ready ? ('acp-1' as ACPSessionId) : undefined;
+        },
         getMemoryBinding: () =>
           previousMcp ? undefined : { providerId: 'nowledge-mem', memoryId: 'previous' },
         getMcpServerIds: () => previousMcp as SessionConfig['mcpServerIds'],
+        ...(mounted
+          ? {
+              getMcpMount: () => ({
+                fingerprint: mounted.fingerprint,
+                authRevisions: mounted.authRevisions ?? {},
+              }),
+            }
+          : {}),
         agentClient: {
           ...agentClient,
+          isCreated: () => ready,
           prompt: async () => {
             if (!reuse) throw new Error('Old process must not receive the new prompt');
             events.push('prompt');
@@ -556,7 +640,25 @@ describe('SessionExecutionService', () => {
           retired = true;
           events.push('retire');
         },
-        getPendingSession: vi.fn(() => null),
+        getPendingSession: vi.fn(() =>
+          ready
+            ? null
+            : Promise.resolve().then(() => {
+                ready = true;
+                return oldSession;
+              })
+        ),
+        ...(current
+          ? {
+              readMcpConfigurationFingerprint: async (ids: readonly string[], userId: string) => {
+                expect([...ids]).toEqual(mcpServerIds);
+                expect(userId).toBe('user-1');
+                return current.fingerprint;
+              },
+              readMcpAuthRevisions: (ids: readonly string[]) =>
+                current.authRevisions ?? Object.fromEntries(ids.map((id) => [id, 0])),
+            }
+          : {}),
         createSession: vi.fn(async (config, agentStart) => {
           expect(retired).toBe(true);
           events.push('restore');

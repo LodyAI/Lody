@@ -501,6 +501,71 @@
       "estimatedMinutes": 6
     },
     {
+      "id": "LODY-MCP-003",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Retire ACP and remount edited MCP configuration on the next turn of the same Session",
+      "owner": "workspace-catalog",
+      "feature": "src/features/mcp-catalog.feature",
+      "fixture": "synthetic-stdio-mcp-and-scripted-acp",
+      "fingerprint": "2aaf2a6db0d54e0a9e18dbf264dcea0a60fb30fcfdcf61bfc7fe852d61d8e4cc",
+      "ownerPaths": [
+        "apps/cli/src/agent/session-mcp-resolver.ts",
+        "apps/cli/src/mcp/authentication/service.ts",
+        "apps/cli/src/session/session-execution-service.ts",
+        "apps/cli/src/session/session-manager.ts",
+        "packages/components/src/components/settings/mcp-setting.tsx"
+      ],
+      "actions": [
+        {
+          "id": "settings.openMcpCatalog"
+        },
+        {
+          "id": "mcp.createSyntheticStdioServer"
+        },
+        {
+          "id": "composer.selectMcpServer"
+        },
+        {
+          "id": "session.createCompleted"
+        },
+        {
+          "id": "mcp.editSelectedServerConfig"
+        },
+        {
+          "id": "session.sendFollowUpTurn"
+        }
+      ],
+      "checkpoints": [
+        "initial turn starts ACP with the initial synthetic MCP configuration",
+        "editing the selected MCP server retires the prior ACP and synthetic MCP process on the next turn",
+        "the next turn starts a fresh ACP session with the updated MCP name and arguments"
+      ],
+      "cleanup": [
+        "reconfigured synthetic MCP and ACP processes exit",
+        "Session is permanently deleted",
+        "workspace MCP catalog entry is deleted"
+      ],
+      "coverage": {
+        "renderer": "MCP settings edit and same-Session follow-up composer",
+        "electronIpc": "Real window and workspace RPC",
+        "bundledCli": "MCP mount fingerprinting, ACP retirement, and re-dispatch",
+        "durableState": "Updated workspace MCP catalog and Session history",
+        "externalWire": "Synthetic stdio MCP and scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": true
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 6
+    },
+    {
       "id": "LODY-ROLE-001",
       "state": "active",
       "priority": "P1",

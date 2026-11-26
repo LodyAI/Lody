@@ -45,6 +45,7 @@ import {
 } from '@/agent/managed-agent-runtime';
 import { discoverManagedPiExtensions } from '@/agent/pi-extensions';
 import { getAcpCapabilitySourceVersion, resolveACPProcessLaunch } from '@/agent/setting';
+import { sessionMcpAuthRevisionsChanged } from '@/agent/session-mcp-resolver';
 import { captureCli } from '@/lib/analytics/posthog';
 import { ConcurrentQueue } from '@/lib/concurrent-queue';
 import {
@@ -2471,9 +2472,6 @@ export class SessionExecutionService {
     if (!agentClient || !acpSessionId || !steerCapability) {
       return await rejectAndPromote('unsupported');
     }
-    if (mcpSelectionChanged(runtime.session, options.inputConfig)) {
-      return await rejectAndPromote('unsupported', 'MCP selection requires a new turn.');
-    }
     if (steerCapability.configPolicy === 'active') {
       const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
       if (mismatch) {
@@ -2492,6 +2490,19 @@ export class SessionExecutionService {
         preparedDoc ??
         (await wait(this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId)));
       preparedDoc = sessionDoc;
+      if (
+        await wait(
+          this.hasMcpConfigurationChanged(runtime.session, options.inputConfig, options.userId)
+        )
+      ) {
+        return (
+          (await rejectBeforeProviderSubmission()) ??
+          (await rejectAndPromote(
+            'unsupported',
+            'The MCP selection or configuration changed, so this message needs a new turn.'
+          ))
+        );
+      }
       const queuedRejection = await rejectBeforeProviderSubmission();
       if (queuedRejection) return queuedRejection;
       const inputBlocks = resolveSessionExecutionInputBlocks(options.inputConfig);
@@ -3280,6 +3291,43 @@ export class SessionExecutionService {
     } finally {
       span.end({ outcome });
     }
+  }
+
+  /**
+   * MCP servers mount at ACP start, so a selected server whose catalog row or
+   * local credentials changed needs the same retirement as a changed selection.
+   */
+  private async hasMcpConfigurationChanged(
+    session: ISession,
+    input: SessionTurnInputConfig,
+    requesterUserId: string
+  ): Promise<boolean> {
+    if (mcpSelectionChanged(session, input)) return true;
+    const selectedIds = input.mcpServerIds ?? [];
+    if (selectedIds.length === 0) return false;
+    const sessionManager = this.deps.sessionManager;
+    if (
+      typeof session.getMcpMount !== 'function' ||
+      typeof sessionManager.readMcpConfigurationFingerprint !== 'function' ||
+      typeof sessionManager.readMcpAuthRevisions !== 'function'
+    )
+      return false;
+    if (!session.agentClient?.isCreated() || !session.acpSessionId) return false;
+    const mounted = session.getMcpMount();
+    if (
+      mounted?.fingerprint !== undefined &&
+      sessionMcpAuthRevisionsChanged(
+        mounted,
+        sessionManager.readMcpAuthRevisions(selectedIds, requesterUserId)
+      )
+    )
+      return true;
+    const current = await sessionManager.readMcpConfigurationFingerprint(
+      selectedIds,
+      requesterUserId
+    );
+    if (current === undefined) return false;
+    return mounted?.fingerprint !== current;
   }
 
   private async evictForTurnStart(sessionId: SessionId): Promise<MemoryPressureEvictionResult> {
@@ -8088,17 +8136,22 @@ export class SessionExecutionService {
           let readySession = session;
           // MCP servers are mounted at ACP startup. Replace between prompts so the
           // driving turn's selection takes effect without hot-loading a busy agent.
-          if (
-            readySession &&
-            (mcpSelectionChanged(readySession, acpSessionConfig) ||
-              JSON.stringify(readySession.getMemoryBinding?.() ?? null) !==
-                JSON.stringify(acpSessionConfig.memory ?? null))
-          ) {
-            yield* ctx.abortIfCancelled();
-            const previousSession = readySession;
-            yield* self.tryPromise(() =>
-              self.deps.sessionManager.retireSessionForReconfiguration(previousSession)
-            );
+          const retireIfReconfigured = (mounted: ISession) =>
+            Effect.gen(function* () {
+              const reconfigure =
+                JSON.stringify(mounted.getMemoryBinding?.() ?? null) !==
+                  JSON.stringify(acpSessionConfig.memory ?? null) ||
+                (yield* self.tryPromise(() =>
+                  self.hasMcpConfigurationChanged(mounted, acpSessionConfig, userId)
+                ));
+              if (!reconfigure) return false;
+              yield* ctx.abortIfCancelled();
+              yield* self.tryPromise(() =>
+                self.deps.sessionManager.retireSessionForReconfiguration(mounted)
+              );
+              return true;
+            });
+          if (readySession && (yield* retireIfReconfigured(readySession))) {
             readySession = null;
             session = null;
           }
@@ -8145,6 +8198,10 @@ export class SessionExecutionService {
               );
               session = readySession;
               yield* ctx.abortIfCancelled();
+              if (yield* retireIfReconfigured(readySession)) {
+                readySession = null;
+                session = null;
+              }
             }
           }
 
