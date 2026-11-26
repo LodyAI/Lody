@@ -127,5 +127,6 @@ describe('DesktopSessionDetailLayout', () => {
     // A remount would have produced a different DOM node.
     expect(collapsedPanel).toBe(openPanel);
     expect(collapsedPanel?.closest('[aria-hidden="true"]')).not.toBeNull();
+    expect(collapsedPanel?.closest('[inert]')).not.toBeNull();
   });
 });
