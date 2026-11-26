@@ -1,0 +1,22 @@
+---
+title: "20260812"
+version: 0.78.0
+date: 2026-08-12
+description: "Ajout du runtime officiel Grok et d'un menu @ unifié à deux niveaux, avec des améliorations pour les vérifications mémoire, l'installation de la CLI et l'expérience sur ordinateur."
+---
+
+Version 0.78.0
+
+### ✨ Nouveautés
+
+- Ajout de la prise en charge du runtime officiel Grok, incluant les contrôles d'interaction et d'autorisation, l'utilisation du contexte et les limites de débit dans Lody.
+- Un nouveau menu `@` à deux niveaux regroupe au même endroit les fichiers, issues, pull requests, skills, sessions et commandes, y compris les références directes à d'autres sessions.
+
+### 🐛 Corrections et améliorations
+
+- Amélioration des vérifications de pression mémoire sur macOS et Linux, réduisant les cas où le démarrage d'une session était bloqué à tort alors que le système disposait encore de ressources utilisables.
+- Rétablissement du raccourci de dézoom dans l'application de bureau Electron.
+- Les descriptions des pull requests peuvent désormais être dépliées, et les réponses des Agents adoptent un alignement plus cohérent.
+- Correction de la corruption du texte multi-octets, notamment des caractères chinois, lorsqu'il chevauchait plusieurs segments de données d'une connexion locale.
+- Correction de l'échec d'installation de Lody CLI via npm ou npx lorsque les versions des dépendances n'étaient pas résolues correctement.
+- Amélioration de la vitesse de chargement, de la taille des ressources et de l'accessibilité de la page d'accueil du site web.

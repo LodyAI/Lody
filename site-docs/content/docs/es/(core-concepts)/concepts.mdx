@@ -1,0 +1,124 @@
+---
+title: "Conceptos y glosario"
+description: "El modelo mental detrás de Lody —sesiones, rondas, configuraciones de agente, roles, entornos de ejecución, worktrees y pull requests— además de un glosario de los términos utilizados en esta documentación."
+---
+
+# Conceptos y glosario
+
+La mayor parte de Lody consiste en un pequeño conjunto de objetos organizados de la misma manera en cada pantalla. Lee esta página una vez
+y te resultará más fácil ubicar el resto de las guías.
+
+## El modelo mental
+
+```text
+workspace
+├── projects / repositories
+│   └── session            one task, one conversation, one branch/worktree
+│       ├── round          one agent turn + the changes it made
+│       ├── side chat      a forked question that does not interrupt the main task
+│       └── pull request   optional GitHub hand-off after review
+├── agent configs          runtime + authentication + machine
+│   └── agent roles        saved machine + config + model + permissions
+└── teammates              see shared sessions, not private machines
+```
+
+Una sesión es el objeto en el que pasas la mayor parte del tiempo. Todo lo demás o bien la alimenta (proyecto,
+repositorio, configuración de agente, rol) o bien sale de ella (diff, pull request, transferencia).
+
+## El recorrido de una tarea
+
+1. **Agrega un proyecto o repositorio.** Un [Proyecto local](/es/docs/local-project) es un directorio; un
+   [repositorio de GitHub](/es/docs/github) añade pull requests, CI y sincronización de revisiones.
+2. **Elige qué se ejecuta.** Una [Configuración de agente](/es/docs/quickstart) vincula un entorno de ejecución a una máquina y sus
+   credenciales. Un [Rol de agente](/es/docs/agent-roles) guarda una combinación recurrente.
+3. **Abre una sesión.** Desde el compositor de la página de inicio, elige el proyecto, la rama, la configuración, el modelo y
+   el alcance de permisos. Consulta [Sesiones](/es/docs/session).
+4. **Trabaja en rondas.** Cada ronda es un turno del agente más un diff. Revísalo con el
+   [Visor de diffs](/es/docs/diff-viewer) y comenta con [Comentarios en diffs](/es/docs/diff-comments).
+5. **Finaliza la tarea.** Crea un pull request, conserva la rama o archiva la sesión. Consulta
+   [Flujo de trabajo recomendado](/es/docs/workflow).
+
+## Objetos principales
+
+| Término | Qué es | Leer más |
+| --- | --- | --- |
+| **Workspace** | El contenedor a nivel de equipo: miembros, máquinas compartidas, sesiones y configuración. | [Funciones de equipo](/es/docs/team) |
+| **Proyecto / repositorio** | El código sobre el que trabaja una sesión: un directorio local o un repositorio de GitHub. | [Proyectos locales](/es/docs/local-project) · [Integración con GitHub](/es/docs/github) |
+| **Sesión** | Una tarea con una conversación, una rama y normalmente un worktree. | [Sesiones](/es/docs/session) |
+| **Ronda** | Un turno del agente más los cambios de archivos que produjo. | [Visor de diffs](/es/docs/diff-viewer) |
+| **Worktree** | Una copia de trabajo aislada para que dos sesiones puedan editar el mismo repositorio sin colisionar. | [Worktrees](/es/docs/worktrees) |
+| **Agent Config** | Un entorno de ejecución (Claude Code, Codex, Kimi, ACP y otros) junto con su autenticación y máquina de ejecución. | [Configuración de agente](/es/docs/quickstart) · [Tipos de entorno de ejecución de CLI](/es/docs/cli-runtimes) |
+| **Agent Role** | Un ajuste preestablecido guardado que combina una máquina, un Agent Config, un modelo, nivel de razonamiento, permisos y una instrucción opcional. | [Roles de agente](/es/docs/agent-roles) |
+
+## Cómo se relacionan las piezas
+
+<Accordions>
+<Accordion title="Sesión vs. ronda vs. turno">
+Una **sesión** es la tarea completa y su historial. Una **ronda** es un turno del agente más su diff. Cuando
+esta documentación dice «revisar la ronda», se refiere a leer el diff producido por ese turno antes de continuar.
+</Accordion>
+<Accordion title="Agent Config vs. Agent Role">
+Un **Agent Config** responde a «¿qué puede ejecutarse en esta máquina y cómo se autentica?». Un
+**Agent Role** responde a «cuando inicio este tipo de tarea, ¿qué máquina, configuración, modelo y
+permisos deben seleccionarse?». Los roles hacen referencia a las configuraciones; las configuraciones no hacen referencia a los roles.
+</Accordion>
+<Accordion title="Fork vs. Side Chat vs. transferencia (handoff)">
+- **Fork** copia la conversación en una nueva sesión para que puedas probar una dirección diferente.
+- **Side Chat** es un fork fijado junto al chat principal para hacer una pregunta rápida.
+- **Handoff** (transferencia) invita a un compañero de equipo a la misma sesión; no crea una copia. Consulta
+  [Compartir una sesión de agente de programación](/es/docs/session-handoff).
+</Accordion>
+<Accordion title="Sesiones paralelas vs. Control de sesiones de agente">
+- Las **sesiones paralelas** las inicias tú, cada una con su propia tarea y su propio worktree. Consulta
+  [Agentes de programación en paralelo](/es/docs/parallel-agents).
+- **Control de sesiones de agente** consiste en que un agente cree, dirija y recopile resultados de otras sesiones mediante
+  las herramientas MCP de Lody. Consulta [Control de sesiones de agente](/es/docs/session-orchestration).
+</Accordion>
+</Accordions>
+
+## Glosario de términos que encontrarás
+
+| Término | Significado |
+| --- | --- |
+| **ACP** | Agent Client Protocol, la interfaz que utiliza Lody para iniciar y comunicarse con muchas CLI de agentes de programación. Consulta [Tipos de entorno de ejecución de CLI](/es/docs/cli-runtimes). |
+| **MCP** | Model Context Protocol. Lody expone herramientas MCP integradas para que un agente pueda actuar sobre conversaciones de Lody y otros recursos. |
+| **Daemon** | El proceso en segundo plano de la CLI de Lody que ejecuta realmente los agentes en una máquina. Consulta [Comandos de la CLI](/es/docs/cli). |
+| **Alcance de permisos** | Cuánto puede hacer el agente sin pedir confirmación, como editar archivos o ejecutar comandos de shell. Se configura por sesión en el compositor. |
+| **Ventana de contexto** | Cuánta conversación puede retener el modelo a la vez. Lody muestra la capacidad restante en el chat. Consulta [Contexto, tokens y cuota](/es/docs/usage-and-quota). |
+| **Handoff** | Invitar a un compañero de equipo a una sesión activa para que continúe con la misma conversación, diffs y worktree. |
+| **Orquestación** | Hacer que un agente cree sesiones, les envíe mensajes y recopile resultados de otras sesiones. |
+
+## Preguntas frecuentes
+
+### ¿Cuál es la diferencia entre un Agent Config y un Agent Role?
+
+Un Agent Config es un entorno de ejecución junto con su autenticación y máquina de ejecución. Un Agent Role es un
+ajuste preestablecido guardado que selecciona una máquina, un Agent Config, un modelo, nivel de razonamiento y permisos, además de una
+instrucción opcional, para que puedas reutilizar la misma configuración al iniciar una sesión. Consulta [Configuración de agente](/es/docs/quickstart) y
+[Roles de agente](/es/docs/agent-roles).
+
+### ¿Cuál es la diferencia entre hacer fork de una sesión y transferirla (handoff)?
+
+Hacer fork copia la conversación en una nueva sesión que te pertenece. Hacer handoff invita a otra persona
+a la sesión existente para que ambos vean el mismo chat en vivo, diffs y worktree. Hacer fork no
+agrega a nadie a la sesión original. Consulta [Sesiones](/es/docs/session) y
+[Compartir una sesión de agente de programación](/es/docs/session-handoff).
+
+### ¿Necesito entender los worktrees para usar Lody?
+
+Puedes usar Lody sin llegar a abrir nunca el directorio del worktree. Resulta relevante cuando ejecutas varias
+sesiones a la vez: cada worktree es lo que mantiene separadas sus ediciones. Consulta [Worktrees](/es/docs/worktrees).
+
+### ¿Una «tarea» es lo mismo que una sesión?
+
+En esta documentación, sí: una tarea suele corresponder a una sesión, una rama y un pull request. El
+[Flujo de trabajo recomendado](/es/docs/workflow) explica por qué funcionan mejor las tareas pequeñas.
+
+## Siguiente
+
+<Cards>
+  <Card href="/es/docs/session" title="Sesiones" />
+  <Card href="/es/docs/quickstart" title="Configuración de agente" />
+  <Card href="/es/docs/worktrees" title="Worktrees" />
+  <Card href="/es/docs/first-session" title="Tu primera sesión" />
+</Cards>

@@ -1,0 +1,54 @@
+---
+title: "Mentions"
+description: "Utilisez @ pour mentionner des conversations, des fichiers, des Issues et des Pull Requests, et $ pour mentionner des Skills afin d'injecter un contexte précis dans les prompts Lody."
+---
+
+# Mentions
+
+Lody enrichit la zone de saisie avec la prise en charge des mentions. Saisissez `@` pour ouvrir le menu des mentions,
+où vous pouvez sélectionner des conversations, des fichiers, des Issues, des Pull Requests, des Skills ou des Rôles d'agent. `$` reste
+un raccourci direct pour les Skills.
+
+## Mentions de conversations
+
+Saisissez `@`, choisissez **Sessions**, puis sélectionnez une autre conversation pour la référencer. Demandez à l'agent actuel
+de contacter cette session, de lire le contexte pertinent, d'échanger des constats ou de demander une revue. Par exemple,
+mentionnez une session d'implémentation et demandez à l'agent actuel d'examiner son dernier commit et de lui renvoyer
+ses constats.
+
+La session référencée peut utiliser un autre agent ou s'exécuter sur une autre machine connectée. L'accès reste
+soumis aux permissions de l'espace de travail, et la machine cible doit être en ligne pour exécuter le travail. Une mention
+identifie la session ; ajoutez une instruction décrivant le contexte à échanger ou le travail à effectuer.
+
+Consultez [Contrôle de session par l'agent](/fr/docs/session-orchestration/) pour découvrir les opérations disponibles, ou suivez
+le [guide de collaboration multi-agents](/fr/docs/agent-collaboration/) pour échanger du contexte et demander des revues
+entre agents et machines.
+
+## Mentions de fichiers
+
+Saisissez `@` et choisissez **Files**. Continuez à saisir pour effectuer une recherche approximative par nom ou chemin de fichier. Utilisez les flèches
+haut et bas pour sélectionner, puis appuyez sur Entrée pour confirmer. Les fichiers mentionnés sont envoyés à l'agent
+de code dans le contexte du prompt avec leur chemin complet.
+
+<MentionPreview locale="fr" kind="file" />
+
+## Mentions d'Issues et de Pull Requests
+
+Après avoir sélectionné un dépôt sur la page d'accueil, saisissez `@` pour ouvrir le menu des mentions, puis choisissez
+**Issues** ou **Pull Requests** pour en mentionner un depuis le dépôt actuel.
+
+<MentionPreview locale="fr" kind="issue" />
+
+Utilisez les flèches haut et bas pour sélectionner, puis appuyez sur Entrée pour confirmer. Lody insère l'élément
+sélectionné dans l'éditeur sous la forme `#<number>` et injecte son contexte dans le prompt, afin que l'agent puisse
+traiter des tâches comme `Fix #12` ou `Review the implementation in #56`.
+
+## Mentions de Skills
+
+Saisissez `$` pour parcourir les Skills disponibles sur le projet et la machine d'agent sélectionnés. Continuez à saisir pour
+filtrer par nom, puis sélectionnez une Skill avec les flèches directionnelles et `Enter`.
+
+Lody conserve un jeton lisible `$skill-name` dans l'éditeur. Lorsque vous envoyez le message, il ajoute le
+chemin `SKILL.md` correspondant afin que l'agent puisse charger et suivre ces instructions.
+
+Consultez [Skills](/fr/docs/skills) pour connaître les emplacements de découverte, la portée projet et globale, ainsi que le comportement hors ligne.

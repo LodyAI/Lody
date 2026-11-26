@@ -57,9 +57,7 @@ async function listWorktrees(root: string): Promise<Worktree[]> {
   const result = await runCommandTextLegacy({
     command: 'git',
     args: ['--no-optional-locks', '-C', root, 'worktree', 'list', '--porcelain', '-z'],
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))
-    ),
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
     timeout: 5_000,
     maxOutputBytes: 256 * 1024,
     check: 'exit-0',

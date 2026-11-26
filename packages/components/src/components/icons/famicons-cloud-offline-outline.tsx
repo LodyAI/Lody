@@ -29,4 +29,3 @@ export function FamiconsCloudOfflineOutline(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-

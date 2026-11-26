@@ -551,6 +551,51 @@ html.light .underwater-hero__lead {
   background: hsl(var(--landing-border));
 }
 
+.site-nav__lang {
+  position: relative;
+}
+
+.site-nav__lang-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.site-nav__lang-trigger {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2rem;
+  padding: 0 0.45rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: hsl(var(--landing-ink-muted));
+  font-family: var(--lody-docs-font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.site-nav__lang-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  opacity: 0.82;
+}
+
+.site-nav__lang-chevron {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  opacity: 0.7;
+}
+
+.site-nav__lang-menu {
+  display: none;
+}
+
 .site-nav__mobile {
   display: none;
 }

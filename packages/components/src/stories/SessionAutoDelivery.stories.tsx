@@ -1,5 +1,9 @@
 import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
-import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import {
+  corner as uiCorner,
+  radius as uiRadius,
+  text as uiText,
+} from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
@@ -96,7 +100,13 @@ const STATES: SessionAutoDelivery[] = (
   [
     { state: 'pr' },
     { state: 'ci' },
-    { state: 'fix', attempt: 2, prUrl: 'https://github.com/lodyai/lody/pull/3210', prIndex: 1, prTotal: 2 },
+    {
+      state: 'fix',
+      attempt: 2,
+      prUrl: 'https://github.com/lodyai/lody/pull/3210',
+      prIndex: 1,
+      prTotal: 2,
+    },
     { state: 'conflict', attempt: 1 },
     { state: 'merge' },
     { state: 'ready' },
@@ -157,8 +167,28 @@ export const SidebarMarks: Story = {
 };
 
 const themeStyles = stylex.create({
-  glyph: { width: '720px', maxWidth: '100vw', backgroundColor: uiColors.background, paddingBlock: 'calc(var(--spacing) * 4)' },
+  glyph: {
+    width: '720px',
+    maxWidth: '100vw',
+    backgroundColor: uiColors.background,
+    paddingBlock: 'calc(var(--spacing) * 4)',
+  },
   notesStack: { display: 'flex', flexDirection: 'column', gap: 'calc(var(--spacing) * 2)' },
-  column: { display: 'flex', flexDirection: 'column', gap: 'calc(var(--spacing) * 2)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading },
-  row: { display: 'flex', width: 'calc(var(--spacing) * 64)', alignItems: 'center', justifyContent: 'space-between', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, paddingInline: 'calc(var(--spacing) * 2)', paddingBlock: 'calc(var(--spacing) * 1)' },
+  column: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 2)',
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+  },
+  row: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 64)',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: uiRadius.small,
+    cornerShape: uiCorner.shape,
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+  },
 });

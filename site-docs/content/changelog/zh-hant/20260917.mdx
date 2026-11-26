@@ -1,0 +1,27 @@
+---
+title: "20260917"
+version: 0.95.0
+date: 2026-09-17
+description: "新增內建 Pi，並改善本機 Agent、工作階段分享與工作階段復原體驗。"
+---
+
+版本 0.95.0
+
+### ✨ 新功能
+
+- 新增受託管的內建 Pi Agent。遷移現有的 Pi Provider 時會請求確認，並保留原有設定與已儲存的歷史紀錄；遷移後無法繼續先前的 Pi 工作階段，請開啟新對話。
+- 將已核准的工作階段分享結果直接回傳給 MCP Agent。
+- 支援從本機 CLI 啟動 Devin。
+- 更可靠地關閉與復原工作區共享的工作階段。
+
+### 🐛 修正與改進
+
+- 透過使用 Lody 內建隨附的 Node 執行，修正 DeepSeek Harness 在部分 Node 版本下無法啟動的問題。
+- 修正 iOS 應用程式從背景恢復前景後偶發空白畫面的問題。
+- 改善中斷處理、復原、背景預先擷取與串流行為，減少草稿遺失與整段對話失敗的情況。
+- 改善分享請求、Provider 設定、錯誤復原與封存行為。
+- 修正工具輸入中的 JSON 被誤判為 Markdown 數學公式的問題。
+
+### 🤝 社群貢獻
+
+- 特別感謝 [@tommy0103](https://github.com/tommy0103) 提交 [#711](https://github.com/LodyAI/Lody/pull/711)，以及 [@Astro-Han](https://github.com/Astro-Han) 提交 [acp-extension-pi #1](https://github.com/LodyAI/acp-extension-pi/pull/1)。

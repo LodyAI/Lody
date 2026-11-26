@@ -483,7 +483,11 @@ export function SessionAutoDeliveryNote({
       ? { label: t('common.dismiss', 'Dismiss'), onClick: onDismiss, disabled: busy }
       : null
     : onTurnOff
-      ? { label: t('sessions.autoDelivery.turnOff', 'Turn off'), onClick: onTurnOff, disabled: busy }
+      ? {
+          label: t('sessions.autoDelivery.turnOff', 'Turn off'),
+          onClick: onTurnOff,
+          disabled: busy,
+        }
       : null;
 
   const hasUpdatedAt = now !== undefined && status.updatedAt > 0;

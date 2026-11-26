@@ -1,52 +1,137 @@
 'use client';
 
 import { SiteAnchor } from '@site/components/site-anchor';
+import {
+  localizeSitePath,
+  SITE_LOCALE_META,
+  SITE_LOCALES,
+  switchSiteLocalePath,
+  type SiteLocale,
+} from '@site/src/site-pages/shared';
 
-import { useNavigate } from '@tanstack/react-router';
+import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useTheme } from 'fumadocs-ui/provider/base';
 import { type MouseEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 
-type SiteNavLocale = 'en' | 'zh';
-
 type SiteNavProps = {
-  locale: SiteNavLocale;
-  languageHref: string;
+  locale: SiteLocale;
+  /** Optional backward-compatible override; language switcher links derive from current pathname. */
+  languageHref?: string;
 };
 
 const DISCORD_HREF = 'https://discord.gg/E8mZtMu38s';
 
-const copy = {
+type SiteNavCopy = {
+  docs: string;
+  blog: string;
+  pricing: string;
+  changelog: string;
+  download: string;
+  menu: string;
+  language: string;
+  toggleTheme: string;
+  primaryNav: string;
+  primaryMobileNav: string;
+};
+
+const copy: Record<SiteLocale, SiteNavCopy> = {
   en: {
-    language: '简体中文',
     docs: 'Docs',
     blog: 'Blog',
     pricing: 'Pricing',
     changelog: 'Changelog',
     download: 'Download',
     menu: 'Menu',
-    homeHref: '/home',
-    docsHref: '/docs',
-    blogHref: '/blog',
-    pricingHref: '/price',
-    changelogHref: '/changelog',
-    downloadHref: '/download',
+    language: 'Language',
+    toggleTheme: 'Toggle color theme',
+    primaryNav: 'Primary',
+    primaryMobileNav: 'Primary mobile',
   },
   zh: {
-    language: 'English',
     docs: '文档',
     blog: '博客',
     pricing: '价格',
     changelog: '更新日志',
     download: '下载',
     menu: '菜单',
-    homeHref: '/zh/home',
-    docsHref: '/zh/docs',
-    blogHref: '/zh/blog',
-    pricingHref: '/zh/price',
-    changelogHref: '/zh/changelog',
-    downloadHref: '/zh/download',
+    language: '语言',
+    toggleTheme: '切换配色主题',
+    primaryNav: '主导航',
+    primaryMobileNav: '移动端主导航',
   },
-} as const;
+  'zh-hant': {
+    docs: '文件',
+    blog: '部落格',
+    pricing: '定價',
+    changelog: '更新日誌',
+    download: '下載',
+    menu: '選單',
+    language: '語言',
+    toggleTheme: '切換配色主題',
+    primaryNav: '主導覽',
+    primaryMobileNav: '行動版主導覽',
+  },
+  ja: {
+    docs: 'ドキュメント',
+    blog: 'ブログ',
+    pricing: '料金',
+    changelog: '更新履歴',
+    download: 'ダウンロード',
+    menu: 'メニュー',
+    language: '言語',
+    toggleTheme: 'カラーテーマを切り替え',
+    primaryNav: 'メインナビゲーション',
+    primaryMobileNav: 'モバイルナビゲーション',
+  },
+  ko: {
+    docs: '문서',
+    blog: '블로그',
+    pricing: '요금',
+    changelog: '변경 로그',
+    download: '다운로드',
+    menu: '메뉴',
+    language: '언어',
+    toggleTheme: '색상 테마 전환',
+    primaryNav: '기본 탐색',
+    primaryMobileNav: '모바일 탐색',
+  },
+  es: {
+    docs: 'Documentación',
+    blog: 'Blog',
+    pricing: 'Precios',
+    changelog: 'Novedades',
+    download: 'Descargar',
+    menu: 'Menú',
+    language: 'Idioma',
+    toggleTheme: 'Cambiar tema de color',
+    primaryNav: 'Navegación principal',
+    primaryMobileNav: 'Navegación móvil',
+  },
+  fr: {
+    docs: 'Documentation',
+    blog: 'Blog',
+    pricing: 'Tarifs',
+    changelog: 'Nouveautés',
+    download: 'Télécharger',
+    menu: 'Menu',
+    language: 'Langue',
+    toggleTheme: 'Changer le thème de couleur',
+    primaryNav: 'Navigation principale',
+    primaryMobileNav: 'Navigation mobile',
+  },
+  ru: {
+    docs: 'Документация',
+    blog: 'Блог',
+    pricing: 'Тарифы',
+    changelog: 'Обновления',
+    download: 'Скачать',
+    menu: 'Меню',
+    language: 'Язык',
+    toggleTheme: 'Переключить цветовую тему',
+    primaryNav: 'Основная навигация',
+    primaryMobileNav: 'Мобильная навигация',
+  },
+};
 
 function MenuIcon() {
   return (
@@ -79,6 +164,62 @@ function CloseIcon() {
     >
       <path d="m6 6 12 12" />
       <path d="m18 6-12 12" />
+    </svg>
+  );
+}
+
+function GlobeIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="site-nav__lang-icon"
+      fill="none"
+      focusable="false"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+      viewBox="0 0 24 24"
+    >
+      <circle cx="12" cy="12" r="9.5" />
+      <path d="M2.5 12h19" />
+      <path d="M12 2.5a14.5 14.5 0 0 1 0 19 14.5 14.5 0 0 1 0-19Z" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="site-nav__lang-chevron"
+      fill="none"
+      focusable="false"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="site-nav__lang-check"
+      fill="none"
+      focusable="false"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2.2"
+      viewBox="0 0 24 24"
+    >
+      <path d="m5 12.5 4.5 4.5L19 7.5" />
     </svg>
   );
 }
@@ -130,7 +271,7 @@ function MoonIcon() {
 
 // Single-icon theme toggle. The two icons are stacked in a clipped window and
 // the track slides vertically on click, so toggling scrolls the new icon in.
-function ThemeToggle() {
+function ThemeToggle({ ariaLabel }: { ariaLabel: string }) {
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -138,7 +279,7 @@ function ThemeToggle() {
   const isDark = !mounted || resolvedTheme === 'dark';
   return (
     <button
-      aria-label="Toggle color theme"
+      aria-label={ariaLabel}
       className="site-nav__theme-toggle"
       data-theme={isDark ? 'dark' : 'light'}
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
@@ -180,25 +321,58 @@ function useRouteLink() {
   );
 }
 
-export function SiteNav({ locale, languageHref }: SiteNavProps) {
+export function SiteNav({ locale }: SiteNavProps) {
   const t = copy[locale];
+  const location = useLocation();
   const menuId = useId();
+  const langMenuId = useId();
   const [open, setOpen] = useState(false);
+  const [langOpen, setLangOpen] = useState(false);
   const menuRef = useRef<HTMLDetailsElement>(null);
+  const langRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
-    // Preserve a native disclosure opened before hydration completed.
+    // Preserve native disclosures opened before hydration completed.
     setOpen(menuRef.current?.open ?? false);
+    setLangOpen(langRef.current?.open ?? false);
   }, []);
   const routeLink = useRouteLink();
 
+  const homeHref = localizeSitePath('/home', locale);
   const navItems = [
-    { label: t.docs, href: t.docsHref },
-    { label: t.blog, href: t.blogHref },
-    { label: t.pricing, href: t.pricingHref },
-    { label: t.changelog, href: t.changelogHref },
-    { label: t.download, href: t.downloadHref },
+    { label: t.docs, href: localizeSitePath('/docs', locale) },
+    { label: t.blog, href: localizeSitePath('/blog', locale) },
+    { label: t.pricing, href: localizeSitePath('/price', locale) },
+    { label: t.changelog, href: localizeSitePath('/changelog', locale) },
+    { label: t.download, href: localizeSitePath('/download', locale) },
   ];
+
+  const languageItems = SITE_LOCALES.map((targetLocale) => ({
+    locale: targetLocale,
+    label: SITE_LOCALE_META[targetLocale].label,
+    href: switchSiteLocalePath(location.pathname, targetLocale),
+  }));
+
+  // Close the desktop language menu on outside click or Escape.
+  useEffect(() => {
+    if (!langOpen) return undefined;
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setLangOpen(false);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (langRef.current && !langRef.current.contains(event.target as Node)) {
+        setLangOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [langOpen]);
 
   // Close the mobile menu on Escape, on a jump to desktop width, and lock body scroll
   // while it is open so the backdrop doesn't scroll the page behind it.
@@ -229,7 +403,7 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
     <>
       <header className="site-nav" data-open={open}>
         <div className="site-nav__inner">
-          <SiteAnchor className="site-nav__brand" href={t.homeHref} onClick={routeLink(t.homeHref)}>
+          <SiteAnchor className="site-nav__brand" href={homeHref} onClick={routeLink(homeHref)}>
             <img
               alt="Lody"
               decoding="async"
@@ -241,7 +415,7 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
             <span>Lody</span>
           </SiteAnchor>
           <div className="site-nav__right">
-            <nav aria-label="Primary" className="site-nav__links">
+            <nav aria-label={t.primaryNav} className="site-nav__links">
               {navItems.map((item) => (
                 <SiteAnchor
                   className="site-nav__link"
@@ -254,14 +428,47 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
               ))}
             </nav>
             <div className="site-nav__actions">
-              <ThemeToggle />
-              <SiteAnchor
-                className="site-nav__link site-nav__desktop"
-                href={languageHref}
-                onClick={routeLink(languageHref)}
+              <ThemeToggle ariaLabel={t.toggleTheme} />
+              <details
+                className="site-nav__lang site-nav__desktop"
+                ref={langRef}
+                open={langOpen}
+                onToggle={(event) => setLangOpen(event.currentTarget.open)}
               >
-                {t.language}
-              </SiteAnchor>
+                <summary
+                  aria-controls={langMenuId}
+                  aria-label={t.language}
+                  className="site-nav__lang-trigger"
+                >
+                  <GlobeIcon />
+                  <span>{SITE_LOCALE_META[locale].label}</span>
+                  <ChevronDownIcon />
+                </summary>
+                <div
+                  aria-label={t.language}
+                  className="site-nav__lang-menu"
+                  id={langMenuId}
+                  role="region"
+                >
+                  {languageItems.map((item) => {
+                    const isCurrent = item.locale === locale;
+                    return (
+                      <SiteAnchor
+                        aria-current={isCurrent ? 'true' : undefined}
+                        className="site-nav__lang-option"
+                        href={item.href}
+                        hrefLang={SITE_LOCALE_META[item.locale].htmlLang}
+                        key={item.locale}
+                        lang={SITE_LOCALE_META[item.locale].htmlLang}
+                        onClick={routeLink(item.href, () => setLangOpen(false))}
+                      >
+                        <span>{item.label}</span>
+                        {isCurrent ? <CheckIcon /> : null}
+                      </SiteAnchor>
+                    );
+                  })}
+                </div>
+              </details>
               <span aria-hidden="true" className="site-nav__divider site-nav__desktop" />
               <SiteAnchor
                 aria-label="Discord"
@@ -282,7 +489,7 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
                   {open ? <CloseIcon /> : <MenuIcon />}
                 </summary>
                 <div className="site-nav__menu" data-open={open} id={menuId}>
-                  <nav aria-label="Primary mobile" className="site-nav__menu-links">
+                  <nav aria-label={t.primaryMobileNav} className="site-nav__menu-links">
                     {navItems.map((item) => (
                       <SiteAnchor
                         className="site-nav__menu-link"
@@ -295,22 +502,42 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
                     ))}
                   </nav>
                   <div className="site-nav__menu-footer">
-                    <SiteAnchor
-                      className="site-nav__menu-secondary"
-                      href={languageHref}
-                      onClick={routeLink(languageHref, () => setOpen(false))}
-                    >
-                      {t.language}
-                    </SiteAnchor>
-                    <SiteAnchor
-                      aria-label="Discord"
-                      className="site-nav__menu-secondary site-nav__menu-social"
-                      href={DISCORD_HREF}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <DiscordIcon />
-                    </SiteAnchor>
+                    <div className="site-nav__menu-langs">
+                      <div className="site-nav__menu-langs-head">
+                        <span className="site-nav__menu-langs-label">
+                          <GlobeIcon />
+                          <span>{t.language}</span>
+                        </span>
+                        <SiteAnchor
+                          aria-label="Discord"
+                          className="site-nav__menu-secondary site-nav__menu-social"
+                          href={DISCORD_HREF}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <DiscordIcon />
+                        </SiteAnchor>
+                      </div>
+                      <div className="site-nav__menu-lang-grid">
+                        {languageItems.map((item) => {
+                          const isCurrent = item.locale === locale;
+                          return (
+                            <SiteAnchor
+                              aria-current={isCurrent ? 'true' : undefined}
+                              className="site-nav__menu-lang-option"
+                              href={item.href}
+                              hrefLang={SITE_LOCALE_META[item.locale].htmlLang}
+                              key={item.locale}
+                              lang={SITE_LOCALE_META[item.locale].htmlLang}
+                              onClick={routeLink(item.href, () => setOpen(false))}
+                            >
+                              <span>{item.label}</span>
+                              {isCurrent ? <CheckIcon /> : null}
+                            </SiteAnchor>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </details>

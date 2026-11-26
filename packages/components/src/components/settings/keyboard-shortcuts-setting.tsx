@@ -125,9 +125,7 @@ export function KeyboardShortcutsSetting() {
   const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
   const visibleGlobalShortcuts = useMemo(
     () =>
-      GLOBAL_SHORTCUTS.filter(
-        (shortcut) => shortcut.id !== 'today.toggleWindow' || todayEnabled
-      ),
+      GLOBAL_SHORTCUTS.filter((shortcut) => shortcut.id !== 'today.toggleWindow' || todayEnabled),
     [todayEnabled]
   );
 

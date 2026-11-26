@@ -1,0 +1,20 @@
+---
+title: "20260901-3"
+version: 0.89.3
+date: 2026-09-01
+description: "Ajout des tentatives de relance en cas de saturation Codex et d'un point d'entrée léger pour rejoindre une session, ainsi qu'amélioration de la stabilité de configuration et de rendu des sessions."
+---
+
+Version 0.89.3
+
+### ✨ Nouveautés
+
+- Les échecs liés à la capacité de Codex prennent désormais en charge une relance explicite suivie de nouvelles tentatives automatiques limitées, avec un compte à rebours et un contrôle d'annulation.
+- Ajout d'un point d'entrée léger permettant de gérer les flux d'accès sans charger l'ensemble de l'interface applicative.
+
+### 🐛 Corrections et améliorations
+
+- Correction des mises à jour répétées et des boucles de rendu dans la configuration de session, les onglets de session, le repli d'accès à l'espace de travail et la synchronisation de visibilité du navigateur.
+- Correction du changement de session, de la restauration des liens profonds et des états en attente lors de données asynchrones et d'actions utilisateur rapides.
+- Amélioration de la résilience face aux relations parent-enfant de session malformées et aux erreurs de rendu, évitant les boucles de redirection et les plantages du moteur de rendu.
+- Merci au contributeur externe Wibus Wu pour les fonctionnalités de relance Codex et de point d'entrée léger pour rejoindre une session.

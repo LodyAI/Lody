@@ -1,0 +1,49 @@
+---
+title: "CLI 執行時期類型"
+description: "使用 ACP Registry 提供的所有執行時期，或新增你自己的 ACP 相容啟動命令。"
+---
+
+# CLI 執行時期類型
+
+Lody 支援發布於 [ACP Registry](https://agentclientprotocol.com/get-started/registry) 的所有 CLI 執行時期。
+可用的執行時期清單會從該 registry 動態載入，因此本頁面不會另外維護一份靜態的廠商或命令清單。
+
+<CliRuntimePreview locale="zh-hant" />
+
+## Registry 執行時期
+
+1. 開啟 **設定** -> **Agent 組態**。
+2. 點擊新增按鈕。
+3. 輸入組態名稱。
+4. 從支援 registry 的選擇器中選擇所需的 CLI 類型。
+5. 加入所有必要的環境變數。
+6. 若畫面顯示 **Test** 按鈕，請點擊該按鈕。這會驗證 Lody 是否能啟動該執行時期並讀取其能力，包括支援的模型與執行模式。
+7. 儲存組態，然後在建立對話時選擇它。
+
+支援 registry 代表隨著上游新增 ACP 執行時期項目，Lody 也能隨之跟進。不過，主機仍需依照所選執行時期各自的文件，預先安裝對應的命令、登入資訊、憑證與相依套件。
+
+## 自訂 ACP Agent
+
+如果你的 Agent 相容於 ACP，但尚未發布至 registry，請在 **設定** -> **Agent 組態** 中選擇 **Custom ACP**。
+
+1. 輸入組態名稱。
+2. 將 **CLI Type** 設為 **Custom ACP**。
+3. 在 **Launch command** 中填入透過 stdio 啟動該 Agent 的命令。
+4. 在同一個 Agent 組態中加入所有必要的環境變數。
+5. 點擊 **Test**，驗證 Lody 是否能啟動該 Agent 並讀取其能力。
+6. 儲存組態，然後在建立對話時選擇它。
+
+啟動命令範例：
+
+```bash
+npx -y my-acp-agent --stdio
+```
+
+啟動命令會被剖析為命令與參數並直接啟動程序。含空白字元的參數可使用引號包覆，但不會剖析執行管線（pipe）、重新導向、glob 展開以及 `$VARS` 等 shell 功能。環境變數請改為設定在 Agent 組態中。
+
+## 注意事項
+
+- 部分 registry 執行時期在上游可能仍屬於實驗性質。
+- 使用前，請確認執行 Lody CLI 的主機上已設定好所需的登入憑證。
+- 本機執行時期類型必須先在主機安裝對應的命令。
+- 模型可用性取決於所選的執行時期、本機安裝狀態以及帳號權限。

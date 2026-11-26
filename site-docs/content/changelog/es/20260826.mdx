@@ -1,0 +1,22 @@
+---
+title: "20260826"
+version: 0.87.0
+date: 2026-08-26
+description: "Se añadieron tamaños de fuente personalizados para conversaciones y vistas previas en vivo para adjuntos HTML, y se corrigieron la creación de sesiones mediante mención de Rol, las rutas de adjuntos HTML en Windows, la edición de mensajes en cola y la carga repetida de datos de sesiones y cambios de archivos."
+---
+
+Versión 0.87.0
+
+### ✨ Novedades
+
+- Se añadieron tamaños de fuente personalizados para conversaciones, de modo que el contenido del chat, Markdown y las terminales se adapten mejor a tus preferencias de lectura.
+- Ahora los adjuntos HTML pueden abrirse directamente en vistas previas en vivo; Lody solicita confirmación antes de conectarse a un puerto remoto informado por el Agente.
+
+### 🐛 Correcciones y mejoras
+
+- Se corrigió un problema por el cual iniciar una conversación mediante un Rol mencionado podía fallar.
+- Se mejoró la edición de mensajes en cola: presiona Enter o usa el botón de confirmación para enviar, usa Shift+Enter para insertar un salto de línea y evita envíos accidentales al redactar con un IME.
+- Se eliminó el botón de permisos redundante cuando se selecciona un Rol de Agente, reduciendo conflictos de configuración y el desorden en la interfaz.
+- Se corrigió que las rutas de adjuntos HTML no se abrieran correctamente en Windows.
+- Se corrigió la aparición de bordes duplicados alrededor del editor de mensajes en cola.
+- Se optimizaron la carga y el almacenamiento en caché de los datos de sesiones y cambios de archivos para reducir escaneos repetidos y el consumo de recursos.

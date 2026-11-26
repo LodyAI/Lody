@@ -1,0 +1,23 @@
+---
+title: "20260919-0.97.1"
+version: 0.97.1
+date: 2026-09-19
+description: "Amélioration de l'interface desktop, des onglets et de la file d'attente, avec des correctifs pour le guidage, la récupération de connexion sous Windows et plus encore."
+---
+
+Version 0.97.1
+
+### 🐛 Correctifs et améliorations
+
+- Correction de l'arrêt forcé de l'agent environ 5 secondes après l'envoi d'un message de guidage au Claude intégré.
+- Correction de l'échec de connexion sur l'application desktop Windows lorsque le magasin d'identifiants système ne peut plus être déchiffré (par exemple après la restauration d'une machine sous un nouveau compte) : la récupération est désormais automatique et la cause affichée en cas d'échec est plus claire.
+- Restauration du runtime Devin intégré.
+- Lors de la fermeture de plusieurs onglets à la suite, les onglets restants conservent leur largeur afin que le bouton de fermeture suivant reste sous le curseur (comme dans Chromium).
+- La fermeture d'un onglet n'ayant jamais contenu de message le supprime désormais au lieu de laisser une session invisible en arrière-plan ; la fermeture d'un onglet n'affiche plus de notification toast, et un onglet isolé n'affiche plus de bouton de fermeture.
+- Pendant qu'un agent travaille, la conversation affiche un libellé d'activité scintillant avec le temps écoulé.
+- Une fois qu'une Operation de message est terminée, elle indique la Session atteinte et présente le résultat sous forme de carte de réponse reçue ; vous pouvez ouvrir la réponse complète dans une boîte de dialogue.
+- La commande complète d'une tâche en arrière-plan peut être ouverte dans une boîte de dialogue.
+- L'en-tête du sélecteur d'espace de travail affiche l'espace de travail actuel.
+- Les messages en file d'attente sont alignés au ras de la zone de saisie, et leurs images s'ouvrent dans la visionneuse d'images.
+- Les fichiers modifiés sans statistiques de lignes affichent désormais un libellé au lieu d'une statistique vide.
+- Finitions de l'application desktop : alignement de la barre supérieure macOS avec les boutons de fenêtre, contraste des blocs de code en mode clair, superposition des surfaces au survol et dans les paramètres, disposition des groupes de projets dans la barre latérale, barre de recherche dans la conversation et taille des blocs de code multilignes alignée sur le corps de la conversation.

@@ -1,0 +1,9 @@
+{
+  "title": "エージェントとランタイム",
+  "pages": [
+    "cli-runtimes",
+    "claude-codex-capabilities",
+    "skills",
+    "device-resource-monitoring"
+  ]
+}

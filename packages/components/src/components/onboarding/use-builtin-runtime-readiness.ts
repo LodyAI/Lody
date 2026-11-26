@@ -5,7 +5,10 @@ import type { ManagedBuiltinAgentType, MachineId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { BUILTIN_BACKGROUND_PREFETCH_AGENT_TYPES } from './use-onboarding-builtin-runtime-prefetch';
-import { agentRuntimeReadinessFromProgress, type AgentRuntimeReadiness } from './provider-test-state';
+import {
+  agentRuntimeReadinessFromProgress,
+  type AgentRuntimeReadiness,
+} from './provider-test-state';
 
 export type BuiltinRuntimeReadinessMap = Partial<
   Record<ManagedBuiltinAgentType, AgentRuntimeReadiness>
@@ -21,7 +24,9 @@ export type BuiltinRuntimeReadinessMap = Partial<
  * ever landing on the intro animation. The hook list is fixed-length because
  * the warmed set is a module constant.
  */
-export function useBuiltinRuntimeReadiness(machineId: MachineId | null): BuiltinRuntimeReadinessMap {
+export function useBuiltinRuntimeReadiness(
+  machineId: MachineId | null
+): BuiltinRuntimeReadinessMap {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const [kimi, codex, claude] = BUILTIN_BACKGROUND_PREFETCH_AGENT_TYPES;
   const kimiProgress = useMachineAcpBinaryProgress(runtime, machineId, kimi);

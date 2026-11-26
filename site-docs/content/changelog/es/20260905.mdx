@@ -1,0 +1,30 @@
+---
+title: "20260905"
+version: 0.91.0
+date: 2026-09-05
+description: "Se añadieron acciones para archivos de sesión, diffs semánticos, indicadores de no leído y una mejor búsqueda de menciones, junto con mejoras en los modelos de agentes, Markdown, la versión móvil y el sitio público."
+---
+
+Versión 0.91.0
+
+### ✨ Novedades
+
+- Se añadió soporte para GPT-6 Astra.
+- Se añadieron acciones para los archivos de sesión de modo que los archivos que no se puedan previsualizar directamente puedan abrirse en una aplicación del sistema, mostrarse en el gestor de archivos o descargarse ([#375](https://github.com/LodyAI/Lody/pull/375)).
+- Markdown ahora puede renderizar bloques de código diff semánticos ([#373](https://github.com/LodyAI/Lody/pull/373)).
+- Las barras laterales de sesión y las pestañas de sesiones secundarias en escritorio ahora muestran el estado de no leído ([#332](https://github.com/LodyAI/Lody/pull/332), [#384](https://github.com/LodyAI/Lody/pull/384)).
+- Las menciones de archivos, Issues y PR ahora utilizan coincidencia aproximada al estilo de VS Code, lo que facilita encontrar los elementos deseados ([#378](https://github.com/LodyAI/Lody/pull/378)).
+- Se añadieron guías bilingües para el traspaso de sesiones compartidas, los agentes en paralelo y los equipos de agentes ([#387](https://github.com/LodyAI/Lody/pull/387), [#389](https://github.com/LodyAI/Lody/pull/389), [#390](https://github.com/LodyAI/Lody/pull/390), [#393](https://github.com/LodyAI/Lody/pull/393), [#394](https://github.com/LodyAI/Lody/pull/394)).
+
+### 🐛 Correcciones y mejoras
+
+- Se reforzaron las comprobaciones de conexión de vista previa en equipo y del navegador local para ofrecer un acceso más seguro y fiable ([#374](https://github.com/LodyAI/Lody/pull/374)).
+- DeepSeek Harness ahora descubre modelos desde servicios personalizados y expone opciones de modelo, razonamiento y permisos desde el entorno de ejecución activo ([#380](https://github.com/LodyAI/Lody/pull/380), [#395](https://github.com/LodyAI/Lody/pull/395), [DeepSeek ACP #10](https://github.com/LodyAI/acp-extension-dsh/pull/10), [#11](https://github.com/LodyAI/acp-extension-dsh/pull/11)).
+- Los selectores de modelos de Kimi ahora muestran y permiten buscar proveedores de modelos, lo que facilita distinguir modelos con el mismo nombre ([Kimi ACP #7](https://github.com/LodyAI/acp-extension-kimi/pull/7)).
+- Se mejoró el renderizado de Markdown y de mensajes en streaming con delimitadores de corchetes de TeX, límites correctos de autoenlaces alrededor de puntuación no ASCII, conservación de la salida de texto final y un visor de Mermaid a pantalla completa que se puede cerrar al tocar ([#336](https://github.com/LodyAI/Lody/pull/336), [#370](https://github.com/LodyAI/Lody/pull/370), [#388](https://github.com/LodyAI/Lody/pull/388), [#396](https://github.com/LodyAI/Lody/pull/396)).
+- Se corrigió la vibración del chat al redimensionar la barra lateral y se aceleró la carga de la información de facturación ([#368](https://github.com/LodyAI/Lody/pull/368), [#371](https://github.com/LodyAI/Lody/pull/371)).
+- Se redujo la sobrecarga de actualización de Live Activity y se limitaron las vistas previas de grupos de sesiones en móvil para lograr listas largas más fluidas ([#319](https://github.com/LodyAI/Lody/pull/319), [#323](https://github.com/LodyAI/Lody/pull/323)).
+- Se mejoró cuándo aparecen las solicitudes de reseña de la App Store y cómo se gestiona su estado ([#310](https://github.com/LodyAI/Lody/pull/310)).
+- Se actualizaron los iconos de proveedores ACP y la información del registro de entornos de ejecución ([#369](https://github.com/LodyAI/Lody/pull/369)).
+- Se mejoraron los títulos de página del sitio público, la visibilidad en búsquedas y el manejo de errores 404 para páginas desconocidas ([#379](https://github.com/LodyAI/Lody/pull/379), [#383](https://github.com/LodyAI/Lody/pull/383), [#391](https://github.com/LodyAI/Lody/pull/391)).
+- Agradecimientos al colaborador externo [@nokizw](https://github.com/nokizw) por mejorar la visualización y búsqueda de proveedores en los selectores de modelos de Kimi ([Kimi ACP #7](https://github.com/LodyAI/acp-extension-kimi/pull/7)).

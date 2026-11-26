@@ -150,8 +150,9 @@ export * from './terminal-protocol';
 export type { WebSocketMessage } from './message';
 export * from './loro-streams-routing';
 import type { WorkspaceId } from './ids';
+import type { SupportedLanguage } from './language';
 
-export type SupportedLanguage = 'en' | 'zh_CN';
+export * from './language';
 
 export type FileTreeItem = {
   path: string;

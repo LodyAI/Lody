@@ -29,6 +29,7 @@
  * HTML; see `site-docs/AGENTS.md` → "Product replica boundary".
  */
 
+import type { SiteLocale } from '@site/src/site-pages/shared';
 import type { ReactNode } from 'react';
 import {
   Boxes,
@@ -48,7 +49,6 @@ import {
   ReplicaRunConfigTrigger,
 } from '../landing-replica/composer-controls';
 import { FileIcon } from '../landing-replica/icons';
-import type { ReplicaLocale } from '../landing-replica/types';
 import { cn } from '../landing-replica/utils';
 
 // ---------------------------------------------------------------------------
@@ -59,13 +59,19 @@ import { cn } from '../landing-replica/utils';
 const COMPOSER_BOX_CLASS =
   '@container/composer-box flex flex-col gap-1 rounded-xl border px-2 py-1.5 transition-colors duration-150 border-foreground/[0.10] bg-[hsl(var(--composer))] shadow-[0_3px_6px_-2px_lch(0%_0_0/0.02),0_1px_1px_lch(0%_0_0/0.04)] dark:shadow-none dark:border-input-border/70 dark:bg-input/90 [--mention-chip-surface:hsl(var(--composer))]';
 
-const PERMISSION_COPY: Record<ReplicaLocale, string> = {
+const PERMISSION_COPY: Record<SiteLocale, string> = {
   en: 'Agent (full access)',
   zh: 'Agent（完全访问）',
+  'zh-hant': 'Agent（完全存取）',
+  ja: 'Agent（フルアクセス）',
+  ko: 'Agent(전체 액세스)',
+  es: 'Agent (acceso total)',
+  fr: 'Agent (accès complet)',
+  ru: 'Agent (полный доступ)',
 };
 
 type ComposerPreviewProps = {
-  locale: ReplicaLocale;
+  locale: SiteLocale;
   caption: string;
   /** The static text/mention line inside the composer. */
   typed: ReactNode;
@@ -163,32 +169,200 @@ type SlashCommand = {
 };
 
 /** Synthetic agent command list. The real list comes from ACP discovery. */
-const SLASH_COMMANDS: readonly SlashCommand[] = [
-  {
-    name: '/debug',
-    description: 'Enable debug logging for this session and help diagnose issues.',
-  },
-  {
-    name: '/simplify',
-    description: 'Review changed code for reuse, quality, and efficiency, then fix issues.',
-  },
-  {
-    name: '/batch',
-    description: 'Research and plan a large-scale change, then execute it in parallel.',
-  },
-  {
-    name: '/loop',
-    description: 'Run a prompt or slash command on a recurring interval.',
-  },
-  {
-    name: '/review',
-    description: 'Review the current changes and report findings.',
-  },
-];
+const SLASH_COMMANDS_COPY: Record<SiteLocale, readonly SlashCommand[]> = {
+  en: [
+    {
+      name: '/debug',
+      description: 'Enable debug logging for this session and help diagnose issues.',
+    },
+    {
+      name: '/simplify',
+      description: 'Review changed code for reuse, quality, and efficiency, then fix issues.',
+    },
+    {
+      name: '/batch',
+      description: 'Research and plan a large-scale change, then execute it in parallel.',
+    },
+    {
+      name: '/loop',
+      description: 'Run a prompt or slash command on a recurring interval.',
+    },
+    {
+      name: '/review',
+      description: 'Review the current changes and report findings.',
+    },
+  ],
+  zh: [
+    {
+      name: '/debug',
+      description: '为当前会话开启调试日志并协助排查问题。',
+    },
+    {
+      name: '/simplify',
+      description: '审查已修改代码的复用性、质量与效率，并修复发现的问题。',
+    },
+    {
+      name: '/batch',
+      description: '调研并规划大规模改动，随后并行执行。',
+    },
+    {
+      name: '/loop',
+      description: '按固定时间间隔循环运行提示词或斜杠命令。',
+    },
+    {
+      name: '/review',
+      description: '审查当前改动并汇报发现的问题。',
+    },
+  ],
+  'zh-hant': [
+    {
+      name: '/debug',
+      description: '為目前工作階段啟用偵錯記錄並協助診斷問題。',
+    },
+    {
+      name: '/simplify',
+      description: '檢視已修改程式碼的重用性、品質與效率，並修復問題。',
+    },
+    {
+      name: '/batch',
+      description: '研究並規劃大規模變更，接著平行執行。',
+    },
+    {
+      name: '/loop',
+      description: '依固定間隔定期執行提示詞或斜線指令。',
+    },
+    {
+      name: '/review',
+      description: '審查目前的變更並回報發現的問題。',
+    },
+  ],
+  ja: [
+    {
+      name: '/debug',
+      description: 'このセッションのデバッグログを有効にし、問題の診断を支援します。',
+    },
+    {
+      name: '/simplify',
+      description: '変更されたコードの再利用性・品質・効率をレビューし、問題を修正します。',
+    },
+    {
+      name: '/batch',
+      description: '大規模な変更を調査・計画し、並列で実行します。',
+    },
+    {
+      name: '/loop',
+      description: 'プロンプトやスラッシュコマンドを一定間隔で繰り返し実行します。',
+    },
+    {
+      name: '/review',
+      description: '現在の変更内容をレビューして指摘事項を報告します。',
+    },
+  ],
+  ko: [
+    {
+      name: '/debug',
+      description: '이 세션의 디버그 로깅을 켜고 문제 진단을 돕습니다.',
+    },
+    {
+      name: '/simplify',
+      description: '변경된 코드의 재사용성, 품질, 효율성을 검토하고 문제를 수정합니다.',
+    },
+    {
+      name: '/batch',
+      description: '대규모 변경 사항을 조사하고 계획한 뒤 병렬로 실행합니다.',
+    },
+    {
+      name: '/loop',
+      description: '프롬프트나 슬래시 명령어를 일정 간격으로 반복 실행합니다.',
+    },
+    {
+      name: '/review',
+      description: '현재 변경 사항을 검토하고 결과를 보고합니다.',
+    },
+  ],
+  es: [
+    {
+      name: '/debug',
+      description:
+        'Activa el registro de depuración en esta sesión y ayuda a diagnosticar problemas.',
+    },
+    {
+      name: '/simplify',
+      description:
+        'Revisa el código modificado para mejorar reutilización, calidad y eficiencia, y corrige incidencias.',
+    },
+    {
+      name: '/batch',
+      description: 'Investiga y planifica un cambio a gran escala y luego ejecútalo en paralelo.',
+    },
+    {
+      name: '/loop',
+      description: 'Ejecuta un prompt o comando de barra en un intervalo recurrente.',
+    },
+    {
+      name: '/review',
+      description: 'Revisa los cambios actuales e informa los hallazgos.',
+    },
+  ],
+  fr: [
+    {
+      name: '/debug',
+      description:
+        'Active la journalisation de débogage pour cette session et aide à diagnostiquer les problèmes.',
+    },
+    {
+      name: '/simplify',
+      description:
+        'Examine le code modifié pour sa réutilisabilité, sa qualité et son efficacité, puis corrige les problèmes.',
+    },
+    {
+      name: '/batch',
+      description: 'Analyse et planifie un changement d’envergure, puis l’exécute en parallèle.',
+    },
+    {
+      name: '/loop',
+      description: 'Exécute un prompt ou une commande slash à intervalle régulier.',
+    },
+    {
+      name: '/review',
+      description: 'Examine les modifications en cours et signale les points relevés.',
+    },
+  ],
+  ru: [
+    {
+      name: '/debug',
+      description:
+        'Включает отладочное логирование для этой сессии и помогает диагностировать проблемы.',
+    },
+    {
+      name: '/simplify',
+      description:
+        'Проверяет изменённый код на переиспользование, качество и эффективность, затем исправляет замечания.',
+    },
+    {
+      name: '/batch',
+      description: 'Исследует и планирует масштабное изменение, затем выполняет его параллельно.',
+    },
+    {
+      name: '/loop',
+      description: 'Запускает промпт или слэш-команду с заданным интервалом.',
+    },
+    {
+      name: '/review',
+      description: 'Проверяет текущие изменения и сообщает о найденных проблемах.',
+    },
+  ],
+};
 
-const SLASH_CAPTION: Record<ReplicaLocale, string> = {
+const SLASH_CAPTION: Record<SiteLocale, string> = {
   en: 'Mock composer. Type / to open the command list; commands are synthetic and come from the agent.',
   zh: '模拟输入框。输入 / 打开命令列表；命令为模拟数据，由 Agent 提供。',
+  'zh-hant': '模擬輸入框。輸入 / 開啟指令列表；指令為模擬資料，由 Agent 提供。',
+  ja: 'モック入力欄です。/ を入力するとコマンド一覧が開きます。コマンドはモックデータで、エージェントから提供されます。',
+  ko: '모의 입력창입니다. /를 입력하면 명령어 목록이 열립니다. 명령어는 모의 데이터이며 에이전트가 제공합니다.',
+  es: 'Compositor de ejemplo. Escribe / para abrir la lista de comandos; los comandos son sintéticos y provienen del agente.',
+  fr: 'Zone de saisie factice. Saisissez / pour ouvrir la liste des commandes ; les commandes sont factices et fournies par l’agent.',
+  ru: 'Демонстрационное поле ввода. Введите /, чтобы открыть список команд; команды приведены для примера и предоставляются агентом.',
 };
 
 /** One `/command` row: the name, then the description on its own quiet line. */
@@ -213,7 +387,8 @@ function CommandRow({ command, selected }: { command: SlashCommand; selected?: b
  * Sources: `mention-two-level-menu.tsx` (`CandidateRow` +
  * `toCommandCandidate`) and `combined-mention-textarea.tsx`.
  */
-export function SlashCommandsPreview({ locale = 'en' }: { locale?: ReplicaLocale }) {
+export function SlashCommandsPreview({ locale = 'en' }: { locale?: SiteLocale }) {
+  const commands = SLASH_COMMANDS_COPY[locale];
   const topSelector = (
     <>
       <ReplicaProjectSelectorTrigger label="loro-dev/lody" kind="github" locale={locale} />
@@ -234,7 +409,7 @@ export function SlashCommandsPreview({ locale = 'en' }: { locale?: ReplicaLocale
       typed={<span className="text-foreground">/</span>}
       popup={
         <PopupList scrollbar>
-          {SLASH_COMMANDS.map((command, index) => (
+          {commands.map((command, index) => (
             <CommandRow key={command.name} command={command} selected={index === 0} />
           ))}
         </PopupList>
@@ -258,7 +433,7 @@ type MentionCopy = {
   category: Record<MentionCategoryLabel, string>;
 };
 
-const MENTION_COPY: Record<ReplicaLocale, MentionCopy> = {
+const MENTION_COPY: Record<SiteLocale, MentionCopy> = {
   en: {
     caption: {
       file: 'Mock composer. Type @ to fuzzy-match files and folders in the selected project.',
@@ -277,6 +452,71 @@ const MENTION_COPY: Record<ReplicaLocale, MentionCopy> = {
     },
     scope: { project: '项目', global: '全局', system: '系统' },
     category: { file: '文件', issue: 'Issues', pr: 'Pull Requests', skill: 'Skills' },
+  },
+  'zh-hant': {
+    caption: {
+      file: '模擬輸入框。輸入 @ 可依檔案名稱或路徑模糊比對所選專案中的檔案與資料夾。',
+      issue:
+        '模擬輸入框。輸入 @ 後選擇 Issues 或 Pull Requests，即可提及所選儲存庫中的 Issue 或 PR。',
+      skill: '模擬輸入框。輸入 $ 可瀏覽專案與機器上可用的 Skill。',
+    },
+    scope: { project: '專案', global: '全域', system: '系統' },
+    category: { file: '檔案', issue: 'Issues', pr: 'Pull Requests', skill: 'Skills' },
+  },
+  ja: {
+    caption: {
+      file: 'モック入力欄です。@ を入力すると、選択中プロジェクトのファイルやフォルダーをあいまい検索できます。',
+      issue:
+        'モック入力欄です。@ を入力して Issues または Pull Requests を選ぶと、選択中リポジトリの Issue や PR を参照できます。',
+      skill:
+        'モック入力欄です。$ を入力すると、プロジェクトやマシンで利用可能なスキルを一覧できます。',
+    },
+    scope: { project: 'プロジェクト', global: 'グローバル', system: 'システム' },
+    category: { file: 'ファイル', issue: 'Issues', pr: 'Pull Requests', skill: 'Skills' },
+  },
+  ko: {
+    caption: {
+      file: '모의 입력창입니다. @를 입력하면 선택한 프로젝트의 파일과 폴더를 퍼지 검색할 수 있습니다.',
+      issue:
+        '모의 입력창입니다. @를 입력한 뒤 Issues 또는 Pull Requests를 선택해 저장소의 이슈나 PR을 멘션할 수 있습니다.',
+      skill:
+        '모의 입력창입니다. $를 입력하면 프로젝트와 머신에서 사용할 수 있는 스킬을 탐색할 수 있습니다.',
+    },
+    scope: { project: '프로젝트', global: '전역', system: '시스템' },
+    category: { file: '파일', issue: 'Issues', pr: 'Pull Requests', skill: 'Skills' },
+  },
+  es: {
+    caption: {
+      file: 'Compositor de ejemplo. Escribe @ para buscar de forma aproximada archivos y carpetas del proyecto seleccionado.',
+      issue:
+        'Compositor de ejemplo. Escribe @ y elige Issues o Pull Requests para mencionar uno del repositorio seleccionado.',
+      skill:
+        'Compositor de ejemplo. Escribe $ para explorar las skills disponibles en el proyecto y la máquina.',
+    },
+    scope: { project: 'Proyecto', global: 'Global', system: 'Sistema' },
+    category: { file: 'Archivos', issue: 'Issues', pr: 'Pull Requests', skill: 'Skills' },
+  },
+  fr: {
+    caption: {
+      file: 'Zone de saisie factice. Saisissez @ pour rechercher par correspondance floue des fichiers et dossiers du projet sélectionné.',
+      issue:
+        'Zone de saisie factice. Saisissez @ puis choisissez Issues ou Pull Requests pour en mentionner une du dépôt sélectionné.',
+      skill:
+        'Zone de saisie factice. Saisissez $ pour parcourir les skills disponibles pour le projet et la machine.',
+    },
+    scope: { project: 'Projet', global: 'Global', system: 'Système' },
+    category: { file: 'Fichiers', issue: 'Issues', pr: 'Pull Requests', skill: 'Skills' },
+  },
+  ru: {
+    caption: {
+      file: 'Демонстрационное поле ввода. Введите @ для нечёткого поиска файлов и папок в выбранном проекте.',
+      issue:
+        'Демонстрационное поле ввода. Введите @ и выберите Issues или Pull Requests, чтобы упомянуть задачу или PR из выбранного репозитория.',
+      skill:
+        'Демонстрационное поле ввода. Введите $, чтобы просмотреть навыки, доступные для проекта и машины.',
+    },
+    scope: { project: 'Проект', global: 'Глобально', system: 'Система' },
+    category: { file: 'Файлы', issue: 'Issues', pr: 'Pull Requests', skill: 'Навыки' },
   },
 };
 
@@ -387,7 +627,7 @@ function SkillRow({
   selected,
 }: {
   item: SkillItem;
-  locale: ReplicaLocale;
+  locale: SiteLocale;
   selected?: boolean;
 }) {
   const copy = MENTION_COPY[locale];
@@ -419,7 +659,7 @@ export function MentionPreview({
   locale = 'en',
   kind = 'file',
 }: {
-  locale?: ReplicaLocale;
+  locale?: SiteLocale;
   kind?: MentionPreviewKind;
 }) {
   const copy = MENTION_COPY[locale];

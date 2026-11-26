@@ -127,7 +127,12 @@ export const automationRuleDraftSchema = z
       z
         .object({
           kind: z.literal('policy'),
-          policy: z.enum(['archive-after-merge', 'auto-deliver', 'compact-idle', 'recover-capacity']),
+          policy: z.enum([
+            'archive-after-merge',
+            'auto-deliver',
+            'compact-idle',
+            'recover-capacity',
+          ]),
           options: jsonObject,
         })
         .strict(),

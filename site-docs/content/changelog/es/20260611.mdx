@@ -1,0 +1,34 @@
+---
+title: "20260611"
+version: 0.58.0
+date: 2026-06-11
+description: "Compatibilidad con Live Activities y Dynamic Island en iOS, scripts de configuración y limpieza de worktrees, exploración de archivos de proyecto en móvil, edición de archivos en tiempo real, vista previa y búsqueda de Markdown, diffs remotos más fiables, agentes ACP personalizados y eliminación de la PWA."
+---
+
+### Novedades
+
+- **Live Activities y Dynamic Island en iOS**: Sigue el progreso del agente desde la pantalla de bloqueo del iPhone y Dynamic Island sin abrir Lody. Cuando un agente necesita aprobación, Lody también puede enviar una alerta interactiva de Live Activity.
+
+  <img src="/_docs-assets/20260611-island.png" alt="Live Activity de Lody en Dynamic Island" />
+
+- **Scripts de configuración y limpieza de worktrees**: Configura scripts a nivel de proyecto que se ejecutan después de crear un worktree y antes de que inicie el agente, además de scripts de limpieza que se ejecutan cuando se archiva la sesión y se elimina el worktree.
+- **Exploración de archivos de proyecto en móvil**: Explora directorios de proyectos locales y de GitHub, y abre archivos directamente desde la vista de proyecto en móvil sin tener que iniciar una sesión primero.
+- **Edición de archivos de proyecto en tiempo real**: Edita archivos de texto en el directorio de trabajo actual de forma colaborativa con tu equipo en sesiones locales o remotas. La edición en móvil estará disponible próximamente.
+- **Vista previa y búsqueda de Markdown en el visor de archivos**: Los archivos Markdown ahora cuentan con un cambio en un clic entre el código fuente y la vista previa renderizada, y los archivos de texto permiten abrir el control de búsqueda integrado.
+- **Turn Diff y All Changes más fiables**: La carga de diffs es más estable y los dispositivos remotos ahora pueden inspeccionar archivos y diffs de forma más consistente.
+- **Agentes ACP personalizados**: Añade cualquier agente compatible con ACP introduciendo su comando de inicio y sus argumentos.
+
+### Mejoras
+
+- Se añadió un botón de copiar en las tarjetas de Plan propuesto, incluidas las respuestas que solo contienen un plan en la parte inferior del mensaje.
+- El selector de proyectos locales ahora prioriza la máquina y es más estable.
+- Las listas de proyectos en nuevas conversaciones se ordenan por actividad reciente.
+- La vista previa ahora incluye un botón para copiar el enlace compartido.
+- Los mensajes de usuario muy largos ya no se desbordan ni quedan recortados por la burbuja del chat.
+- El botón para contraer la barra lateral derecha ya no salta lateralmente al alternar su estado.
+- Las máquinas y los proyectos compartidos se conservan de forma más fiable cuando hay inestabilidad en la conexión.
+- Se corrigió el desplazamiento repetido de la página en la pantalla de creación de conversación mientras una máquina está desconectada.
+
+### Eliminado
+
+- Lody ya no incluye compatibilidad con PWA.

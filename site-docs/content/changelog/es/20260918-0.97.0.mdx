@@ -1,0 +1,20 @@
+---
+title: "20260918-0.97.0"
+version: 0.97.0
+date: 2026-09-18
+description: "Se agregan menciones de sesión, el catálogo de Proyectos en escritorio y el direccionamiento en cola, y se corrige el inicio de agentes en la aplicación de escritorio firmada para macOS."
+---
+
+Versión 0.97.0
+
+### ✨ Nuevas funciones
+
+- Al pegar un enlace de sesión en el editor de mensajes, se convierte en una mención de sesión; usa Cmd/Ctrl+Shift+V para pegar un enlace sin formato.
+- Configuración de escritorio > Proyectos ahora es un catálogo de dos paneles: GitHub / máquinas a la izquierda y carpetas del origen seleccionado a la derecha; haz clic en una carpeta para editarla.
+- Los mensajes en cola pueden redirigirse directamente (no solo el primer elemento cuando el agente admite direccionamiento confirmado); Cmd/Ctrl+Shift+Enter alterna temporalmente entre encolar y redirigir para ese envío.
+
+### 🐛 Correcciones y mejoras
+
+- Se corrigió el fallo de inicio de DeepSeek Harness y otros agentes que cargan complementos nativos sin firmar en la aplicación de escritorio firmada para macOS.
+- El menú de sesión en dispositivos móviles permite compartir una conversación como imagen.
+- En una columna de conversación estrecha, las acciones de IDE y compartir se trasladan al menú ⋯.

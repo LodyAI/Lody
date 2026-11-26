@@ -93,7 +93,6 @@ shells supply `window.__LODY_CLIPBOARD__` (Android WebView denies the web API).
 - Turn diffs require the CLI-local store. Cross-render permits release
   only on settlement.
 
-
 - Preview and More-menu shell actions share `useSessionFileActions`. Only Electron
   on the session's own machine may invoke them; explicit local absolute artifact
   paths stay absolute, and remote paths never launch on the viewer's machine.

@@ -1,0 +1,119 @@
+---
+title: "Compartir una sesión de agente de programación"
+description: "Invita a un compañero de equipo a una sesión existente de agente de programación en Lody para continuar el trabajo —conversación, diffs y worktree— en lugar de enviar una transcripción de solo lectura."
+---
+
+# Comparte una sesión de agente de programación con tu equipo
+
+Un **traspaso de sesión de agente de programación** en Lody significa que un compañero de equipo abre la **misma** sesión que ya iniciaste y la continúa. Obtiene la conversación en vivo, los diffs de archivos que generó el agente y el [worktree](/es/docs/worktrees) de la sesión, no una captura de pantalla, un volcado en Markdown ni un enlace compartido estilo ChatGPT que solo le permite _leer_ lo ocurrido.
+
+Esa es la diferencia frente a la mayoría de los flujos de trabajo de “compartir mi sesión de Claude Code”: esos suelen publicar una transcripción. Lody invita a alguien a la sesión existente para que pueda seguir chateando y dirigiendo al agente.
+
+Consulta también [Sesiones](/es/docs/session), [Funciones de equipo](/es/docs/team), [Configuración del agente](/es/docs/quickstart) y la comparación conceptual en [Enlace compartido vs. traspaso en vivo](/es/docs/compare/share-link-vs-live-handoff).
+
+<Callout title="Qué significa “continuar”">
+  Los miembros del espacio de trabajo que puedan abrir la sesión pueden seguir la conversación desde el mismo contexto.
+  Lody no convierte la sesión en una repetición de solo lectura. Compartir sigue sujeto a la visibilidad de la máquina y del proyecto;
+  consulta [permisos](#permisos) más abajo.
+</Callout>
+
+## Por qué un enlace de transcripción no es un traspaso
+
+La gente ya comparte el trabajo de los agentes de varias maneras. La mayoría se queda en “mira esto”. El traspaso es “retoma esto”.
+
+| Enfoque                                | Qué recibe el destinatario                                | ¿Misma sesión en vivo?         | Diffs y worktree                                                    |
+| -------------------------------------- | --------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------- |
+| Captura de pantalla                    | Una imagen del chat                                       | No                             | No                                                                  |
+| Exportación Markdown / transcripción   | Texto estático que puedes pegar en otro sitio             | No — inician un nuevo chat     | No                                                                  |
+| Enlace compartido estilo ChatGPT       | Una instantánea de solo lectura de la conversación        | No                             | No                                                                  |
+| **Lody**                               | La [sesión](/es/docs/session) existente del espacio de trabajo | **Sí** — ábrela y continúa     | **Sí** — [diffs](/es/docs/diff-viewer) en vivo y el worktree de la sesión |
+
+La definición de enlace compartido frente a traspaso en vivo está en [Enlace compartido vs. traspaso en vivo](/es/docs/compare/share-link-vs-live-handoff). Lody igualmente puede exportar una conversación como Markdown cuando solo necesitas un registro. Esa es una acción distinta: [Copiar conversaciones](/es/docs/copy-md). Copiar la URL de una sesión sin compartir la sesión tampoco otorga acceso al equipo; el enlace sigue funcionando solo para el propietario.
+
+## Cómo traspasar una sesión
+
+### 1. Invita al compañero de equipo al espacio de trabajo
+
+El traspaso es una acción del espacio de trabajo de equipo. La otra persona ya debe ser miembro.
+
+1. Abre **Configuración** -> **Espacio de trabajo** -> **General**.
+2. En la sección **Miembros**, haz clic en **Invitar miembro**.
+3. Introduce su correo electrónico y elige un rol.
+4. Puede aceptar desde el correo electrónico, o puedes copiar el enlace de invitación y enviárselo tú mismo.
+
+Detalles: [Invitar miembros](/es/docs/team#invite-members).
+
+### 2. Haz que la sesión sea visible para el equipo
+
+Las máquinas nuevas permanecen **privadas**. Una sesión solo es visible para el equipo cuando se comparten los recursos en los que se ejecuta.
+
+Desde la sesión:
+
+1. Abre el menú `...` de la sesión, o el control **Privado** en el encabezado de la sesión de escritorio.
+2. Elige **Compartir con el equipo…** (la etiqueta puede decir **Compartir dispositivo con el equipo…** o **Compartir proyecto con el equipo…** cuando esos son los permisos que faltan).
+3. Confirma. Lody comparte la máquina requerida y, en el caso de un proyecto local, el proyecto; luego copia un enlace.
+
+Solo el **propietario del dispositivo** puede compartir. Si el dispositivo no está registrado para acceso del equipo, regístralo primero. También puedes compartir una máquina desde **Configuración** -> **Máquinas** -> **Compartir máquina** sin abrir una sesión específica. Consulta [Visibilidad de máquinas del equipo](/es/docs/team#team-machine-visibility).
+
+<Callout type="warn" title="Compartir puede exponer más de una conversación">
+  Compartir una sesión puede compartir su máquina o su proyecto local con todos en el espacio de trabajo. Otras
+  conversaciones en ese dispositivo también pueden volverse visibles. El cuadro de diálogo de confirmación indica el alcance
+  antes de que confirmes.
+</Callout>
+
+### 3. Indícale dónde está la sesión
+
+Una vez que la sesión sea visible para el equipo:
+
+- Envíale el enlace copiado de la sesión, o
+- Pídele que abra la lista de sesiones en la página de inicio. Si solo ve sus propias conversaciones, cambia el filtro de la barra lateral de **Mis tareas** a **Todas las tareas** (en móvil, **Tareas del equipo**). Los avatares muestran quién inició cada una. De forma predeterminada, la lista muestra **Todas las tareas**.
+
+Abrirá **esa** sesión: no una bifurcación ni un nuevo hilo del redactor.
+
+### 4. Continúa el trabajo
+
+Una vez dentro de la sesión, puede:
+
+- Leer la conversación completa que ya tiene el agente
+- Revisar los [diffs](/es/docs/diff-viewer) actuales
+- Seguir trabajando en el mismo [worktree](/es/docs/worktrees) y la misma rama
+- Enviar el siguiente prompt y dirigir la misma [configuración del agente](/es/docs/quickstart)
+
+Bifurcar una sesión es una herramienta distinta: copia el historial en una **nueva** sesión. **Espacio de trabajo actual** permanece en los mismos archivos; **Nuevo worktree** (cuando se ofrece) se aísla a partir del `HEAD` confirmado. Usa la bifurcación cuando quieras una rama privada de la conversación, no cuando quieras que un compañero entre en la original. Consulta [Bifurcar una sesión](/es/docs/session#fork-a-session).
+
+Para ejecutar varias sesiones aisladas en equipo, consulta [Agentes de programación en paralelo](/es/docs/parallel-agents).
+Para coordinar varias conversaciones desde un mismo agente, consulta [Control de sesiones de agentes](/es/docs/session-orchestration).
+
+## Permisos
+
+| Control                        | A quién se aplica                                                                     | Efecto                                                                                                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Membresía del espacio de trabajo | Todas las personas que invites                                                        | Es obligatoria antes de que alguien pueda abrir sesiones del equipo                                                                  |
+| Rol de miembro                 | Propietarios y administradores gestionan miembros                                     | Controla quién puede invitar, editar o eliminar personas — consulta [Cambiar permisos de miembros](/es/docs/team#change-member-permissions) |
+| Compartir máquina              | Solo el propietario de la máquina                                                     | Las sesiones en una máquina no compartida no aparecen en la barra lateral de otros miembros                                          |
+| Compartir proyecto local       | Propietario de la máquina, cuando la sesión usa un proyecto local                     | Los compañeros necesitan el permiso del proyecto además del permiso de la máquina                                                     |
+| URL de la sesión               | Siempre el propietario; los compañeros solo después de que la sesión sea visible para el equipo | Copiar la URL no equivale a **Compartir con el equipo…**                                                                             |
+
+Unirse a un espacio de trabajo **no** expone tu portátil. Las máquinas permanecen privadas hasta que las compartes. Las configuraciones de agente pueden compartirse por separado para que los compañeros ejecuten la misma configuración de CLI; consulta [Configuración del agente](/es/docs/quickstart) y [Funciones de equipo](/es/docs/team).
+
+## Preguntas frecuentes
+
+### ¿Puedo compartir una sesión de Claude Code para que un compañero de equipo la continúe?
+
+Sí, si la sesión se ejecuta en un espacio de trabajo de Lody. Invítalo, comparte la sesión (y la máquina o el proyecto local que necesite) y pídele que abra esa sesión y siga chateando. No se trata de una exportación de transcripción de solo lectura de Claude Code ni de un enlace de instantánea pública.
+
+### ¿Es lo mismo que un enlace compartido de ChatGPT?
+
+No. Un enlace compartido de ChatGPT es un **registro visible**, una instantánea de solo lectura. Lody traspasa la **sesión existente del agente de programación** en el espacio de trabajo del equipo: la misma conversación, los diffs y el worktree. Consulta [Enlace compartido vs. traspaso en vivo](/es/docs/compare/share-link-vs-live-handoff).
+
+### ¿Qué pasa si mi compañero de equipo no puede ver la sesión?
+
+Comprueba tres cosas: que haya aceptado la invitación al espacio de trabajo, que la máquina (y el proyecto local, si corresponde) esté compartida y que esté mirando **Todas las tareas** en lugar de **Mis tareas**. Las máquinas no compartidas nunca sincronizan esas conversaciones en la barra lateral de otros miembros.
+
+### ¿Compartir una sesión comparte toda mi máquina?
+
+Puede hacerlo. Si la máquina aún no está compartida, **Compartir con el equipo…** la comparte para que los compañeros puedan abrir y continuar conversaciones en ese dispositivo. Otras sesiones en la misma máquina pueden volverse visibles. Puedes desactivar **Compartir máquina** más tarde en **Configuración** -> **Máquinas**.
+
+### ¿Puedo simplemente enviar una transcripción en su lugar?
+
+Sí. Copia un mensaje o usa **Copiar como Markdown** desde el menú de la sesión cuando solo necesites un registro. Eso no permite que otra persona continúe la sesión en vivo. Consulta [Copiar conversaciones](/es/docs/copy-md).

@@ -83,12 +83,24 @@ export function measureParsedFileDiffComplexity(
     for (const content of hunk.hunkContent) {
       if (content.type === 'context') {
         hunkLines += content.lines;
-        hunkTextLength += countLinesTextLength(fileDiff.additionLines, content.additionLineIndex, content.lines);
+        hunkTextLength += countLinesTextLength(
+          fileDiff.additionLines,
+          content.additionLineIndex,
+          content.lines
+        );
       } else {
         hunkLines += content.additions + content.deletions;
         hunkTextLength +=
-          countLinesTextLength(fileDiff.additionLines, content.additionLineIndex, content.additions) +
-          countLinesTextLength(fileDiff.deletionLines, content.deletionLineIndex, content.deletions);
+          countLinesTextLength(
+            fileDiff.additionLines,
+            content.additionLineIndex,
+            content.additions
+          ) +
+          countLinesTextLength(
+            fileDiff.deletionLines,
+            content.deletionLineIndex,
+            content.deletions
+          );
       }
     }
   }

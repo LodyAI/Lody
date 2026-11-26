@@ -3,8 +3,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { formatDistanceToNow, type Locale } from 'date-fns';
-import { enUS } from 'date-fns/locale/en-US';
-import { zhCN } from 'date-fns/locale/zh-CN';
+import { getDateFnsLocale } from '@/lib/date-fns-locale';
 import {
   AlertCircle,
   Boxes,
@@ -539,7 +538,7 @@ export function MobileProjectSkillsBody({
   onViewDetail,
 }: MobileProjectSkillsBodyProps) {
   const { t, i18n } = useTranslation();
-  const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const locale: Locale = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
   const totalSkills = useMemo(
     () => groups.reduce((sum, group) => sum + group.skills.length, 0),
     [groups]

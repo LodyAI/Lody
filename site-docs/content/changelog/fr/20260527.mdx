@@ -1,0 +1,23 @@
+---
+title: "20260527"
+version: 0.54.0
+date: 2026-05-27
+description: "Parcourez les modifications par type de fichier, modifiez et réorganisez les messages en file d'attente, renommez les espaces de travail depuis les Paramètres et profitez de correctifs pour le démarrage, la navigation, l'état des sessions, les thèmes et le rendu Markdown."
+---
+
+### Nouveautés
+
+- La vue Modifications peut désormais regrouper les fichiers modifiés par type, et la barre latérale des sessions peut ne compter que les modifications de code.
+- Les messages en file d'attente peuvent désormais être modifiés sur place et réorganisés par glisser-déposer.
+- Les espaces de travail peuvent désormais être renommés depuis les Paramètres.
+
+### Corrections et améliorations
+
+- Correction du téléversement d'images sur les pages de conversation d'onglets nouvellement ouverts.
+- Correction d'un écran blanc au démarrage sur les navigateurs anciens tels qu'iOS Safari 16.0, où l'absence de prise en charge des assertions arrière (lookbehind) dans les expressions régulières pouvait bloquer l'initialisation de l'application ; Lody invite désormais les utilisateurs concernés à mettre à jour leur navigateur.
+- Correction d'écrans blancs au démarrage sur ordinateur et sur mobile.
+- Correction de l'interruption d'envois de messages en cours lors de la navigation entre pages.
+- Correction du statut de la session d'aperçu qui ne restait pas synchronisé.
+- Correction de l'activité des onglets enfants qui ne remontait pas jusqu'à la session parente, ce qui faussait le tri et l'état non lu de la session parente.
+- Correction de l'application qui ne suivait pas le paramètre de thème du système.
+- Amélioration du rendu Markdown : les blocs de code sur une seule ligne sont centrés verticalement, l'espacement des blocs et l'échelle des titres sont préservés, les éléments de liste ont un espacement visible et les séparateurs horizontaux sont de nouveau visibles.

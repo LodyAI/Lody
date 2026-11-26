@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { CheckCircle2, ChevronRight, Copy, Info, MousePointer2, UserIcon } from 'lucide-react';
+import { SITE_LOCALE_META } from '@site/src/site-pages/shared';
 import { Button } from './button';
 import { ReplicaMarkdown } from './markdown';
 import type {
@@ -53,7 +54,86 @@ const STRINGS = {
     copyResponse: '复制回答',
     turnConfig: '运行配置',
   },
-} as const;
+  'zh-hant': {
+    finishedWorking: '已完成工作',
+    commands: ['執行了 {n} 個指令', '執行了 {n} 個指令'],
+    readFiles: ['讀取了 {n} 個檔案', '讀取了 {n} 個檔案'],
+    editedFiles: ['編輯了 {n} 個檔案', '編輯了 {n} 個檔案'],
+    searches: ['進行了 {n} 次搜尋', '進行了 {n} 次搜尋'],
+    tools: ['呼叫了 {n} 個工具', '呼叫了 {n} 個工具'],
+    copyMessage: '複製訊息',
+    copyResponse: '複製回覆',
+    turnConfig: '執行設定',
+  },
+  ja: {
+    finishedWorking: '作業が完了しました',
+    commands: ['コマンドを {n} 件実行', 'コマンドを {n} 件実行'],
+    readFiles: ['ファイルを {n} 件読み込み', 'ファイルを {n} 件読み込み'],
+    editedFiles: ['ファイルを {n} 件編集', 'ファイルを {n} 件編集'],
+    searches: ['検索を {n} 回実行', '検索を {n} 回実行'],
+    tools: ['ツールを {n} 回呼び出し', 'ツールを {n} 回呼び出し'],
+    copyMessage: 'メッセージをコピー',
+    copyResponse: '回答をコピー',
+    turnConfig: '実行設定',
+  },
+  ko: {
+    finishedWorking: '작업 완료',
+    commands: ['명령 {n}개 실행', '명령 {n}개 실행'],
+    readFiles: ['파일 {n}개 읽음', '파일 {n}개 읽음'],
+    editedFiles: ['파일 {n}개 수정', '파일 {n}개 수정'],
+    searches: ['검색 {n}회 실행', '검색 {n}회 실행'],
+    tools: ['도구 {n}회 호출', '도구 {n}회 호출'],
+    copyMessage: '메시지 복사',
+    copyResponse: '응답 복사',
+    turnConfig: '실행 설정',
+  },
+  es: {
+    finishedWorking: 'Trabajo completado',
+    commands: ['Ejecutó {n} comando', 'Ejecutó {n} comandos'],
+    readFiles: ['Leyó {n} archivo', 'Leyó {n} archivos'],
+    editedFiles: ['Editó {n} archivo', 'Editó {n} archivos'],
+    searches: ['Hizo {n} búsqueda', 'Hizo {n} búsquedas'],
+    tools: ['Llamó a {n} herramienta', 'Llamó a {n} herramientas'],
+    copyMessage: 'Copiar mensaje',
+    copyResponse: 'Copiar respuesta',
+    turnConfig: 'Configuración del turno',
+  },
+  fr: {
+    finishedWorking: 'Travail terminé',
+    commands: ['{n} commande exécutée', '{n} commandes exécutées'],
+    readFiles: ['{n} fichier lu', '{n} fichiers lus'],
+    editedFiles: ['{n} fichier modifié', '{n} fichiers modifiés'],
+    searches: ['{n} recherche effectuée', '{n} recherches effectuées'],
+    tools: ['{n} outil appelé', '{n} outils appelés'],
+    copyMessage: 'Copier le message',
+    copyResponse: 'Copier la réponse',
+    turnConfig: 'Configuration du tour',
+  },
+  ru: {
+    finishedWorking: 'Работа завершена',
+    commands: ['Выполнена {n} команда', 'Выполнено команд: {n}'],
+    readFiles: ['Прочитан {n} файл', 'Прочитано файлов: {n}'],
+    editedFiles: ['Изменён {n} файл', 'Изменено файлов: {n}'],
+    searches: ['Выполнен {n} поиск', 'Выполнено поисков: {n}'],
+    tools: ['Вызван {n} инструмент', 'Вызвано инструментов: {n}'],
+    copyMessage: 'Копировать сообщение',
+    copyResponse: 'Копировать ответ',
+    turnConfig: 'Параметры запуска',
+  },
+} as const satisfies Record<
+  ReplicaLocale,
+  {
+    finishedWorking: string;
+    commands: readonly [string, string];
+    readFiles: readonly [string, string];
+    editedFiles: readonly [string, string];
+    searches: readonly [string, string];
+    tools: readonly [string, string];
+    copyMessage: string;
+    copyResponse: string;
+    turnConfig: string;
+  }
+>;
 
 type Strings = (typeof STRINGS)[ReplicaLocale];
 
@@ -69,7 +149,6 @@ export function ConversationColumn({ className, ...props }: HTMLAttributes<HTMLD
 
 // ---- Timestamps (lib/format-conversation-timestamp.ts) ---------------------
 
-const INTL_LOCALE: Record<ReplicaLocale, string> = { en: 'en', zh: 'zh-CN' };
 const DAY_MS = 24 * 60 * 60 * 1000;
 const calendarDay = (date: Date) =>
   Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS;
@@ -77,7 +156,7 @@ const calendarDay = (date: Date) =>
 function formatConversationTimestamp(timestamp: string, locale: ReplicaLocale): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return '';
-  const intl = INTL_LOCALE[locale];
+  const intl = SITE_LOCALE_META[locale].bcp47;
   const now = new Date();
   const time = new Intl.DateTimeFormat(intl, { hour: '2-digit', minute: '2-digit' }).format(date);
   const daysAgo = calendarDay(now) - calendarDay(date);

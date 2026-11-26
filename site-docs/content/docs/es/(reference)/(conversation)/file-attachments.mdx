@@ -1,0 +1,46 @@
+---
+title: "Archivos adjuntos"
+description: "Envía archivos de cualquier tipo a los agentes de Lody, previsualiza adjuntos de texto, descarga otros tipos de archivo y recibe archivos generados de vuelta en la conversación."
+---
+
+# Archivos adjuntos
+
+Lody admite archivos adjuntos de cualquier tipo tanto en conversaciones nuevas como en conversaciones existentes. Los archivos adjuntos viajan con el prompt, por lo que el agente puede leer el archivo original desde el espacio de trabajo de la sesión sin necesidad de pegar su contenido en el mensaje.
+
+## Agregar un archivo adjunto
+
+1. Abre el menú de archivos adjuntos `+` en el editor de mensajes.
+2. Elige **Subir archivo** y luego selecciona uno o más archivos.
+3. Espera a que terminen las subidas activas, agrega las instrucciones necesarias y envía el mensaje.
+
+También puedes arrastrar archivos a la interfaz de la sesión. Al iniciar una conversación, los archivos adjuntos pendientes permanecen asociados a esa nueva sesión.
+
+## Vista previa y descarga
+
+Los archivos con vista previa de texto se abren en un cuadro de diálogo de vista previa. Desde allí puedes:
+
+- ver el Markdown renderizado o el código fuente sin formato
+- copiar el texto original
+- descargar el archivo completo
+
+Otros tipos de archivo tienen la descarga como acción principal. En la aplicación móvil nativa, las descargas se abren mediante la hoja de compartir del sistema para que puedas guardar o enviar el archivo a otra aplicación.
+
+## Cómo recibe los archivos el agente
+
+Antes de que comience el turno, Lody materializa cada archivo adjunto dentro del espacio de trabajo de la sesión en `.lody/attachments/` y le proporciona al agente una referencia al archivo. El contenido del archivo no se inserta en el prompt de texto.
+
+Los agentes también pueden devolver archivos e imágenes. Las salidas ACP compatibles y las herramientas de subida de Lody agregan esos archivos a la conversación como tarjetas de adjuntos normales.
+
+## Límites y retención
+
+- Se pueden adjuntar hasta 8 archivos por mensaje.
+- Cada archivo puede pesar hasta 100 MiB.
+- Se aceptan todos los tipos de archivo.
+- Los archivos almacenados en el relay se conservan durante 90 días.
+
+Las imágenes tienen un tratamiento independiente: hasta 8 imágenes por mensaje y 5 MiB por imagen. Una imagen más grande puede enviarse como un archivo normal. Consulta [Entrada de imágenes](/es/docs/image-input) y
+[Salida de imágenes](/es/docs/image-output).
+
+## Disponibilidad
+
+La máquina propietaria debe poder recuperar el archivo adjunto antes de que el agente pueda leerlo. Si falla una subida, reinténtala o elimina ese archivo adjunto; los demás archivos adjuntos subidos correctamente se pueden seguir enviando.

@@ -1,0 +1,26 @@
+---
+title: "20260828"
+version: 0.88.0
+date: 2026-08-28
+description: "Добавлено упреждающее распознавание наведения курсора в оглавлении беседы, улучшена настройка провайдеров и публичный сайт, а также исправлены проблемы с недоставленными сообщениями, синхронизацией рабочих пространств, взаимодействием с беседами и стабильностью десктопного приложения."
+---
+
+Версия 0.88.0
+
+### ✨ Новое
+
+- Добавлено упреждающее распознавание намерения при наведении курсора в оглавлении беседы, благодаря чему навигация по длинным беседам стала удобнее, а случайных открытий стало меньше ([#51](https://github.com/LodyAI/Lody/pull/51), [#97](https://github.com/LodyAI/Lody/pull/97), [#113](https://github.com/LodyAI/Lody/pull/113)).
+- При настройке провайдера теперь нагляднее отображается ход выполнения и появляется предупреждение, если модель делегирования DeepSeek может привести к дополнительным расходам ([#66](https://github.com/LodyAI/Lody/pull/66), [#81](https://github.com/LodyAI/Lody/pull/81)).
+- В публичном блоге появились RSS-ленты на английском и китайском языках, оценка времени чтения и навигация к предыдущей/следующей статье; также стали плавнее демо на главной странице и фоновая анимация ([#84](https://github.com/LodyAI/Lody/pull/84), [#85](https://github.com/LodyAI/Lody/pull/85)).
+- Публичный исходный код и процесс внесения изменений перенесены в LodyAI/Lody — со структурированными шаблонами Issue и PR, автоматическими проверками и более понятной обратной связью для контрибьюторов ([#39](https://github.com/LodyAI/Lody/pull/39), [#63](https://github.com/LodyAI/Lody/pull/63), [#69](https://github.com/LodyAI/Lody/pull/69), [#80](https://github.com/LodyAI/Lody/pull/80), [#91](https://github.com/LodyAI/Lody/pull/91)).
+
+### 🐛 Исправления и улучшения
+
+- Недоставленные сообщения теперь чётко отмечаются и могут быть отправлены повторно после подтверждения, что предотвращает потерю сообщений и дублирование выполнения ([#48](https://github.com/LodyAI/Lody/pull/48), [#74](https://github.com/LodyAI/Lody/pull/74)).
+- Улучшены переключение и синхронизация рабочих пространств: содержимое боковой панели теперь строго соответствует текущему рабочему пространству, а совместимость между новыми и старыми клиентами повышена ([#49](https://github.com/LodyAI/Lody/pull/49), [#55](https://github.com/LodyAI/Lody/pull/55), [#96](https://github.com/LodyAI/Lody/pull/96), [#108](https://github.com/LodyAI/Lody/pull/108)).
+- Исправлены пропущенные переводы на китайский язык, настройка инструмента задач, переименование вкладок сессий, подтверждение ввода через IME, редактирование в узких колонках сообщений, корректировка в очереди и совместимость вопросов агента ([#40](https://github.com/LodyAI/Lody/pull/40), [#42](https://github.com/LodyAI/Lody/pull/42), [#43](https://github.com/LodyAI/Lody/pull/43), [#44](https://github.com/LodyAI/Lody/pull/44), [#52](https://github.com/LodyAI/Lody/pull/52), [#99](https://github.com/LodyAI/Lody/pull/99), [#101](https://github.com/LodyAI/Lody/pull/101)).
+- Повышена надёжность десктопного приложения: облегчена отрисовка диаграмм Mermaid, улучшено поведение при клике левой кнопкой мыши по значку в трее Windows, восстановлены предпросмотр локальных файлов и элементы управления сессией, а также сделана более безопасной навигация окон ([#45](https://github.com/LodyAI/Lody/pull/45), [#46](https://github.com/LodyAI/Lody/pull/46), [#50](https://github.com/LodyAI/Lody/pull/50), [#71](https://github.com/LodyAI/Lody/pull/71), [#75](https://github.com/LodyAI/Lody/pull/75), [#77](https://github.com/LodyAI/Lody/pull/77)).
+- Улучшено отображение календаря использования на небольших экранах, включая позиционирование последних недель и визуальные детали, а также исправлено выравнивание маркеров нумерованных списков в Markdown ([#53](https://github.com/LodyAI/Lody/pull/53), [#62](https://github.com/LodyAI/Lody/pull/62), [#78](https://github.com/LodyAI/Lody/pull/78), [#82](https://github.com/LodyAI/Lody/pull/82), [#83](https://github.com/LodyAI/Lody/pull/83)).
+- Удаление локального проекта теперь сначала архивирует связанные с ним сессии, остаётся видимым в ожидании офлайн-устройства и позволяет безопасно очищать созданные Lody worktree, сохраняя те, в которых есть незафиксированные изменения или ошибки ([#105](https://github.com/LodyAI/Lody/pull/105), [#119](https://github.com/LodyAI/Lody/pull/119)).
+- Исправлены пути в репозитории, ссылка на руководство по сессиям на китайском языке, требования к версии Node.js и метаданные публичных пакетов ([#57](https://github.com/LodyAI/Lody/pull/57), [#60](https://github.com/LodyAI/Lody/pull/60), [#64](https://github.com/LodyAI/Lody/pull/64)).
+- Благодарим [@clanzhang](https://github.com/clanzhang), [@tommy0103](https://github.com/tommy0103), [@lawvs](https://github.com/lawvs), [@Innei](https://github.com/Innei), [@hyoban](https://github.com/hyoban), [@wibus-wee](https://github.com/wibus-wee), [@limichange](https://github.com/limichange), [@27Aaron](https://github.com/27Aaron), [@hcz-czh](https://github.com/hcz-czh), [@Pleasurecruise](https://github.com/Pleasurecruise), [@frostming](https://github.com/frostming), [@natsustan](https://github.com/natsustan) и [@zxch3n](https://github.com/zxch3n) за их публичный вклад в этот релиз.

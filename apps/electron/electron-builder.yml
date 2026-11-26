@@ -101,6 +101,13 @@ mac:
     CFBundleLocalizations:
       - en
       - zh_CN
+      - zh_TW
+      - zh-Hant
+      - ja
+      - ko
+      - es
+      - fr
+      - ru
   # Sparkle verifies updates with EdDSA, not Squirrel.Mac's copy of the Developer
   # ID signature. First-install Gatekeeper still needs a signed + notarized DMG.
   # Local builds without Apple credentials are still fine: electron-builder skips

@@ -30,6 +30,18 @@ describe('bundled emojibase assets', () => {
       'emojibase/en/messages.json',
       'emojibase/zh/data.json',
       'emojibase/zh/messages.json',
+      'emojibase/zh-hant/data.json',
+      'emojibase/zh-hant/messages.json',
+      'emojibase/ja/data.json',
+      'emojibase/ja/messages.json',
+      'emojibase/ko/data.json',
+      'emojibase/ko/messages.json',
+      'emojibase/es/data.json',
+      'emojibase/es/messages.json',
+      'emojibase/fr/data.json',
+      'emojibase/fr/messages.json',
+      'emojibase/ru/data.json',
+      'emojibase/ru/messages.json',
     ]);
   });
 
@@ -63,9 +75,17 @@ describe('bundled emojibase assets', () => {
     expect(resolveEmojibaseLocale('en')).toBe('en');
     expect(resolveEmojibaseLocale('zh_CN')).toBe('zh');
     expect(resolveEmojibaseLocale('zh-Hans')).toBe('zh');
+    expect(resolveEmojibaseLocale('zh_Hant')).toBe('zh-hant');
+    expect(resolveEmojibaseLocale('zh-TW')).toBe('zh-hant');
+    expect(resolveEmojibaseLocale('zh-HK')).toBe('zh-hant');
+    expect(resolveEmojibaseLocale('ja')).toBe('ja');
+    expect(resolveEmojibaseLocale('ko')).toBe('ko');
+    expect(resolveEmojibaseLocale('es')).toBe('es');
+    expect(resolveEmojibaseLocale('fr')).toBe('fr');
+    expect(resolveEmojibaseLocale('ru')).toBe('ru');
     // A language the picker has no bundled dataset for reads the English one
     // rather than requesting a file that was never emitted.
-    expect(resolveEmojibaseLocale('ja')).toBe('en');
+    expect(resolveEmojibaseLocale('de')).toBe('en');
     expect(resolveEmojibaseLocale(undefined)).toBe('en');
   });
 

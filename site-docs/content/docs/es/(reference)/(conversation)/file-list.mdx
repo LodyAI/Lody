@@ -1,0 +1,54 @@
+---
+title: "Lista de archivos"
+description: "Explora archivos de proyectos y sesiones, abre archivos modificados, busca en archivos de texto, previsualiza Markdown y edita archivos colaborativos en tiempo real desde Lody."
+---
+
+# Lista de archivos
+
+Lody ofrece dos vistas de archivos:
+
+- Los **archivos del proyecto** muestran un proyecto local o un repositorio de GitHub sin requerir una sesión.
+- Los **archivos de sesión** muestran el worktree de la sesión actual, incluidos los archivos modificados por el agente.
+
+## Explorar archivos del proyecto
+
+En dispositivos móviles, abre un proyecto desde la pestaña **Proyectos** y luego cambia a **Archivos**. Puedes entrar en
+las carpetas y abrir archivos de texto directamente desde la vista del proyecto. Esto funciona tanto para proyectos locales como para
+repositorios de GitHub cuando la máquina propietaria o el proveedor del repositorio están disponibles.
+
+Explorar los archivos del proyecto es útil cuando quieres inspeccionar un repositorio antes de iniciar una nueva
+conversación o cuando necesitas consultar un archivo mientras estás lejos de tu equipo de escritorio.
+
+## Explorar archivos de la sesión
+
+Haz clic en el botón para expandir la barra lateral en la esquina superior derecha de la interfaz de chat para abrir la barra lateral de Archivos y
+cambios.
+
+En la pestaña `Files`, puedes ver la lista completa de archivos de la conversación actual. Los archivos modificados en
+la conversación actual aparecen resaltados para que sean más fáciles de encontrar.
+
+<SessionFilesPreview locale="es" />
+
+Haz clic en un archivo de texto para abrir una vista previa dentro de la sesión. Las líneas largas se ajustan automáticamente, lo que hace que
+los registros, los archivos generados y los archivos de código fuente compactos sean más fáciles de leer en el panel de vista previa.
+
+## Apertura rápida y búsqueda
+
+Desde el visor de archivos de una sesión, usa el control de búsqueda de archivos para encontrar archivos indexados y abrir uno sin
+desplazarte por el árbol. Cuando un archivo de texto está abierto, haz clic en el icono de búsqueda en la barra de herramientas del archivo para
+abrir el control de búsqueda dentro del archivo.
+
+## Vista previa de Markdown
+
+Los archivos Markdown se abren en modo fuente de forma predeterminada. Haz clic en el icono del ojo en la barra de herramientas del archivo para cambiar a
+una vista previa renderizada; vuelve a hacer clic para volver al modo fuente. Al pasar el cursor sobre el icono se muestra una vista previa rápida
+sin salir del editor.
+
+## Edición en tiempo real
+
+Cuando un archivo de sesión está respaldado por un proveedor colaborativo en vivo, es un archivo de texto y tu
+rol tiene acceso de escritura, el visor de archivos pasa a ser editable. Las ediciones se guardan en el worktree
+de la sesión y se sincronizan con los colaboradores en tiempo real.
+
+Si un archivo es de solo lectura, histórico, demasiado grande, binario o la máquina anfitriona está sin conexión, Lody mantiene
+el visor en modo de solo lectura y muestra el estado de disponibilidad actual en la barra de estado del archivo.

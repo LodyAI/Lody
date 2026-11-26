@@ -39,11 +39,7 @@ import { useMemoryAssociations } from '@/hooks/use-memory-associations';
 import { Dialog } from '@/ui/dialog';
 import { AgentRoleForm, MachineStatusDot, type AddMachineItemProps } from './agent-role-form';
 import { useSettingsPane } from './settings-page-header';
-import {
-  settingsEditorDialogStyles,
-  SETTINGS_EDITOR_DIALOG_WIDTH,
-} from './surface';
-
+import { settingsEditorDialogStyles, SETTINGS_EDITOR_DIALOG_WIDTH } from './surface';
 
 /**
  * A `create` carries its id from the moment the form opens.

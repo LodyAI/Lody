@@ -15,11 +15,7 @@ import {
   type MermaidCanvasTransform,
 } from './mermaid-inline-canvas';
 import { themeColors } from '../../style/theme-colors.stylex';
-import {
-  themeDuration,
-  themeEasing,
-  themeSpace,
-} from '../../style/theme-scale.stylex';
+import { themeDuration, themeEasing, themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
   fullscreenButton: {

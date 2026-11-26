@@ -125,7 +125,6 @@ const storyLayout = stylex.create({
 });
 import { PinSectionTargetPill } from '@/components/chat/pin-section-target-pill';
 
-
 const samplePromptPlaceholder = "Press '/' for commands, '@' for mentions.";
 const sampleZhCnPromptPlaceholder = "按 '/' 使用命令，'@' 添加提及。";
 

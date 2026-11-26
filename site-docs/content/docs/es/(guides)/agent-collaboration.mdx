@@ -1,0 +1,179 @@
+---
+title: "Colaboración multiagente con un agente principal"
+description: "Usa un agente principal para coordinar Codex, Kimi y Grok en Lody. Delega PR e issues, comparte contexto con menciones @ y revisa correcciones entre repositorios y máquinas."
+---
+
+Tienes una cola de issues, varios PR abiertos y un error que podría involucrar tres repositorios. Quieres que un agente principal procese la cola, delegue las correcciones a Kimi, le pida a Codex que las revise y devuelva los resultados.
+
+En Lody, puedes organizar ese trabajo desde una sola conversación. Un agente de programación puede crear otras sesiones, enviarles instrucciones, consultar su progreso y hacer seguimiento. Los agentes también pueden enviarse mensajes entre sí: un revisor puede enviar sus hallazgos al agente que escribe la corrección, el cual puede solicitar otra revisión cuando el parche esté listo.
+
+Esta guía muestra cómo usar **un agente principal como orquestador** para ese flujo de trabajo. Los ejemplos son prompts ilustrativos que puedes adaptar a tus repositorios; no son resultados de un benchmark ni de una ejecución de producción registrada.
+
+<Callout title="¿Qué página necesito?">
+  Esta guía es el recorrido paso a paso para un agente orquestador. Para conocer las herramientas
+  subyacentes, consulta [Control de sesiones de agente](/es/docs/session-orchestration); para iniciar
+  tareas por tu cuenta, consulta [Agentes de programación en paralelo](/es/docs/parallel-agents).
+</Callout>
+
+## Qué hace el orquestador
+
+El orquestador lleva el seguimiento de la tarea general: qué requiere atención, qué cambios dependen unos de otros, quién está trabajando en cada parte y qué falta por verificar. Los demás agentes llevan a cabo asignaciones específicas en sus propias conversaciones.
+
+Esta es una posible división del trabajo:
+
+| Conversación     | Asignación                                                            | Qué devuelve                                          |
+| ---------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
+| Agente principal | Inspeccionar la cola de issues y PR, asignar trabajo, dar seguimiento | Estado actual, dependencias y decisiones sin resolver |
+| Kimi             | Implementar una corrección acotada                                    | Parche, commit y resultados de verificación           |
+| Codex            | Revisar ese parche                                                    | Hallazgos vinculados al commit revisado               |
+| Grok             | Investigar otro repositorio afectado                                  | Hallazgos y cambios de interfaz propuestos            |
+
+Esos roles son opciones para esta tarea. Puedes intercambiarlos, usar varias instancias del mismo agente o incorporar otro agente compatible al espacio de trabajo. Grok también puede implementar una corrección,
+revisar un parche o coordinar otras sesiones cuando se le selecciona para esa asignación.
+
+Lody proporciona las [herramientas entre sesiones](/es/docs/session-orchestration/) usadas para organizar este trabajo. Esta guía utiliza esas herramientas entre un agente principal y sesiones de Kimi, Codex y Grok; no depende de la función nativa de equipos de ningún agente.
+
+## Configura el espacio de trabajo
+
+[Conecta una máquina a Lody](/es/docs/quickstart/) y asegúrate de que las [configuraciones de agente](/es/docs/quickstart) que quieres usar estén disponibles allí. Las máquinas de destino deben estar en línea y los agentes necesitan acceso a los repositorios y a cualquier herramienta de GitHub requerida para sus asignaciones.
+
+Los ejemplos siguientes usan un agente principal para la coordinación y Kimi, Codex o Grok para el trabajo específico.
+Inicia una sesión de agente principal para coordinar. Indícale qué repositorios, PR o issues debe inspeccionar. Dale a las tareas de edición sus propios [worktrees de Git](/es/docs/worktrees/) para que los agentes en paralelo tengan directorios de trabajo separados. Una nueva bifurcación de worktree parte del `HEAD` con commit; los cambios sin commit en otro directorio no aparecerán allí automáticamente.
+
+La primera asignación útil es comprender la cola antes de modificar código.
+
+## 1. Haz que el agente principal clasifique los PR e issues
+
+Una cola a menudo contiene trabajo superpuesto. Un issue puede ya tener un PR, dos PR pueden resolver el mismo problema, o un cambio en el SDK puede necesitar integrarse antes que una actualización del cliente. Pídele primero al coordinador que identifique esas relaciones.
+
+```text
+Usa las herramientas de sesión de Lody para coordinar este trabajo.
+
+Inspecciona estos PR e issues: [pega los enlaces].
+Para cada elemento, identifica el repositorio afectado, el estado actual,
+el trabajo de implementación existente y las dependencias con otros elementos.
+
+Luego delega las correcciones independientes a sesiones de Kimi y las revisiones
+a sesiones de Codex. Asigna a cada tarea de edición un worktree separado. Incluye el
+issue, el alcance, el comportamiento esperado y los requisitos de verificación
+en cada asignación. Reutiliza una sesión existente cuando ya sea responsable del trabajo.
+
+Devuelve los enlaces de las sesiones, los hallazgos y cualquier punto que requiera mi decisión.
+Deja el merge y el despliegue para mi revisión.
+```
+
+Una asignación útil es lo suficientemente concreta como para que el agente receptor pueda trabajar sin reconstruir toda la cola. Por ejemplo: «Corrige los envíos duplicados en el cliente; conserva el comportamiento de reintento existente; reproduce el error y verifica el parche». Incluye el issue y el repositorio correspondientes, en lugar de confiar en que otra sesión sepa qué significa «ese error».
+
+El coordinador debe distinguir entre una tarea que terminó y un cambio que está listo. Un parche puede estar completo mientras su revisión, dependencia o comprobación de integración sigue pendiente.
+
+## 2. Coordina una corrección entre repositorios
+
+Considera un error ilustrativo: reintentar una solicitud puede crear el mismo registro dos veces. El cliente inicia el reintento, el SDK construye la solicitud y el servidor decide si ya la ha procesado.
+
+Puedes iniciar una investigación en cada repositorio al mismo tiempo. Antes de implementar, haz que los agentes comparen sus hallazgos y acuerden el comportamiento que cruza los límites entre repositorios.
+
+```text
+Investiga los registros duplicados tras el reintento de una solicitud en estos repositorios:
+[repositorio del cliente], [repositorio del SDK], [repositorio del servidor].
+
+Asigna una sesión de Kimi al cliente, una sesión de Codex al SDK y una sesión
+de Grok al servidor. Pide a los agentes que intercambien
+hallazgos sobre dónde se originan los reintentos y cómo se gestionan las solicitudes duplicadas.
+Haz que acuerden el contrato de la solicitud antes de realizar cambios dependientes.
+
+Implementa las partes independientes en paralelo. Cada agente debe informar su
+commit, las comprobaciones ejecutadas y las dependencias respecto a cambios en los otros repositorios.
+
+Recopila los resultados y organiza una comprobación de integración usando juntos
+los componentes actualizados. Informa el orden de merge necesario y las brechas restantes.
+```
+
+El intercambio importante puede ser un pequeño detalle: si el cliente o el SDK crea un identificador de solicitud, y si los reintentos lo conservan. Enviar esa decisión a las demás sesiones mantiene alineadas las implementaciones.
+
+Los worktrees separados mantienen aisladas las ediciones de archivos. La corrección entre repositorios sigue dependiendo de comprobar los componentes juntos. Tres suites de pruebas que pasan por separado no demuestran por sí solas que el cliente, el SDK y el servidor coincidan en el mismo contrato.
+
+## 3. Ejecuta un ciclo de revisión y corrección entre agentes
+
+Una vez que exista un parche, dale al revisor un objetivo exacto. Una rama puede avanzar mientras la revisión está en curso, así que incluye el repositorio, la base y el commit que se debe inspeccionar.
+
+Puedes pedirle al coordinador que organice el intercambio:
+
+```text
+Pide a una sesión de Codex que revise el parche de la sesión de Kimi.
+Identifica primero el repositorio, el commit base y el commit head actual.
+El revisor debe inspeccionar el diff sin editarlo y enviar hallazgos
+accionables a la sesión de implementación, incluyendo ubicaciones de archivos y una reproducción
+cuando sea posible.
+
+Pide al agente de implementación que corrija esos hallazgos y responda con el nuevo commit
+y los resultados de verificación. Haz que el revisor inspeccione ese commit actualizado.
+
+Detente cuando no queden hallazgos accionables o después de dos rondas de revisión y corrección.
+Si hay desacuerdo o un bloqueo, devuélvemelo.
+Resume los commits revisados y cualquier aspecto que siga sin verificarse.
+```
+
+También puedes indicar a un agente que se ponga en contacto con otra sesión existente: «Envía tus hallazgos a la sesión de implementación y pídele que los aborde», o «Pide a la sesión de revisión que compruebe tu último commit». Usa una [mención de sesión](/es/docs/mention/) para identificar la conversación al redactar la instrucción.
+
+El intercambio puede ir en ambas direcciones. El agente de implementación puede pedir al revisor que aclare un hallazgo; el revisor puede solicitar una reproducción faltante. Puedes abrir cualquiera de las conversaciones para añadir contexto o cambiar la asignación.
+
+El límite de rondas en este ejemplo forma parte de la instrucción que das. Proporciona un punto para devolverte el trabajo sin resolver en lugar de pedir repetidamente a los agentes que resuelvan un desacuerdo. Que un agente informe que no hay hallazgos es una evidencia útil, pero el diff y los resultados de verificación siguen mereciendo inspección.
+
+## Menciona otra conversación para conectar el trabajo
+
+En una conversación de Lody, escribe `@` y selecciona otra conversación para referenciarla en tu mensaje.
+Luego puedes pedirle al agente actual que se ponga en contacto con esa sesión, se ponga al día con sus hallazgos o le dé una
+nueva asignación. Esto ofrece a los agentes una forma directa de intercambiar el contexto que necesitan sin que tengas que
+copiar mensajes entre chats.
+
+Por ejemplo, selecciona la conversación de investigación del SDK con `@` y luego pide:
+
+```text
+Pregunta a la sesión mencionada qué encontró sobre los reintentos de solicitudes.
+Envíale nuestros hallazgos del lado del cliente, acuerden el comportamiento del identificador de solicitud
+y usen ese acuerdo para actualizar nuestro plan de implementación.
+```
+
+O menciona la conversación de revisión y pide al agente de implementación que envíe allí su último commit y
+los resultados de verificación para otra comprobación. La mención identifica la conversación; tu
+instrucción indica al agente qué información solicitar o enviar. Los agentes intercambian el contexto
+relevante mediante mensajes y el historial de sesión disponible mientras mantienen sus propias conversaciones.
+
+## Colabora entre máquinas y agentes
+
+Las sesiones participantes pueden ejecutarse en distintas máquinas conectadas a Lody. Por ejemplo, un agente
+principal en tu portátil puede coordinar una sesión de Kimi trabajando en el SDK en una estación de trabajo y una sesión
+de Codex investigando el servidor en una máquina de desarrollo remota.
+
+| Máquina                      | Agente           | Trabajo                                                 |
+| ---------------------------- | ---------------- | ------------------------------------------------------- |
+| Portátil                     | Agente principal | Coordinar la investigación y recopilar resultados       |
+| Estación de trabajo          | Kimi             | Investigar y corregir el SDK                            |
+| Máquina de desarrollo remota | Codex            | Investigar el servidor y revisar el contrato compartido |
+
+Usa menciones de sesión y mensajes para conectar su trabajo tal como lo harías con sesiones en una misma
+máquina. Cada agente utiliza la copia del repositorio, las herramientas y el entorno de ejecución disponibles en su máquina
+de ejecución. Las máquinas de destino deben estar en línea, con el acceso necesario al espacio de trabajo y configuraciones
+de agente compatibles.
+
+Los mensajes pueden llevar hallazgos, decisiones de interfaz, referencias a commits y solicitudes de revisión. Para probar
+cambios juntos, haz que los commits o artefactos correspondientes estén disponibles en la máquina que realiza
+la comprobación de integración; intercambiar contexto de conversación no transfiere archivos sin commit.
+
+## Mantén las transferencias específicas
+
+Los agentes que trabajan en sesiones separadas tienen sus propios historiales de conversación. Envía de forma explícita la información necesaria para la siguiente tarea:
+
+- **Antes de implementar:** el repositorio, el issue, el alcance, el comportamiento esperado y las decisiones de interfaz relevantes.
+- **Antes de revisar:** los commits base y head, el problema que aborda el parche y las comprobaciones ya ejecutadas.
+- **Después de una corrección:** el nuevo commit, qué hallazgos aborda y cualquier limitación restante.
+
+Estas transferencias también hacen que el flujo de trabajo sea más fácil de seguir para las personas. En Lody, puedes inspeccionar [diffs junto a la conversación](/es/docs/diff-viewer/) y [compartir una sesión con un compañero de equipo](/es/docs/session-handoff/) que necesite continuar el trabajo. El acceso del equipo sigue los permisos de uso compartido de máquinas y proyectos.
+
+## Empieza con un issue y dos agentes
+
+Elige un issue que entiendas. Haz que el agente principal lo inspeccione y delegue una corrección acotada a Kimi o Codex. Añade una sesión de revisión separada, pide a los dos agentes que intercambien hallazgos e inspecciona tú mismo el parche resultante.
+
+Una vez que ese flujo de trabajo resulte útil, amplíalo a una cola o a un error que abarque varios repositorios. Las mismas operaciones —crear una sesión, enviar un mensaje, inspeccionar el progreso y hacer seguimiento— sirven para cada caso.
+
+[Empieza a usar Lody](/es/docs/quickstart/) y utiliza [Control de sesiones de agente](/es/docs/session-orchestration/) para organizar tu primera asignación.

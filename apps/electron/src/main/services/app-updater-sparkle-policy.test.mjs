@@ -231,7 +231,13 @@ void test('reads standard and localized release notes from update metadata', () 
             contentVersion: '1.2.3',
             locales: {
               en: 'English notes',
-              zh_CN: '中文更新内容'
+              zh_CN: '中文更新内容',
+              zh_Hant: '繁體更新內容',
+              ja: '日本語の更新内容',
+              ko: '한국어 업데이트',
+              es: 'Notas en español',
+              fr: 'Notes en français',
+              ru: 'Заметки о выпуске'
             }
           }
         }
@@ -244,7 +250,13 @@ void test('reads standard and localized release notes from update metadata', () 
       releaseNotes: 'English fallback',
       releaseNotesByLocale: {
         en: 'English notes',
-        zh_CN: '中文更新内容'
+        zh_CN: '中文更新内容',
+        zh_Hant: '繁體更新內容',
+        ja: '日本語の更新内容',
+        ko: '한국어 업데이트',
+        es: 'Notas en español',
+        fr: 'Notes en français',
+        ru: 'Заметки о выпуске'
       }
     }
   )

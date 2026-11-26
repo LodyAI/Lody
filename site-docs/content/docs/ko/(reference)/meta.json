@@ -1,0 +1,9 @@
+{
+  "title": "기능 목록",
+  "pages": [
+    "(conversation)",
+    "(agents-and-runtimes)",
+    "(team-and-usage)",
+    "(settings-and-cli)"
+  ]
+}

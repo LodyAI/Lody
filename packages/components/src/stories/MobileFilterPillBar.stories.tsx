@@ -3,10 +3,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { Monitor } from 'lucide-react';
 
-import {
-  MobileFilterPillBar,
-  type FilterPill,
-} from '@/components/mobile/mobile-filter-pill-bar';
+import { MobileFilterPillBar, type FilterPill } from '@/components/mobile/mobile-filter-pill-bar';
 
 const storyStyles = stylex.create({
   canvas: {
@@ -97,13 +94,19 @@ function StoryShell() {
           <MobileFilterPillBar pills={pills} />
         </div>
         <div {...stylex.props(storyStyles.status)}>
-          <div>scope = <code>{scope}</code></div>
-          <div>status = <code>{status}</code></div>
-          <div>machines = <code>{Array.from(machines).join(', ') || '(none)'}</code></div>
+          <div>
+            scope = <code>{scope}</code>
+          </div>
+          <div>
+            status = <code>{status}</code>
+          </div>
+          <div>
+            machines = <code>{Array.from(machines).join(', ') || '(none)'}</code>
+          </div>
           <p {...stylex.props(storyStyles.hint)}>
-            Single-select pills auto-close on commit. Multi-select stays open so the user
-            can toggle several. The active-dot on "Machines" appears whenever the selection
-            differs from the default (all machines).
+            Single-select pills auto-close on commit. Multi-select stays open so the user can toggle
+            several. The active-dot on "Machines" appears whenever the selection differs from the
+            default (all machines).
           </p>
         </div>
       </div>

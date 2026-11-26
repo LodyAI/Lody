@@ -1,0 +1,17 @@
+---
+title: "20260922-0.99.0"
+version: 0.99.0
+date: 2026-09-22
+description: "Choisissez une icône d'application alternative sur iOS et récupérez les erreurs de cache de runtime au démarrage."
+---
+
+Version 0.99.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Sur iOS, vous pouvez choisir l'icône d'application Aqua dans les paramètres d'Apparence ou revenir à l'icône par défaut.
+
+### 🐛 Correctifs et améliorations
+
+- Correction des échecs de démarrage après mise à niveau causés par des caches de runtime obsolètes. Le runtime concerné est de nouveau téléchargé et vérifié si nécessaire.
+- Maintien du démarrage de l'application lorsque le nettoyage du cache de runtime ou les vérifications de mise à jour échouent, sans interrompre les autres runtimes.

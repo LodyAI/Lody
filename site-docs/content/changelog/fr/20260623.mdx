@@ -1,0 +1,36 @@
+---
+title: "20260623"
+version: 0.63.0
+date: 2026-06-23
+description: "Ajout de raccourcis personnalisables, d'une palette de commandes, de la gestion des Skills, du réglage de la taille de police des conversations, de lanceurs personnalisés par chemin, de pièces jointes de tout type de fichier, et plus encore."
+---
+
+### Nouveautés
+
+- Ajout de `lody review`, un outil de revue de code local qui vous permet de consulter les rapports de revue sans vous connecter.
+- Les sessions prennent désormais en charge les pièces jointes de tout type de fichier, aperçus compris. Les agents peuvent également lire les pièces jointes et renvoyer des fichiers.
+- Ajout d'une nouvelle palette de commandes (⌘K) pour rechercher des commandes et changer rapidement de session.
+- Ajout des paramètres de raccourcis clavier, permettant de personnaliser ou réaffecter chaque raccourci avec détection des conflits.
+- Ajout d'une fenêtre de session rapide sur ordinateur (⌘⇧N) entièrement contrôlable au clavier.
+- Le terminal sur ordinateur suit désormais le thème de l'application et intègre une barre d'état inférieure inspirée de VS Code.
+- Le menu « Ouvrir dans » de la session prend désormais en charge Xcode, Sublime Text et les lanceurs personnalisés.
+- Utilisez `$` dans la zone de saisie pour mentionner une Skill du projet et parcourez les Skills disponibles depuis la nouvelle page Skills.
+- Les projets locaux peuvent désormais être supprimés depuis d'autres appareils.
+- Ajout d'un réglage de taille de police pour les conversations.
+- Ajout du fournisseur DeepSeek Reasonix.
+- Les utilisateurs sur ordinateur peuvent désactiver le démarrage automatique du CLI et utiliser Lody uniquement comme télécommande.
+
+### Correctifs et améliorations
+
+- Amélioration des performances de la liste Toutes les modifications.
+- Les pull requests affichent désormais un badge d'état Brouillon.
+- Le téléversement d'images fonctionne désormais dans toute l'interface de conversation.
+- Ajout de la mise en cache des scripts de worktree pour éviter d'attendre leur chargement.
+- Correction du clavier mobile qui masquait l'interface de réponse lorsque vous répondiez à une question de l'IA.
+- Amélioration de l'affichage des noms de modèles longs sur mobile.
+- Réduction des saccades et de la chauffe de l'appareil lors du streaming des réponses.
+- Correction d'un écran noir après avoir appuyé sur Cmd+W en mode plein écran sur macOS.
+- Correction des contours de sélection tronqués dans la barre latérale et d'un espacement superflu avant les horodatages.
+- Modification du raccourci de recherche dans la session en ⌘F sur macOS.
+- Les noms de modèles longs sont plus lisibles dans le sélecteur de modèle sur mobile et son menu n'est plus masqué par le clavier.
+- L'arrêt manuel d'une tâche ne déclenche plus à tort une notification « terminée ».

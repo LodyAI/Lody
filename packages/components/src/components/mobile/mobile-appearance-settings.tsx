@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
 import { usePostHog } from '@/lib/posthog-context';
 import * as stylex from '@stylexjs/stylex';
-import type { SupportedLanguage } from '@lody/shared';
+import { toPushLanguage, type SupportedLanguage } from '@lody/shared';
 import { Check, ChevronDown, Monitor, Moon, Sun } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -232,7 +232,7 @@ export function MobileAppearanceSettings() {
         return;
       }
       void withPush((pushClient) => {
-        void pushClient.User.setLanguage(next === 'en' ? 'en' : 'zh');
+        void pushClient.User.setLanguage(toPushLanguage(next));
       }).catch((error: unknown) => {
         console.error('Failed to sync Push language', error);
       });

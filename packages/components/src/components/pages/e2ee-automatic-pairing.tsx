@@ -1,7 +1,11 @@
 import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-failure';
 import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
 import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
-import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import {
+  corner as uiCorner,
+  radius as uiRadius,
+  text as uiText,
+} from '@lody/ui/tokens/scales.stylex';
 import { themeSpace as appSpace } from '../../style/theme-scale.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -123,10 +127,7 @@ const ComparisonCode = ({ code, hint }: { code: string; hint: string }) => {
   const { t } = useTranslation();
   return (
     <div {...stylex.props(themeStyles.hint)}>
-      <p
-        {...stylex.props(pairingStyles.code)}
-        aria-live="polite"
-      >
+      <p {...stylex.props(pairingStyles.code)} aria-live="polite">
         {`${code.slice(0, 3)} ${code.slice(3)}`}
       </p>
       <p {...stylex.props(themeStyles.hint2)}>{t(hint)}</p>
@@ -634,9 +635,7 @@ export function E2eeAutomaticPairingPage({
         </h1>
         {terminal ? (
           <>
-            <p {...stylex.props(themeStyles.hint3)}>
-              {t(`e2ee.auto.${state.phase}.help`)}
-            </p>
+            <p {...stylex.props(themeStyles.hint3)}>{t(`e2ee.auto.${state.phase}.help`)}</p>
             {/* A removed member needs a new invitation; this device cannot ask for one. */}
             {state.phase !== 'removed' && (
               <Button
@@ -669,22 +668,19 @@ export function E2eeAutomaticPairingPage({
             <p {...stylex.props(themeStyles.layout)}>{state?.workspaceName}</p>
             {qr === 'joining' ? (
               <div {...stylex.props(themeStyles.layout2)}>
-                <p
-                  role="status"
-                  data-testid="e2ee-qr-joining"
-                  {...stylex.props(themeStyles.hint5)}
-                >
+                <p role="status" data-testid="e2ee-qr-joining" {...stylex.props(themeStyles.hint5)}>
                   {t('e2ee.instantQr.scannedJoining')}
                 </p>
-                <Button xstyle={themeStyles.spaced3} variant="ghost" onClick={() => abandonQr(null)}>
+                <Button
+                  xstyle={themeStyles.spaced3}
+                  variant="ghost"
+                  onClick={() => abandonQr(null)}
+                >
                   {t('common.cancel')}
                 </Button>
               </div>
             ) : pendingLink ? (
-              <div
-                data-testid="e2ee-link-join"
-                {...stylex.props(themeStyles.hint)}
-              >
+              <div data-testid="e2ee-link-join" {...stylex.props(themeStyles.hint)}>
                 <p {...stylex.props(themeStyles.copy2)}>{t('e2ee.accountPair.request.title')}</p>
                 <div {...stylex.props(themeStyles.row)}>
                   <Button
@@ -712,12 +708,7 @@ export function E2eeAutomaticPairingPage({
               </div>
             ) : qr === 'scanning' ? (
               <div {...stylex.props(themeStyles.layout3)} data-testid="e2ee-qr-viewfinder">
-                <video
-                  ref={qrVideo}
-                  muted
-                  playsInline
-                  {...stylex.props(themeStyles.panel)}
-                />
+                <video ref={qrVideo} muted playsInline {...stylex.props(themeStyles.panel)} />
                 {cameraState === 'unavailable' && (
                   <p role="alert" {...stylex.props(themeStyles.hint7)}>
                     {t('e2ee.verify.cameraUnavailable')}
@@ -729,19 +720,13 @@ export function E2eeAutomaticPairingPage({
               </div>
             ) : state?.comparisonCode ? (
               <>
-                <p
-                  role="status"
-                  {...stylex.props(themeStyles.row2)}
-                >
+                <p role="status" {...stylex.props(themeStyles.row2)}>
                   <CircleCheck size={15} aria-hidden="true" />
                   {t('e2ee.auto.prompted')}
                 </p>
                 {scanButton('e2ee.auto.scanPrompt')}
                 {!mobile && (
-                  <div
-                    data-testid="e2ee-auto-pair-qr"
-                    {...stylex.props(themeStyles.column2)}
-                  >
+                  <div data-testid="e2ee-auto-pair-qr" {...stylex.props(themeStyles.column2)}>
                     <div {...stylex.props(themeStyles.panel2)}>
                       <LedgerQrCode
                         payload={autoPairQrPayload(state.id, state.comparisonCode)}
@@ -756,15 +741,10 @@ export function E2eeAutomaticPairingPage({
                   code={state.comparisonCode}
                   hint={mobile ? 'e2ee.auto.showCode' : 'e2ee.auto.showCode.desktop'}
                 />
-                <p {...stylex.props(themeStyles.hint9)}>
-                  {t('e2ee.auto.waiting.help')}
-                </p>
+                <p {...stylex.props(themeStyles.hint9)}>{t('e2ee.auto.waiting.help')}</p>
               </>
             ) : (
-              <div
-                data-testid="e2ee-awaiting-device"
-                {...stylex.props(themeStyles.hint10)}
-              >
+              <div data-testid="e2ee-awaiting-device" {...stylex.props(themeStyles.hint10)}>
                 <p role="status" {...stylex.props(themeStyles.copy2)}>
                   {t('e2ee.auto.awaiting.title')}
                 </p>
@@ -826,17 +806,12 @@ export function E2eeAutomaticPairingPage({
                 />
               </div>
             ) : (
-              <details
-                {...stylex.props(themeStyles.hint14)}
-                data-testid="e2ee-lost-all-entry"
-              >
+              <details {...stylex.props(themeStyles.hint14)} data-testid="e2ee-lost-all-entry">
                 <summary {...stylex.props(themeStyles.row3)}>
                   {t('e2ee.auto.noOtherDevice')}
                   <ChevronDown size={14} />
                 </summary>
-                <p {...stylex.props(themeStyles.copy3)}>
-                  {t('e2ee.auto.noOtherDevice.elsewhere')}
-                </p>
+                <p {...stylex.props(themeStyles.copy3)}>{t('e2ee.auto.noOtherDevice.elsewhere')}</p>
               </details>
             )}
           </>
@@ -939,9 +914,7 @@ export function E2eeAutomaticPairingInbox({
   const [inbox, setInbox] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<
-    | { kind: 'retry' | 'refused'; key: string }
-    | { kind: 'mismatch'; attemptsLeft: number }
-    | null
+    { kind: 'retry' | 'refused'; key: string } | { kind: 'mismatch'; attemptsLeft: number } | null
   >(null);
   const [code, setCode] = useState('');
   // The typed code belongs to one request. A poll that briefly omits it closes the dialog,
@@ -1159,7 +1132,8 @@ export function E2eeAutomaticPairingInbox({
     } catch (cause) {
       if (owner !== actionOwner.current) return;
       const refusal =
-        accountPairingErrorCode(cause) ?? accountPairingErrorCode({ code: requestFailureCode(cause) });
+        accountPairingErrorCode(cause) ??
+        accountPairingErrorCode({ code: requestFailureCode(cause) });
       if (refusal === 'pairing-code-locked') {
         settled.current.add(target.id);
         deferred.current.add(target.id);
@@ -1331,9 +1305,7 @@ export function E2eeAutomaticPairingInbox({
           <PrivatePairingSurface>
             {ended && !current && !qrFor && (
               <>
-                <Dialog.Title>
-                  {t('e2ee.auto.codeLocked.title')}
-                </Dialog.Title>
+                <Dialog.Title>{t('e2ee.auto.codeLocked.title')}</Dialog.Title>
                 <Dialog.Description>
                   {t('e2ee.auto.codeLocked.help', { workspace: ended.workspaceName })}
                 </Dialog.Description>
@@ -1352,21 +1324,15 @@ export function E2eeAutomaticPairingInbox({
             )}
             {current ? (
               <>
-                <Dialog.Title>
-                  {t('e2ee.auto.approve.title')}
-                </Dialog.Title>
+                <Dialog.Title>{t('e2ee.auto.approve.title')}</Dialog.Title>
                 <Dialog.Description>{t('e2ee.auto.approve.help')}</Dialog.Description>
                 <p {...stylex.props(themeStyles.copy5)}>{current.deviceName}</p>
-                <p {...stylex.props(themeStyles.hint8)}>
-                  {t('e2ee.auto.deviceNameUnverified')}
-                </p>
+                <p {...stylex.props(themeStyles.hint8)}>{t('e2ee.auto.deviceNameUnverified')}</p>
               </>
             ) : (
               qrFor && (
                 <>
-                  <Dialog.Title>
-                    {t('e2ee.instantQr.title')}
-                  </Dialog.Title>
+                  <Dialog.Title>{t('e2ee.instantQr.title')}</Dialog.Title>
                   <Button xstyle={themeStyles.spaced6} variant="ghost" onClick={later}>
                     {t('common.close')}
                   </Button>
@@ -1390,7 +1356,11 @@ export function E2eeAutomaticPairingInbox({
                         {t('e2ee.verify.cameraUnavailable')}
                       </p>
                     )}
-                    <Button xstyle={themeStyles.spaced6} variant="ghost" onClick={() => setScanning(false)}>
+                    <Button
+                      xstyle={themeStyles.spaced6}
+                      variant="ghost"
+                      onClick={() => setScanning(false)}
+                    >
                       {t('common.cancel')}
                     </Button>
                   </>
@@ -1511,9 +1481,7 @@ export function E2eeAutomaticPairingInbox({
                     {t('common.close')}
                   </Button>
                 )}
-                <p {...stylex.props(themeStyles.hint19)}>
-                  {t('e2ee.auto.laterHint')}
-                </p>
+                <p {...stylex.props(themeStyles.hint19)}>{t('e2ee.auto.laterHint')}</p>
               </>
             )}
             {mobile && qrSlot}
@@ -1525,67 +1493,320 @@ export function E2eeAutomaticPairingInbox({
 }
 
 const themeStyles = stylex.create({
-  hint: { marginBlock: appSpace[6], borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: appSpace[4], paddingBlock: appSpace[5], textAlign: 'center' },
-  hint2: { marginTop: appSpace[2], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  glyph: { position: 'relative', height: '100dvh', overflowY: 'auto', backgroundColor: uiColors.background, paddingInline: appSpace[6], paddingBottom: 'max(2rem,env(safe-area-inset-bottom))' },
+  hint: {
+    marginBlock: appSpace[6],
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    paddingInline: appSpace[4],
+    paddingBlock: appSpace[5],
+    textAlign: 'center',
+  },
+  hint2: {
+    marginTop: appSpace[2],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  glyph: {
+    position: 'relative',
+    height: '100dvh',
+    overflowY: 'auto',
+    backgroundColor: uiColors.background,
+    paddingInline: appSpace[6],
+    paddingBottom: 'max(2rem,env(safe-area-inset-bottom))',
+  },
   glyph2: { marginTop: appSpace[5], width: '100%' },
-  column: { marginInline: 'auto', display: 'flex', minHeight: '75dvh', maxWidth: '24rem', flexDirection: 'column', paddingTop: appSpace[10], textAlign: 'center' },
+  column: {
+    marginInline: 'auto',
+    display: 'flex',
+    minHeight: '75dvh',
+    maxWidth: '24rem',
+    flexDirection: 'column',
+    paddingTop: appSpace[10],
+    textAlign: 'center',
+  },
   copy: { fontSize: uiText.titleSize, lineHeight: 1.375, fontWeight: 600 },
-  hint3: { marginTop: appSpace[4], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint3: {
+    marginTop: appSpace[4],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   spaced: { marginTop: appSpace[6] },
-  hint4: { marginTop: appSpace[5], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint4: {
+    marginTop: appSpace[5],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   spaced2: { marginTop: appSpace[5] },
-  hint5: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint5: {
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   spaced3: { marginTop: appSpace[3] },
-  hint6: { marginBottom: appSpace[1], marginTop: appSpace[4], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint6: {
+    marginBottom: appSpace[1],
+    marginTop: appSpace[4],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   layout: { fontWeight: 500 },
   layout2: { marginBlock: appSpace[8] },
-  copy2: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500 },
-  row: { marginTop: appSpace[4], display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: appSpace[2] },
+  copy2: {
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    fontWeight: 500,
+  },
+  row: {
+    marginTop: appSpace[4],
+    display: 'flex',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: appSpace[2],
+  },
   layout3: { marginBlock: appSpace[6] },
-  panel: { aspectRatio: '1', width: '100%', borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: uiColors.secondaryBackground, objectFit: 'cover' },
-  hint7: { marginTop: appSpace[3], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
-  row2: { marginInline: 'auto', marginTop: appSpace[6], display: 'inline-flex', alignItems: 'center', gap: appSpace[1.5], borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: appSpace[3], paddingBlock: appSpace[1], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading },
-  column2: { marginInline: 'auto', marginTop: appSpace[6], display: 'flex', flexDirection: 'column', alignItems: 'center', gap: appSpace[2] },
-  panel2: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: '#fff', padding: appSpace[2], lineHeight: 1 },
-  hint8: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  hint9: { marginTop: appSpace[1], fontSize: uiText.subheadlineSize, lineHeight: 1.625, color: uiColors.secondaryLabel },
-  hint10: { marginBlock: appSpace[6], borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: appSpace[4], paddingBlock: appSpace[5], textAlign: 'start' },
-  hint11: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: 1.625, color: uiColors.secondaryLabel },
-  hint12: { marginTop: appSpace[2], fontSize: uiText.footnoteSize, lineHeight: 1.625, color: uiColors.secondaryLabel },
+  panel: {
+    aspectRatio: '1',
+    width: '100%',
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    backgroundColor: uiColors.secondaryBackground,
+    objectFit: 'cover',
+  },
+  hint7: {
+    marginTop: appSpace[3],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
+  row2: {
+    marginInline: 'auto',
+    marginTop: appSpace[6],
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: appSpace[1.5],
+    borderRadius: uiRadius.full,
+    cornerShape: uiCorner.round,
+    backgroundColor: uiColors.secondaryBackground,
+    paddingInline: appSpace[3],
+    paddingBlock: appSpace[1],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+  },
+  column2: {
+    marginInline: 'auto',
+    marginTop: appSpace[6],
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: appSpace[2],
+  },
+  panel2: {
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    backgroundColor: '#fff',
+    padding: appSpace[2],
+    lineHeight: 1,
+  },
+  hint8: {
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  hint9: {
+    marginTop: appSpace[1],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: 1.625,
+    color: uiColors.secondaryLabel,
+  },
+  hint10: {
+    marginBlock: appSpace[6],
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    paddingInline: appSpace[4],
+    paddingBlock: appSpace[5],
+    textAlign: 'start',
+  },
+  hint11: {
+    marginTop: appSpace[2],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: 1.625,
+    color: uiColors.secondaryLabel,
+  },
+  hint12: {
+    marginTop: appSpace[2],
+    fontSize: uiText.footnoteSize,
+    lineHeight: 1.625,
+    color: uiColors.secondaryLabel,
+  },
   layout4: { marginRight: appSpace[1], display: 'inline' },
-  hint13: { marginBottom: appSpace[3], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
-  row3: { display: { 'default': 'inline-flex', '::-webkit-details-marker': 'none' }, cursor: 'pointer', listStyleType: 'none', alignItems: 'center', justifyContent: 'center', gap: appSpace[1.5] },
+  hint13: {
+    marginBottom: appSpace[3],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
+  row3: {
+    display: { default: 'inline-flex', '::-webkit-details-marker': 'none' },
+    cursor: 'pointer',
+    listStyleType: 'none',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: appSpace[1.5],
+  },
   copy3: { marginTop: appSpace[3], textAlign: 'start', lineHeight: 1.625 },
-  hint14: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
-  hint15: { marginTop: 'auto', paddingTop: appSpace[10], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  hint16: { borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: appSpace[1.5], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, fontVariantNumeric: 'tabular-nums' },
-  panel3: { marginBlock: appSpace[5], borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: appSpace[4] },
-  column3: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: appSpace[2], textAlign: 'center' },
+  hint14: {
+    marginTop: appSpace[2],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
+  hint15: {
+    marginTop: 'auto',
+    paddingTop: appSpace[10],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  hint16: {
+    borderRadius: uiRadius.full,
+    cornerShape: uiCorner.round,
+    backgroundColor: uiColors.secondaryBackground,
+    paddingInline: appSpace[1.5],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  panel3: {
+    marginBlock: appSpace[5],
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    padding: appSpace[4],
+  },
+  column3: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: appSpace[2],
+    textAlign: 'center',
+  },
   glyph3: { width: '100%', maxWidth: { default: null, '@media (min-width: 640px)': '24rem' } },
-  spaced4: { marginTop: appSpace[6], display: 'flex', flexDirection: 'column', rowGap: appSpace[3] },
-  panel4: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: appSpace[4] },
-  hint17: { marginTop: appSpace[1], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  spaced4: {
+    marginTop: appSpace[6],
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: appSpace[3],
+  },
+  panel4: {
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    padding: appSpace[4],
+  },
+  hint17: {
+    marginTop: appSpace[1],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   glyph4: { marginTop: appSpace[4], width: '100%' },
-  panel5: { maxHeight: '90dvh', maxWidth: { 'default': 'calc(100vw-2rem)', '@media (min-width: 640px)': '28rem' }, overflowY: 'auto', borderRadius: uiRadius.large, cornerShape: uiCorner.shape },
+  panel5: {
+    maxHeight: '90dvh',
+    maxWidth: { default: 'calc(100vw-2rem)', '@media (min-width: 640px)': '28rem' },
+    overflowY: 'auto',
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+  },
   copy4: { fontSize: uiText.titleSize, lineHeight: 1.375 },
   spaced5: { marginTop: appSpace[4] },
-  row4: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  copy5: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500 },
+  row4: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  copy5: {
+    marginTop: appSpace[2],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    fontWeight: 500,
+  },
   spaced6: { marginTop: appSpace[2] },
   layout5: { marginBlock: appSpace[5] },
-  panel6: { aspectRatio: '1', width: '100%', borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: uiColors.secondaryBackground, objectFit: 'cover' },
+  panel6: {
+    aspectRatio: '1',
+    width: '100%',
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    backgroundColor: uiColors.secondaryBackground,
+    objectFit: 'cover',
+  },
   glyph5: { width: '100%' },
-  copy6: { marginBottom: appSpace[2], display: 'block', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading },
-  copy7: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.destructive },
-  panel7: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: appSpace[4] },
-  hint18: { marginTop: appSpace[1], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  column4: { marginTop: appSpace[3], display: 'flex', flexDirection: { 'default': 'column', '@media (min-width: 640px)': 'row' }, gap: appSpace[2] },
+  copy6: {
+    marginBottom: appSpace[2],
+    display: 'block',
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+  },
+  copy7: {
+    marginTop: appSpace[2],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.destructive,
+  },
+  panel7: {
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    padding: appSpace[4],
+  },
+  hint18: {
+    marginTop: appSpace[1],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  column4: {
+    marginTop: appSpace[3],
+    display: 'flex',
+    flexDirection: { default: 'column', '@media (min-width: 640px)': 'row' },
+    gap: appSpace[2],
+  },
   row5: { flex: { default: null, '@media (min-width: 640px)': '1 1 0%' } },
-  hint19: { textAlign: 'center', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  hint19: {
+    textAlign: 'center',
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
 });
 
 const pairingStyles = stylex.create({
- code: { fontFamily: 'var(--font-mono)', fontSize: '2.25rem', lineHeight: '2.5rem', fontWeight: 600, letterSpacing: '0.15em', fontVariantNumeric: 'tabular-nums' },
- alternative: { textAlign: 'center', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  code: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '2.25rem',
+    lineHeight: '2.5rem',
+    fontWeight: 600,
+    letterSpacing: '0.15em',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  alternative: {
+    textAlign: 'center',
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
 });

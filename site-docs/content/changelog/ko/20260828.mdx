@@ -1,0 +1,26 @@
+---
+title: "20260828"
+version: 0.88.0
+date: 2026-08-28
+description: "대화 개요에 예측형 호버 의도(hover intent) 감지를 추가하고 프로바이더 설정 및 공개 사이트를 개선했으며, 미전달 메시지, 워크스페이스 동기화, 대화 상호작용, 데스크톱 안정성 문제를 수정했습니다."
+---
+
+버전 0.88.0
+
+### ✨ 새로운 기능
+
+- 대화 개요에 예측형 호버 의도(hover intent) 감지를 추가하여 실수로 열리는 경우를 줄이고 긴 대화를 더 쉽게 탐색할 수 있도록 했습니다([#51](https://github.com/LodyAI/Lody/pull/51), [#97](https://github.com/LodyAI/Lody/pull/97), [#113](https://github.com/LodyAI/Lody/pull/113)).
+- 프로바이더 설정 화면에서 진행 상태를 더 명확하게 표시하고, DeepSeek 위임 모델 사용 시 추가 비용이 발생할 수 있을 때 경고를 표시합니다([#66](https://github.com/LodyAI/Lody/pull/66), [#81](https://github.com/LodyAI/Lody/pull/81)).
+- 공개 블로그에 영어 및 중국어 RSS 피드, 예상 읽기 시간, 이전/다음 글 탐색 기능을 추가했으며, 랜딩 페이지 데모와 애니메이션 분위기도 더욱 부드럽게 개선했습니다([#84](https://github.com/LodyAI/Lody/pull/84), [#85](https://github.com/LodyAI/Lody/pull/85)).
+- 공개 소스 코드와 기여 창구를 LodyAI/Lody로 이전하고, 체계화된 이슈 및 PR 템플릿, 자동화 검사, 기여자를 위한 더 명확한 피드백을 마련했습니다([#39](https://github.com/LodyAI/Lody/pull/39), [#63](https://github.com/LodyAI/Lody/pull/63), [#69](https://github.com/LodyAI/Lody/pull/69), [#80](https://github.com/LodyAI/Lody/pull/80), [#91](https://github.com/LodyAI/Lody/pull/91)).
+
+### 🐛 수정 및 개선
+
+- 전달되지 않은 메시지를 명확하게 표시하고 확인 후 재전송할 수 있도록 하여 메시지 유실이나 중복 실행을 방지합니다([#48](https://github.com/LodyAI/Lody/pull/48), [#74](https://github.com/LodyAI/Lody/pull/74)).
+- 워크스페이스 전환 및 동기화를 개선하여 사이드바 내용이 현재 워크스페이스 범위 내에 유지되도록 하고, 최신 클라이언트와 구버전 클라이언트 간의 호환성을 높였습니다([#49](https://github.com/LodyAI/Lody/pull/49), [#55](https://github.com/LodyAI/Lody/pull/55), [#96](https://github.com/LodyAI/Lody/pull/96), [#108](https://github.com/LodyAI/Lody/pull/108)).
+- 누락된 중국어 번역, 작업(task) 도구 설정, 세션 탭 이름 변경, IME 입력 확정, 좁은 메시지 열에서의 편집, 대기 중인 방향 지시(steer), 에이전트 질문 호환성 문제를 수정했습니다([#40](https://github.com/LodyAI/Lody/pull/40), [#42](https://github.com/LodyAI/Lody/pull/42), [#43](https://github.com/LodyAI/Lody/pull/43), [#44](https://github.com/LodyAI/Lody/pull/44), [#52](https://github.com/LodyAI/Lody/pull/52), [#99](https://github.com/LodyAI/Lody/pull/99), [#101](https://github.com/LodyAI/Lody/pull/101)).
+- Mermaid 다이어그램 경량화, Windows 트레이 좌클릭 동작 개선, 로컬 파일 미리보기 및 세션 제어 기능 복구, 안전한 창 탐색을 통해 데스크톱 안정성을 높였습니다([#45](https://github.com/LodyAI/Lody/pull/45), [#46](https://github.com/LodyAI/Lody/pull/46), [#50](https://github.com/LodyAI/Lody/pull/50), [#71](https://github.com/LodyAI/Lody/pull/71), [#75](https://github.com/LodyAI/Lody/pull/75), [#77](https://github.com/LodyAI/Lody/pull/77)).
+- 작은 화면에서 사용량 캘린더의 최근 주 위치와 시각적 세부 요소를 개선하고, Markdown 순서 있는 목록의 번호 정렬 문제를 수정했습니다([#53](https://github.com/LodyAI/Lody/pull/53), [#62](https://github.com/LodyAI/Lody/pull/62), [#78](https://github.com/LodyAI/Lody/pull/78), [#82](https://github.com/LodyAI/Lody/pull/82), [#83](https://github.com/LodyAI/Lody/pull/83)).
+- 이제 로컬 프로젝트를 제거할 때 관련 세션을 먼저 보관(archive)하고 오프라인 기기를 기다리는 동안에도 상태를 계속 표시하며, 커밋되지 않은 변경 사항이 있거나 정리에 실패한 워크트리는 보존하면서 Lody가 생성한 워크트리만 안전하게 정리할 수 있습니다([#105](https://github.com/LodyAI/Lody/pull/105), [#119](https://github.com/LodyAI/Lody/pull/119)).
+- 리포지토리 경로, 중국어 세션 가이드 링크, Node.js 사전 요구 사항, 공개 패키지 메타데이터를 바로잡았습니다([#57](https://github.com/LodyAI/Lody/pull/57), [#60](https://github.com/LodyAI/Lody/pull/60), [#64](https://github.com/LodyAI/Lody/pull/64)).
+- 이번 릴리스에 공개 기여로 참여해 주신 [@clanzhang](https://github.com/clanzhang), [@tommy0103](https://github.com/tommy0103), [@lawvs](https://github.com/lawvs), [@Innei](https://github.com/Innei), [@hyoban](https://github.com/hyoban), [@wibus-wee](https://github.com/wibus-wee), [@limichange](https://github.com/limichange), [@27Aaron](https://github.com/27Aaron), [@hcz-czh](https://github.com/hcz-czh), [@Pleasurecruise](https://github.com/Pleasurecruise), [@frostming](https://github.com/frostming), [@natsustan](https://github.com/natsustan), [@zxch3n](https://github.com/zxch3n)님께 감사드립니다.

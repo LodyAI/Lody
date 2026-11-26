@@ -1,4 +1,13 @@
-import { changelogEn, changelogZh } from '@site/.source/server';
+import {
+  changelogEn,
+  changelogEs,
+  changelogFr,
+  changelogJa,
+  changelogKo,
+  changelogRu,
+  changelogZh,
+  changelogZhHant,
+} from '@site/.source/server';
 import {
   normalizeChangelogEntries,
   type ChangelogEntry,
@@ -6,8 +15,19 @@ import {
   type ChangelogSourceEntry,
 } from './changelog';
 
+const rawChangelogEntriesByLocale: Record<ChangelogLocale, ChangelogSourceEntry[]> = {
+  en: changelogEn as ChangelogSourceEntry[],
+  zh: changelogZh as ChangelogSourceEntry[],
+  'zh-hant': changelogZhHant as ChangelogSourceEntry[],
+  ja: changelogJa as ChangelogSourceEntry[],
+  ko: changelogKo as ChangelogSourceEntry[],
+  es: changelogEs as ChangelogSourceEntry[],
+  fr: changelogFr as ChangelogSourceEntry[],
+  ru: changelogRu as ChangelogSourceEntry[],
+};
+
 function getRawChangelogEntries(locale: ChangelogLocale): ChangelogSourceEntry[] {
-  return (locale === 'zh' ? changelogZh : changelogEn) as ChangelogSourceEntry[];
+  return rawChangelogEntriesByLocale[locale];
 }
 
 export function getChangelogEntries(locale: ChangelogLocale): ChangelogEntry[] {

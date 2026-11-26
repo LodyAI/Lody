@@ -52,7 +52,11 @@ export const setWorkspaceContextAtom = atom(
   null,
   (get, set, context: WorkspaceContext | AdmittedWorkspaceTicket) => {
     const current = get(workspaceContextAtom);
-    if ('accountId' in context && workspaceRuntimeInitFailureAtom && typeof workspaceRuntimeInitFailureAtom === 'object') {
+    if (
+      'accountId' in context &&
+      workspaceRuntimeInitFailureAtom &&
+      typeof workspaceRuntimeInitFailureAtom === 'object'
+    ) {
       const failure = get(workspaceRuntimeInitFailureAtom);
       if (
         failure &&

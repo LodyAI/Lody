@@ -51,6 +51,34 @@ await test('extractFaqFromMdx ignores pages without an FAQ section', () => {
   assert.deepEqual(extractFaqFromMdx('# Sessions\n\nA session is the basic unit.\n'), []);
 });
 
+await test('extractFaqFromMdx recognizes FAQ headings in all 8 locales', () => {
+  const headings = [
+    'FAQ',
+    '常见问题',
+    '常見問題',
+    'よくある質問',
+    '자주 묻는 질문',
+    'Preguntas frecuentes',
+    'Questions fréquentes',
+    'Часто задаваемые вопросы',
+  ];
+
+  for (const heading of headings) {
+    const items = extractFaqFromMdx(`---
+title: Example
+description: Example
+---
+
+## ${heading}
+
+### Question 1?
+
+Answer 1.
+`);
+    assert.deepEqual(items, [{ question: 'Question 1?', answer: 'Answer 1.' }], heading);
+  }
+});
+
 await test('session-handoff English FAQ matches the page and emits FAQPage JSON-LD', () => {
   const fromMdx = extractFaqFromMdx(readDoc('content/docs/en/(guides)/session-handoff.mdx'));
   const items = docsFaqByPath['/docs/session-handoff'] ?? [];
@@ -82,13 +110,21 @@ await test('session-handoff English FAQ matches the page and emits FAQPage JSON-
 });
 
 await test('share-link-vs-live-handoff English FAQ stays a definition contrast', () => {
-  const fromMdx = extractFaqFromMdx(readDoc('content/docs/en/compare/share-link-vs-live-handoff.mdx'));
+  const fromMdx = extractFaqFromMdx(
+    readDoc('content/docs/en/compare/share-link-vs-live-handoff.mdx')
+  );
   const items = docsFaqByPath['/docs/compare/share-link-vs-live-handoff'] ?? [];
   assert.equal(items.length, 5);
   assert.deepEqual(items, fromMdx);
-  assert.equal(items[0]?.question, 'Is a share link the same as handing off a coding agent session?');
+  assert.equal(
+    items[0]?.question,
+    'Is a share link the same as handing off a coding agent session?'
+  );
   assert.match(items[0]?.answer ?? '', /viewable record/u);
-  assert.doesNotMatch(fromMdx.map((item) => item.question).join('\n'), /Lody vs Lore|replace Lore/iu);
+  assert.doesNotMatch(
+    fromMdx.map((item) => item.question).join('\n'),
+    /Lody vs Lore|replace Lore/iu
+  );
 });
 
 await test('session-handoff Chinese FAQ matches the page', () => {

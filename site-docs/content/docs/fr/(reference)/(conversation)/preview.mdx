@@ -1,0 +1,49 @@
+---
+title: "Lody Preview"
+description: "Ouvrez un aperçu en direct à distance depuis une session Lody, inspectez les mises en page responsives et envoyez des annotations visuelles à l'agent."
+---
+
+# Lody Preview
+
+Lody Preview permet à une session d'ouvrir une vue en direct d'un serveur de développement local via l'interface Lody. C'est utile lorsqu'un agent modifie du code d'interface utilisateur et que vous souhaitez inspecter le résultat sur ordinateur, tablette, mobile ou un autre appareil sans copier manuellement les URL localhost.
+
+<BrowserPreview locale="fr" />
+
+## Démarrer un aperçu
+
+Demandez à l'agent de démarrer le serveur de développement et d'utiliser Lody Preview, par exemple :
+
+```text
+Start the Vite dev server and use Lody Preview to check the page.
+```
+
+Lorsque Lody détecte un candidat d'aperçu pour la session, ouvrez l'onglet **Aperçu**. Pour une session
+locale sur ordinateur, activez le **Mode Design** afin d'ouvrir directement l'aperçu local ; il ne nécessite
+ni tunnel ni URL distante partageable. Pour une session à distance ou lors du partage d'un aperçu, utilisez
+**Aperçu à distance** et cliquez sur **Créer une connexion**. L'aperçu peut être arrêté depuis le bouton
+d'alimentation dans l'en-tête de l'aperçu.
+
+## Inspecter les mises en page
+
+La barre d'outils de l'aperçu inclut :
+
+- des préréglages de zone d'affichage ordinateur, tablette et mobile
+- la rotation en mode portrait et paysage
+- les contrôles de zoom, d'ajustement à la fenêtre et de réinitialisation
+- le mode main pour déplacer par glisser-déposer et zoomer par pincement ou Ctrl+molette
+- une action d'ouverture externe pour les pages nécessitant un onglet de navigateur autonome
+- un bouton de copie pour l'URL de partage de l'aperçu
+
+Utilisez ces contrôles pour vérifier les points de rupture responsives, les débordements, les zones tactiles et les changements de mise en page tout en gardant la conversation et les diffs à portée de main.
+
+## Annotations visuelles
+
+Activez le mode annotation, cliquez sur un élément d'interface dans l'aperçu et rédigez un commentaire sur ce qui doit changer. Lody ancre le commentaire à l'élément sélectionné et peut renvoyer cette référence dans la discussion afin que l'agent dispose à la fois de la cible visuelle et de votre instruction.
+
+Les annotations visuelles fonctionnent particulièrement bien pour des retours d'interface concrets, comme des problèmes d'espacement, d'alignement, de texte, de couleur ou de mise en page responsive.
+
+## Remarques
+
+- Un aperçu local en Mode Design nécessite que le serveur de développement local continue de fonctionner. Les aperçus à distance nécessitent également que la machine de la session soit en ligne.
+- Certaines applications peuvent bloquer les aperçus intégrés ou nécessiter des fonctionnalités de navigateur qui fonctionnent mieux dans un onglet externe.
+- Si l'aperçu est obsolète, rechargez l'aperçu ou demandez à l'agent de redémarrer le serveur de développement.

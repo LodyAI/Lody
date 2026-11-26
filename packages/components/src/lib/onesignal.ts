@@ -1,6 +1,7 @@
+import type { PushLanguage } from '@lody/shared/language';
 import { isNativeAppShell, isNativeIOSAppShell } from './native-platform';
 
-type OneSignalLanguage = 'en' | 'zh';
+type OneSignalLanguage = PushLanguage;
 type OneSignalLogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
 type OneSignalPushSubscription = {

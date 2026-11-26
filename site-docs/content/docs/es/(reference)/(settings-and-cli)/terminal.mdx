@@ -1,0 +1,56 @@
+---
+title: "Terminal integrado"
+description: "Abre y gestiona pestañas de terminal interactivas dentro de sesiones locales de Lody con directorios de trabajo asociados a la sesión y temas sincronizados con la aplicación."
+---
+
+# Terminal integrado
+
+La aplicación de escritorio de Lody incluye un terminal interactivo para las sesiones locales. Se abre en el
+espacio de trabajo de la sesión actual, de modo que puedes ejecutar pruebas, inspeccionar el estado de Git o
+usar las herramientas del proyecto sin cambiar a un terminal externo.
+
+## Disponibilidad
+
+El terminal integrado actualmente es compatible con:
+
+- la aplicación de escritorio Electron
+- sesiones pertenecientes a la máquina local
+- sesiones locales activas e inactivas cuyo directorio del espacio de trabajo esté disponible
+
+Las sesiones remotas, los clientes móviles y la aplicación web no ofrecen actualmente un terminal interactivo.
+Las sesiones archivadas o eliminadas no pueden abrir uno.
+
+## Abrir y gestionar terminales
+
+Usa el control de terminal en la barra inferior, o presiona `Ctrl+\`` o `Cmd/Ctrl+J`. Puedes abrir hasta
+8 pestañas de terminal en una misma sesión.
+
+- Haz clic en `+` para abrir otro terminal.
+- Cambia de pestaña desde la barra inferior del terminal.
+- Cierra una pestaña individual para detener su proceso de shell.
+- Arrastra el divisor del panel para ajustar su altura.
+
+Cuando el terminal tiene el foco, `Alt+N` abre otra pestaña de terminal. El mismo atajo crea una nueva
+pestaña de sesión cuando el terminal no tiene el foco.
+
+## Directorio de trabajo y ciclo de vida
+
+Lody resuelve el directorio de trabajo a partir de la sesión en lugar de aceptar una ruta arbitraria desde
+la interfaz. En una sesión de proyecto, corresponde al worktree de la sesión o al directorio del proyecto.
+
+Los procesos del terminal permanecen disponibles mientras el daemon de la CLI de Lody está en ejecución,
+incluso cuando cambias de sesión o recargas la interfaz. Se cierran cuando la sesión se archiva o se elimina,
+o cuando el daemon se detiene. El historial del terminal no se conserva entre reinicios del daemon.
+
+## Tema y barra inferior
+
+El terminal sigue el modo claro/oscuro actual de Lody, incluidos los colores ANSI. La barra inferior también
+contiene el control de estado de la CLI; haz clic en él para mostrar u ocultar la salida de la CLI. La salida
+de la CLI y el terminal activo comparten la misma posición de acoplamiento y se muestran uno a la vez.
+
+## Fuentes
+
+En la aplicación de escritorio, abre **Configuración** -> **Apariencia** para elegir una fuente del sistema
+para la interfaz de Lody y otra para el terminal integrado. La fuente de la interfaz se aplica a toda la
+aplicación de escritorio; la fuente del terminal se aplica únicamente a las pestañas del terminal. Selecciona
+**Predeterminado** para restablecer cualquiera de las dos opciones a la pila de fuentes integrada de Lody.

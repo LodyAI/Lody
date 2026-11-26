@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { LLMS_ANSWERS } from './llms-answers.mjs';
-import { absoluteSiteUrl, slugFromMdxFile } from './site-paths.mjs';
+import { absoluteSiteUrl, SITE_LOCALES, slugFromMdxFile } from './site-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = path.join(packageRoot, 'public');
@@ -76,8 +76,9 @@ function orderedDocsFiles(dir) {
 }
 
 function validateDocsMetadata() {
-  for (const locale of ['en', 'zh']) {
+  for (const locale of SITE_LOCALES) {
     const localeRoot = path.join(docsRoot, locale);
+    if (!statSync(localeRoot, { throwIfNoEntry: false })?.isDirectory()) continue;
     for (const file of listMdxFiles(localeRoot)) {
       const { frontmatter } = parseMdxFile(file);
       requireString(frontmatter.title, 'title', file);

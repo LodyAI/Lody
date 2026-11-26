@@ -1,0 +1,24 @@
+---
+title: "20261106"
+version: 0.110.1
+date: 2026-11-06
+description: "Ayuda de comandos MCP bajo demanda y mejoras en diffs remotos, selección de máquinas, citas de conversación, sesiones cifradas y notificaciones push en Android."
+---
+
+Versión 0.110.1
+
+### ✨ Nuevas funciones
+
+- Lody MCP ahora ofrece ayuda de comandos bajo demanda, para que los agentes puedan consultar el uso y los parámetros sin repetir instrucciones detalladas en la lista de herramientas.
+
+### 🐛 Correcciones y mejoras
+
+- Se mejoró la carga de diffs de código remotos con menos transferencias repetidas y carga bajo demanda para archivos grandes. Al actualizar, se conservan la posición de lectura y las secciones expandidas.
+- Se corrigió un problema por el que la máquina remota seleccionada cambiaba de forma inesperada al actualizar el estado de la conexión y se mejoró la visualización del estado sin conexión.
+- Se corrigió que la edición de proyectos perdiera la máquina seleccionada y se ocultaron los grupos de proyectos vacíos en la aplicación de escritorio.
+- Se mejoraron las citas de conversación: ahora es posible seleccionar fragmentos consecutivos dentro de la misma respuesta conservando el formato, como enlaces, listas y código.
+- Se restauró el plegado del contenido final en las respuestas completadas.
+- Se corrigió que la barra lateral no se actualizara de inmediato tras renombrar un grupo de conversaciones.
+- Se mejoró la visualización de menciones en el editor de mensajes, corrigiendo colores incorrectos en los límites del cursor y estados residuales de menciones después de enviar.
+- Se mejoró la validación de mensajes en cola en sesiones cifradas, se corrigió el bloqueo incorrecto de mensajes mientras aún se cargan los permisos de compartición y se aclararon los mensajes de emparejamiento y estado de claves en la CLI.
+- Se corrigió que a los paquetes de Android les pudiera faltar la configuración de notificaciones push, lo que impedía que llegaran las notificaciones.

@@ -1,8 +1,4 @@
-import {
-  getAppOriginForUrlParsing,
-  getAppShareOrigin,
-  getAppShareUrl,
-} from '@/lib/app-location';
+import { getAppOriginForUrlParsing, getAppShareOrigin, getAppShareUrl } from '@/lib/app-location';
 import { parseSessionTabSearch } from './session-tab-url';
 
 /**

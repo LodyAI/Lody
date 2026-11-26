@@ -29,7 +29,9 @@ const landingStory = stylex.create({
   },
   hint: {
     borderRadius: 'var(--radius-md)',
-    borderWidth:"1px",borderStyle:"solid",borderColor:"color-mix(in oklab, var(--color-amber-500) 40%, transparent)",
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, var(--color-amber-500) 40%, transparent)',
     backgroundColor: 'color-mix(in oklab, var(--color-amber-500) 10%, transparent)',
     paddingInline: 'calc(var(--spacing) * 3)',
     paddingBlock: 'calc(var(--spacing) * 2)',

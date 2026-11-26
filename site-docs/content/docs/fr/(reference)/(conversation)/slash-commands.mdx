@@ -1,0 +1,54 @@
+---
+title: "Commandes slash"
+description: "Tapez `/` dans le champ de saisie du chat pour trouver les commandes de l'agent et les raccourcis de prompt disponibles."
+---
+
+# Commandes slash
+
+Tapez `/` au début du champ de saisie du chat pour ouvrir un menu regroupant les commandes exposées
+par l'agent actuel et les raccourcis de prompt disponibles dans l'espace de travail. Parmi les exemples
+de commandes d'agent figurent `/review`, `/compact` et `/undo` lorsque l'agent connecté les prend en charge.
+
+<SlashCommandsPreview locale="fr" />
+
+Les commandes d'agent sont **fournies par l'agent**, et non par Lody. Chaque configuration d'agent
+annonce sa propre liste lors de la découverte des capacités : les commandes disponibles dépendent donc
+du type de CLI (Claude Code, Codex, Kimi, OpenCode ou tout runtime du registre ACP) et de la version
+installée sur la machine. Les raccourcis de prompt sont définis au niveau de l'espace de travail et
+suivent leurs propres règles de visibilité et de portée.
+
+## Ouvrir le menu
+
+- Tapez `/` comme premier caractère d'un nouveau tour.
+- Au fil de votre saisie, les résultats disponibles des deux sources s'affichent par ordre de pertinence :
+  d'abord les noms exacts, puis les préfixes, les débuts de mots, le texte contenu et les correspondances plus larges.
+  Chaque ligne indique sa source. Taper uniquement `/` maintient les sources dans des groupes distincts.
+- Appuyez sur `↑` / `↓` pour vous déplacer entre les entrées, ou sur `Home` / `End` pour accéder directement à la première ou à la dernière entrée.
+- Appuyez sur `Enter` pour insérer la commande en surbrillance, ou sur `Tab` / `Escape` pour fermer le menu sans rien insérer.
+
+Si aucun résultat ne correspond, le menu vous l'indique. Le texte reste dans le champ de saisie comme du contenu normal.
+
+## Que font les commandes
+
+Comme ces commandes proviennent de l'agent, leur comportement est défini par la documentation de cet agent.
+Voici des exemples courants exposés par les agents populaires :
+
+| Commande   | Comportement typique                                                             |
+| ---------- | -------------------------------------------------------------------------------- |
+| `/review`  | Demander à l'agent de passer en revue le diff actuel ou les changements récents  |
+| `/compact` | Résumer et compacter la conversation pour libérer du contexte                    |
+| `/undo`    | Annuler la dernière modification produite par l'agent                            |
+
+Consultez la documentation propre à l'agent pour obtenir la liste complète et la sémantique exacte.
+
+## Actualiser la liste des commandes
+
+La liste est mise en cache par configuration d'agent sur chaque machine. Après avoir installé une nouvelle
+version de la CLI ou modifié l'environnement d'une configuration d'agent, actualisez le cache afin que les
+nouvelles commandes apparaissent :
+
+- Depuis l'interface web : ouvrez **Agent Config**, choisissez la configuration et actualisez les options.
+- Depuis la CLI : exécutez `lody agent-config refresh-capabilities <idOrName>` sur la machine que vous utilisez.
+
+Consultez [Configuration d'agent](/fr/docs/quickstart) et [Commandes CLI](/fr/docs/cli#agent-config-refresh-capabilities)
+pour plus de détails.

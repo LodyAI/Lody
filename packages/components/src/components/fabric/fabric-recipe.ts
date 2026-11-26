@@ -134,7 +134,13 @@ export function generateWeaveMatrix(
       });
     }
     case 'custom': {
-      const m = custom && custom.length > 0 ? custom : [[1, 0], [0, 1]];
+      const m =
+        custom && custom.length > 0
+          ? custom
+          : [
+              [1, 0],
+              [0, 1],
+            ];
       const rows = m.length;
       const cols = m[0].length;
       return matrixFromFn(cols, rows, (i, j) => (m[j][i] ? 1 : 0));
@@ -239,11 +245,7 @@ export function deriveFabricUniforms(recipe: FabricRecipe): DerivedFabricUniform
     melange: fiber.melange,
     fuzz: clamp(finish.raising * 1.3 + yarn.hairiness * 0.6 + (1 - fiber.alignment) * 0.25, 0, 2),
     fuzzRough: 0.4 + 0.45 * clamp(finish.raising + (1 - fiber.alignment) * 0.4, 0, 1),
-    fuzzColor: [
-      avgAll[0] * 0.6 + 0.4,
-      avgAll[1] * 0.6 + 0.4,
-      avgAll[2] * 0.6 + 0.4,
-    ],
+    fuzzColor: [avgAll[0] * 0.6 + 0.4, avgAll[1] * 0.6 + 0.4, avgAll[2] * 0.6 + 0.4],
   };
 }
 

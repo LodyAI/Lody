@@ -1,0 +1,31 @@
+---
+title: "20260810"
+version: 0.77.2
+date: 2026-08-10
+description: "Se agregó compatibilidad para pegar y arrastrar archivos al chat, reautenticación de Agentes dentro de la aplicación, diagnósticos más claros e importantes mejoras de rendimiento y fiabilidad."
+---
+
+Versión 0.77.2
+
+### ✨ Novedades
+
+- Se agregó compatibilidad para pegar archivos en el editor de mensajes y subirlos mediante arrastrar y soltar.
+- Tanto las imágenes en el chat como los archivos de imagen independientes ahora se pueden abrir, ampliar y desplazar. En la aplicación de escritorio, también se pueden copiar o guardar desde el menú contextual.
+- Los Agentes ahora se pueden volver a autenticar dentro de Lody cuando su autenticación expira, sin necesidad de volver a crear la sesión.
+- Los errores de los Agentes ahora se pueden expandir para mostrar todos los detalles, con copia en un clic de la información de diagnóstico. Los detalles del error también son totalmente accesibles en dispositivos móviles.
+- Se mejoraron las invitaciones a espacios de trabajo, las aprobaciones de ingreso y los flujos para compartir recursos privados, con mensajes más claros cuando no hay máquinas o proyectos disponibles para compartir.
+- Lody ahora abre automáticamente un proyecto local después de importarlo.
+- La configuración de facturación ahora es accesible desde la web móvil.
+
+### 🐛 Correcciones y mejoras
+
+- Se redujo significativamente la carga del hilo principal al desplazarse por el árbol de archivos o cambiar de sesión, haciendo más fluidos los proyectos grandes, el cambio de sesión y la reapertura de la barra lateral derecha.
+- Se redujo la presión de CPU y memoria provocada por la sincronización en segundo plano, la persistencia y la reconexión. La inestabilidad de la red o un problema en una sola sala de sincronización ya no desencadena una tormenta de reconexiones de alta frecuencia en todo el espacio de trabajo.
+- Se corrigieron fallos ocasionales de sincronización y retrasos en las respuestas del Agente después de que las sesiones locales permanecieran inactivas, así como la pérdida de ramas al restaurar sesiones.
+- Se corrigió un problema con los mensajes de dirección que podían quedar bloqueados tras no llegar a un Agente en ejecución. Si un mensaje no se puede insertar de inmediato, ahora se pone en cola para el siguiente turno regular.
+- Se corrigió un problema por el que las operaciones de Git usaban credenciales de una cuenta incorrecta en entornos con múltiples espacios de trabajo, así como fallos al restaurar sesiones anteriores cuando sus ramas local y remota compartían el mismo nombre.
+- El interruptor de Plan Mode vuelve a funcionar en dispositivos móviles.
+- Se corrigió un problema por el que el botón para copiar mensajes no respondía.
+- Los teléfonos ahora siguen usando el diseño móvil en orientación horizontal, y la aplicación web ya no intenta abrir la aplicación nativa sin interacción del usuario.
+- Se corrigieron errores en los menús desplegables del cajón de navegación móvil, estadísticas recortadas, nombres de Agentes truncados y rutas de proyectos demasiado largas que desbordaban los cuadros de diálogo.
+- La página de fallo de la aplicación ahora muestra un error legible y permite copiar el informe. Si la recuperación falla repetidamente, los usuarios pueden borrar los datos locales e iniciar sesión nuevamente tras confirmar la acción.

@@ -1,0 +1,72 @@
+---
+title: "GitHub 연동"
+description: "GitHub 리포지토리를 Lody에 연결해 프로젝트 클론, Issue 및 PR 컨텍스트, 워크트리 세션, CI 상태, 리뷰 코멘트 동기화를 사용할 수 있습니다."
+---
+
+# GitHub 연동
+
+데스크톱과 모바일 환경 모두에서 원활한 워크플로를 유지할 수 있도록, Lody는 GitHub 연동을 제품의 핵심 기능으로 제공합니다. 리포지토리에 Lody GitHub App을 설치하면 어느 기기에서든 프로젝트를 클론하고, Issue 및 PR 컨텍스트를 가져와 더욱 매끄러운 워크플로를 이용할 수 있습니다.
+
+## 설정
+
+**Settings** -> **GitHub** -> **Manage**를 열어 GitHub App 설치 페이지로 이동합니다. Lody가 액세스할 리포지토리를 선택한 뒤 Lody로 돌아옵니다. 선택한 리포지토리는 **Repositories available to add to workspace** 아래에 표시되며, 현재 워크스페이스에 필요한 리포지토리를 추가할 수 있습니다.
+
+Lody는 하나의 리포지토리를 여러 워크스페이스에서 공유하는 기능을 지원합니다. 다른 워크스페이스에서는 이미 GitHub App이 설치된 리포지토리를 바로 선택하여 추가할 수 있습니다.
+
+### 승인된 목록에서 리포지토리를 찾을 수 없나요?
+
+승인한 리포지토리가 **Authorized Repositories** 아래에 표시되지 않는다면 GitHub App 설치 과정에서 해당 리포지토리가 누락되었을 가능성이 높습니다(예: 리포지토리를 선택하기 전에 **Install**을 클릭했거나, 관리자 승인이 필요한 조직에 속한 리포지토리인 경우).
+
+가장 간단한 해결 방법은 승인 절차를 처음부터 다시 진행하는 것입니다.
+
+1. [github.com/settings/installations](https://github.com/settings/installations)(개인 리포지토리의 경우) 또는 소속 조직의 **Settings → GitHub Apps → Lody → Configure** 페이지를 엽니다.
+2. **Lody** GitHub App을 제거(Uninstall)합니다.
+3. Lody로 돌아와 **Settings → GitHub → Manage**를 열어 앱을 다시 설치하고, 이번에는 Lody가 액세스할 모든 리포지토리를 선택합니다.
+
+재설치가 완료되면 Settings 페이지로 돌아옵니다. 이제 리포지토리가 목록에 표시되며 워크스페이스에 추가할 수 있습니다.
+
+## 개인 GitHub 계정
+
+GitHub App 설치는 Lody에 리포지토리 액세스 권한을 부여합니다. 개인 계정 연동은 이와 별개인 선택 사항으로, PR 코멘트 작성, 리뷰 작업, 병합(merge)을 본인 GitHub 사용자 명의로 수행하고 싶을 때만 활성화하면 됩니다. 사용하려면 **Settings** -> **GitHub**에서 **Act as you for PRs, comments, and merges**를 켠 다음 GitHub 계정을 승인하세요.
+
+승인이 완료되면 Settings 페이지에 연결된 GitHub 계정이 표시됩니다. 이 설정은 Lody가 액세스할 수 있는 리포지토리 범위를 변경하지 않으며, 리포지토리 액세스 권한은 여전히 GitHub App 설치를 통해 부여됩니다. 나중에 Lody가 다시 워크스페이스의 GitHub App 명의로만 동작하도록 하려면 언제든지 이 옵션을 끌 수 있습니다.
+
+## 대화에 사용할 리포지토리 선택
+
+홈 페이지의 컴포저(입력창) 왼쪽 상단에 있는 리포지토리 선택기에서 워크스페이스에 추가된 리포지토리를 선택합니다. 그러면 Lody가 해당 리포지토리의 브랜치 목록을 표시하므로 작업을 시작할 브랜치를 고를 수 있습니다.
+
+<GithubRepoPickerPreview locale="ko" />
+
+대화를 생성하면 Lody가 CLI 머신에 리포지토리를 클론하고 초기화한 뒤, 선택한 브랜치에서 새 [워크트리](/ko/docs/worktrees)를 생성합니다. 각 대화는 독립된 브랜치에서 실행되므로 다른 대화에 영향을 주지 않습니다.
+
+## Issue 또는 Pull Request에서 시작하기
+
+홈 페이지에서 리포지토리를 선택한 후 `@`를 입력해 멘션 메뉴를 열고, **Issues** 또는 **Pull Requests**를 선택하여 현재 리포지토리의 항목을 멘션합니다.
+
+<MentionPreview locale="ko" kind="issue" />
+
+위아래 방향키로 항목을 선택한 뒤 Enter 키를 눌러 확정합니다. Lody는 선택한 항목을 `#<number>` 형식으로 컴포저에 입력하고 해당 컨텍스트를 프롬프트에 주입하므로, 에이전트가 `Fix #12` 또는 `Review the implementation in #56`과 같은 작업을 처리할 수 있습니다.
+
+## PR 상태 및 CI 동기화
+
+세션이 GitHub PR에 연결되면 Lody는 세션 UI에 PR 번호, open/closed/merged 상태, 그리고 CI 상태를 표시합니다. 진행 중이거나 통과 또는 실패한 체크 항목도 Lody 내에서 실시간으로 업데이트되므로, 브랜치가 준비되었는지 확인하기 위해 매번 GitHub로 화면을 전환할 필요가 없습니다.
+
+이미 PR이 열려 있는 브랜치에서 계속 작업하는 경우에도 Lody가 해당 PR을 감지하여 세션에 자동으로 연결해 줍니다.
+
+## Lody에서 PR 작업하기
+
+연결된 세션 상단의 PR 배지를 클릭하면 PR 패널이 열립니다. 여기에서 Lody를 벗어나지 않고도 PR 제목, 설명, 브랜치, CI, 코멘트 및 리뷰를 바로 확인할 수 있습니다.
+
+Draft PR의 경우 PR 패널에 **Ready for review** 작업 버튼이 표시됩니다. PR이 리뷰를 마치고 병합 가능한 상태가 되면 Lody에서 직접 병합할 수 있으며, GitHub에 해당 브랜치가 아직 남아 있는 경우 병합 후 브랜치 삭제도 함께 진행할 수 있습니다.
+
+## PR 세션에서의 커밋 및 푸시
+
+PR에 연결된 GitHub 기반 세션에서는 매 에이전트 턴이 끝난 후 Lody가 워크스페이스를 확인합니다. 커밋되지 않은 변경 사항이나 아직 푸시되지 않은 로컬 커밋이 있으면 Lody가 에이전트에게 이를 커밋하고 PR 브랜치로 푸시하도록 요청할 수 있습니다.
+
+세션 UI에서 수동으로 **Commit & Push**를 실행할 수도 있으며, 리뷰 코멘트를 추가로 반영해야 할 때는 **Fix PR Comments**를 사용할 수 있습니다.
+
+## 리뷰 코멘트 동기화
+
+[Diff 코멘트](/ko/docs/diff-comments)에서 PR에 연결된 세션은 **Sync to GitHub**를 활성화해 새로 작성한 줄 단위 코멘트를 GitHub에 게시할 수 있습니다.
+
+기존 GitHub PR Review의 줄 단위 코멘트 역시 Lody diff에 표시되며, Lody에서 남긴 답글은 GitHub에도 게시됩니다. 이를 통해 리뷰, 코드 확인, 그리고 에이전트의 후속 작업을 한곳에서 이어 나갈 수 있습니다.

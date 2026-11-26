@@ -1,0 +1,115 @@
+---
+title: "Cómo compartir una sesión de Claude Code con tu equipo (traspaso, no solo un enlace)"
+date: 2026-09-04
+author: Lody Team
+authorLink: https://lody.ai
+description: "Una captura de pantalla, una exportación o un enlace al estilo de Lore no es un traspaso. Invita a un compañero de equipo a la misma sesión de Claude Code en Lody para que pueda continuar la conversación, los diffs y el worktree."
+tag: "Guía"
+sidebar: false
+aside: false
+---
+
+Pasas una hora en una sesión de Claude Code. El agente ya tiene el contexto del repositorio, los callejones sin salida y una corrección a medio escribir. Entonces, un compañero de equipo tiene que continuar a partir de ahí.
+
+Lo habitual es enviar una captura de pantalla, exportar la transcripción o pegar un enlace compartido al estilo de ChatGPT. Eso permite que alguien **lea** lo que pasó. No le permite abrir la **misma** sesión y seguir adelante.
+
+De esa brecha trata esta publicación: cómo compartir una sesión de Claude Code como un traspaso, no como un recuerdo.
+
+## Por qué un enlace compartido no es un traspaso
+
+La mayoría de los flujos de trabajo de “compartir mi sesión de Claude Code” publican un registro:
+
+- Una **captura de pantalla** muestra un fragmento del chat. La siguiente persona no puede buscar en él, continuarlo ni ver los archivos que el agente modificó realmente.
+- Una **exportación a Markdown o de transcripción** es texto estático. Puede pegarlo en un chat nuevo y esperar que el modelo reconstruya el contexto. Está empezando de cero.
+- Un **enlace compartido al estilo de ChatGPT** es una instantánea de solo lectura. Sirve para un “mira esto”. Es inútil para un “tú te encargas del siguiente turno”.
+- Un **enlace al estilo de [Lore](https://lore.link/share)** renderiza el hilo —prompts, llamadas a herramientas, archivos modificados— y puede iniciar una **nueva** ejecución del agente. La sesión original se queda donde se ejecutó. El compañero de equipo no se une a ella.
+
+Ninguna de esas opciones sitúa a un compañero de equipo en la conversación en vivo, sobre los mismos diffs y en el mismo worktree. Si tiene que volver a explicar la tarea, el traspaso ya falló.
+
+## Qué significa continuar la misma sesión
+
+En Lody, un [traspaso de sesión de agente de programación](/es/docs/session-handoff/) significa que un compañero del espacio de trabajo abre la sesión que ya iniciaste y la continúa.
+
+Obtiene:
+
+- la [conversación](/es/docs/session) en vivo
+- los [diffs](/es/docs/diff-viewer) de archivos que produjo el agente
+- el [worktree](/es/docs/worktrees) y la rama de la sesión
+- la misma [configuración de agente](/es/docs/quickstart) —incluido Claude Code— para poder enviar el siguiente prompt
+
+No es un fork ni un nuevo hilo en el compositor. Abre **esa** sesión.
+
+Lody sigue pudiendo [copiar una conversación como Markdown](/es/docs/copy-md) cuando solo necesitas un registro. Copiar la URL de una sesión sin compartir la sesión tampoco otorga acceso: el enlace sigue funcionando para el propietario.
+
+## Cómo se comparan las opciones habituales
+
+| Enfoque | Qué obtiene | ¿Misma sesión en vivo? |
+| --- | --- | --- |
+| Captura de pantalla | Una imagen del chat | No |
+| Exportación de transcripción / Markdown | Texto estático para pegar en otro lugar | No — empieza un chat nuevo |
+| Enlace compartido al estilo de ChatGPT | Una instantánea de solo lectura de la conversación | No |
+| [Lore](https://lore.link/share) | Un hilo renderizado que puedes ver o bifurcar en una **nueva** sesión de agente | No — la sesión original se queda donde se ejecutó |
+| **Lody** | La [sesión](/es/docs/session) existente del espacio de trabajo | **Sí** — ábrela y continúa |
+
+Lore es honesto sobre lo que es: un visor y, a veces, una forma de iniciar una *nueva* ejecución a partir de contexto resumido. Lody cumple la otra función: invitar a alguien a la sesión existente.
+
+La comparación completa, incluidos SpecStory y el modelo de permisos, está en [Compartir una sesión de agente de programación](/es/docs/session-handoff/).
+
+## Cómo traspasar una sesión de Claude Code en Lody
+
+El traspaso es una acción de espacio de trabajo en equipo. La sesión debe existir en un espacio de trabajo de Lody y la otra persona debe ser miembro. Los siguientes pasos coinciden con la guía del producto; consulta esa página si quieres conocer todos los casos límite de permisos.
+
+### 1. Invítalo al espacio de trabajo
+
+1. Abre **Settings** -> **Workspace** -> **General**.
+2. En la sección **Members**, haz clic en **Invite Member**.
+3. Introduce su correo electrónico y elige un rol.
+4. Puede aceptar desde el correo o puedes copiar el enlace de invitación y enviárselo tú mismo.
+
+Detalles: [Invitar miembros](/es/docs/team#invite-members).
+
+### 2. Haz que la sesión sea visible para el equipo
+
+Las máquinas nuevas permanecen **privadas**. Una sesión solo es visible para el equipo cuando se comparten los recursos en los que se ejecuta.
+
+Desde la sesión:
+
+1. Abre el menú `...` de la sesión o el control **Private** en el encabezado de la sesión de escritorio.
+2. Elige **Share with team…** (la etiqueta puede decir **Share device with team…** o **Share project with team…** cuando esos permisos son los que faltan).
+3. Confirma. Lody comparte la máquina requerida y, en el caso de un proyecto local, el proyecto, y luego copia un enlace.
+
+Solo el **propietario del dispositivo** puede compartir. Si el dispositivo no está registrado para el acceso en equipo, regístralo primero. También puedes compartir una máquina desde **Settings** -> **Machines** -> **Share machine** sin abrir una sesión específica. Consulta [Visibilidad de máquinas del equipo](/es/docs/team#team-machine-visibility).
+
+Compartir una sesión puede compartir su máquina o proyecto local con todos los miembros del espacio de trabajo. Otras conversaciones en ese dispositivo también pueden volverse visibles. El diálogo de confirmación indica el alcance antes de que confirmes.
+
+### 3. Indícale dónde está la sesión
+
+Una vez que la sesión sea visible para el equipo:
+
+- Envía el enlace de la sesión copiado, o
+- Pídele que abra la lista de sesiones de la página de inicio. Si solo ve sus propias conversaciones, cambia el filtro de la barra lateral de **My Tasks** a **All Tasks** (en dispositivos móviles, **Team Tasks**). Los avatares muestran quién inició cada una. La lista usa **All Tasks** de forma predeterminada.
+
+Debe abrir **esa** sesión: no un fork y no un hilo nuevo en el compositor.
+
+### 4. Continúa el trabajo
+
+Una vez dentro de la sesión, puede leer la conversación completa, revisar los diffs actuales, seguir trabajando en el mismo worktree y rama, y enviar el siguiente prompt a la misma configuración de agente de Claude Code (u otro agente).
+
+Bifurcar (fork) es una herramienta diferente: copia el historial en una **nueva** sesión en la misma máquina y directorio. Usa fork cuando quieras una rama privada de la conversación. Usa compartir cuando quieras a un compañero de equipo en la original. Consulta [Bifurcar una sesión](/es/docs/session#fork-a-session).
+
+Para coordinar varias conversaciones desde un solo agente, consulta [Control de sesiones de agente](/es/docs/session-orchestration).
+
+## Si no puede ver la sesión
+
+Comprueba tres cosas: que haya aceptado la invitación al espacio de trabajo, que la máquina (y el proyecto local, si lo hay) esté compartida y que esté mirando **All Tasks** en lugar de **My Tasks**. Las máquinas no compartidas nunca sincronizan esas conversaciones en las barras laterales de otros miembros.
+
+Unirse a un espacio de trabajo **no** expone tu portátil. Las máquinas permanecen privadas hasta que las compartes. Las configuraciones de agente se pueden compartir por separado para que los compañeros ejecuten la misma configuración de CLI; consulta [Configuración de agente](/es/docs/quickstart) y [Funciones de equipo](/es/docs/team).
+
+## Cuando solo necesitas un registro
+
+Si el compañero solo necesita leer lo que ocurrió, copia un mensaje o usa **Copy as Markdown** desde el menú de la sesión. Eso es una transcripción, no un traspaso. Consulta [Copiar conversaciones](/es/docs/copy-md).
+
+## Primeros pasos
+
+- [Descargar Lody](/es/download)
+- Guía del producto: [Compartir una sesión de agente de programación](/es/docs/session-handoff/)

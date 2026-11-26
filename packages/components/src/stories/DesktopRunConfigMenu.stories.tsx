@@ -703,11 +703,30 @@ export const GenericSelect: Story = {
 export const SpeedTiers: Story = {
   args: { isEmptyConversation: false },
   render: () => <SpeedTierShell />,
-
 };
 
 const themeStyles = stylex.create({
-  column: { display: 'flex', minHeight: '100dvh', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-end', gap: 'calc(var(--spacing) * 4)', backgroundColor: uiColors.background, padding: 'calc(var(--spacing) * 8)' },
+  column: {
+    display: 'flex',
+    minHeight: '100dvh',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    justifyContent: 'flex-end',
+    gap: 'calc(var(--spacing) * 4)',
+    backgroundColor: uiColors.background,
+    padding: 'calc(var(--spacing) * 8)',
+  },
 });
 
-const runConfigSceneStyles = stylex.create({ composer: { containerType: 'inline-size', containerName: 'composer-face', display: 'flex', alignItems: 'center', borderRadius: '14px', backgroundColor: uiColors.elevatedBackground, paddingInline: 'calc(var(--spacing) * 2)', paddingBlock: 'calc(var(--spacing) * 1.5)' } });
+const runConfigSceneStyles = stylex.create({
+  composer: {
+    containerType: 'inline-size',
+    containerName: 'composer-face',
+    display: 'flex',
+    alignItems: 'center',
+    borderRadius: '14px',
+    backgroundColor: uiColors.elevatedBackground,
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+  },
+});

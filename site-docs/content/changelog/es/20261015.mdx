@@ -1,0 +1,125 @@
+---
+title: "20261015"
+version: 0.105.0
+date: 2026-10-15
+description: "Widgets de iOS, sesiones ampliadas de DeepSeek y Objetivos, vistas previas de archivos e importaciones de memoria por lotes, con mejoras en la sincronización de sesiones largas, interacciones móviles y recuperación."
+---
+
+Versión 0.105.0
+
+### ✨ Nuevas funciones
+
+- Se agregaron vistas previas de archivos de video.
+- Las vistas previas de imágenes a pantalla completa ahora ofrecen un menú al mantener pulsado para copiar, guardar o compartir imágenes cuando el dispositivo lo admite.
+- Las vistas previas de CSV, TSV y XLSX ahora permiten redimensionar columnas y seleccionar y copiar celdas o rangos rectangulares. Las vistas previas de XLSX también permiten redimensionar filas.
+- Los archivos HTML y los archivos adjuntos de chat en dispositivos móviles ahora se abren en modo vista previa de forma predeterminada, con una opción para ver el código fuente.
+- Se agregaron widgets para la pantalla de inicio de iOS que muestran el progreso de las conversaciones y el uso de tokens del espacio de trabajo.
+- La importación de memoria ahora admite seleccionar y agregar múltiples identidades a la vez.
+- DeepSeek ahora puede cargar y reanudar el historial de sesiones nativas conservando el contexto, el modelo, los permisos y la configuración preestablecida.
+- DeepSeek ahora admite dirigir la ejecución en curso y establecer, pausar y reanudar Objetivos.
+- DeepSeek ahora admite consultar y cancelar subagentes, así como mostrar el estado de tareas en segundo plano, la actividad de reintentos y el uso actual del contexto. La disponibilidad de cancelación depende del método de ejecución.
+- La herramienta de subagentes de Pi ahora puede seleccionar un modelo disponible para cada subtarea.
+- Se actualizó Claude Code con compatibilidad para Haiku 5.5 y Codex con compatibilidad para ventanas de contexto más grandes.
+- Codex ahora acepta una descripción de tarea directamente después de `/plan`, y los títulos automáticos pueden usar el modelo y los parámetros de título configurados en Lody.
+- La creación y continuación de sesiones por CLI y MCP ahora admiten archivos e imágenes adjuntos, incluidos los archivos adjuntos enviados a sesiones en máquinas remotas.
+- La creación de sesiones por CLI ahora admite `--agent-role <name or ID>` para usar la configuración de máquina, agente, modelo y prompt de un rol del espacio de trabajo.
+- Cloud CLI incorpora `migrate --from-oss` para importar registros de sesiones de Loro y archivos adjuntos históricos de la edición OSS a un espacio de trabajo en la nube existente.
+- Después de crear un worktree aislado, el agente recibe una indicación en su primera tarea para nombrar la rama según la tarea, lo que facilita identificar el trabajo en paralelo.
+- El panel de conversaciones relacionadas ahora ofrece acciones para detener y reanudar la colaboración. Detener la sesión principal y sus sesiones secundarias evita que los resultados tardíos de los agentes reinicien la ejecución. La colaboración debe reanudarse manualmente; las máquinas sin conexión aplican el cambio después de sincronizarse.
+- Las conversaciones secundarias creadas de forma consecutiva se agrupan en un panel de tareas compacto con expansión, contracción y desplazamiento interno.
+- Las colas de mensajes ahora se pueden contraer conservando los borradores y mostrando el recuento de los mensajes que aún se están preparando o que fallaron.
+- El compositor ahora ofrece detalles de la máquina de ejecución. En escritorio, pasa el cursor o haz clic sobre el nombre de la máquina para ver su propietario y estado de conexión; en teléfonos, abre la tarjeta de detalles con un botón de ícono.
+- El selector de directorios remotos ahora puede crear carpetas y entrar en ellas en escritorio y dispositivos móviles antes de agregarlas como proyectos. La máquina de destino necesita una versión de CLI compatible con esta función.
+- Los títulos largos de sesiones en la barra lateral se desplazan al pasar el cursor o al recibir foco del teclado. También puedes arrastrar o usar el trackpad o la rueda del mouse para leer el título completo. La animación respeta la configuración de movimiento reducido del sistema.
+- Los proveedores que admiten consultas de cuota ahora pueden actualizar las cuotas de suscripción según sea necesario al cambiar la configuración del compositor, abrir el panel de cuotas o volver a la aplicación.
+- Los detalles de las facturas ahora muestran los motivos de cobro, cambios de puestos, conceptos detallados, saldos pendientes y un acceso directo de pago.
+- Se agregó un receptor para importaciones locales de configuración de Magpie. El flujo completo de importación aún requiere compatibilidad correspondiente en Magpie.
+
+### 🐛 Correcciones y mejoras
+
+- Se corrigió que el modelo seleccionado no se aplicara a tiempo al crear o reanudar una sesión de Codex.
+- La interfaz ahora advierte cuando un agente rechaza una selección de modelo, de modo que un cambio fallido ya no se confunda con uno exitoso.
+- Se corrigió el orden de configuración de modelos para algunos agentes ACP para que las opciones del rol, como el esfuerzo de razonamiento, no se restablezcan tras cambiar de modelo.
+- Se corrigió que las opciones heredadas, como el esfuerzo de razonamiento y Fast, se validaran frente al modelo incorrecto.
+- Guardar un rol de agente ahora limpia las opciones de configuración obsoletas mientras conserva las selecciones válidas, reduciendo las advertencias persistentes de compatibilidad.
+- Se corrigió que los prompts, incluidos los de roles de agente, cambiaran entre el envío y la entrega durante la continuación, dirección en curso o recuperación.
+- Se corrigió que los menús de menciones de roles de agente perdieran su selección o posición cuando cambiaban los detalles, y se corrigieron los contornos de foco en los diálogos de configuración de agentes.
+- Se corrigió que las opciones móviles de configuración de Dimcode interfirieran entre sí y que las selecciones de permisos se perdieran tras soltar el toque.
+- Dimcode ahora usa el comando y la configuración ya instalados en la máquina, con un comando de instalación copiable cuando falta.
+- Se corrigió que el adaptador de Amp usara repetidamente una versión anterior en caché. Ahora usa el binario de la versión correspondiente.
+- Se corrigió que las instalaciones de agentes distribuidos en ZIP se bloquearan durante la extracción en algunas versiones de Node.js.
+- Se corrigieron los saltos de línea faltantes en la salida de comandos de Pi, incluida la salida en sesiones existentes.
+- Las extensiones de Pi ahora muestran los nombres de paquete guardados antes de que termine el escaneo, y los fallos al cargar extensiones se informan con claridad.
+- Las importaciones del historial de Codex ahora conservan los archivos adjuntos. Los mensajes de error son más claros para sesiones retenidas por otro cliente, errores de servicio, fallos de inicio y problemas con el directorio de trabajo.
+- Se corrigió que las sesiones vacías de Codex fallaran al reanudarse tras un reinicio del servicio y la selección imprecisa de títulos para sesiones históricas.
+- Codex ahora guarda la confianza para el directorio de ejecución real antes de abrir una sesión, mejorando la detección de skills del proyecto y la configuración de MCP mientras conserva los directorios explícitamente marcados como no confiables.
+- Las tareas Bash en segundo plano de Claude ahora muestran sus comandos reales por separado de las descripciones de tarea, con compatibilidad para resaltado y copia.
+- Se mejoró cómo aparecen las tareas en segundo plano detenidas en el historial de Claude para que sea menos probable que se muestren como prompts del usuario.
+- Se corrigió que los mensajes de finalización de agentes se procesaran dos veces tras una reconexión o reintentos diferidos, provocando una ejecución duplicada.
+- Los resultados de múltiples agentes ahora se agrupan en lotes. Las sesiones ocupadas los reciben una vez finalizado el turno actual, lo que reduce las continuaciones repetidas por resultados individuales.
+- Se estableció el límite de delegación consecutiva de agentes en 16 niveles y se mejoraron las instrucciones de colaboración para reducir confirmaciones innecesarias y resultados repetidos.
+- Se corrigió que la confirmación de guardado de un mensaje en cola borrara el borrador del siguiente mensaje que se estaba editando.
+- Cambiar entre preguntas pendientes ahora conserva las respuestas seleccionadas, la entrada personalizada y las notas. Los envíos fallidos muestran un error y conservan las respuestas para reintentar.
+- Se corrigió que confirmar un candidato de método de entrada chino enviara accidentalmente una respuesta personalizada.
+- Se corrigió que los formularios de una sola pregunta de Codex y otros agentes mostraran solo “Entrada solicitada” en lugar de la pregunta completa.
+- Se corrigieron los detalles duplicados de fallos de chat.
+- Se optimizaron las escrituras de salida en streaming en conversaciones largas para reducir los bloqueos de la CLI durante el uso intensivo de herramientas y los retrasos prolongados al entregar mensajes a otros dispositivos.
+- Se corrigieron bloqueos prolongados de la interfaz en conversaciones que contienen comandos muy largos o imágenes en línea.
+- Se redujeron las imágenes de herramientas no utilizadas, los bytes de recursos incrustados y los datos duplicados en el historial de sesiones, y se acotaron los resúmenes de comandos y títulos de herramientas para disminuir la sobrecarga de almacenamiento y sincronización. Se conservan los archivos adjuntos ordinarios, la salida legible, los diffs de código y el contenido de aprobación. Las solicitudes de permisos indican claramente los comandos truncados.
+- Se optimizó el renderizado al abrir menús de menciones para reducir la latencia del compositor.
+- El texto pegado de 50 000 caracteres o más ahora se convierte en un archivo adjunto de texto conservando todo el contenido original.
+- Se corrigió que el editor móvil de texto pegado no aprovechara el espacio disponible. Ahora se puede desplazar por todo el texto dentro del panel, con una tipografía acorde a la del compositor.
+- Se corrigió que los eventos de desplazamiento diferidos interrumpieran la inercia o devolvieran al final a los usuarios táctiles mientras leían mensajes anteriores.
+- Se corrigieron las sacudidas y rebotes al desplazarse rápidamente hacia abajo en dispositivos móviles, así como el seguimiento involuntario de nuevos mensajes cuando cambia la altura del compositor o se edita un borrador.
+- Se corrigió el desplazamiento de la conversación sobre vistas previas de Mermaid y se redujeron los errores de página causados por actualizaciones repetidas de diseño.
+- Al enviar un nuevo mensaje ahora se conserva parte del contexto previo para facilitar la lectura.
+- Se corrigió que la flecha para desplazarse al último mensaje quedara oculta al pasar el cursor o al recibir foco del teclado.
+- Se mejoraron la alineación de conversaciones móviles y el espaciado entre turnos en texto, pasos de ejecución y barras de acciones. Los mensajes anteriores muestran acciones al tocarlos, mientras que la respuesta más reciente del asistente mantiene visibles las acciones comunes.
+- Se alinearon los chips de texto pegado y las referencias a Issues y PR de GitHub con el texto circundante, se mejoró el espaciado de las tarjetas de respuesta de tareas y se igualó la tipografía del tiempo transcurrido con el pie.
+- Se corrigió el formato Markdown en negrita y cursiva junto a signos de puntuación en texto chino, japonés y coreano.
+- Los mensajes largos del usuario contraídos ahora terminan entre líneas completas con un desvanecimiento que indica que hay más contenido, en lugar de cortar el texto a la mitad.
+- El pie del compositor en escritorio ahora muestra el nombre completo del modelo.
+- Se corrigió que los botones y las estadísticas de cambios desbordaran la barra de información de la sesión en ventanas estrechas. El texto y los nombres de máquina se encogen cuando el espacio es limitado.
+- Los archivos adjuntos HTML, Markdown y de texto plano en dispositivos móviles ahora usan una hoja casi a pantalla completa para ofrecer más espacio de lectura, con mensajes mejorados de estado vacío en la vista previa.
+- Se corrigieron el clic, la escritura y el desplazamiento en diálogos dentro de paneles deslizables móviles, y se evitó que los toques traspasaran hacia la interfaz inferior.
+- Se deshabilitó la vista previa del sistema al mantener pulsado para enlaces de mensajes en iOS, evitando que toques posteriores vuelvan a abrir repetidamente el mismo enlace. Tocar para abrir y la selección de texto siguen disponibles.
+- Se ampliaron los botones de acción de la cola de mensajes en dispositivos táctiles para reducir toques accidentales.
+- Se corrigieron los íconos estirados cuando la navegación inferior móvil se contrae o expande, y se mejoraron la visibilidad de la navegación y el manejo del foco al desplazarse hacia arriba.
+- Se unificaron la apertura, el pegado y la exportación de enlaces de sesión para apuntar con mayor precisión al espacio de trabajo y a la sesión, manteniendo la compatibilidad con enlaces anteriores.
+- Se corrigió que los enlaces pegados de sesiones secundarias apuntaran a la sesión principal. Los errores de enlace ahora distinguen entre sesiones archivadas, espacios de trabajo inaccesibles y otros casos.
+- Las sesiones locales sin un directorio de trabajo disponible ahora pueden previsualizar rutas de archivos absolutas y `~/`. Se corrigió que las rutas `~/` se pudieran previsualizar pero no abrir ni mostrar en el administrador de archivos.
+- Se corrigió que los enlaces de archivos con números de línea se abrieran al inicio en el primer clic, y se restauró el resaltado del rango de líneas de destino.
+- Se restauró el botón para expandir la barra lateral en las páginas de tareas programadas cuando la barra lateral está oculta, y se corrigió el diseño cerca de los controles de ventana de macOS.
+- Se corrigió que la lista de programaciones en teléfonos quedara cubierta por la barra de estado. Al guardar o cerrar una tarea ahora se regresa a la pestaña de programaciones de inicio con cambio de espacio de trabajo, búsqueda, configuración y navegación inferior.
+- Los fallos repetidos en la recuperación del inicio de sesión ahora detienen la carga indefinida y ofrecen acciones de reintento e inicio de sesión conservando la página actual.
+- Después de esperar más de 30 segundos para iniciar sesión, cambiar de espacio de trabajo o abrir un espacio de trabajo, una página de recuperación ofrece recargar, limpiar la caché y copiar diagnósticos. Un banner de conexión estancada también abre esta página.
+- La recuperación al inicio en iOS ahora admite un restablecimiento completo nativo de datos locales para borrar los datos locales y volver al inicio de sesión cuando la aplicación no puede cargar con normalidad.
+- Se corrigieron fallos de inicio de sesión en escritorio en algunos entornos con proxy o certificados, con indicaciones más claras de solución de problemas para errores de validación de certificados.
+- Las consultas en la nube ahora reintentan errores transitorios del servidor un número limitado de veces, reduciendo las interrupciones de página por fallos temporales.
+- Las lecturas de máquinas en la CLI pueden recurrir a los datos locales existentes tras fallos temporales de sincronización. La configuración incompleta de una máquina ya no marca incorrectamente como inválidos los proyectos, agentes o modelos temporalmente no disponibles.
+- Se mejoró la limpieza tras cambios de espacio de trabajo o cuenta y fallos de conexión para que las conexiones antiguas y las solicitudes tardías no interfieran con las nuevas. Los errores de sincronización ahora incluyen más detalles.
+- Se mejoraron el uso compartido y la cancelación de las actualizaciones de credenciales de sincronización y las consultas del entorno de shell para que una solicitud que exceda el tiempo de espera o se cancele no afecte a otras.
+- Se corrigieron errores de inicialización duplicada cuando múltiples comandos de CLI o MCP acceden al mismo espacio de trabajo, así como la interferencia con sesiones posteriores cuando se reutiliza un espacio de trabajo antes de que termine la preparación anterior.
+- Se corrigió que el servicio MCP stdio liberara su runtime demasiado pronto después de conectarse, lo que provocaba que fallaran las llamadas posteriores a herramientas.
+- Se mejoró la limpieza de procesos al salir un agente, finalizar una sesión y fallar el inicio. Las tareas canceladas permanecen marcadas como activas mientras terminan la limpieza.
+- Se restauró la autorización personal de GitHub en clientes de escritorio y móviles, abriendo el navegador para completar la autorización.
+- Los detalles, revisiones y cambios de código de PR públicos de GitHub ahora se pueden ver en modo de solo lectura incluso cuando el espacio de trabajo no tiene ningún repositorio vinculado.
+- Se acotaron los reintentos tras fallos en la asociación de PR de GitHub y se agregaron indicaciones para reparar permisos mientras se sigue actualizando el estado del PR.
+- Se corrigió que un estado obsoleto de credenciales de GitHub durante la preparación y el reinicio de sesiones impidiera ejecutar mensajes posteriores.
+- Se corrigió que las credenciales de solo lectura de GitHub fueran rechazadas en clonaciones HTTPS y obtenciones recursivas de submódulos, y se conservó la atribución de la aplicación de GitHub en flujos no interactivos de creación de PR.
+- Se agregaron tiempos de espera para consultas de identidad de Git y sondeos de asistentes de credenciales, se redujeron los sondeos repetidos del entorno y se reintentaron fallos transitorios de inicio de procesos para evitar una inicialización prolongada de los agentes.
+- Se corrigió que las lecturas de identidad de Git omitieran la configuración global XDG y que la indexación de archivos recurriera a alternativas antes de que finalizara una consulta paralela de Git.
+- Se mejoró el manejo de errores de Git para proyectos locales y worktrees de modo que los fallos de inicio, tiempos de espera agotados y errores de permisos no se confundan con repositorios o ramas faltantes.
+- Se mejoraron la cola de bloqueos de archivos y la limpieza tras salidas anómalas para reducir los bloqueos por cierres obsoletos. Los errores de Git y de limpieza se conservan en lugar de provocar incorrectamente la eliminación forzada de directorios de trabajo.
+- Se mejoraron las comprobaciones previas al nombrado de ramas en worktrees para evitar enviar indicaciones de cambio de nombre en ramas existentes o espacios de trabajo inadecuados.
+- Se reorganizó la información de cuotas en la configuración de proveedores para distinguir las cuotas restantes de las previsiones de restablecimiento y mostrar cada ventana de cuota.
+- Las previsiones de restablecimiento de Codex ahora se abren con un clic. Las acciones de actualizar y eliminar están en un menú de gestión separado para no cubrir la entrada de previsión al pasar el cursor.
+- Los grupos de máquinas en la barra lateral mantienen su orden mientras un agente local no está disponible temporalmente, reduciendo los movimientos de la lista.
+- Actualizar un avatar personal ahora actualiza la información de los miembros del espacio de trabajo para que las listas de miembros no sigan mostrando el avatar anterior.
+- La configuración móvil de ejecución y los ajustes de roles de agente ahora distinguen con mayor claridad entre Modo y Permisos. Los interruptores para compartir carpetas usan etiquetas de acción explícitas como “Compartir proyecto con el equipo”.
+- Se corrigieron bloques de fondo inesperados detrás de los controles de ventana superiores derechos en Windows después de abrir un diálogo.
+- Se eliminaron archivos de runtime duplicados de los instaladores de escritorio, se comprimieron los recursos de interfaz de escritorio y se redujeron las comprobaciones repetidas del entorno de Claude en Linux.
+- Se mejoró el espaciado de la conversación de bienvenida tras cambiar el tamaño de fuente de la interfaz y se corrigieron marcas de tiempo de archivo como “hace 0 minutos”.
+- Se corrigieron las anclas de títulos de la documentación y los encabezados de nivel superior duplicados en las páginas.
+
+¡Gracias a Astro-Han, delete-cloud, etonwan, hjlarry, kipyin, Lampese, lawvs, Pleasurecruise, slashdevcorpse, timonwong y yayoinoyume por contribuir a esta actualización!

@@ -1,0 +1,11 @@
+{
+  "title": "Documentación de Lody",
+  "pages": [
+    "index",
+    "(getting-started)",
+    "(core-concepts)",
+    "(guides)",
+    "(reference)",
+    "(migrating)"
+  ]
+}

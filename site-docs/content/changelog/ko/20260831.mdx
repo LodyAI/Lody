@@ -1,0 +1,37 @@
+---
+title: "20260831"
+version: 0.89.0
+date: 2026-08-31
+description: "새롭게 디자인된 온보딩 흐름, 통합 플랜 모드, 프로젝트 폴더 관리, 데스크톱 자동 실행, 로컬 문서 검색, 표준 ACP 인증을 도입했으며 세션, 협업, 모바일, 설정 전반의 오류를 수정했습니다."
+---
+
+버전 0.89.0
+
+### ✨ 새로운 기능
+
+- 새롭게 디자인된 온보딩 흐름에서는 첫 번째 에이전트를 선택하거나 건너뛰고, 읽기 전용 예제 프로젝트로 첫 작업을 완료하며, 동기화 중이거나 설정 대기 중인 상태를 더욱 명확하게 파악할 수 있습니다([#163](https://github.com/LodyAI/Lody/pull/163), [#180](https://github.com/LodyAI/Lody/pull/180), [#182](https://github.com/LodyAI/Lody/pull/182), [#216](https://github.com/LodyAI/Lody/pull/216)).
+- 이제 플랜 모드에서 통합 대화 패널을 사용하여 기본 에이전트와 하위 에이전트가 작성한 플랜을 더 쉽게 검토하고 따라갈 수 있습니다([#215](https://github.com/LodyAI/Lody/pull/215), [#221](https://github.com/LodyAI/Lody/pull/221)).
+- 프로젝트 설정에서 머신별 폴더 관리와 로컬 프로젝트 항목에 대한 더 편리한 작업을 지원합니다([#205](https://github.com/LodyAI/Lody/pull/205), [#220](https://github.com/LodyAI/Lody/pull/220)).
+- 데스크톱 앱에 로그인 시 Lody를 자동으로 실행하는 옵션이 추가되었습니다([#176](https://github.com/LodyAI/Lody/pull/176)).
+- 영역별 키보드 탐색 기능이 도입되어 사이드바, 메뉴, 대화 화면 전반에서 키보드 조작이 한층 편리해졌습니다([#168](https://github.com/LodyAI/Lody/pull/168)).
+- 문서 사이트에 브라우저 내에서 완전히 동작하는 이중 언어 검색 기능을 추가했습니다([#228](https://github.com/LodyAI/Lody/pull/228)).
+- 공용 커뮤니티 진입점에 Feishu 그룹 QR 코드를 포함했습니다([#164](https://github.com/LodyAI/Lody/pull/164)).
+- Registry 에이전트가 표준 ACP 인증을 지원하며, 내장된 Claude, Codex, Kimi, Grok 런타임을 업그레이드했습니다([#201](https://github.com/LodyAI/Lody/pull/201), [#208](https://github.com/LodyAI/Lody/pull/208)).
+
+### 🐛 수정 및 개선
+
+- 삭제한 기본 내장 에이전트가 재시작 후 다시 나타나던 문제를 수정했습니다([#94](https://github.com/LodyAI/Lody/pull/94)).
+- 사이드바에서 진입할 때 프로젝트 선택 상태가 풀리던 문제를 수정하고 프로젝트 설정 대화 상자 레이아웃을 개선했습니다([#87](https://github.com/LodyAI/Lody/pull/87), [#177](https://github.com/LodyAI/Lody/pull/177)).
+- 협업자 간 에이전트 설정 동기화와 하위 탭에서의 Agent Role 선택 동작을 개선했습니다([#159](https://github.com/LodyAI/Lody/pull/159), [#181](https://github.com/LodyAI/Lody/pull/181)).
+- 대기 중인 턴(queued turn) 전달 및 MCP 하위 세션 완료 알림 문제를 수정했으며, 구버전 클라이언트의 완료 알림과의 호환성도 유지했습니다([#166](https://github.com/LodyAI/Lody/pull/166), [#200](https://github.com/LodyAI/Lody/pull/200)).
+- 활성 탭 유지, URL 동기화, 긴 대화 제목의 이름 변경 문제를 수정했습니다([#194](https://github.com/LodyAI/Lody/pull/194), [#199](https://github.com/LodyAI/Lody/pull/199), [#202](https://github.com/LodyAI/Lody/pull/202)).
+- 단축키 안내, 하위 탭에서 모델 검색 시 포커스 동작, 메시지 전송 후 입력창 포커스 문제를 수정했습니다([#95](https://github.com/LodyAI/Lody/pull/95), [#129](https://github.com/LodyAI/Lody/pull/129), [#143](https://github.com/LodyAI/Lody/pull/143)).
+- 세션 경로 런처 감지 문제와 편집된 파일과 일치할 때 에이전트 파일 링크가 사라지던 문제를 수정했습니다([#73](https://github.com/LodyAI/Lody/pull/73), [#167](https://github.com/LodyAI/Lody/pull/167)).
+- 모바일에서 세션 인증 복구, 워크스페이스 설정 간격, 안전 영역(safe-area) 레이아웃, 승인 대기 중인 백그라운드 탭 관련 문제를 수정했습니다([#190](https://github.com/LodyAI/Lody/pull/190), [#210](https://github.com/LodyAI/Lody/pull/210), [#222](https://github.com/LodyAI/Lody/pull/222), [#231](https://github.com/LodyAI/Lody/pull/231)).
+- 설정 화면의 둥근 모서리 클리핑, 상태 표시 정렬, 중첩 대화 상자 배경(backdrop), 링크 동작을 개선했습니다([#186](https://github.com/LodyAI/Lody/pull/186), [#204](https://github.com/LodyAI/Lody/pull/204), [#226](https://github.com/LodyAI/Lody/pull/226), [#233](https://github.com/LodyAI/Lody/pull/233)).
+- 첫 실행 시 언어 감지 문제와 중국어 문서의 깨진 링크를 수정했습니다([#117](https://github.com/LodyAI/Lody/pull/117), [#175](https://github.com/LodyAI/Lody/pull/175)).
+- 데스크톱 창 드래그와 패널 상호작용 간의 충돌을 수정했습니다([#169](https://github.com/LodyAI/Lody/pull/169)).
+- 로컬 세션의 GitHub 프로젝트 연결을 개선하고, 잘못된 WebSocket 종료 코드가 프리뷰 프록시를 중단시키지 않도록 방지했습니다([#197](https://github.com/LodyAI/Lody/pull/197), [#198](https://github.com/LodyAI/Lody/pull/198)).
+- 차단된 목표(blocked goals)의 재개 동작을 복구했습니다([#230](https://github.com/LodyAI/Lody/pull/230)).
+- 이번 릴리스 범위에는 빌드 일관성과 기여 워크플로를 위한 공개 리포지토리 유지보수 작업도 포함되어 있습니다([#165](https://github.com/LodyAI/Lody/pull/165), [#171](https://github.com/LodyAI/Lody/pull/171)).
+- 외부 기여자 [@Pleasurecruise](https://github.com/Pleasurecruise)([#73](https://github.com/LodyAI/Lody/pull/73), [#192](https://github.com/LodyAI/Lody/pull/192)), [@sheepbox8646](https://github.com/sheepbox8646)([#87](https://github.com/LodyAI/Lody/pull/87)), [@xuxu777xu](https://github.com/xuxu777xu)([#94](https://github.com/LodyAI/Lody/pull/94)), [@ShobhanKarthish](https://github.com/ShobhanKarthish)([#95](https://github.com/LodyAI/Lody/pull/95)), [@clanzhang](https://github.com/clanzhang)([#117](https://github.com/LodyAI/Lody/pull/117), [#143](https://github.com/LodyAI/Lody/pull/143)), [@1-WEEK](https://github.com/1-WEEK)([#129](https://github.com/LodyAI/Lody/pull/129)), [@Innei](https://github.com/Innei)([#168](https://github.com/LodyAI/Lody/pull/168), [#169](https://github.com/LodyAI/Lody/pull/169), [#205](https://github.com/LodyAI/Lody/pull/205), [#227](https://github.com/LodyAI/Lody/pull/227)), [@kovsu](https://github.com/kovsu)([#186](https://github.com/LodyAI/Lody/pull/186)), [@ImSingee](https://github.com/ImSingee)([#194](https://github.com/LodyAI/Lody/pull/194), [#226](https://github.com/LodyAI/Lody/pull/226)), [@MichaelYuhe](https://github.com/MichaelYuhe)([#231](https://github.com/LodyAI/Lody/pull/231)), [@wong2](https://github.com/wong2)([#233](https://github.com/LodyAI/Lody/pull/233))님께 특별히 감사드립니다.

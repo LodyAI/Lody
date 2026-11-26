@@ -1,0 +1,27 @@
+---
+title: "20260903"
+version: 0.90.1
+date: 2026-09-03
+description: "Добавлены режим макета Zen, инкрементальные обновления для macOS, переименование сессий и пользовательские конечные точки DeepSeek Harness, а также улучшены настройка агентов, надёжность CLI и обработка ввода."
+---
+
+Версия 0.90.1
+
+### ✨ Новое
+
+- Добавлен режим макета Zen для более сфокусированной работы в рабочем пространстве ([#341](https://github.com/LodyAI/Lody/pull/341)).
+- Улучшено автообновление для macOS: добавлены инкрементальные обновления, нативное отображение прогресса и более надёжная проверка установки ([#173](https://github.com/LodyAI/Lody/pull/173)).
+- Добавлены инструменты для переименования сессий ([#337](https://github.com/LodyAI/Lody/pull/337)).
+- Добавлена поддержка пользовательских конечных точек сервиса DeepSeek Harness ([#293](https://github.com/LodyAI/Lody/pull/293)).
+- Улучшены настройки агентов и провайдеров: добавлены более понятные параметры конфигурации, статусы и сведения о причинах недоступности ([#257](https://github.com/LodyAI/Lody/pull/257)).
+
+### 🐛 Исправления и улучшения
+
+- Улучшены восстановление запуска CLI-демона, диагностика статуса и сообщения об ошибках ([#287](https://github.com/LodyAI/Lody/pull/287)).
+- Исправлены сбои обновления возможностей агента и несогласованность состояния конфигурации при многошаговых операциях.
+- Улучшена обработка ссылок Markdown, жирных URL-адресов, методов ввода CJK и ввода упоминаний ([#274](https://github.com/LodyAI/Lody/pull/274), [#309](https://github.com/LodyAI/Lody/pull/309), [#294](https://github.com/LodyAI/Lody/pull/294)).
+- Улучшены вкладки сессий, утверждение планов, навигация по настройкам и компактные мобильные макеты ([#326](https://github.com/LodyAI/Lody/pull/326), [#315](https://github.com/LodyAI/Lody/pull/315), [#334](https://github.com/LodyAI/Lody/pull/334), [#285](https://github.com/LodyAI/Lody/pull/285)).
+- Улучшены выбор локальной папки проекта, вложения файлов SVG и поведение Cmd+W в десктопном приложении ([#291](https://github.com/LodyAI/Lody/pull/291), [#173](https://github.com/LodyAI/Lody/pull/173)).
+- Исправлена ошибка, из-за которой встроенный браузер не мог подключиться в некоторых сетевых окружениях с прокси ([#299](https://github.com/LodyAI/Lody/pull/299)).
+- Улучшены управление командой goal в Codex и подсказки по рабочему пространству для дочерних сессий ([#144](https://github.com/LodyAI/Lody/pull/144), [#225](https://github.com/LodyAI/Lody/pull/225)).
+- Благодарим внешних участников [@jeffwcx](https://github.com/jeffwcx), [@EYHN](https://github.com/EYHN), [@Innei](https://github.com/Innei), [@MichaelYuhe](https://github.com/MichaelYuhe), [@sinxy-sai](https://github.com/sinxy-sai), [@natsustan](https://github.com/natsustan), [@slashdevcorpse](https://github.com/slashdevcorpse) и [@ImSingee](https://github.com/ImSingee).

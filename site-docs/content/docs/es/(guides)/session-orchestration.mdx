@@ -1,0 +1,107 @@
+---
+title: "Control de sesiones de agente"
+description: "Permite que un agente cree, inspeccione, dé seguimiento y coordine otras conversaciones de Lody para tareas de varios pasos."
+---
+
+# Control de sesiones de agente
+
+Los agentes de Lody pueden usar las herramientas MCP integradas de Lody para trabajar entre conversaciones. Esto te permite pedirle a un
+agente que divida una tarea en conversaciones específicas, compruebe su progreso, envíe trabajo de seguimiento y
+devuelva los resultados completados a la conversación original.
+
+Iniciar varias sesiones por tu cuenta —worktrees aislados, modelos mixtos, visibilidad para el equipo— se cubre
+en [Agentes de programación en paralelo](/es/docs/parallel-agents). Esta página trata sobre la ruta de control: un agente
+coordina a los demás.
+
+Para ver un recorrido con un agente principal, Kimi, Codex y Grok —incluidas las menciones de conversaciones y
+el trabajo entre máquinas— consulta [Flujos de trabajo de colaboración entre agentes](/es/docs/agent-collaboration/).
+
+<Callout title="¿Qué página necesito?">
+  - Iniciar varias tareas por tu cuenta → [Agentes de programación en paralelo](/es/docs/parallel-agents) - Hacer que un agente
+  cree y dirija otras conversaciones → esta página - Entregar una sesión en vivo a un compañero de equipo → [Compartir una
+  sesión de agente de programación](/es/docs/session-handoff)
+</Callout>
+
+## Úsalo en una conversación
+
+Describe el resultado esperado y la división del trabajo en un prompt normal. Por ejemplo:
+
+```text
+Create two review conversations for this project: one for correctness and one for test coverage.
+When both finish, summarize the findings here.
+```
+
+El agente puede crear o reutilizar conversaciones, leer su estado y su historial acotado, entregar una
+instrucción de seguimiento o cancelar un turno en ejecución cuando corresponda. Los resultados regresan a la conversación
+solicitante una vez que el trabajo solicitado alcanza un estado terminal.
+
+Al crear una nueva sesión, el agente también puede seleccionar entre las opciones compatibles de modelo y nivel de razonamiento
+disponibles en la máquina de destino. Incluye esas preferencias en tu prompt cuando sean importantes,
+por ejemplo:
+
+```text
+Create a review session with Codex using the high reasoning setting, then summarize the findings here.
+```
+
+## Coordinar PR, issues y correcciones entre repositorios
+
+### Usar Claude Code como coordinador
+
+Pídele a Claude Code que inspeccione un conjunto de PR o issues, identifique dependencias y luego asigne trabajo específico
+a otros agentes como Kimi, Codex o Grok. Cada agente trabaja en su propia conversación, y el coordinador
+puede dar seguimiento y recopilar los resultados. El acceso a los repositorios utiliza las herramientas y credenciales disponibles
+para los agentes.
+
+```text
+Go through these PRs and issues, group related work, and identify dependencies.
+Delegate independent fixes to Kimi and reviews to Codex in separate conversations.
+Collect their findings and report which changes are ready for my review.
+```
+
+### Corregir un error entre varios repositorios
+
+Cuando un error abarca un cliente, un SDK y un servidor, crea una conversación para cada repositorio afectado.
+Los agentes pueden investigar e implementar cambios independientes en paralelo, intercambiar hallazgos sobre el
+contrato compartido y coordinar los cambios dependientes.
+
+```text
+Investigate this bug across the client, SDK, and server repositories.
+Start a focused Agent conversation for each repository. Have them exchange findings
+and agree on the interface changes before implementing dependent fixes.
+Collect the patches and verification results here.
+```
+
+### Ejecutar un ciclo de revisión y corrección entre agentes
+
+Los agentes pueden enviar mensajes y delegar trabajo a otras conversaciones accesibles de Lody. También puedes
+pedirle a un agente que envíe mensajes a otro directamente: haz que un revisor inspeccione un commit específico, envíe los hallazgos
+al agente encargado de la implementación y luego revise el commit actualizado tras la corrección.
+
+```text
+Ask the review Agent to inspect the implementing Agent's current commit without editing it.
+Send actionable findings to the implementing Agent and ask it to fix them.
+Have the reviewer check the updated commit. Stop after two rounds, or earlier if no findings remain,
+and summarize the result for me.
+```
+
+Estos ejemplos describen flujos de trabajo que puedes solicitar, no pipelines preconfigurados. Indica explícitamente los
+repositorios de destino, el alcance, los criterios de finalización y el límite de revisiones. El trabajo en paralelo aún necesita
+comprobaciones de integración antes de que sus cambios estén listos para fusionarse.
+
+## Qué esperar
+
+- Cada conversación sigue siendo una tarea independiente con su propio historial y su turno activo.
+- El trabajo puede ejecutarse en paralelo cuando la máquina de destino está en línea.
+- Lody conserva la relación con la conversación solicitante, por lo que el agente puede continuar una vez que
+  se completa el trabajo delegado.
+- Las conversaciones temporales pueden archivarse desde la lista de sesiones una vez que su trabajo ha finalizado.
+
+## Límites
+
+El control de sesiones está acotado deliberadamente: un agente solo puede inspeccionar datos de conversaciones pertenecientes a Lody y
+no puede usarlo como un programador de tareas en segundo plano sin límites. Una tarea delegada puede finalizar después del plazo
+solicitado; su salida permanece en esa conversación incluso cuando el solicitante ya ha recibido un
+resultado de tiempo de espera agotado.
+
+Para entregar una sesión en vivo a un compañero de equipo en lugar de coordinar a otros agentes, consulta
+[Compartir una sesión de agente de programación](/es/docs/session-handoff).

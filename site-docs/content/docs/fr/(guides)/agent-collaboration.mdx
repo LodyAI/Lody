@@ -1,0 +1,181 @@
+---
+title: "Collaboration multi-agents avec un agent principal"
+description: "Utilisez un agent principal pour coordonner Codex, Kimi et Grok dans Lody. Déléguez des PR et des issues, partagez le contexte avec les mentions @ et passez en revue des correctifs sur plusieurs dépôts et machines."
+---
+
+Vous avez une file d'attente d'issues, plusieurs PR ouvertes et un bug qui touche peut-être trois dépôts. Vous souhaitez qu'un agent principal traite cette file, délègue les correctifs à Kimi, demande à Codex de les passer en revue et vous rapporte les résultats.
+
+Dans Lody, vous pouvez organiser ce travail depuis une seule conversation. Un agent de développement peut créer d'autres sessions, leur envoyer des instructions, consulter leur avancement et assurer le suivi. Les agents peuvent aussi s'envoyer des messages entre eux : un agent relecteur peut transmettre ses constats à l'agent qui rédige le correctif, lequel peut demander une nouvelle revue une fois le patch prêt.
+
+Ce guide montre comment utiliser **un agent principal comme orchestrateur** pour ce workflow. Les exemples sont des prompts illustratifs que vous pouvez adapter à vos dépôts ; il ne s'agit pas de résultats de benchmark ni d'exécutions enregistrées en production.
+
+<Callout title="De quelle page avez-vous besoin ?">
+  Ce guide présente le déroulement complet avec un agent orchestrateur. Pour découvrir les outils
+  sous-jacents, consultez [Contrôle des sessions d'agent](/fr/docs/session-orchestration) ; pour
+  lancer des tâches vous-même, consultez [Agents de développement en
+  parallèle](/fr/docs/parallel-agents).
+</Callout>
+
+## Ce que fait l'orchestrateur
+
+L'orchestrateur suit l'ensemble de la tâche : ce qui demande de l'attention, quels changements dépendent les uns des autres, qui travaille sur chaque partie et ce qu'il reste à vérifier. Les autres agents exécutent des missions ciblées dans leurs propres conversations.
+
+Voici une répartition possible du travail :
+
+| Conversation    | Mission                                                          | Ce qu'elle renvoie                                    |
+| --------------- | ---------------------------------------------------------------- | ----------------------------------------------------- |
+| Agent principal | Inspecter la file d'issues et de PR, répartir le travail, suivre | État actuel, dépendances et décisions en suspens      |
+| Kimi            | Implémenter un correctif ciblé                                   | Patch, commit et résultats de vérification            |
+| Codex           | Passer en revue ce patch                                         | Constats liés au commit examiné                       |
+| Grok            | Enquêter sur un autre dépôt concerné                             | Constats et propositions de modifications d'interface |
+
+Ces rôles ne sont que des choix pour cette tâche. Vous pouvez les intervertir, utiliser plusieurs instances du même agent ou intégrer un autre agent compatible à l'espace de travail. Grok peut également implémenter un correctif,
+passer en revue un patch ou coordonner d'autres sessions lorsqu'il est choisi pour cette mission.
+
+Lody fournit les [outils inter-sessions](/fr/docs/session-orchestration/) utilisés pour organiser ce travail. Ce guide s'appuie sur ces outils entre un agent principal et des sessions Kimi, Codex et Grok ; il ne dépend pas d'une fonctionnalité d'équipe native d'un agent.
+
+## Configurer l'espace de travail
+
+[Connectez une machine à Lody](/fr/docs/quickstart/) et assurez-vous que les [configurations d'agent](/fr/docs/quickstart) que vous souhaitez utiliser y sont disponibles. Les machines cibles doivent être en ligne, et les agents doivent avoir accès aux dépôts ainsi qu'à tous les outils GitHub nécessaires à leurs missions.
+
+Les exemples ci-dessous utilisent un agent principal pour la coordination et Kimi, Codex ou Grok pour les tâches ciblées.
+Démarrez une session d'agent principal pour la coordination. Indiquez-lui quels dépôts, PR ou issues inspecter. Attribuez aux tâches d'édition leurs propres [worktrees Git](/fr/docs/worktrees/) afin que les agents parallèles disposent de répertoires de travail distincts. Un nouveau fork de worktree part du `HEAD` commité ; les modifications non commitées dans un autre répertoire n'y apparaîtront pas automatiquement.
+
+La première mission utile consiste à comprendre la file d'attente avant de modifier le code.
+
+## 1. Faire trier les PR et les issues par l'agent principal
+
+Une file d'attente contient souvent des travaux qui se chevauchent. Une issue peut déjà avoir une PR, deux PR peuvent résoudre le même problème, ou une modification du SDK peut devoir être intégrée avant une mise à jour du client. Demandez d'abord au coordinateur d'identifier ces relations.
+
+```text
+Utilisez les outils de session Lody pour coordonner ce travail.
+
+Inspectez ces PR et issues : [coller les liens].
+Pour chaque élément, identifiez le dépôt concerné, l'état actuel,
+les travaux d'implémentation existants et les dépendances vis-à-vis des autres éléments.
+
+Déléguez ensuite les correctifs indépendants à des sessions Kimi et les revues
+à des sessions Codex. Attribuez un worktree distinct à chaque tâche d'édition.
+Précisez l'issue, le périmètre, le comportement attendu et les exigences de
+vérification dans chaque mission. Réutilisez une session existante lorsqu'elle
+est déjà responsable du travail.
+
+Rapportez les liens des sessions, les constats et tout ce qui nécessite ma décision.
+Laissez la fusion et le déploiement pour ma revue.
+```
+
+Une mission utile est suffisamment concrète pour que l'agent destinataire puisse travailler sans reconstituer toute la file d'attente. Par exemple : « Corrigez les envois en double dans le client ; conservez le comportement de nouvelle tentative existant ; reproduisez le bug et vérifiez le patch. » Incluez l'issue et le dépôt concernés, plutôt que de compter sur une autre session pour deviner ce que signifie « ce bug ».
+
+Le coordinateur doit distinguer une tâche terminée d'un changement prêt à être intégré. Un patch peut être complet alors que sa revue, une dépendance ou une vérification d'intégration est encore en attente.
+
+## 2. Coordonner un correctif sur plusieurs dépôts
+
+Prenons un bug illustratif : relancer une requête peut créer le même enregistrement deux fois. Le client déclenche la nouvelle tentative, le SDK construit la requête et le serveur décide s'il l'a déjà traitée.
+
+Vous pouvez lancer une enquête dans chaque dépôt en même temps. Avant l'implémentation, demandez aux agents de comparer leurs constats et de s'accorder sur le comportement à la frontière entre les dépôts.
+
+```text
+Enquêtez sur la création d'enregistrements en double après une nouvelle tentative de requête dans ces dépôts :
+[dépôt client], [dépôt SDK], [dépôt serveur].
+
+Attribuez une session Kimi au client, une session Codex au SDK et une session Grok
+au serveur. Demandez aux agents d'échanger
+leurs constats sur l'origine des nouvelles tentatives et la gestion des requêtes en double.
+Faites-les s'accorder sur le contrat de requête avant d'effectuer des modifications dépendantes.
+
+Implémentez les parties indépendantes en parallèle. Chaque agent doit indiquer son
+commit, les vérifications exécutées et ses dépendances vis-à-vis des changements dans les autres dépôts.
+
+Rassemblez les résultats et organisez une vérification d'intégration en utilisant ensemble
+les composants mis à jour. Indiquez l'ordre de fusion requis et les lacunes restantes.
+```
+
+L'échange décisif peut porter sur un détail minime : savoir si c'est le client ou le SDK qui crée l'identifiant de requête, et si les nouvelles tentatives le conservent. Transmettre cette décision aux autres sessions permet de garder les implémentations alignées.
+
+Des worktrees séparés isolent les modifications de fichiers. La justesse inter-dépôts dépend toujours d'une vérification des composants ensemble. Trois suites de tests qui réussissent séparément ne prouvent pas à elles seules que le client, le SDK et le serveur respectent le même contrat.
+
+## 3. Exécuter une boucle de revue et de correction entre agents
+
+Une fois qu'un patch existe, donnez à l'agent relecteur une cible précise. Une branche peut évoluer pendant que la revue est en cours : indiquez donc le dépôt, la base et le commit à inspecter.
+
+Vous pouvez demander au coordinateur d'organiser cet échange :
+
+```text
+Demandez à une session Codex de passer en revue le patch de la session Kimi.
+Identifiez d'abord le dépôt, le commit de base et le commit head actuel.
+Le relecteur doit inspecter le diff sans le modifier et envoyer des constats
+exploitables à la session d'implémentation, en incluant les emplacements dans les fichiers
+et une reproduction lorsque c'est possible.
+
+Demandez à l'agent d'implémentation de corriger ces points et de répondre avec le nouveau commit
+et les résultats de vérification. Faites inspecter ce commit mis à jour par le relecteur.
+
+Arrêtez-vous lorsqu'il ne reste plus de constats exploitables, ou après deux cycles de revue/correction.
+En cas de désaccord ou de blocage, remontez-moi le sujet.
+Résumez les commits examinés et tout ce qui reste non vérifié.
+```
+
+Vous pouvez également demander à un agent de contacter une autre session existante : « Envoyez vos constats à la session d'implémentation et demandez-lui de les traiter », ou « Demandez à la session de revue de vérifier votre dernier commit ». Utilisez une [mention de session](/fr/docs/mention/) pour identifier la conversation lors de la rédaction de l'instruction.
+
+L'échange peut se faire dans les deux sens. L'agent d'implémentation peut demander au relecteur de clarifier un constat ; le relecteur peut demander une reproduction manquante. Vous pouvez ouvrir l'une ou l'autre conversation pour ajouter du contexte ou modifier la mission.
+
+La limite de cycles dans cet exemple fait partie de l'instruction que vous donnez. Elle fixe un point d'arrêt pour vous renvoyer le travail non résolu plutôt que de demander indéfiniment aux agents de trancher un désaccord. Un agent qui ne signale aucun constat constitue un indice utile, mais le diff et les résultats de vérification méritent tout de même d'être inspectés.
+
+## Mentionner une autre conversation pour relier le travail
+
+Dans une conversation Lody, saisissez `@` et sélectionnez une autre conversation pour la référencer dans votre message.
+Vous pouvez ensuite demander à l'agent actuel de contacter cette session, de récupérer ses constats ou de lui confier une
+nouvelle mission. Les agents disposent ainsi d'un moyen direct d'échanger le contexte dont ils ont besoin sans que vous
+ayez à copier des messages entre discussions.
+
+Par exemple, sélectionnez la conversation d'enquête sur le SDK avec `@`, puis demandez :
+
+```text
+Demandez à la session mentionnée ce qu'elle a trouvé au sujet des nouvelles tentatives de requête.
+Envoyez-lui nos constats côté client, mettez-vous d'accord sur le comportement de l'identifiant de requête
+et utilisez cet accord pour mettre à jour notre plan d'implémentation.
+```
+
+Ou mentionnez la conversation de revue et demandez à l'agent d'implémentation d'y envoyer son dernier commit et
+ses résultats de vérification pour un nouveau contrôle. La mention identifie la conversation ; votre
+instruction indique à l'agent quelles informations demander ou envoyer. Les agents échangent le contexte
+pertinent par messages et via l'historique de session disponible tout en conservant leurs propres conversations.
+
+## Collaborer entre machines et agents
+
+Les sessions participantes peuvent s'exécuter sur différentes machines connectées à Lody. Par exemple, un agent
+principal sur votre ordinateur portable peut coordonner une session Kimi travaillant sur le SDK sur une station de travail et une session
+Codex enquêtant sur le serveur sur une machine de développement distante.
+
+| Machine                           | Agent           | Travail                                                      |
+| --------------------------------- | --------------- | ------------------------------------------------------------ |
+| Ordinateur portable               | Agent principal | Coordonner l'enquête et collecter les résultats              |
+| Station de travail                | Kimi            | Enquêter sur le SDK et le corriger                           |
+| Machine de développement distante | Codex           | Enquêter sur le serveur et passer en revue le contrat partagé |
+
+Utilisez les mentions de session et les messages pour relier leur travail exactement comme vous le feriez pour des sessions sur une même
+machine. Chaque agent utilise le checkout du dépôt, les outils et l'environnement d'exécution disponibles sur sa machine
+d'exécution. Les machines cibles doivent être en ligne, avec les accès nécessaires à l'espace de travail et des configurations
+d'agent compatibles.
+
+Les messages peuvent transporter des constats, des décisions d'interface, des références de commit et des demandes de revue. Pour tester
+des changements ensemble, rendez les commits ou artefacts correspondants disponibles sur la machine qui effectue
+la vérification d'intégration ; l'échange de contexte de conversation ne transfère pas les fichiers non commités.
+
+## Garder des passages de relais précis
+
+Les agents qui travaillent dans des sessions distinctes ont chacun leur propre historique de conversation. Transmettez explicitement les informations nécessaires à la tâche suivante :
+
+- **Avant l'implémentation :** le dépôt, l'issue, le périmètre, le comportement attendu et les décisions d'interface pertinentes.
+- **Avant la revue :** les commits base et head, le problème traité par le patch et les vérifications déjà exécutées.
+- **Après un correctif :** le nouveau commit, les constats auxquels il répond et les limitations restantes.
+
+Ces passages de relais rendent également le workflow plus facile à suivre pour les personnes. Dans Lody, vous pouvez inspecter les [diffs à côté de la conversation](/fr/docs/diff-viewer/) et [partager une session avec un coéquipier](/fr/docs/session-handoff/) qui doit poursuivre le travail. L'accès de l'équipe suit les autorisations de partage des machines et des projets.
+
+## Commencer avec une issue et deux agents
+
+Choisissez une issue que vous maîtrisez. Demandez à l'agent principal de l'inspecter et de déléguer un correctif ciblé à Kimi ou Codex. Ajoutez une session de revue distincte, demandez aux deux agents d'échanger leurs constats et inspectez vous-même le patch obtenu.
+
+Une fois ce workflow utile en place, étendez-le à une file d'attente ou à un bug couvrant plusieurs dépôts. Les mêmes opérations — créer une session, envoyer un message, consulter l'avancement et assurer le suivi — prennent en charge chaque cas.
+
+[Démarrez avec Lody](/fr/docs/quickstart/) et utilisez le [contrôle des sessions d'agent](/fr/docs/session-orchestration/) pour organiser votre première mission.

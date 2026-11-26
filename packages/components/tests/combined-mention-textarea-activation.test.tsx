@@ -608,19 +608,20 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
         errorMessage: 'not linked',
       }),
     });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(
-        JSON.stringify([
-          {
-            number: 42,
-            title: 'Linked repo issue',
-            state: 'open',
-            updated_at: '2026-01-01T00:00:00Z',
-            html_url: 'https://github.com/acme/unlinked/issues/42',
-          },
-        ]),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      )
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              number: 42,
+              title: 'Linked repo issue',
+              state: 'open',
+              updated_at: '2026-01-01T00:00:00Z',
+              html_url: 'https://github.com/acme/unlinked/issues/42',
+            },
+          ]),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
     );
 
     try {

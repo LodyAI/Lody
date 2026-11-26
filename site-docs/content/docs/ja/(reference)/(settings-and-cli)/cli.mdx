@@ -1,0 +1,724 @@
+---
+title: "CLI コマンド"
+description: "ログイン、デーモンモード、ワークスペース、GitHub リポジトリ、プロジェクト、セッション、マシン、および Agent Config に関する Lody CLI コマンドリファレンスです。"
+---
+
+# CLI コマンド
+
+`lody` は次の 2 つの役割を備えています。
+
+- `lody start` または `lody daemon start` で起動するローカルランタイムプロセス
+- ワークスペース、GitHub リポジトリ、セッション、マシン、および Agent Config を管理するための単発実行型 CLI
+
+Lody を初めてお使いの場合は、まず[クイックスタート](/ja/docs/quickstart)、[セッション](/ja/docs/session)、[Agent Config](/ja/docs/quickstart)、および [CLI ランタイムの種類](/ja/docs/cli-runtimes)をお読みください。
+
+## ヘルプとパラメーターの確認方法
+
+正確なフラグや位置引数を確認するには、CLI 組み込みのヘルプ出力が一次情報となります。
+
+```bash
+lody --help
+lody session --help
+lody session create --help
+lody agent-config update --help
+```
+
+どのコマンドでも、次のパターンで確認できます。
+
+| 対象範囲           | コマンド                           |
+| ------------------ | ---------------------------------- |
+| トップレベルの概要 | `lody --help`                      |
+| コマンドグループ   | `lody <group> --help`              |
+| 個別のサブコマンド | `lody <group> <subcommand> --help` |
+
+## コマンド概要
+
+| コマンドグループ                      | 用途                                                                   | ヘルプコマンド             | ドキュメント                                              |
+| ------------------------------------- | ---------------------------------------------------------------------- | -------------------------- | --------------------------------------------------------- |
+| `lody` / `login` / `logout` / `start` | サインイン、CLI の確認、フォアグラウンドでのローカルランタイムの実行   | `lody --help`              | [コアコマンド](#コアコマンド)                             |
+| `daemon`                              | バックグラウンドデーモンの起動、停止、状態確認、およびログの読み取り   | `lody daemon --help`       | [Daemon モード](#daemon-モード)                           |
+| `workspace`                           | アクセス可能なワークスペースの ID と slug の確認                       | `lody workspace --help`    | [Workspace コマンド](#workspace-コマンド)                 |
+| `github`                              | ワークスペースにすでにリンクされている GitHub リポジトリの一覧表示     | `lody github --help`       | [GitHub コマンド](#github-コマンド)                       |
+| `project`                             | ローカルプロジェクト登録の管理                                         | `lody project --help`      | [Project コマンド](#project-コマンド)                     |
+| `app`                                 | デスクトップアプリの起動、または応答停止時のローカルキャッシュのリセット | `lody app --help`          | [デスクトップアプリコマンド](#デスクトップアプリコマンド) |
+| `session`                             | セッションの作成、チャット送信、確認、アーカイブ、復元、および削除     | `lody session --help`      | [Session コマンド](#session-コマンド)                     |
+| `machine`                             | ワークスペースに登録されているマシンの確認                             | `lody machine --help`      | [Machine コマンド](#machine-コマンド)                     |
+| `agent-config`                        | Agent Config の管理とランタイム機能の更新                              | `lody agent-config --help` | [Agent Config コマンド](#agent-config-コマンド)           |
+
+## コアコマンド
+
+| コマンド      | 機能                                                 | ヘルプコマンド       |
+| ------------- | ---------------------------------------------------- | -------------------- |
+| `lody`        | トップレベルのヘルプと利用可能なコマンドを表示します | `lody --help`        |
+| `lody login`  | サインインし、現在のマシンを登録します               | `lody login --help`  |
+| `lody logout` | ローカルの認証情報を消去します                       | `lody logout --help` |
+| `lody start`  | 現在のターミナルで Lody CLI を実行します             | `lody start --help`  |
+
+ローカルランタイムと直接通信するコマンドは、通常フォアグラウンドで `lody start` を実行しているか、バックグラウンドで `lody daemon start` を実行している必要があります。
+
+- `lody session create`
+- `lody session chat`
+- `lody session cancel`
+- `lody agent-config refresh-capabilities`
+
+### `--auth` を使った非対話型ログイン
+
+デフォルトでは、`lody login` はブラウザーでデバイス認証フローを開きます。ヘッドレスマシン（CI ランナー、リモートサーバー、コンテナーなど）では、事前に作成した CLI トークンを渡すことでブラウザーでの操作を省略できます。
+
+```bash
+lody login --auth <token>
+lody start --auth <token>          # 1 ステップでサインインしてランタイムを起動
+```
+
+- `--auth <token>` は、デスクトップアプリまたは Web アプリの **Settings → Account → CLI Token** から生成した **CLI トークン**を使って認証します。**Create token** をクリックして短いメモ（例：`CI runner`、`home server`）を入力し、ダイアログを閉じる前にトークンをコピーしてください。トークンは一度しか表示されません。
+- トークンは同じパネルからいつでも取り消せます。取り消すと、そのトークンを使用していたすべての CLI が即座に無効になります。
+- `--auth` では対話型ログインと同じ `--machine-name <name>` フラグを使用できるため、デフォルトのホスト名を上書きできます。
+- `lody login` で `--auth` を省略すると、対話型のデバイス認証フローにフォールバックします。既存のセッションがない環境で `lody start` の `--auth` を省略すると、ランタイムは別途ログインするよう促します。
+
+トークンは安全な場所（シークレットマネージャーや `LODY_AUTH` 環境変数など）に保管してください。このトークンは、所属するワークスペースに対して対話型ログインと同じアクセス権限を付与します。
+
+## プロダクトアナリティクス
+
+クラウド版の各クライアント（デスクトップ、Web、モバイル、および CLI）は、デフォルトで最小限の利用回数データと機密情報を除去したエラー情報を共有します。これは、Settings → About → **Share app usage data** にあるアカウント単位の統合スイッチ 1 つで制御されます。これをオフにすると、デスクトップ、Web、モバイル、アカウント側の分析、およびサインイン済みのクラウド CLI プロセス全体で収集が停止します。
+
+任意のクラウド CLI プロセスについて、環境変数に `LODY_DISABLE_USAGE_SHARING=1`（または `DO_NOT_TRACK=1`）を設定することで、ローカル側の強制オーバーライドとしてアナリティクスを無効に保つこともできます。
+
+ローカルビルドでは PostHog が無効化されています。クラウド CLI でアナリティクスが有効になっている場合でも、最小限の登録済みイベント名、イベント時刻、ランダムなプロセス識別子、おおまかな `platform` / `cli_type` / 正規化された組み込み `agent_type` メタデータ（カスタムエージェントの場合は `other`）、およびライブラリのメタデータのみが送信され、個人プロファイルは作成されません。自動エラー送信には固定の種別とコードのみが含まれます。コマンド引数、マシン ID、リポジトリパス、カスタムエージェント名、およびエラーメッセージはこれらのリクエストから除外されます。
+
+## Daemon モード
+
+`lody daemon start` は Lody CLI をバックグラウンドで実行し、ターミナルウィンドウを開いたままにすることなく、デスクトップ、Web、およびモバイルの各クライアントから利用可能な状態を維持します。これはリモートマシンを接続するためのコマンドでもあります。サーバーや別のワークステーション上で SSH 経由で実行すると、そのマシンがワークスペースに参加します。
+
+バックグラウンドへ移行する前に、`lody daemon start` は Lody に接続できること、およびこのマシンがサインイン済みであることを確認します。
+
+- サインイン済みで接続可能な場合：デーモンを起動します。
+- 未サインインの場合（または保存された認証情報が拒否された場合）：デバイス認証フローを開始し、ブラウザーでサインインリンクを開いて（ブラウザーがない場合はリンクを出力します）、完了するまで待機してからデーモンモードに移行します。CI やスクリプト化された SSH コマンドなどターミナルが接続されていない環境では、ブラウザーの完了を待たずにエラー終了し、`lody login` または `--auth <cli_token>` の指定を求めます。
+- Lody に接続できない場合：同期できないデーモンを残さず、接続エラーで停止します。そのまま起動するには `--skip-auth-check` を渡し、非対話的にサインインするには `--auth <cli_token>` を渡してください。
+
+| コマンド              | 機能                                               |
+| --------------------- | -------------------------------------------------- |
+| `lody daemon start`   | バックグラウンドデーモンを起動します               |
+| `lody daemon status`  | ランタイム、マシン、および接続状態を表示します     |
+| `lody daemon logs`    | 最近のログを出力します（デフォルトでは 50 行）     |
+| `lody daemon stop`    | バックグラウンドデーモンを停止します               |
+| `lody daemon restart` | 実行中の場合はデーモンを停止し、その後再起動します |
+
+よく使う例：
+
+```bash
+lody daemon start
+lody daemon status
+lody daemon logs --lines 100
+lody daemon restart
+lody daemon stop
+```
+
+デーモンのログは `~/.lody/logs` 配下に書き込まれます。起動に失敗した場合や UI から CLI に接続できない場合は `lody daemon logs` を確認してください。デバッグ中にフォアグラウンドでリアルタイムの出力を確認したい場合は、代わりに `lody start` を使用してください。
+
+## Workspace コマンド
+
+後続のコマンドで正確なワークスペース ID または slug が必要な場合は、workspace コマンドを使用します。
+
+| コマンド              | 機能                                         | ヘルプコマンド               |
+| --------------------- | -------------------------------------------- | ---------------------------- |
+| `lody workspace list` | アクセス可能なワークスペースを一覧表示します | `lody workspace list --help` |
+
+### workspace list
+
+`lody workspace list` は、`ID`、`Name`、および `Slug` を含むテーブルを出力します。`--workspace <idOrSlug>` を受け取るコマンドを実行する前に使用してください。
+
+```bash
+lody workspace list
+lody workspace list --json
+```
+
+## GitHub コマンド
+
+Settings → GitHub からワークスペースにすでにリンクされているリポジトリを確認するには、github コマンドを使用します。
+
+| コマンド           | 機能                                                           | ヘルプコマンド            |
+| ------------------ | -------------------------------------------------------------- | ------------------------- |
+| `lody github list` | ワークスペースにリンクされた GitHub リポジトリを一覧表示します | `lody github list --help` |
+
+### github list
+
+`lody github list` は、ワークスペースにすでに追加されているリポジトリを出力します。GitHub App がアクセス可能なすべてのリポジトリではなく、そのワークスペースに現在リンクされているリポジトリのみが表示されます。
+
+```bash
+lody github list --workspace my-team
+lody github list --workspace my-team --json
+```
+
+主なパラメーター：
+
+- `--workspace <idOrSlug>`：対象のワークスペースを選択します
+- デフォルトの出力は、リポジトリ ID、フルネーム、公開設定を含む人間向けのテーブル形式です
+- `--json`：自動化向けに構造化されたリポジトリデータを返します
+
+正確なフラグの確認：
+
+```bash
+lody github list --help
+```
+
+## Project コマンド
+
+project コマンドは、後からセッション作成時に選択できるローカルプロジェクトの登録を管理します。
+
+| コマンド                  | 機能                                           | ヘルプコマンド               |
+| ------------------------- | ---------------------------------------------- | ---------------------------- |
+| `lody project add [path]` | ローカルプロジェクトディレクトリを登録します   | `lody project add --help`    |
+| `lody project list`       | 登録済みのローカルプロジェクトを一覧表示します | `lody project list --help`   |
+| `lody project delete`     | 登録済みのローカルプロジェクトを削除します     | `lody project delete --help` |
+
+セレクターを指定しない場合、`lody project list` はローカルデーモン経由で現在のマシンを読み取ります。クライアント上でデーモンを実行せずにワークスペースのマシンに登録されているプロジェクトを確認するには、クラウドカタログのパスを使用します。
+
+```bash
+lody project list --workspace <id|slug|name> [--machine <id|name>] --json
+```
+
+`--machine` を指定しない場合、ワークスペースカタログには各マシン上の認可されたローカルプロジェクトと有効な GitHub リポジトリが含まれます。種別を 1 つに絞るには `--kind local` または `--kind github` を使用し、`--machine` を指定するとそのマシン上のローカルプロジェクトのみに結果を限定します。明示的なワークスペースセレクターなしでワークスペースカタログを選択するには `--catalog` を使用します。オープンソースのローカルプラットフォームではクラウド I/O を行わないため、リモート一覧取得は利用できません。
+
+### リソースの探索とページネーション
+
+ワークスペースのマシン、プロジェクト、Agent Config、Role、および MCP の一覧は、デフォルトで 20 件を返します。同じフィルター条件で `--limit`（1〜100）、`--query`、および `--cursor` を指定するか、`--all-pages` を使用してください。JSON 出力では `items`、`hasMore`、および任意の `nextCursor` に加え、リソース固有の配列エイリアスが返されます。これらは安全なサマリーであり、MCP の接続値や Agent の起動認証情報は省略されます。
+
+```bash
+lody agent-role list --workspace my-team --all-pages --json
+lody agent-role get ROLE_ID --workspace my-team --json
+lody agent-config get AGENT_ID --workspace my-team --json
+lody mcp list --workspace my-team --json
+lody operation list --workspace my-team --session SESSION_ID --state active --json
+lody session list --workspace my-team --query parser --machine-id MACHINE_ID --agent-config-id AGENT_ID --agent-role-id ROLE_ID
+```
+
+Role の詳細にはプロンプトプレフィックスが含まれます。一覧には、利用不可となった Role も理由付きで読み取り可能な状態で保持されます。Operation の一覧取得は、リクエスト元のセッションおよび認証済みユーザーをスコープとしてこのマシンのストアを読み取り、`--state`、`--limit`、および `--cursor` を指定できます。他のマシンのストアを集約することはありません。セッションの Role フィルターは作成時の来歴情報に一致します。Lody MCP では、対応する読み取り専用の `lody_catalog` アクション（`machines`、`projects`、`agent_configs`、`agent_roles`、`mcp_servers`）および `lody_operation` ツールが公開されています。
+
+最新の正確なフラグについては、常に組み込みのヘルプを確認してください。
+
+```bash
+lody project add --help
+lody project list --help
+lody project delete --help
+```
+
+## Agent Role の作成と更新
+
+CLI および MCP からは、新しい Role の作成や、ご自身が所有する Role の変更を提案できます。提案はアクティブな会話内に確認カードとして表示されます。Lody で **Save** をクリックすると変更が適用され、カードを閉じるとカタログは変更されないままになります。コマンドが成功した場合、保存済みの Role ではなく、保留中の提案が作成されたことが報告されます。
+
+```bash
+lody agent-role create --name "Reviewer" --description "Review code" \
+  --prompt-prefix "Find actionable bugs" \
+  --machine-id MACHINE_ID --agent-config-id CONFIG_ID --session SESSION_ID
+
+lody agent-role update ROLE_ID --name "Code reviewer" \
+  --description "" --prompt-prefix "Focus on correctness" --session SESSION_ID
+```
+
+| オプション               | Create | Update            |
+| ------------------------ | ------ | ----------------- |
+| `--name <name>`          | 必須   | 任意              |
+| `--description <text>`   | 任意   | 任意、`""` で消去 |
+| `--prompt-prefix <text>` | 任意   | 任意、`""` で消去 |
+| `--machine-id <id>`      | 必須   | 非対応            |
+| `--agent-config-id <id>` | 必須   | 非対応            |
+
+更新では少なくとも 1 つのフィールドが必要です。省略されたフィールドは変更されません。新しい Role はプライベートとなり、紐付けられた Agent のデフォルト実行設定を使用します。モデル、権限、共有などの設定は Role エディターで変更してください。
+
+アクティブな会話を選択するには `--session` を指定するか `LODY_SESSION_ID` を設定し、ワークスペースが曖昧な場合は `--workspace <id-or-slug>` を指定します。リトライ時は同じ入力で `--request-id <id>` を再利用してください。既存の提案の結果が返されます。
+
+JSON ファイルもサポートされています。
+
+```bash
+lody agent-role create --file role.json --session SESSION_ID
+lody agent-role update ROLE_ID --file patch.json --session SESSION_ID
+```
+
+作成用ファイルには `name`、`machineId`、`agentConfigId`、および任意の `description` と `promptPrefix` を含めます。更新用ファイルには、変更する `name`、`description`、または `promptPrefix` のみを含めます。`--file` は Role フィールドの直接指定オプションと併用できません。Markdown に保存された指示を使用する場合は、代わりに `--prompt-prefix "$(cat reviewer.md)"` を渡してください。
+
+`role.json`:
+
+```json
+{
+  "name": "Reviewer",
+  "machineId": "MACHINE_ID",
+  "agentConfigId": "CONFIG_ID",
+  "description": "Review code",
+  "promptPrefix": "Check correctness.\nReport actionable bugs."
+}
+```
+
+`patch.json`:
+
+```json
+{
+  "description": "",
+  "promptPrefix": "Focus on correctness.\nExplain each finding."
+}
+```
+
+ファイルには、上記に示した camelCase キーを使用した単一の UTF-8 JSON オブジェクトを含める必要があります。更新用ファイルはパッチそのものであり、`patch` でラップしないでください。Role ID はコマンド引数として渡します。リトライ ID は `--request-id` で渡してください。JSON 文字列の改行には `\n` を使用します。コメントや末尾のカンマは有効な JSON ではありません。
+
+すべてのフィールド値は文字列です。作成時には `name`、`machineId`、および `agentConfigId` が必須です。更新時にはサポートされているフィールドを少なくとも 1 つ指定する必要があります。更新時に省略されたフィールドは変更されません。`""` は説明または指示を消去し、`null` は拒否されます。名前は空でなく、メンションに対応し、前後の空白除去後で 60 文字以内である必要があります。説明は最大 140 Unicode コードポイントまで、指示は前後の空白除去前で最大 32,768 文字まで指定できます。マシン ID と設定 ID は空でなく、前後の空白除去後で 128 文字以内である必要があります。サポートされていないフィールドは拒否されます。
+
+MCP では、`lody_agent_role` の `create` および `update` アクションを通じて同じ確認フローが公開されています。`create` は `requestId` と上記の作成フィールドを受け取り、`update` は `requestId`、`roleId`、および変更するテキストフィールドを含む `patch` を受け取ります。保存された Role の使い方については、[エージェントロール](/ja/docs/agent-roles)を参照してください。
+
+## デスクトップアプリコマンド
+
+| コマンド               | 機能                                                                               | ヘルプコマンド                |
+| ---------------------- | ---------------------------------------------------------------------------------- | ----------------------------- |
+| `lody app [path]`      | 指定したディレクトリを開いた状態で、新しいチャットでデスクトップアプリを起動します | `lody app --help`             |
+| `lody app reset-cache` | 次回起動時にデスクトップアプリのローカルキャッシュを消去します                     | `lody app reset-cache --help` |
+
+### フリーズしたデスクトップウィンドウを復旧する
+
+デスクトップウィンドウが応答しなくなった場合や、再起動しても同じ不具合状態のまま復帰する場合は、ローカルキャッシュが原因である可能性があり、修復のための **Settings → Clear cache** にもアクセスできないことがあります。そのような場合は、代わりにターミナルから同じ修復を予約してください。
+
+```bash
+lody app reset-cache          # 回復可能なキャッシュを消去（サインイン状態は維持）
+lody app reset-cache --hard   # すべてのローカルデータを削除してサインアウト
+lody app reset-cache --cancel # 上記のいずれかを取り消す
+```
+
+このコマンドはリクエストを記録するのみであり、アプリが次回起動した際に適用されます。そのため、**デスクトップアプリを終了してから再度開いてください**。外部へデータが送信されることはなく、サインインも実行中のデーモンも不要です。
+
+`lody app reset-cache` はアカウント情報、設定、未送信のショートカット下書きを保持したまま、ワークスペースから会話を再ダウンロードします。それでもアプリが動作しない場合にのみ `--hard` を使用してください。`--hard` ではサインイン中のセッションとローカルの環境設定も削除されます。適用されなかったリクエストは 1 日後に期限切れとなります。
+
+## Session コマンド
+
+session コマンドは、Web UI 以外から Lody を操作する際の主なワークフローです。
+
+使用する前に次の点を確認してください。
+
+- `session create`、`session chat`、および `session cancel` を実行するには、現在のマシン上で `lody start` または `lody daemon start` が実行されている必要があります
+- `session list`、`history`、`observe`、`show`、`rename`、`archive`、`restore`、および `delete` は、ログインとワークスペースへのアクセス権限のみで利用できます
+- ワークスペース ID または slug が必要な場合は、[`lody workspace list`](#workspace-コマンド) を使用してください
+- `sessionId` は位置引数または `LODY_SESSION_ID` を通じて渡せます
+
+| サブコマンド           | 機能                                                 | ローカルランタイムが必要 | ヘルプコマンド                |
+| ---------------------- | ---------------------------------------------------- | ------------------------ | ----------------------------- |
+| `lody session create`  | 現在のマシン上に新しいセッションを作成します         | はい                     | `lody session create --help`  |
+| `lody session chat`    | 既存のローカルセッションに新しいターンを送信します   | はい                     | `lody session chat --help`    |
+| `lody session cancel`  | ローカルセッションで実行中のターンをキャンセルします | はい                     | `lody session cancel --help`  |
+| `lody session list`    | ワークスペース内のセッションを一覧表示します         | いいえ                   | `lody session list --help`    |
+| `lody session history` | 表示可能なトランスクリプト履歴を読み取ります         | いいえ                   | `lody session history --help` |
+| `lody session observe` | 永続化されたセッション状態を確認・追跡します         | いいえ                   | `lody session observe --help` |
+| `lody session show`    | セッションのメタデータを表示します                   | いいえ                   | `lody session show --help`    |
+| `lody session rename`  | セッション名を変更します                             | いいえ                   | `lody session rename --help`  |
+| `lody session archive` | セッションをアクティブ一覧から移動します             | いいえ                   | `lody session archive --help` |
+| `lody session restore` | アーカイブされたセッションを復元します               | いいえ                   | `lody session restore --help` |
+| `lody session delete`  | アーカイブされたセッションを完全に削除します         | いいえ                   | `lody session delete --help`  |
+
+### session create
+
+GitHub リポジトリまたは登録済みのローカルプロジェクトに紐付けたセッションを作成します。
+
+```bash
+lody session create --workspace my-team --agent-config codex --repo owner/repo "Fix the failing test"
+```
+
+主なパラメーター：
+
+- `--workspace <idOrSlug>`：対象のワークスペースを選択します
+- `--agent-config <idOrName>`：[Agent Config](/ja/docs/quickstart) から Agent Config を選択します
+- `--agent-role <idOrName>`：ワークスペースの Agent Role から作成します。Role のマシン、Agent Config、および実行設定は `--machine`、`--agent`/`--agent-config`、`--mode`、`--model`、`--config-option` を上書きします（無視されたフラグは警告に表示されます）
+- `--repo <owner/repo>`：GitHub リポジトリを紐付けます
+- `--local-project <id|name|path>`：事前に登録されたローカルプロジェクトを紐付けます
+- `--repo` と `--local-project` は同時に指定できません
+- `--branch <name>`：開始ブランチを選択します
+- `--mode <modeId>` と `--model <modelId>`：ACP の選択内容を上書きします
+- `--env KEY=VALUE`：繰り返し指定でき、後の再開のためにセッションとともに保存されます
+- プロンプト入力は位置テキスト、`--prompt`、`--prompt-file`、または標準入力から渡せます
+
+正確なフラグの確認：
+
+```bash
+lody session create --help
+```
+
+### session chat
+
+現在のマシン上の既存セッションに、次のユーザーターンを送信します。
+
+```bash
+lody session chat <sessionId> "continue from the last patch"
+LODY_SESSION_ID=<sessionId> lody session chat --prompt "continue from the last patch"
+```
+
+主なパラメーター：
+
+- `sessionId` は位置引数または `LODY_SESSION_ID` から指定できます
+- プロンプト入力は位置テキスト、`--prompt`、`--prompt-file`、または標準入力から渡せます
+- `--mode <modeId>` と `--model <modelId>`：このターンで使用する ACP の選択内容を上書きします
+
+正確なフラグの確認：
+
+```bash
+lody session chat --help
+```
+
+### 入力の添付ファイル
+
+create と chat のどちらも、繰り返し指定可能な `--attach <path>` を受け付けます。
+
+```bash
+lody session create --machine remote --prompt "Analyze the data" --attach ./data.csv
+lody session chat <sessionId> --prompt "Use this screenshot too" --attach ./screen.png
+```
+
+パスはコマンドを実行しているマシン上で、現在のディレクトリからの相対パスとして読み取られます。メッセージが送信される前に、すべての添付ファイルの準備が完了している必要があります。1 つでも失敗すると送信全体が中止されます。空でないファイルを最大 8 件、各 100 MiB までサポートしています。画像サイズ制限内の対応画像は視覚入力として保持され、それより大きい画像はファイルとして扱われます。添付ファイルがある場合はテキストを省略できます。`--prompt-file` を使用した場合もプロンプトテキストが読み取られます。スタンドアロンの CLI コマンドを再実行すると、新しいメッセージが送信されます。
+
+### session cancel
+
+ローカルセッションで現在実行中のターンをキャンセルします。
+
+```bash
+lody session cancel <sessionId>
+```
+
+キャンセルに失敗した場合、コマンドは 0 以外の終了コードで終了します。正確なフラグの確認：
+
+```bash
+lody session cancel --help
+```
+
+### session list
+
+ワークスペース内のセッションを一覧表示します。デフォルトではアクティブなセッションのみが表示されます。
+
+```bash
+lody session list --workspace my-team
+lody session list --workspace my-team --archived
+lody session list --workspace my-team --all --limit 50 --json
+```
+
+主なパラメーター：
+
+- `--archived`：アーカイブ済みのセッションのみを表示します
+- `--all`：アクティブおよびアーカイブ済みの両方のセッションを含めます
+- `--limit <count>`：結果の件数を制限します
+- デフォルトの出力は人間向けのテーブル形式です。`--json` は構造化データを返します
+
+正確なフラグの確認：
+
+```bash
+lody session list --help
+```
+
+### session history
+
+1 つのセッションについて表示可能なトランスクリプトを読み取ります。このコマンドは、内部の推論、ツール呼び出し、その他のユーザー向けではない項目を意図的に非表示にします。
+
+```bash
+lody session history <sessionId> --limit 20
+lody session history <sessionId> --all --reverse
+lody session history <sessionId> --jsonl
+```
+
+主なパラメーター：
+
+- `--limit <count>`：最新の表示可能な N ターンを返します
+- `--all`：表示可能なトランスクリプト全体を返します
+- `--reverse`：新しい順に出力します
+- `--json` および `--jsonl` は自動化に便利です
+
+正確なフラグの確認：
+
+```bash
+lody session history --help
+```
+
+### session observe
+
+タスクを送信したり未読状態を変更したりせずに、既存のセッションへアタッチします。このコマンドは現在クラウドログインとワークスペースアクセスを使用するため、ローカル専用のデーモンへのアタッチには対応していません。
+
+```bash
+lody session observe <sessionId> --json
+lody session observe <sessionId> --jsonl --follow
+lody session observe --workspace my-team --all --jsonl --follow
+```
+
+`--follow` を指定しない場合は、スナップショットを出力して終了します。追跡には `--jsonl` が必要です。`history --jsonl` とは異なり、後続のターンのために接続を維持します。ワークスペースモードでは `--workspace` と `--all` の両方が必要であり、位置引数のセッション ID は拒否され、`LODY_SESSION_ID` も無視されます。
+
+JSONL イベントは `snapshot`、`ready`、`session.changed`、`turn.started`、`turn.finished`、および `session.removed` です。成功した各イベントには `version: 1`、`streamId`、`sequence`、`observedAt`（Unix ミリ秒）、および `workspaceId` が含まれます。`turn.finished` にはユーザー ID / 任意のアシスタント ID と `outcome: completed | failed | canceled` が含まれます。初期スナップショットには `latestTurn` が含まれるため、高速に完了したタスクの結果も読み取ることができます。過去のターンがイベントとして再生されることはありません。
+
+セッションスナップショットでは `source: persisted | metadata` および `freshness: synced | unavailable` が区別されます。ワークスペースの `ready` はカタログの列挙完了を示すものであり、すべての履歴ルームが開かれたことを意味するわけではありません。メタデータのみのセッションでは `state: unknown` となります。過去のアイドル状態のルームは開かれないままとなり、それらの履歴のみの変更はワークスペース追跡の対象外です。必要に応じて個別にアタッチしてください。完了判定には永続化されたターンの証跡が必要であり、メタデータ上のアイドル状態や Presence の喪失だけでは不十分です。`freshness` は読み取りが確認されたことを示すものであり、エージェントが現在オンラインである保証ではありません。
+
+`sequence` は実行中の 1 つのプロセス内での順序付けにのみ使用され、別プロセスでの再開や再生保証には使用できません。再起動後はスナップショットと履歴を照合してください。通常のストリーミングテキストは省略されます。構造化された診断情報は標準エラー出力に出力され、コマンドエラーは既存の CLI エラー形式を使用します。Ctrl+C を押すと、実行をキャンセルせずに監視のみを停止します。
+
+```bash
+lody session observe --help
+```
+
+### session show
+
+ステータス、マシン、ワークスペースの紐付け、履歴数などのセッションメタデータを表示します。
+
+```bash
+lody session show <sessionId>
+lody session show <sessionId> --json
+```
+
+正確なフラグの確認：
+
+```bash
+lody session show --help
+```
+
+### session rename
+
+セッションの名前を変更します。
+
+```bash
+lody session rename <sessionId> "New title"
+LODY_SESSION_ID=<sessionId> lody session rename --title "New title"
+```
+
+`LODY_SESSION_ID` を使用する場合は、タイトルが明示的なセッションセレクターと誤認されないよう、`--title` の使用を推奨します。
+
+正確なフラグの確認：
+
+```bash
+lody session rename --help
+```
+
+### session archive
+
+セッションをアーカイブし、アクティブ一覧から非表示にしつつ復元可能な状態に保ちます。
+
+```bash
+lody session archive <sessionId>
+```
+
+正確なフラグの確認：
+
+```bash
+lody session archive --help
+```
+
+### session restore
+
+アーカイブされたセッションをアクティブ一覧に復元します。
+
+```bash
+lody session restore <sessionId>
+```
+
+このコマンドはアーカイブ済みのセッションに対してのみ機能します。正確なフラグの確認：
+
+```bash
+lody session restore --help
+```
+
+### session delete
+
+アーカイブされたセッションを完全に削除します。これにより、worktree やランタイムリソースを削除できるようにマシン側のクリーンアップもキューに登録されます。
+
+```bash
+lody session delete <sessionId>
+```
+
+このコマンドはアーカイブ済みのセッションに対してのみ機能します。正確なフラグの確認：
+
+```bash
+lody session delete --help
+```
+
+## Machine コマンド
+
+ワークスペースに登録されているマシンや、それらがオンラインに見えるかどうかを確認するには、machine コマンドを使用します。
+
+| コマンド            | 機能                                     | ヘルプコマンド             |
+| ------------------- | ---------------------------------------- | -------------------------- |
+| `lody machine list` | ワークスペース内のマシンを一覧表示します | `lody machine list --help` |
+
+### machine list
+
+```bash
+lody machine list --workspace my-team
+lody machine list --workspace my-team --online-only
+lody machine list --workspace my-team --json
+lody machine list --workspace my-team --json --include-acp-capabilities
+```
+
+デフォルトのテーブルにはマシンの識別情報と利用可能状態が表示されます。JSON では `onlineStatus: online | offline | unknown` が保持され、Presence を取得できない状態がオフラインとして誤って報告されることはありません。`--include-acp-capabilities` および `--include-agents` は従来の詳細出力を維持するものであり、ディレクトリ一覧のページネーションやフィルター用フラグと併用することはできません。ページネーション付きで機能情報を取得するには、`agent-config list/get` を使用してください。
+
+- デフォルトでは、オンラインとオフラインの両方のマシンが表示されます
+- 最近のハートビートがあるマシンに絞り込むには `--online-only` を使用します
+- ペイロードサイズを小さく保つため、`--json` ではデフォルトで `acpCapabilities` が省略されます
+- JSON 出力に機能キャッシュを含める必要がある場合は `--include-acp-capabilities` を指定します
+
+これは `agent-config refresh-capabilities` を実行する前に確認するのに便利です。
+
+正確なフラグの確認：
+
+```bash
+lody machine list --help
+```
+
+## Agent Config コマンド
+
+agent-config コマンドは、[Agent Config](/ja/docs/quickstart) における Web UI の操作の多くを CLI で再現しています。
+
+使用する前に次の点を確認してください。
+
+- セレクターには ID または名前を指定できます
+- 複数の設定やマシンが同じ名前を共有している場合、CLI では明示的な ID の指定が必要です
+- `refresh-capabilities` は現在、CLI からは現在のマシン上でのみ動作します
+
+| サブコマンド                             | 機能                                                   | ヘルプコマンド                                  |
+| ---------------------------------------- | ------------------------------------------------------ | ----------------------------------------------- |
+| `lody agent-config list`                 | ワークスペース内の設定を一覧表示します                 | `lody agent-config list --help`                 |
+| `lody agent-config show`                 | 1 つの設定を表示します                                 | `lody agent-config show --help`                 |
+| `lody agent-config create`               | 新しい設定を作成します                                 | `lody agent-config create --help`               |
+| `lody agent-config import-magpie`        | ローカルの Magpie プロバイダーをインポートします       | `lody agent-config import-magpie --help`        |
+| `lody agent-config update`               | 既存の設定を更新します                                 | `lody agent-config update --help`               |
+| `lody agent-config delete`               | 設定を削除します                                       | `lody agent-config delete --help`               |
+| `lody agent-config refresh-capabilities` | サポートされているモード、モデル、オプションを更新します | `lody agent-config refresh-capabilities --help` |
+
+### agent-config list
+
+```bash
+lody agent-config list --workspace my-team
+```
+
+設定の識別情報、マシン、および利用可能状態を表示します。JSON にはエージェントタイプ、説明、およびサポートされているモデル / 実行設定も含まれます。一覧を絞り込むには `--machine`、`--query`、およびページネーションを使用してください。
+
+### agent-config show
+
+```bash
+lody agent-config show <idOrName>
+LODY_AGENT_CONFIG_ID=<id> lody agent-config show
+```
+
+設定フィールドを人間が読みやすい形式または JSON で表示します。
+
+### agent-config create
+
+組み込みまたはレジストリのエージェントランタイム用の設定を作成します。
+
+```bash
+lody agent-config create \
+  --workspace my-team \
+  --agent-type codex \
+  --name "Codex Default" \
+  --env OPENAI_API_KEY=... \
+  --prompt "Always run tests before finishing"
+```
+
+主なパラメーター：
+
+- `--agent-type <type>` は必須です
+- `claude` と `codex` は組み込みランタイムとして扱われます
+- その他のすべてのエージェントタイプはレジストリランタイムとして扱われます
+- `--env KEY=VALUE` は繰り返し指定できます
+- `--env-file <path>` はファイルから環境変数を読み込みます
+- `--prompt` または `--prompt-file` はデフォルトのプロンプトプレフィックスを設定します
+
+正確なフラグの確認：
+
+```bash
+lody agent-config create --help
+```
+
+### agent-config import-magpie
+
+コマンドを実行しているサーバー上で、サポートされているすべてのエージェントまたは選択した一部を対象に Magpie プロバイダーをインポートします。
+
+```bash
+lody agent-config import-magpie --workspace my-team --json
+```
+
+セットアップ、オプション、および結果ステータスについては、[Magpie を接続する](/ja/docs/magpie)を参照してください。
+
+### agent-config update
+
+既存の設定をその場で更新します。
+
+```bash
+lody agent-config update <idOrName> --name "Codex CI"
+lody agent-config update <idOrName> --env OPENAI_API_KEY=... --unset-env OLD_KEY
+lody agent-config update <idOrName> --prompt ""
+```
+
+主なパラメーター：
+
+- `--name`：表示名を更新します
+- `--description ""`：説明を消去します
+- `--env` および `--env-file`：新しい環境変数の値をマージします
+- `--unset-env KEY`：1 つ以上の環境変数を削除します
+- `--prompt ""`：デフォルトのプロンプトプレフィックスを消去します
+
+正確なフラグの確認：
+
+```bash
+lody agent-config update --help
+```
+
+### agent-config delete
+
+```bash
+lody agent-config delete <idOrName>
+```
+
+ID または一意の名前を指定して 1 つの設定を削除します。
+
+### agent-config refresh-capabilities
+
+現在のマシン上にある 1 つの Agent Config にキャッシュされた機能情報を更新します。
+
+```bash
+lody agent-config refresh-capabilities <idOrName> --workspace my-team
+```
+
+次の操作を行った後に使用してください。
+
+- コーディング CLI をインストールまたはアップグレードしたとき
+- Agent Config の環境変数を変更したとき
+- マシン上で利用可能なモデルやモードを更新したとき
+
+主なパラメーター：
+
+- `--machine <idOrName>`：デフォルトでは現在のマシンになります
+- 選択したマシンはオンラインである必要があります
+- 現在 CLI ではリモートマシンの更新を拒否するため、このコマンドは現在のマシンで使用してください
+- 自動化向けに `--json` および `--jsonl` に対応しています
+
+正確なフラグの確認：
+
+```bash
+lody agent-config refresh-capabilities --help
+```
+
+## よく使う例
+
+```bash
+# 使用するワークスペースの ID または slug を確認
+lody workspace list
+
+# そのワークスペースにすでにリンクされている GitHub リポジトリを確認
+lody github list --workspace my-team
+
+# そのワークスペース内の Agent Config を確認
+lody agent-config list --workspace my-team
+
+# ローカルデーモンをバックグラウンドで起動
+lody daemon start
+
+# フォアグラウンドモードは一時的なデバッグに便利です
+lody start
+
+# GitHub リポジトリでセッションを作成
+lody session create \
+  --workspace my-team \
+  --agent-config codex \
+  --repo owner/repo \
+  "Fix the failing tests"
+
+# 最新の表示可能なトランスクリプトのターンを取得
+lody session history <sessionId> --limit 20
+
+# マシンを確認し、現在のマシンの機能情報を更新
+lody machine list --workspace my-team --online-only
+lody agent-config refresh-capabilities codex --workspace my-team
+```

@@ -1,0 +1,9 @@
+{
+  "title": "設定與 CLI",
+  "pages": [
+    "cli",
+    "keyboard-shortcuts",
+    "notification",
+    "terminal"
+  ]
+}

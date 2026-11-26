@@ -297,7 +297,8 @@ export function hostLedgerHistory(
         body: Result.getOrThrow(decodeRecord(bytes)).body,
       });
     }
-    records = suffixRecords.length === 0 ? previous.records : [...previous.records, ...suffixRecords];
+    records =
+      suffixRecords.length === 0 ? previous.records : [...previous.records, ...suffixRecords];
     if (
       records.length > 0 &&
       (records[0]!.hash !== status.genesisHash ||
@@ -311,7 +312,10 @@ export function hostLedgerHistory(
             extendLedger(previous.view, suffixBytes, { head: view.head, length: view.length })
           );
     const state = Result.getOrThrow(exportVerifiedState(replayed));
-    if (!replayed.head.equals(view.head) || bytesToHex(state.stateDigest.toBytes()) !== status.stateDigest)
+    if (
+      !replayed.head.equals(view.head) ||
+      bytesToHex(state.stateDigest.toBytes()) !== status.stateDigest
+    )
       throw new E2eeHistoryError('local-conflict', 'history-changed');
     view = replayed;
   } else {
@@ -326,7 +330,10 @@ export function hostLedgerHistory(
         throw new E2eeHistoryError('local-conflict', 'history-changed');
       return { index: position, rawHex, hash, body: Result.getOrThrow(decodeRecord(bytes)).body };
     });
-    if (records.length === view.length && positions.every((position, index) => position === index)) {
+    if (
+      records.length === view.length &&
+      positions.every((position, index) => position === index)
+    ) {
       const replayed = Result.getOrThrow(
         verifyLedger({
           anchor: view.genesis,

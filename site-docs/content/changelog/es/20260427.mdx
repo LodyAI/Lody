@@ -1,0 +1,31 @@
+---
+title: "20260427"
+version: 0.47.1
+date: 2026-04-27
+description: "Se añadió compatibilidad con GPT-5.5, se rediseñaron los ajustes de agentes, se incorporó un ajuste preestablecido de DeepSeek y se mejoraron la barra lateral, la actualización automática de archivos y la estabilidad general."
+---
+
+### Experiencia con agentes
+
+- Se añadió compatibilidad con GPT-5.5
+- Se rediseñó la página de configuración de agentes con una nueva barra lateral de categorías y un flujo para actualizar capacidades
+- Se añadió un ajuste preestablecido de DeepSeek para que puedas pegar un token y completar la configuración rápidamente
+- Se mejoraron la estabilidad de conexión y la detección de capacidades para agentes como Claude Code y Codex
+- Se corrigió un problema en macOS por el que usar Codex podía mostrar una ventana emergente de error de `ComputerUse`
+
+### Experiencia de escritorio
+
+- Ahora es posible contraer la barra lateral izquierda, redimensionarla arrastrándola y alternarla mediante atajos de teclado
+- Las secciones de Proyectos locales, GitHub Worktrees y Chat son más claras y cuentan con interacciones más consistentes en la barra lateral
+- Las listas de archivos locales en las sesiones ahora se actualizan automáticamente, lo que facilita revisar los cambios a medida que ocurren
+
+### Experiencia de conversación
+
+- Los bloques de código en streaming ya no parpadean entre el resaltado de sintaxis y el renderizado en texto plano
+- La inicialización y el cambio de sesiones son más estables, lo que reduce confusiones ocasionales durante la carga
+
+### Otras correcciones
+
+- Los proyectos remotos ya no activan incorrectamente la detección local
+- El estado en línea de las máquinas y la sincronización en tiempo real ahora son más precisos
+- Se corrigió el espaciado inferior en el área de salida de la CLI dentro de Electron

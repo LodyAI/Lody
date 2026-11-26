@@ -398,7 +398,11 @@ describe('useRecoverableConvexQuery', () => {
       const state = useOptionalPublicConvexQuery(publicQuery, { slug: 'demo' });
       return (
         <div>
-          {value ? `ok:${String(value.available)}` : state.error ? 'public error' : 'public loading'}
+          {value
+            ? `ok:${String(value.available)}`
+            : state.error
+              ? 'public error'
+              : 'public loading'}
         </div>
       );
     }

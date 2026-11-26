@@ -18,6 +18,7 @@ import { type ReactNode } from 'react';
 import { Check, Send, SendHorizontal, X } from 'lucide-react';
 import { ReplicaBrowserToolbar } from './landing-replica/browser-toolbar';
 import { Button } from './landing-replica/button';
+import type { ReplicaLocale } from './landing-replica/types';
 import { cn } from './landing-replica/utils';
 
 export type LandingPreviewDemoState = {
@@ -62,7 +63,117 @@ const HOVER_BOX_STYLE: React.CSSProperties = {
 
 const BROWSER_ADDRESS = 'http://127.0.0.1:3002/';
 
-export function LandingPreviewPanel({ state }: { state: LandingPreviewDemoState }) {
+const PANEL_COPY: Record<
+  ReplicaLocale,
+  {
+    previewComment: string;
+    placeholder: string;
+    cancel: string;
+    addComment: string;
+    draft: string;
+    collapseComment: string;
+    added: string;
+    send: string;
+    resolve: string;
+  }
+> = {
+  en: {
+    previewComment: 'Preview comment',
+    placeholder: 'Describe what should change here...',
+    cancel: 'Cancel',
+    addComment: 'Add comment',
+    draft: 'Draft',
+    collapseComment: 'Collapse comment',
+    added: 'Added',
+    send: 'Send',
+    resolve: 'Resolve',
+  },
+  zh: {
+    previewComment: '预览评论',
+    placeholder: '描述这里需要修改的内容…',
+    cancel: '取消',
+    addComment: '添加评论',
+    draft: '草稿',
+    collapseComment: '收起评论',
+    added: '已添加',
+    send: '发送',
+    resolve: '解决',
+  },
+  'zh-hant': {
+    previewComment: '預覽留言',
+    placeholder: '描述這裡需要修改的內容…',
+    cancel: '取消',
+    addComment: '新增留言',
+    draft: '草稿',
+    collapseComment: '收合留言',
+    added: '已加入',
+    send: '傳送',
+    resolve: '解決',
+  },
+  ja: {
+    previewComment: 'プレビューコメント',
+    placeholder: '変更してほしい内容を記入…',
+    cancel: 'キャンセル',
+    addComment: 'コメントを追加',
+    draft: '下書き',
+    collapseComment: 'コメントを折りたたむ',
+    added: '追加済み',
+    send: '送信',
+    resolve: '解決',
+  },
+  ko: {
+    previewComment: '미리보기 댓글',
+    placeholder: '여기서 변경할 내용을 설명하세요…',
+    cancel: '취소',
+    addComment: '댓글 추가',
+    draft: '초안',
+    collapseComment: '댓글 접기',
+    added: '추가됨',
+    send: '보내기',
+    resolve: '해결',
+  },
+  es: {
+    previewComment: 'Comentario de vista previa',
+    placeholder: 'Describe qué debería cambiar aquí…',
+    cancel: 'Cancelar',
+    addComment: 'Añadir comentario',
+    draft: 'Borrador',
+    collapseComment: 'Contraer comentario',
+    added: 'Añadido',
+    send: 'Enviar',
+    resolve: 'Resolver',
+  },
+  fr: {
+    previewComment: "Commentaire d'aperçu",
+    placeholder: 'Décrivez ce qui doit changer ici…',
+    cancel: 'Annuler',
+    addComment: 'Ajouter un commentaire',
+    draft: 'Brouillon',
+    collapseComment: 'Réduire le commentaire',
+    added: 'Ajouté',
+    send: 'Envoyer',
+    resolve: 'Résoudre',
+  },
+  ru: {
+    previewComment: 'Комментарий к предпросмотру',
+    placeholder: 'Опишите, что нужно изменить…',
+    cancel: 'Отмена',
+    addComment: 'Добавить комментарий',
+    draft: 'Черновик',
+    collapseComment: 'Свернуть комментарий',
+    added: 'Добавлено',
+    send: 'Отправить',
+    resolve: 'Решить',
+  },
+};
+
+export function LandingPreviewPanel({
+  state,
+  locale = 'en',
+}: {
+  state: LandingPreviewDemoState;
+  locale?: ReplicaLocale;
+}) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       {/* Toolbar replica; only annotation mode changes, driven by the demo. */}
@@ -70,11 +181,12 @@ export function LandingPreviewPanel({ state }: { state: LandingPreviewDemoState 
         address={BROWSER_ADDRESS}
         loading={state.loading}
         annotating={state.annotating}
+        locale={locale}
       />
 
       {/* The page fills the panel — the browser has no device canvas. */}
       <div className="relative min-h-0 flex-1 overflow-hidden bg-white">
-        {state.loading ? <MockPreviewLoading /> : <MockLandingSite state={state} />}
+        {state.loading ? <MockPreviewLoading /> : <MockLandingSite state={state} locale={locale} />}
       </div>
     </div>
   );
@@ -97,7 +209,13 @@ function MockPreviewLoading() {
 
 // ---- The previewed page: a mock Lody landing hero -----------------------------
 
-function MockLandingSite({ state }: { state: LandingPreviewDemoState }) {
+function MockLandingSite({
+  state,
+  locale,
+}: {
+  state: LandingPreviewDemoState;
+  locale: ReplicaLocale;
+}) {
   const lines = [PAGE_LINES[0], PAGE_LINES[1], state.edited ? PAGE_LINE_2_EDITED : PAGE_LINES[2]];
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-[linear-gradient(180deg,#071a2c_0%,#03090f_78%,#02060b_100%)] text-slate-100">
@@ -118,15 +236,15 @@ function MockLandingSite({ state }: { state: LandingPreviewDemoState }) {
 
       {/* Hero: the three copy lines the ghost cursor inspects. */}
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-8 pb-10 text-center">
-        <CopyLine index={0} state={state}>
+        <CopyLine index={0} state={state} locale={locale}>
           <h2 className="text-balance text-2xl font-bold leading-tight tracking-tight text-white sm:text-3xl">
             {lines[0]}
           </h2>
         </CopyLine>
-        <CopyLine index={1} state={state}>
+        <CopyLine index={1} state={state} locale={locale}>
           <p className="text-pretty text-sm leading-6 text-slate-300 sm:text-base">{lines[1]}</p>
         </CopyLine>
-        <CopyLine index={2} state={state}>
+        <CopyLine index={2} state={state} locale={locale}>
           <p className="text-pretty text-sm leading-6 text-slate-300 sm:text-base">{lines[2]}</p>
         </CopyLine>
         <div className="mt-3 flex items-center gap-3">
@@ -147,10 +265,12 @@ function MockLandingSite({ state }: { state: LandingPreviewDemoState }) {
 function CopyLine({
   index,
   state,
+  locale,
   children,
 }: {
   index: number;
   state: LandingPreviewDemoState;
+  locale: ReplicaLocale;
   children: ReactNode;
 }) {
   const hovered = state.hoverLine === index;
@@ -173,14 +293,15 @@ function CopyLine({
           className="absolute -left-4 top-1/2 z-30 block h-3 w-3 -translate-y-1/2 rounded-full bg-amber-500 ring-2 ring-background"
         />
       ) : null}
-      {draft ? <DraftCommentCard text={draft.text} /> : null}
-      {saved ? <SavedCommentCard text={saved.text} staged={saved.staged} /> : null}
+      {draft ? <DraftCommentCard text={draft.text} locale={locale} /> : null}
+      {saved ? <SavedCommentCard text={saved.text} staged={saved.staged} locale={locale} /> : null}
     </div>
   );
 }
 
 // 1:1 with the annotation draft card in `sessions/managed-preview-surface.tsx`.
-function DraftCommentCard({ text }: { text: string }) {
+function DraftCommentCard({ text, locale }: { text: string; locale: ReplicaLocale }) {
+  const t = PANEL_COPY[locale];
   return (
     <div
       data-demo="pv-draft"
@@ -188,7 +309,7 @@ function DraftCommentCard({ text }: { text: string }) {
     >
       <div className="mb-2 flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold">Preview comment</div>
+          <div className="text-xs font-semibold">{t.previewComment}</div>
           <div className="truncate font-mono text-[10px] text-muted-foreground">
             p &quot;{PAGE_LINES[2].slice(0, 42)}&quot;
           </div>
@@ -196,7 +317,7 @@ function DraftCommentCard({ text }: { text: string }) {
         <button
           type="button"
           className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-hover-foreground"
-          aria-label="Cancel"
+          aria-label={t.cancel}
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -205,16 +326,16 @@ function DraftCommentCard({ text }: { text: string }) {
       <textarea
         value={text}
         readOnly
-        placeholder="Describe what should change here..."
+        placeholder={t.placeholder}
         className="flex min-h-20 w-full resize-none rounded-md border border-input-border bg-background px-3 py-2 text-xs text-input-foreground ring-offset-background placeholder:text-input-placeholder focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60"
       />
       <div className="mt-2 flex justify-end gap-1.5">
         <Button type="button" size="sm" variant="ghost">
-          Cancel
+          {t.cancel}
         </Button>
         <Button type="button" size="sm" data-demo="pv-draft-send" disabled={text.length === 0}>
           <Send className="h-3.5 w-3.5" />
-          Add comment
+          {t.addComment}
         </Button>
       </div>
     </div>
@@ -223,7 +344,16 @@ function DraftCommentCard({ text }: { text: string }) {
 
 // Mirrors the open comment card in visual-annotation-comments-overlay.tsx, but
 // uses app tokens so dark mode (landing default) stays legible on the mock page.
-function SavedCommentCard({ text, staged }: { text: string; staged: boolean }) {
+function SavedCommentCard({
+  text,
+  staged,
+  locale,
+}: {
+  text: string;
+  staged: boolean;
+  locale: ReplicaLocale;
+}) {
+  const t = PANEL_COPY[locale];
   return (
     <article className="absolute left-6 top-[calc(100%+12px)] z-30 w-[260px] overflow-hidden rounded-xl border border-border bg-popover text-left text-popover-foreground shadow-2xl">
       <div className="flex items-start gap-2.5 px-3 pt-3">
@@ -237,7 +367,7 @@ function SavedCommentCard({ text, staged }: { text: string; staged: boolean }) {
           <p className="flex items-center gap-1.5 text-xs font-semibold leading-4 text-foreground">
             <span className="truncate">Leon</span>
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
-              Draft
+              {t.draft}
             </span>
           </p>
           <p className="mt-1 whitespace-pre-line break-words text-[13px] leading-5 text-muted-foreground">
@@ -246,7 +376,7 @@ function SavedCommentCard({ text, staged }: { text: string; staged: boolean }) {
         </div>
         <button
           type="button"
-          aria-label="Collapse comment"
+          aria-label={t.collapseComment}
           className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground"
         >
           <X className="h-3.5 w-3.5" />
@@ -269,14 +399,14 @@ function SavedCommentCard({ text, staged }: { text: string; staged: boolean }) {
           ) : (
             <SendHorizontal className="h-3 w-3 -scale-x-100" />
           )}
-          {staged ? 'Added' : 'Send'}
+          {staged ? t.added : t.send}
         </button>
         <button
           type="button"
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-emerald-600 transition-colors hover:bg-emerald-500/10 dark:text-emerald-400"
         >
           <Check className="h-3 w-3" />
-          Resolve
+          {t.resolve}
         </button>
       </div>
     </article>

@@ -166,10 +166,7 @@ export function terrainTransferables(a: TerrainAttributes): ArrayBuffer[] {
   );
 }
 
-export function computeTerrainAttributes(
-  pointBudget: number,
-  P: TerrainParams
-): TerrainAttributes {
+export function computeTerrainAttributes(pointBudget: number, P: TerrainParams): TerrainAttributes {
   const aspect = (2 * HALF_W) / (Z_NEAR - Z_FAR);
   const rows = Math.max(40, Math.round(Math.sqrt(pointBudget / aspect)));
   const cols = Math.max(40, Math.round(pointBudget / rows));

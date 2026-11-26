@@ -1,0 +1,47 @@
+---
+title: "Visor de diffs"
+description: "Revisa los cambios de archivos del agente de programación en tiempo real con diffs por ronda, recuentos de líneas modificadas, pestañas de archivos y secciones sin cambios expandibles."
+---
+
+# Visor de diffs
+
+Lody sincroniza en tiempo real las actualizaciones de archivos realizadas por el agente de programación después de cada ronda de conversación.
+
+## Diffs de la ronda actual
+
+Cuando le pides a la IA que edite código y modifique archivos, Lody compara el estado de los archivos antes y después de esa
+ronda de conversación. Al finalizar la ronda, muestra todos los cambios de archivos y el recuento de líneas modificadas
+debajo de la burbuja de mensaje del agente de programación.
+
+<ConversationDiffPreview locale="es" />
+
+Haz clic en cualquier archivo para abrir una pestaña de diff e ir directamente a ese archivo. El primer clic puede tardar un poco
+más mientras los datos se sincronizan y cargan.
+
+<DiffViewerPreview locale="es" />
+
+También puedes hacer clic en el control de expandir del panel para ver las secciones del archivo que no han cambiado.
+
+## Comentarios en líneas
+
+Pasa el cursor sobre una línea comentable del diff y haz clic en `+` junto al número de línea para añadir un comentario en Markdown.
+En dispositivos móviles, toca una línea comentable para abrir el cuadro de comentario. Los comentarios admiten respuestas en hilo,
+marcar como resuelto o sin resolver y enviar el hilo de vuelta al chat para que el agente se encargue.
+
+Si la sesión está vinculada a un PR de GitHub, los comentarios de Lody se pueden sincronizar como comentarios en líneas de
+revisión de PR de GitHub. Los hilos de revisión existentes en GitHub también aparecen en el diff de Lody para que puedas responder en contexto.
+
+Consulta [Comentarios en diffs](/es/docs/diff-comments) para ver el flujo de trabajo completo.
+
+## Diffs de toda la conversación
+
+Además de los cambios por ronda, puedes hacer clic en el botón para expandir la barra lateral en la esquina superior derecha
+de la interfaz del chat para abrir la barra lateral de archivos y cambios.
+
+En la pestaña `Changes`, puedes ver todos los cambios de archivos de la conversación actual.
+
+## Revisión remota
+
+Cuando la máquina de la sesión está en línea, los dispositivos remotos pueden abrir archivos modificados y diffs mediante el
+mismo proveedor de archivos de sesión que usa la interfaz de escritorio. Si un diff o archivo todavía se está sincronizando, Lody muestra
+el estado actual de no disponible o cargando en lugar de suponerlo a partir de la última instantánea del espacio de trabajo.

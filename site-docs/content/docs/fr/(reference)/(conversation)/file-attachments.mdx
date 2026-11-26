@@ -1,0 +1,59 @@
+---
+title: "Pièces jointes"
+description: "Envoyez tout type de fichier aux agents Lody, prévisualisez les pièces jointes texte, téléchargez les autres types de fichiers et recevez en retour les fichiers générés dans la conversation."
+---
+
+# Pièces jointes
+
+Lody prend en charge les pièces jointes de tout type, aussi bien dans les nouvelles conversations
+que dans les conversations existantes. Les pièces jointes accompagnent le prompt, ce qui permet à
+l'agent de lire le fichier d'origine depuis l'espace de travail de la session sans que vous ayez à
+en coller le contenu dans le message.
+
+## Ajouter une pièce jointe
+
+1. Ouvrez le menu `+` des pièces jointes dans la zone de saisie.
+2. Choisissez **Téléverser un fichier**, puis sélectionnez un ou plusieurs fichiers.
+3. Attendez la fin des téléversements en cours, ajoutez vos éventuelles instructions et envoyez le message.
+
+Vous pouvez également glisser-déposer des fichiers dans l'interface de la session. Lorsque vous
+démarrez une conversation, les pièces jointes en attente restent associées à cette nouvelle session.
+
+## Aperçu et téléchargement
+
+Les fichiers prenant en charge l'aperçu texte s'ouvrent dans une fenêtre d'aperçu. Depuis celle-ci, vous pouvez :
+
+- afficher le Markdown rendu ou la source brute
+- copier le texte d'origine
+- télécharger le fichier complet
+
+Pour les autres types de fichiers, le téléchargement est l'action principale. Sur l'application mobile
+native, les téléchargements s'ouvrent via la feuille de partage du système afin que vous puissiez
+enregistrer le fichier ou l'envoyer vers une autre application.
+
+## Comment l'agent reçoit les fichiers
+
+Avant le début du tour, Lody matérialise chaque pièce jointe dans l'espace de travail de la session
+sous `.lody/attachments/` et fournit à l'agent une référence de fichier. Le contenu des fichiers
+n'est pas inséré dans le prompt texte.
+
+Les agents peuvent également renvoyer des fichiers et des images. Les sorties ACP prises en charge
+et les outils de téléversement de Lody ajoutent ces fichiers à la conversation sous forme de cartes
+de pièces jointes classiques.
+
+## Limites et conservation
+
+- Jusqu'à 8 fichiers peuvent être joints à un même message.
+- Chaque fichier peut atteindre 100 Mio.
+- Tous les types de fichiers sont acceptés.
+- Les fichiers stockés sur le relais sont conservés pendant 90 jours.
+
+Les images bénéficient d'un traitement distinct : jusqu'à 8 images par message et 5 Mio par image.
+Une image plus volumineuse peut être envoyée en tant que fichier standard à la place. Consultez
+[Entrée d'image](/fr/docs/image-input) et [Sortie d'image](/fr/docs/image-output).
+
+## Disponibilité
+
+La machine propriétaire doit pouvoir récupérer la pièce jointe avant que l'agent puisse la lire. Si
+un téléversement échoue, réessayez ou supprimez cette pièce jointe ; les autres pièces jointes
+correctement téléversées peuvent tout de même être envoyées.

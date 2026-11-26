@@ -1,0 +1,51 @@
+---
+title: "20260507"
+version: 0.49.0
+date: 2026-05-07
+description: "Lody 0.49.0 ajoute l'aperçu en direct avec annotations visuelles, les objectifs Codex (Codex Goals) et la génération d'images, les questions interactives de Claude Code, une meilleure gestion des tâches dans la barre latérale et des workflows de PR GitHub enrichis."
+---
+
+### Workflow des agents
+
+- Les objectifs Codex (Codex Goals) sont désormais disponibles dans Lody. Activez d'abord la fonctionnalité dans Codex avec `codex features enable goals`.
+  <img src="/_docs-assets/20260507-goal.png" alt="" />
+- Les images générées par Codex s'affichent désormais directement dans la conversation active, afin de rester aux côtés du prompt et des instructions de suivi.
+  <img src="/_docs-assets/20260507-codex-image-gen.png" alt="" />
+- Les requêtes AskUserQuestion de Claude Code apparaissent désormais sous forme de cartes d'interaction natives, prenant en charge les réponses à choix unique, à choix multiples et en texte libre.
+  <img src="/_docs-assets/20260507-ask-question.png" alt="" />
+- Ajout d'un préréglage Xiaomi MiMo pour Claude Code, incluant la configuration du Token Plan.
+
+### Aperçu à distance et retours visuels
+
+<img src="/_docs-assets/20260507-preview.png" alt="" />
+
+- Ajout de Lody Preview, un aperçu en direct rattaché à la session pour les serveurs de développement locaux. Vous pouvez par exemple demander à l'agent : `Start the Vite dev server and use Lody Preview`.
+- Utilisez le panneau d'aperçu pour basculer entre les formats ordinateur, tablette et mobile, faire pivoter l'écran, zoomer, déplacer la vue ou ouvrir la page dans un navigateur externe si besoin.
+- Les annotations visuelles vous permettent de cliquer sur un élément dans l'aperçu, de laisser un commentaire et de renvoyer ce retour contextualisé directement dans la conversation.
+
+### Barre latérale et gestion des tâches
+
+- Ajout du mode d'organisation par mise à jour dans la barre latérale, qui regroupe les sessions Chat, Worktree GitHub et Projet local par récence : Aujourd'hui, Cette semaine et Plus ancien.
+- Les menus contextuels des sessions incluent désormais le renommage, l'épinglage, l'archivage, la copie de l'URL de session et la copie de la branche actuelle.
+- Les sessions épinglées restent en haut de la liste, ce qui permet de retrouver plus facilement vos tâches importantes ou de longue durée.
+- Sur le web, les tâches de la barre latérale prennent désormais en charge le clic du milieu et Cmd/Ctrl-clic pour s'ouvrir dans un nouvel onglet.
+
+### Conversation et saisie
+
+- Les longs textes collés se réduisent désormais en un espace réservé intégré au lieu de remplir la zone de saisie. Cliquez dessus pour relire ou modifier le contenu collé.
+- Les images peuvent être glissées directement dans la zone de saisie pour être importées.
+- Sur mobile, un appui long sur l'aperçu d'une image ouvre les actions natives de partage et d'enregistrement.
+- Les aperçus de fichiers renvoient automatiquement les longues lignes à la ligne, rendant les journaux et les sorties générées denses plus faciles à lire.
+
+### GitHub et Pull Requests
+
+- Les PR brouillons peuvent être marquées comme prêtes pour relecture directement depuis le panneau PR.
+- Les sessions liées à une PR peuvent être archivées automatiquement lorsque la PR est fusionnée ou fermée.
+- Les commentaires de PR, les actions de revue et les fusions peuvent utiliser votre identité GitHub personnelle, et les Paramètres affichent désormais le compte connecté.
+
+### Correctifs et stabilité
+
+- Correction d'une notification d'échec erronée après la réussite de l'importation d'un projet local.
+- Correction d'un problème où les discussions au premier tour avec des agents prédéfinis manquaient parfois de configuration pour la génération de titre.
+- Correction de plusieurs problèmes d'affichage dans la barre latérale.
+- Correction de menus déroulants sur mobile qui pouvaient dépasser de l'écran.

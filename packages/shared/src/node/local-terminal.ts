@@ -10,6 +10,6 @@ export function getLocalTerminalSocketPath(platform?: PlatformKind): string {
   // well-known path (S1).
   return getLocalDaemonSocketPath(
     `${getInstallationProfile(platform).namespace}-terminal`,
-    platform,
+    platform
   );
 }

@@ -98,6 +98,13 @@ mac:
     CFBundleLocalizations:
       - en
       - zh_CN
+      - zh_TW
+      - zh-Hant
+      - ja
+      - ko
+      - es
+      - fr
+      - ru
   notarize: true
   artifactName: ${productName}-${version}-${arch}.${ext}
 dmg:

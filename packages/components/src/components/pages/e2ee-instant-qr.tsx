@@ -111,7 +111,11 @@ export function useInstantQrOffer(
             workspaceIds: preview.workspaces.map((workspace) => workspace.workspaceId),
             unavailable: preview.unavailable.map((workspace) => workspace.name),
           };
-          setPhase({ kind: 'joining', deviceName: target.deviceName, unavailable: target.unavailable });
+          setPhase({
+            kind: 'joining',
+            deviceName: target.deviceName,
+            unavailable: target.unavailable,
+          });
         }
         const result = await runtime.approveAccountPairing!({
           pairingString: offer.pairingString,
@@ -124,13 +128,19 @@ export function useInstantQrOffer(
         if (outcomes.includes('awaiting-delivery')) return;
         finish(
           outcomes.includes('admitted')
-            ? { kind: 'joined', deviceName: target.deviceName, result, unavailable: target.unavailable }
+            ? {
+                kind: 'joined',
+                deviceName: target.deviceName,
+                result,
+                unavailable: target.unavailable,
+              }
             : { kind: 'failed', error: 'e2ee.accountPair.error.failed' }
         );
       } catch (failure) {
         if (!alive) return;
         // A typed refusal is final; anything else retries the same code next tick.
-        if (accountPairingErrorCode(failure)) finish({ kind: 'failed', error: failureKey(failure) });
+        if (accountPairingErrorCode(failure))
+          finish({ kind: 'failed', error: failureKey(failure) });
       } finally {
         running = false;
       }
@@ -224,8 +234,7 @@ export function E2eeInstantQrApprove(props: {
   useEffect(() => {
     if (joinedDevice !== null) joinedRef.current();
   }, [joinedDevice]);
-  const unavailable =
-    phase.kind === 'joining' || phase.kind === 'joined' ? phase.unavailable : [];
+  const unavailable = phase.kind === 'joining' || phase.kind === 'joined' ? phase.unavailable : [];
   if (!supportsInstantQr(props.runtime)) return null;
   const pairingString = phase.kind === 'showing' ? phase.pairingString : null;
   return (
@@ -247,10 +256,7 @@ export function E2eeInstantQrApprove(props: {
               />
             </div>
           ) : (
-            <div
-              aria-hidden="true"
-              {...stylex.props(styles.qr, styles.qrFaded)}
-            />
+            <div aria-hidden="true" {...stylex.props(styles.qr, styles.qrFaded)} />
           )}
           {phase.kind === 'loading' && (
             <span {...stylex.props(styles.overlay)}>
@@ -304,8 +310,7 @@ export function E2eeInstantQrApprove(props: {
   );
 }
 
-type AddDeviceRuntime = InstantQrRuntime &
-  Pick<E2eeWorkspaceRuntime, 'declineAccountPairing'>;
+type AddDeviceRuntime = InstantQrRuntime & Pick<E2eeWorkspaceRuntime, 'declineAccountPairing'>;
 
 /** The console's one way to add a personal device: a QR code a phone scans to join,
  * with manual code entry for a device that has no camera. */
@@ -318,7 +323,8 @@ export function E2eeAddDeviceCard(props: {
   const [showing, setShowing] = useState(props.defaultShowQr === true);
   const requests = useE2eeDeviceRequests();
   const [manual, setManual] = useState(false);
-  if (!supportsInstantQr(props.runtime)) return <E2eeAccountPairingApprove runtime={props.runtime} />;
+  if (!supportsInstantQr(props.runtime))
+    return <E2eeAccountPairingApprove runtime={props.runtime} />;
   return (
     <>
       <Card.Root data-testid="e2ee-add-device">

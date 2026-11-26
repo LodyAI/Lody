@@ -1,0 +1,45 @@
+---
+title: "Lody Preview"
+description: "Abre una vista previa remota en vivo desde una sesión de Lody, inspecciona diseños responsivos y envía anotaciones visuales de vuelta al agente."
+---
+
+# Lody Preview
+
+Lody Preview permite que una sesión abra una vista en vivo de un servidor de desarrollo local a través de la interfaz de Lody. Resulta útil cuando un agente está modificando código de interfaz de usuario y deseas inspeccionar el resultado desde escritorio, tableta, móvil u otro dispositivo sin copiar manualmente las URL de localhost.
+
+<BrowserPreview locale="es" />
+
+## Iniciar una vista previa
+
+Pídele al agente que inicie el servidor de desarrollo y use Lody Preview, por ejemplo:
+
+```text
+Start the Vite dev server and use Lody Preview to check the page.
+```
+
+Cuando Lody detecte un candidato de vista previa para la sesión, abre la pestaña **Preview**. Para una sesión local de escritorio, activa **Design mode** para abrir la vista previa local directamente; no necesita un túnel ni una URL remota compartible. Para una sesión remota o al compartir una vista previa, usa **Preview Remote** y haz clic en **Create connection**. La vista previa se puede cerrar desde el botón de encendido en el encabezado de la vista previa.
+
+## Inspeccionar diseños
+
+La barra de herramientas de la vista previa incluye:
+
+- ajustes preestablecidos de ventana gráfica para escritorio, tableta y móvil
+- rotación vertical y horizontal
+- controles de zoom, ajuste y restablecimiento
+- modo mano para desplazar arrastrando y hacer zoom con pellizco o Ctrl+rueda
+- una acción para abrir externamente en páginas que necesitan una pestaña de navegador independiente
+- un botón para copiar la URL compartida de la vista previa
+
+Usa estos controles para verificar los puntos de interrupción responsivos, el desbordamiento, las áreas táctiles y los cambios de diseño mientras mantienes cerca la conversación y los diffs.
+
+## Anotaciones visuales
+
+Activa el modo de anotación, haz clic en un elemento de la interfaz en la vista previa y escribe un comentario sobre lo que debería cambiar. Lody ancla el comentario al elemento seleccionado y puede enviar esa referencia de vuelta al chat para que el agente tenga tanto el objetivo visual como tu instrucción.
+
+Las anotaciones visuales funcionan mejor para comentarios concretos de interfaz de usuario, como problemas de espaciado, alineación, texto, color o diseño responsivo.
+
+## Notas
+
+- Una vista previa local en Design mode necesita que el servidor de desarrollo local siga ejecutándose. Las vistas previas remotas también requieren que la máquina de la sesión esté en línea.
+- Algunas aplicaciones pueden bloquear las vistas previas integradas o requerir funciones del navegador que funcionan mejor en una pestaña externa.
+- Si la vista previa está desactualizada, recárgala o pídele al agente que reinicie el servidor de desarrollo.

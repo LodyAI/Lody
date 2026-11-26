@@ -88,11 +88,7 @@ export const CheckboxPillRequired: Story = {
 export const ContextPill: Story = {
   args: CheckboxPill.args,
   render: () => (
-    <WorktreeCheckboxPill
-      checked
-      onCheckedChange={() => undefined}
-      surface="context"
-    />
+    <WorktreeCheckboxPill checked onCheckedChange={() => undefined} surface="context" />
   ),
 };
 

@@ -3,9 +3,11 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import {
   renderBootFailure,
+  resolveBootFailureLanguage,
   usageSharingAllowed,
   type BootFailureKind,
 } from '@lody/components/lib/boot-failure';
+import type { SupportedLanguage } from '@lody/shared/language';
 import { updateNativeAppInfo } from '@lody/components/lib/native-app-info';
 
 type CachedAppInfo = {
@@ -156,11 +158,71 @@ function postMobileBootFailedBeacon(): void {
   }
 }
 
+type MobileBootHintCopy = {
+  chunkLoad: string;
+  offline: string;
+  unknown: string;
+};
+
+const MOBILE_BOOT_HINT_COPY: Record<SupportedLanguage, MobileBootHintCopy> = {
+  en: {
+    chunkLoad:
+      'Part of the app failed to load. This can happen if the install is incomplete. ' +
+      'Reload to try again; if it keeps happening, reinstall the app.',
+    offline: 'Your device appears to be offline. Check your network connection, then reload.',
+    unknown: 'Copy the error below and send it to us, then reload the app.',
+  },
+  zh_CN: {
+    chunkLoad:
+      '应用有部分内容加载失败，可能是安装包不完整所致。请重新加载重试；若反复出现，请重新安装应用。',
+    offline: '你的设备似乎处于离线状态。请检查网络连接后再重新加载。',
+    unknown: '请复制下方的错误信息发送给我们，然后重新加载应用。',
+  },
+  zh_Hant: {
+    chunkLoad:
+      '應用程式有部分內容載入失敗，可能是安裝不完整所致。請重新載入重試；若反覆出現，請重新安裝應用程式。',
+    offline: '你的裝置似乎處於離線狀態。請檢查網路連線後再重新載入。',
+    unknown: '請複製下方的錯誤資訊傳給我們，然後重新載入應用程式。',
+  },
+  ja: {
+    chunkLoad:
+      'アプリの一部を読み込めませんでした。インストールが不完全な可能性があります。再読み込みしてもう一度お試しください。繰り返し発生する場合はアプリを再インストールしてください。',
+    offline:
+      'デバイスがオフラインのようです。ネットワーク接続を確認してから再読み込みしてください。',
+    unknown: '下のエラーをコピーして送信し、アプリを再読み込みしてください。',
+  },
+  ko: {
+    chunkLoad:
+      '앱의 일부를 불러오지 못했습니다. 설치가 완전하지 않을 때 발생할 수 있습니다. 새로고침하여 다시 시도하고, 문제가 반복되면 앱을 다시 설치해 주세요.',
+    offline: '기기가 오프라인 상태인 것 같습니다. 네트워크 연결을 확인한 뒤 새로고침하세요.',
+    unknown: '아래 오류를 복사해 보내 주신 뒤 앱을 새로고침해 주세요.',
+  },
+  es: {
+    chunkLoad:
+      'Una parte de la aplicación no se pudo cargar. Esto puede ocurrir si la instalación está incompleta. Recarga para intentarlo de nuevo; si sigue pasando, reinstala la aplicación.',
+    offline: 'Tu dispositivo parece estar sin conexión. Comprueba tu red y vuelve a cargar.',
+    unknown: 'Copia el error de abajo y envíanoslo; luego recarga la aplicación.',
+  },
+  fr: {
+    chunkLoad:
+      'Une partie de l’application n’a pas pu être chargée. Cela peut arriver si l’installation est incomplète. Rechargez pour réessayer ; si le problème persiste, réinstallez l’application.',
+    offline: 'Votre appareil semble hors ligne. Vérifiez votre connexion réseau puis rechargez.',
+    unknown: 'Copiez l’erreur ci-dessous et envoyez-la-nous, puis rechargez l’application.',
+  },
+  ru: {
+    chunkLoad:
+      'Не удалось загрузить часть приложения. Это может произойти при неполной установке. Перезагрузите, чтобы попробовать снова; если проблема повторяется, переустановите приложение.',
+    offline: 'Похоже, устройство не в сети. Проверьте подключение к интернету и перезагрузите.',
+    unknown: 'Скопируйте ошибку ниже и отправьте её нам, затем перезагрузите приложение.',
+  },
+};
+
 /**
  * Mobile-specific hint shown above the diagnostics block. Distinguishes the
  * common failure modes so the message points the user at the right recovery.
  */
 export function computeMobileHint(error: unknown): string {
+  const copy = MOBILE_BOOT_HINT_COPY[resolveBootFailureLanguage()];
   // Chunk/module-load failures surface as Error instances; non-Error throws
   // won't match the patterns below, so an empty message is fine for them.
   const message = error instanceof Error ? `${error.name}: ${error.message}` : '';
@@ -171,15 +233,12 @@ export function computeMobileHint(error: unknown): string {
     lower.includes('error loading') ||
     lower.includes('chunkloaderror')
   ) {
-    return (
-      'Part of the app failed to load. This can happen if the install is incomplete. ' +
-      'Reload to try again; if it keeps happening, reinstall the app.'
-    );
+    return copy.chunkLoad;
   }
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return 'Your device appears to be offline. Check your network connection, then reload.';
+    return copy.offline;
   }
-  return 'Copy the error below and send it to us, then reload the app.';
+  return copy.unknown;
 }
 
 /**

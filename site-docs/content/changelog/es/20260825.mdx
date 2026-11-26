@@ -1,0 +1,25 @@
+---
+title: "20260825"
+version: 0.86.2
+date: 2026-08-25
+description: "Se añadieron Roles de Agente, búsqueda difusa de modelos, un selector unificado de adjuntos, vista previa de HTML, copia completa de Markdown, previsiones de restablecimiento de uso de Codex y actualizaciones en segundo plano de entornos de ejecución de agentes, con mejoras de confiabilidad en sesiones, tareas, vista previa de archivos locales y plataformas compatibles."
+---
+
+Versión 0.86.2
+
+### ✨ Novedades
+
+- Se añadieron los Roles de Agente para guardar y compartir configuraciones de ejecución frecuentes (agente, modelo, permisos y otros ajustes) y luego seleccionarlos o mencionarlos rápidamente en sesiones nuevas y existentes.
+- Se añadió la búsqueda difusa a la lista de modelos y se combinaron los archivos e imágenes adjuntos en un selector unificado más claro.
+- Se añadieron vistas previas para archivos HTML autocontenidos y acciones para copiar por completo los mensajes en Markdown.
+- Se añadieron previsiones de restablecimiento de uso de Codex.
+- Se añadieron actualizaciones en segundo plano para los entornos de ejecución de agentes integrados.
+
+### 🐛 Correcciones y mejoras
+
+- Se mejoró la confiabilidad de la creación y restauración de sesiones y del envío de tareas, se evitó que las sesiones locales directas crearan ramas inesperadas y se gestionaron automáticamente los conflictos de nombres de rama en nuevos worktrees.
+- Se corrigió que el cuerpo de las tareas desapareciera antes de confirmarse el guardado y se hizo que archivar una sesión principal también archive sus sesiones secundarias.
+- Se mejoraron la exploración y la vista previa de archivos locales en Electron manteniendo las lecturas de archivos locales en el dispositivo.
+- Se corrigió el desplazamiento del contenido del chat al cambiar el tamaño del editor.
+- Se mejoraron los respaldos (fallbacks) de modelos de Claude y Grok, la compatibilidad con cachés de entornos de ejecución heredados y las etiquetas de los gráficos de uso.
+- Se corrigieron las asociaciones de íconos de escritorio en Linux y se mejoró la disponibilidad sin conexión del selector de emojis en Web y dispositivos móviles.

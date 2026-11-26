@@ -1,5 +1,7 @@
 import { productWindows } from '../window-state'
 import { Notification, shell, systemPreferences, type BrowserWindow } from 'electron'
+import type { DevicePairingNotificationLanguage } from '@lody/shared/electron-ipc'
+import { normalizeSupportedLanguage, type SupportedLanguage } from '@lody/shared/language'
 import type {
   GetNotificationPermissionStatusResult,
   NotificationPermissionState,
@@ -9,6 +11,41 @@ import type {
 } from '../types'
 import { formatUnknownError } from '../utils'
 import { showNativeNotification } from './notification-delivery'
+
+const DEVICE_PAIRING_COPY: Record<SupportedLanguage, { title: string; body: string }> = {
+  en: {
+    title: 'Device approval requested',
+    body: 'Open Lody and compare the codes on both of your devices before authorizing.'
+  },
+  zh_CN: {
+    title: '新设备请求授权',
+    body: '打开 Lody，在你的两台设备上核对配对码后授权。'
+  },
+  zh_Hant: {
+    title: '新裝置請求授權',
+    body: '開啟 Lody，在你的兩台裝置上核對配對碼後再授權。'
+  },
+  ja: {
+    title: '新しいデバイスから承認リクエスト',
+    body: 'Lody を開き、両方のデバイスでコードを確認してから承認してください。'
+  },
+  ko: {
+    title: '새 기기 승인 요청',
+    body: 'Lody를 열고 두 기기의 코드를 비교한 후 승인하세요.'
+  },
+  es: {
+    title: 'Solicitud de aprobación de dispositivo',
+    body: 'Abre Lody y compara los códigos en ambos dispositivos antes de autorizar.'
+  },
+  fr: {
+    title: 'Demande d’approbation d’appareil',
+    body: 'Ouvrez Lody et comparez les codes sur vos deux appareils avant d’autoriser.'
+  },
+  ru: {
+    title: 'Запрос на одобрение устройства',
+    body: 'Откройте Lody и сравните коды на обоих устройствах перед подтверждением.'
+  }
+}
 
 function getNotificationSettingsUrls(platform: NodeJS.Platform): string[] {
   if (platform === 'darwin') {
@@ -132,15 +169,15 @@ export class NotificationService {
   }
 
   /** Discovery hint only: no device name, code, key, account or authorization. */
-  async showDevicePairingRequest(language: 'en' | 'zh'): Promise<{ shown: boolean }> {
+  async showDevicePairingRequest(
+    language: DevicePairingNotificationLanguage
+  ): Promise<{ shown: boolean }> {
     if (!Notification.isSupported() || [...productWindows].some((window) => window.isFocused()))
       return { shown: false }
+    const copy = DEVICE_PAIRING_COPY[normalizeSupportedLanguage(language) ?? 'en']
     const notification = new Notification({
-      title: language === 'zh' ? '新设备请求授权' : 'Device approval requested',
-      body:
-        language === 'zh'
-          ? '打开 Lody，在你的两台设备上核对配对码后授权。'
-          : 'Open Lody and compare the codes on both of your devices before authorizing.',
+      title: copy.title,
+      body: copy.body,
       silent: true
     })
     notification.on('click', () => {

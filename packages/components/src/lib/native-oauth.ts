@@ -107,8 +107,8 @@ export async function runNativeOAuthSignIn(
   // Race app-return against sign-in so a closed browser tab does not keep the login UI locked.
   const returnedWithoutSession = waitForNativeOAuthReturn(appWindow)
     .then(() => delay(options.returnGraceMs ?? DEFAULT_NATIVE_OAUTH_RETURN_GRACE_MS))
-    .then(
-      (): NativeOAuthSignInOutcome => (sessionUpdated ? 'completed' : 'returned_without_session')
+    .then((): NativeOAuthSignInOutcome =>
+      sessionUpdated ? 'completed' : 'returned_without_session'
     );
 
   const signInCompleted = startSignIn().then((): NativeOAuthSignInOutcome => 'completed');

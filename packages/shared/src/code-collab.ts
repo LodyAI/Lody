@@ -988,7 +988,10 @@ export function estimateCodeCollabFileIndexRowBytes(
   workspacePath: string,
   value?: CodeCollabV2FileIndexValue
 ): number {
-  return estimateCodeCollabFlockRowBytes(codeCollabFileIndexKeyForWorkspacePath(workspacePath), value);
+  return estimateCodeCollabFlockRowBytes(
+    codeCollabFileIndexKeyForWorkspacePath(workspacePath),
+    value
+  );
 }
 
 const codeCollabFileIndexRowCount = (value: CodeCollabV2FileIndexValue): number =>

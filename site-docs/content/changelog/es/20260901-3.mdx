@@ -1,0 +1,20 @@
+---
+title: "20260901-3"
+version: 0.89.3
+date: 2026-09-01
+description: "Se añadieron reintentos por capacidad de Codex y un acceso ligero para unirse, y se mejoraron la estabilidad de la configuración de sesiones y del renderizado."
+---
+
+Versión 0.89.3
+
+### ✨ Novedades
+
+- Los fallos de capacidad de Codex ahora admiten un reintento explícito seguido de reintentos automáticos acotados con una cuenta regresiva y control de cancelación.
+- Se añadió un acceso ligero para unirse que gestiona los flujos de unión sin cargar toda la estructura principal de la aplicación.
+
+### 🐛 Correcciones y mejoras
+
+- Se corrigieron actualizaciones repetidas y bucles de renderizado en la configuración de sesiones, las pestañas de sesión, el mecanismo de respaldo de acceso al espacio de trabajo y la sincronización de visibilidad del navegador.
+- Se corrigieron el cambio de sesión, la restauración de enlaces profundos y los estados pendientes ante datos asíncronos y acciones rápidas del usuario.
+- Se mejoró la tolerancia ante relaciones padre-hijo mal formadas entre sesiones y errores de renderizado, evitando bucles de redirección y cierres inesperados del renderizador.
+- Agradecemos al colaborador externo Wibus Wu por las funciones de reintento de Codex y acceso ligero para unirse.

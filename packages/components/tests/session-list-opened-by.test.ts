@@ -98,9 +98,7 @@ describe('session group opened-by tree', () => {
       makeRow({ sessionId: 'opener' }),
       makeRow({ sessionId: 'opened', openedBySessionId: 'opener' }),
     ];
-    const visible = getVisibleSessionGroupRows(buildRepoGroup(rows), 0).map(
-      (row) => row.sessionId
-    );
+    const visible = getVisibleSessionGroupRows(buildRepoGroup(rows), 0).map((row) => row.sessionId);
     expect(visible).toHaveLength(MAX_VISIBLE_SESSIONS);
     expect(visible).not.toContain('opened');
   });
