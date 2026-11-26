@@ -176,3 +176,47 @@ it.each(['method_required', 'payment_required', 'refresh'] as const)(
     expect(resolve).toHaveBeenCalledOnce();
   }
 );
+
+it('discloses promotional seat-expansion discount before deadline and reverts immediately at expiry', async () => {
+  vi.useFakeTimers();
+  try {
+    const startNow = Date.UTC(2026, 10, 27, 0, 0, 0);
+    const promoEndsAt = Date.UTC(2026, 10, 27, 0, 1, 0);
+    vi.setSystemTime(startNow);
+
+    const { SeatInvitePreviewSchema } = await import('@lody/cloud-api/seat-invite-preview');
+    const preview = SeatInvitePreviewSchema.parse({
+      status: 'billed',
+      interval: 'year',
+      unitAmount: 7680,
+      proratedAmount: 2496,
+      regularProratedAmount: 3120,
+      promoDiscountPercent: 20,
+      promoEndsAt,
+      policyNextChangeAt: promoEndsAt,
+      currentPeriodEnd: Date.UTC(2027, 1, 14),
+      seatCount: 5,
+      nextSeatCount: 6,
+      nextRenewalAmount: 57600,
+    });
+
+    await act(async () => root.render(createElement(SeatCostNotice, { preview })));
+    expect(container.textContent).toContain('20% off');
+    expect(container.querySelector('s')?.textContent).toContain('31.20');
+    expect(container.textContent).toContain('24.96');
+    expect(container.textContent).toContain('Renews at standard rate');
+    expect(container.textContent).toContain('576.00');
+
+    // Cross the promotional boundary without a new server payload: expired promo
+    // badge and discount disappear immediately in favor of the standard proration.
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(container.textContent).not.toContain('20% off');
+    expect(container.querySelector('s')).toBeNull();
+    expect(container.textContent).toContain('31.20');
+    expect(container.textContent).not.toContain('24.96');
+  } finally {
+    vi.useRealTimers();
+  }
+});

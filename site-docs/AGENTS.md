@@ -38,10 +38,13 @@ tuning shortcut are in [`README.md`](README.md).
 - The field is **hosted once** via `MarketingAtmosphereHost` in `site-root-provider`
   (price / download / changelog share one GL context; off-route pauses without teardown).
 - Pricing content lives in `components/pricing-page.tsx` + `app/pricing.css` (Vue-ported table +
-  plans + FAQ). Public Plus uses standard pricing: `$8`/seat/mo (`$96`/yr),
-  monthly `$10`. The early-bird campaign has ended; do not restore promotional
-  banners, deadlines, or a client clock/env gate. Billing toggle animates via
-  `@number-flow/react` (digit odometer) and the billing note swap.
+  plans + FAQ). Prerendered HTML keeps standard list pricing (`$8`/seat/mo (`$96`/yr),
+  monthly `$10`) so static HTML never depends on a build clock; after mount,
+  `usePublicPromo` optionally overlays active first-period campaigns from
+  `VITE_PUBLIC_PROMO_URL` / `VITE_CONVEX_SITE_URL` (`/api/billing/public-promo`) on `/price`
+  and in the narrow strip below `SiteNav` on the landing page, expiring immediately at
+  the server-authoritative `endsAt`. Billing toggle animates via `@number-flow/react`
+  (digit odometer) and the billing note swap.
 - Marketing pages (landing/pricing/changelog/download) must stay on `--landing-*` /
   `--mkt-*` and reference no `fd-` token — check that before moving a component between
   marketing and reading (blog/docs) surfaces.

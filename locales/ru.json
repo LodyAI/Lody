@@ -7392,5 +7392,9 @@
   "settings.agent.dialog.section.defaultPermission": "Разрешение по умолчанию",
   "settings.agent.dialog.defaultPermissionLastUsed": "Последнее выбранное",
   "e2ee.access.waitingKey.checkFailed": "Не удалось проверить ключи сейчас. Проверьте подключение и повторите попытку.",
-  "e2ee.instantQr.retrying": "Соединение прервано. Повторная попытка…"
+  "e2ee.instantQr.retrying": "Соединение прервано. Повторная попытка…",
+  "billing.promoOfferTitle": "Акционная скидка",
+  "billing.switchPromoDiscountWithPercent": "Акционная скидка (−{{discount}}%)",
+  "billing.switchRenewalDateStandardYearly": "Следующее продление: {{date}} по стандартному тарифу ({{amount}}/год).",
+  "workspace.invite.seat.promoNoteUntil": "Скидка {{discount}}% при принятии приглашения до {{date}}. Продление по стандартному тарифу."
 }

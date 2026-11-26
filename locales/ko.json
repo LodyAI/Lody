@@ -7252,5 +7252,9 @@
   "settings.agent.dialog.section.defaultPermission": "기본 권한",
   "settings.agent.dialog.defaultPermissionLastUsed": "마지막으로 선택한 항목",
   "e2ee.access.waitingKey.checkFailed": "지금은 키를 확인할 수 없습니다. 연결을 확인하고 다시 시도해 주세요.",
-  "e2ee.instantQr.retrying": "연결이 끊어졌습니다. 다시 시도하는 중…"
+  "e2ee.instantQr.retrying": "연결이 끊어졌습니다. 다시 시도하는 중…",
+  "billing.promoOfferTitle": "기간 한정 할인",
+  "billing.switchPromoDiscountWithPercent": "기간 한정 할인 ({{discount}}% 할인)",
+  "billing.switchRenewalDateStandardYearly": "다음 갱신일: {{date}} (정상 요금 {{amount}}/년).",
+  "workspace.invite.seat.promoNoteUntil": "{{date}}까지 수락 시 {{discount}}% 할인이 적용됩니다. 다음 갱신부터는 정상 요금으로 청구됩니다."
 }

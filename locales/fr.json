@@ -7252,5 +7252,9 @@
   "settings.agent.dialog.section.defaultPermission": "Autorisation par défaut",
   "settings.agent.dialog.defaultPermissionLastUsed": "La dernière choisie",
   "e2ee.access.waitingKey.checkFailed": "Impossible de vérifier les clés pour le moment. Vérifiez votre connexion et réessayez.",
-  "e2ee.instantQr.retrying": "Connexion interrompue. Nouvelle tentative…"
+  "e2ee.instantQr.retrying": "Connexion interrompue. Nouvelle tentative…",
+  "billing.promoOfferTitle": "Remise promotionnelle",
+  "billing.switchPromoDiscountWithPercent": "Remise promotionnelle (−{{discount}} %)",
+  "billing.switchRenewalDateStandardYearly": "Prochain renouvellement : {{date}} au tarif standard ({{amount}}/an).",
+  "workspace.invite.seat.promoNoteUntil": "Inclut −{{discount}} % si l’invitation est acceptée d’ici le {{date}}. Renouvellement au tarif standard."
 }

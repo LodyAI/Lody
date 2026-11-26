@@ -1,6 +1,8 @@
 import { SiteAnchor } from '@site/components/site-anchor';
 import type { SiteLocale } from '@site/src/site-pages/shared';
 import { LANDING_COPY } from './landing-copy';
+import { OptionalEnhancement } from './optional-enhancement';
+import { LandingPromoBanner } from './promo-banner';
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
 import { UnderwaterExperience } from './underwater-experience';
@@ -17,6 +19,10 @@ export function LandingPage({ locale }: { locale: LandingLocale }) {
       </SiteAnchor>
 
       <SiteNav locale={locale} />
+
+      <OptionalEnhancement>
+        <LandingPromoBanner locale={locale} />
+      </OptionalEnhancement>
 
       <UnderwaterExperience
         subscriptions={t.subscriptions}

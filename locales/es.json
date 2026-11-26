@@ -7252,5 +7252,9 @@
   "settings.agent.dialog.section.defaultPermission": "Permiso predeterminado",
   "settings.agent.dialog.defaultPermissionLastUsed": "El último que elegí",
   "e2ee.access.waitingKey.checkFailed": "No se pudieron comprobar las claves ahora mismo. Comprueba tu conexión e inténtalo de nuevo.",
-  "e2ee.instantQr.retrying": "Conexión interrumpida. Reintentando…"
+  "e2ee.instantQr.retrying": "Conexión interrumpida. Reintentando…",
+  "billing.promoOfferTitle": "Descuento promocional",
+  "billing.switchPromoDiscountWithPercent": "Descuento promocional ({{discount}}% de dto.)",
+  "billing.switchRenewalDateStandardYearly": "Próxima renovación: {{date}} a la tarifa estándar ({{amount}}/año).",
+  "workspace.invite.seat.promoNoteUntil": "Incluye un {{discount}}% de descuento si se acepta antes del {{date}}. Se renueva a la tarifa estándar."
 }

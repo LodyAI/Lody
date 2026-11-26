@@ -16,10 +16,12 @@ presentation without changing previously earned subscription benefits.
 
 ## Decision and ownership
 
-The pricing page owns static public list prices ($8 per month billed yearly,
-$10 billed monthly), without clock or environment gates. Its campaign banner,
-strike-through prices, deadline copy, and unused styles are removed in both
-languages. The Chinese landing metadata no longer advertises the campaign.
+Prerendered pricing HTML owns static public list prices ($8 per month billed yearly,
+$10 billed monthly), without build-time clock gates; later time-windowed first-period
+promotions load progressively on the client ([promotional campaign display](../feature/2026-11-26-promo-campaign-display.md)).
+The fixed early-bird banner, strike-through prices, deadline copy, and unused styles
+are removed in both languages, and the Chinese landing metadata no longer advertises
+the early-bird campaign.
 
 Shared workspace and billing components still render server-provided prices;
 invoice discounts use the generic subscription-discount label. Historical offer
