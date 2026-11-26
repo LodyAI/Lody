@@ -1210,7 +1210,6 @@ export class SessionExecutionService {
     await this.abandonInboxInput(sessionId, turnId);
     const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
     if (!releaseConflict) {
-      // The turn start holding the lease (maybe this input's admission) settles it.
       this.automationCancelRequests.add(automationCancelKey(sessionId, turnId));
       return true;
     }
@@ -8902,6 +8901,7 @@ export class SessionExecutionService {
       this.deps.logger.debug(`[${sessionId}] Closing assistant turn ${turnId}: no runtime owns it`);
       this.deps.clearSessionActivePresence(sessionId);
       // Settle the input before the entry turns terminal, as an ordinary Stop does.
+      // Pointers move only when they still name this input, never a newer one.
       if (userTurnId && !userSettled) {
         await this.setTerminalUserTurnStatus(sessionId, sessionDoc, userTurnId, 'canceled');
         const meta = await this.getSessionMeta(sessionId);
