@@ -18,6 +18,9 @@ export async function checkSourceDaemonInstaller({
   expectedVersion,
   baseUrl,
   fetchImpl = fetch,
+  maxAttempts = 4,
+  retryDelayMs = 1500,
+  sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
   if (!['stable', 'next', 'nightly'].includes(channel))
     throw new Error('Invalid installer channel');
@@ -32,15 +35,28 @@ export async function checkSourceDaemonInstaller({
     ).DEFAULT_RUNTIME_ARTIFACTS_BASE_URL;
   const distribution = channel === 'next' ? 'lody-cloud-next-daemon' : 'lody-cloud-daemon';
   const get = async (pathname, method = 'GET') => {
-    const response = await fetchImpl(new URL(pathname, origin), {
-      method,
-      redirect: 'error',
-      signal: AbortSignal.timeout(15000),
-      cache: 'no-store',
-    });
-    if (response.status !== 200)
-      throw new Error(`Installer not ready: ${pathname} (${response.status})`);
-    return response;
+    const attempts = Math.max(1, maxAttempts);
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      let response;
+      try {
+        response = await fetchImpl(new URL(pathname, origin), {
+          method,
+          redirect: 'error',
+          signal: AbortSignal.timeout(15000),
+          cache: 'no-store',
+        });
+      } catch (error) {
+        if (attempt === attempts) throw error;
+        await sleepImpl(retryDelayMs * attempt);
+        continue;
+      }
+      if (response.status === 200) return response;
+      const transient = response.status === 429 || response.status >= 500;
+      if (!transient || attempt === attempts)
+        throw new Error(`Installer not ready: ${pathname} (${response.status})`);
+      await sleepImpl(retryDelayMs * attempt);
+    }
+    throw new Error(`Installer not ready: ${pathname}`);
   };
   await Promise.all(
     ['/install.sh', '/install.ps1'].map(async (pathname) => {
