@@ -2466,7 +2466,10 @@ export class SessionExecutionService {
       ) {
         return (
           (await rejectBeforeProviderSubmission()) ??
-          (await rejectAndPromote('unsupported', 'MCP selection requires a new turn.'))
+          (await rejectAndPromote(
+            'unsupported',
+            'The MCP selection or configuration changed, so this message needs a new turn.'
+          ))
         );
       }
       const queuedRejection = await rejectBeforeProviderSubmission();

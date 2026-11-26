@@ -1052,7 +1052,7 @@ describe('SessionExecutionService', () => {
         error: expect.stringContaining(
           selection === 'model'
             ? 'Active turn configuration differs'
-            : 'MCP selection requires a new turn'
+            : 'The MCP selection or configuration changed'
         ),
       });
       if (selection === 'model') expect(findSteerConfigMismatch).toHaveBeenCalledOnce();
