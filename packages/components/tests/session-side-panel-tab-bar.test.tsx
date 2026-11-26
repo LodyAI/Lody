@@ -107,6 +107,11 @@ describe('getSidePanelTabSelection', () => {
       activeSideSessionId: null,
       activeViewerTabId: 'file:README.md',
     });
+    expect(getSidePanelTabSelection('attachment:sess-1:file-1')).toEqual({
+      activeSidebarTabId: null,
+      activeSideSessionId: null,
+      activeViewerTabId: 'attachment:sess-1:file-1',
+    });
     expect(getSidePanelTabSelection('files')).toEqual({
       activeSidebarTabId: 'files',
       activeSideSessionId: null,

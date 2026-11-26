@@ -7538,6 +7538,7 @@ const SessionDetail = ({
         className={
           stylex.props(isActive ? detailStyles.rootFill : detailStyles.hiddenFill).className
         }
+        inert={!isActive || !isSidebarVisible}
         aria-hidden={!isActive || !isSidebarVisible}
       >
         {renderViewerTabContent(
@@ -7631,6 +7632,7 @@ const SessionDetail = ({
                 (!showFixedSidePanelBody || activeSidebarTab === null) && detailStyles.invisibleFill
               ).className
             }
+            inert={!showFixedSidePanelBody || activeSidebarTab === null}
             aria-hidden={!showFixedSidePanelBody || activeSidebarTab === null}
           >
             {sidebarContent}
