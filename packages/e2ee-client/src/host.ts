@@ -178,9 +178,16 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     Context.add(ClientCustodyWriter, writer),
     Context.add(ClientPairingOriginalStore, pairings)
   );
-  const prepare = (offer: PersonalPairingOffer, replacement = false, existingOnly = false) =>
+  const prepare = (
+    offer: PersonalPairingOffer,
+    replacement = false,
+    existingOnly = false,
+    verifiedLost = false
+  ) =>
     Effect.scoped(
-      preparePersonalIdentity(offer, replacement, existingOnly).pipe(Effect.provide(base))
+      preparePersonalIdentity(offer, replacement, existingOnly, verifiedLost).pipe(
+        Effect.provide(base)
+      )
     );
   const publicPrepared = (p: PreparedPersonalIdentity) =>
     Object.freeze({
@@ -584,14 +591,15 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     Effect.gen(function* () {
       const base = accountPairingOffer(platform.scope, pin);
       const current = yield* installations.read();
-      if (!current || current.phase !== 'ready') return yield* prepare(base);
+      if (!current) return yield* prepare(base);
       const { own, candidate, self } = yield* accountOriginals(current);
       if (candidate) return yield* prepare(candidate, true, true);
       if (history !== undefined) {
         const view = yield* verifyPersonalHistory(base, history);
         if (verifiedAccessLoss(view, self))
-          return yield* prepare(accountPairingOffer(platform.scope, pin, self), true);
+          return yield* prepare(accountPairingOffer(platform.scope, pin, self), true, false, true);
       }
+      if (current.phase !== 'ready') return yield* prepare(base);
       return yield* prepare(own ?? base);
     });
   /** Opening a retained account-pairing offer: an approved replacement candidate is

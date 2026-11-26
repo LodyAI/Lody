@@ -34,6 +34,7 @@ import {
 } from '@lody/e2ee-client/recovery-restore'
 import {
   abandonVaultReplacement,
+  isVaultWorkspaceAccessLoss,
   planVaultReplacement,
   recoveryFetchEnvelope,
   recoverySubmitOriginal,
@@ -576,16 +577,25 @@ export const continueAccountVaultReplacement = (
       if (vault.vaultId !== replacing) return yield* Effect.fail({ code: 'authentication' })
       const local = yield* RecoveryVaultLocalStore
       const workspaces: VaultReplacementWorkspace[] = []
-      for (const target of io.workspaces)
-        workspaces.push({
-          name: target.name,
-          ...(yield* target.owner({
+      for (const target of io.workspaces) {
+        const opened = yield* Effect.result(
+          target.owner({
             vault,
             local,
             submitOriginal: submitFor(target),
             fetchCurrentEnvelope: recoveryFetchEnvelope(target)
-          }))
-        })
+          })
+        )
+        if (Result.isFailure(opened)) {
+          if (isVaultWorkspaceAccessLoss(opened.failure)) continue
+          return {
+            outcome: 'Pending' as const,
+            step: 'setup' as const,
+            workspace: target.name
+          }
+        }
+        workspaces.push({ name: target.name, ...opened.success })
+      }
       const outcome = yield* replaceAccountVault({
         workspaces,
         compromised: io.compromised,
@@ -615,15 +625,24 @@ export const abandonAccountVaultReplacement = (
         readonly name: string
         readonly revokeOwnRecoveryDevice: () => Effect.Effect<{ readonly outcome: string }, unknown>
       }[] = []
-      for (const target of io.workspaces)
-        workspaces.push({
-          name: target.name,
-          ...(yield* target.abandonOwner({
+      for (const target of io.workspaces) {
+        const opened = yield* Effect.result(
+          target.abandonOwner({
             vaultId: replacing,
             local,
             submitOriginal: submitFor(target)
-          }))
-        })
+          })
+        )
+        if (Result.isFailure(opened)) {
+          if (isVaultWorkspaceAccessLoss(opened.failure)) continue
+          return {
+            outcome: 'Pending' as const,
+            step: 'revoke' as const,
+            workspace: target.name
+          }
+        }
+        workspaces.push({ name: target.name, ...opened.success })
+      }
       return yield* abandonVaultReplacement({
         workspaces,
         abandon: () => io.replacement.abandon(replacing)

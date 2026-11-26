@@ -2098,4 +2098,125 @@ describe('durable local epoch rotation', () => {
     );
     disposeEpochKey(nextKey);
   });
+
+  it('discards unsubmitted draft candidates on target switch, stale parent, or native unprotect failure while preserving submitted CAS reconciliation', async () => {
+    const f = fixture();
+    const alice = memberDevice(81),
+      bob = memberDevice(82);
+    const membershipA = ok(Bytes.membershipId(new Uint8Array(16).fill(81))),
+      membershipB = ok(Bytes.membershipId(new Uint8Array(16).fill(82)));
+    const add = (operation: import('../../src/internal/foundation/cbor').CborValue) => {
+      const body = [f.view().head.toBytes(), f.owner.publicKey.toBytes(), operation] as const;
+      f.append(ok(encodeCbor([body, f.owner.signBytes(recordSigningBytes(ok(encodeCbor(body))))])));
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          for (const [dev, mem, seed] of [
+            [alice, membershipA, 81],
+            [bob, membershipB, 82],
+          ] as const) {
+            const req = yield* prepareJoinRequest({
+              genesis: f.context.genesis,
+              requestId: ok(Bytes.requestId(new Uint8Array(16).fill(seed))),
+              userId: ok(Bytes.userId(new Uint8Array(32).fill(seed))),
+              encryptionPublicKey: dev.encryptionPublicKey,
+              expiresAt: null,
+              signer: dev.signer,
+            });
+            add([
+              1,
+              mem.toBytes(),
+              [
+                req.requestId.toBytes(),
+                req.userId.toBytes(),
+                req.signingPublicKey.toBytes(),
+                req.encryptionPublicKey.toBytes(),
+                null,
+                req.signature.toBytes(),
+              ],
+            ]);
+          }
+          let failNextUnprotect = false;
+          const native = {
+            ...f.native.protector,
+            unprotect: async (blob: Uint8Array) => {
+              if (failNextUnprotect) {
+                failNextUnprotect = false;
+                throw new Error('synthetic native unprotect failure');
+              }
+              return f.native.protector.unprotect(blob);
+            },
+          };
+          const { rotation, journal } = yield* f.open('create', { native });
+
+          f.stageFailure(true);
+          expect(
+            Result.isFailure(yield* Effect.result(rotation.publishRemoving(membershipA)))
+          ).toBe(true);
+          expect((yield* journal.load(f.context.genesis)).record).toBeNull();
+          f.stageFailure(false);
+          const removedB = yield* rotation.publishRemoving(membershipB);
+          expect(removedB.outcome).toBe('Committed');
+          yield* rotation.acknowledge(removedB);
+          const afterB = f.view().inspectState();
+          expect(afterB.members.has(Buffer.from(membershipA.toBytes()).toString('hex'))).toBe(true);
+          expect(afterB.members.has(Buffer.from(membershipB.toBytes()).toString('hex'))).toBe(
+            false
+          );
+
+          f.requestRotation();
+          f.stageFailure(true);
+          expect(
+            Result.isFailure(yield* Effect.result(rotation.publishRemoving(membershipA)))
+          ).toBe(true);
+          expect((yield* journal.load(f.context.genesis)).record).toBeNull();
+          f.stageFailure(false);
+          const rotated = yield* rotation.publish();
+          expect(rotated.outcome).toBe('Committed');
+          yield* rotation.acknowledge(rotated);
+          expect(
+            f.view().inspectState().members.has(Buffer.from(membershipA.toBytes()).toString('hex'))
+          ).toBe(true);
+
+          f.requestRotation();
+          f.stageFailure(true);
+          expect(Result.isFailure(yield* Effect.result(rotation.publish()))).toBe(true);
+          expect((yield* journal.load(f.context.genesis)).record).toBeNull();
+          f.stageFailure(false);
+          f.requestRotation();
+          const healedStale = yield* rotation.publish();
+          expect(healedStale.outcome).toBe('Committed');
+          yield* rotation.acknowledge(healedStale);
+
+          f.requestRotation();
+          f.stageFailure(true);
+          expect(Result.isFailure(yield* Effect.result(rotation.publish()))).toBe(true);
+          f.stageFailure(false);
+          failNextUnprotect = true;
+          const healedCorrupt = yield* rotation.publish();
+          expect(healedCorrupt.outcome).toBe('Committed');
+          expect(failNextUnprotect).toBe(false);
+          yield* rotation.acknowledge(healedCorrupt);
+
+          f.requestRotation();
+          f.mode('unavailable');
+          expect(
+            Result.isFailure(yield* Effect.result(rotation.publishRemoving(membershipA)))
+          ).toBe(true);
+          const submittedRecord = (yield* journal.load(f.context.genesis)).record;
+          expect(submittedRecord).not.toBeNull();
+          f.mode('ok');
+          failureCode(yield* Effect.exit(rotation.publish()), 'busy');
+          const resumed = yield* rotation.resume();
+          expect(resumed?.outcome).toBe('Committed');
+          expect(resumed?.record).toEqual(submittedRecord!);
+          yield* rotation.acknowledge(resumed!);
+          expect(
+            f.view().inspectState().members.has(Buffer.from(membershipA.toBytes()).toString('hex'))
+          ).toBe(false);
+        })
+      )
+    );
+  });
 });

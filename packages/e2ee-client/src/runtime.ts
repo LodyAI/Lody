@@ -28,6 +28,7 @@ import {
   accessLossError,
   fail,
   findAccessLoss,
+  PersonalAccessLoss,
   PersonalRuntimeFailure,
   verifiedAccessLoss,
 } from './errors';
@@ -599,12 +600,33 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               })
             )
           ),
-        memberKeyDeliveries: async () => ({
-          items: [...deliveries.keys()].map(deliveryView),
-        }),
+        memberKeyDeliveries: async (id) => {
+          if (entry && !entry.closing && entry.readers.size) {
+            const discovered = await run(
+              withSession(id, (session) => session.pendingMemberKeyDeliveries())
+            );
+            for (const item of discovered) {
+              if (!deliveries.has(item.requestId)) {
+                deliveries.set(item.requestId, {
+                  device: item.device,
+                  state: 'failed',
+                  code: item.code,
+                });
+              }
+            }
+          }
+          return { items: [...deliveries.keys()].map(deliveryView) };
+        },
         retryMemberKeyDelivery: async (id, requestId) => {
-          const entry = deliveries.get(requestId);
-          if (!entry) throw fail('invalid-input');
+          let entry = deliveries.get(requestId);
+          if (!entry) {
+            const device = await run(
+              withSession(id, (session) => session.memberDeliveryDevice(requestId))
+            ).catch(() => null);
+            if (!device) throw fail('invalid-input');
+            entry = { device, state: 'failed', code: 'e2ee_key_not_sent' };
+            deliveries.set(requestId, entry);
+          }
           if (entry.state === 'failed') startDelivery(id, requestId);
           return deliveryView(requestId);
         },
@@ -1341,7 +1363,13 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
   const exposed = Object.assign(runtime, { accountRequester });
   requesters.set(exposed, accountRequester);
   recoveries.set(exposed, {
-    restore: (input) => checked(host.restoreRecovery(input)),
+    restore: (input) =>
+      checked(host.restoreRecovery(input)).pipe(
+        Effect.catchIf(
+          (error): error is PersonalAccessLoss => error instanceof PersonalAccessLoss,
+          (loss) => Effect.fail(accessLossError(loss.code))
+        )
+      ),
     setup: (input) => withSession(workspaceId, (session) => session.setupRecovery(input)),
   });
   return Object.freeze(exposed);

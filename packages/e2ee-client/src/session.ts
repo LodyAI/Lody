@@ -336,6 +336,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       | Layer.Success<typeof keyLayer>
       | EpochStagingStore
       | ReceiveJournal
+      | DistributionJournal
       | EpochCandidateStore
       | KeyMailbox;
     let keyServices: Context.Context<Keys> | undefined;
@@ -505,12 +506,42 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                 const activeCandidate = yield* Effect.result(
                   Context.get(ctx, EpochCandidateStore).active()
                 );
+                const candidateRow = Result.isSuccess(activeCandidate)
+                  ? activeCandidate.success
+                  : null;
                 const hasCandidate = Result.isSuccess(activeCandidate)
-                  ? activeCandidate.success !== null
+                  ? candidateRow !== null
                   : true;
                 const pendingEntry = yield* submission.pending();
                 const publisher = Context.get(ctx, EpochPublisher);
-                if (missingCurrent || hasCandidate || pendingEntry.record !== null) {
+                const unsubmittedNonPublishDraft =
+                  pendingEntry.record === null &&
+                  candidateRow !== null &&
+                  candidateRow.outcome === null &&
+                  (() => {
+                    const decoded = decodeRecord(candidateRow.record);
+                    return (
+                      Result.isSuccess(decoded) &&
+                      decoded.success.body.type === 'ordinary' &&
+                      decoded.success.body.operation.type !== 'publishEpoch'
+                    );
+                  })();
+                if (unsubmittedNonPublishDraft && candidateRow) {
+                  yield* Effect.ignore(
+                    Context.get(ctx, EpochCandidateStore).replace(candidateRow, {
+                      ...candidateRow,
+                      blob: new Uint8Array(),
+                      outcome: 'Conflict',
+                      binding: null,
+                      consumed: true,
+                    })
+                  );
+                }
+                if (
+                  missingCurrent ||
+                  (hasCandidate && !unsubmittedNonPublishDraft) ||
+                  pendingEntry.record !== null
+                ) {
                   yield* Context.get(ctx, InstalledEpochHistory).recover();
                   const pending = yield* publisher.resume();
                   if (pending) {
@@ -570,6 +601,71 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           return 'e2ee_key_recipient_ineligible';
         })
       );
+    const pendingMemberKeyDeliveries = () =>
+      withKeys((ctx) =>
+        Effect.gen(function* () {
+          const view = yield* admitted(),
+            state = view.inspectState();
+          const epoch = state.epoch.number;
+          const selfHex = toHex(device.publicKey.toBytes());
+          const own = state.devices.get(selfHex);
+          const selfMembership = own ? toHex(own.membershipId.toBytes()) : null;
+          const ownerMembership = toHex(state.owner.toBytes());
+          if (
+            !own ||
+            own.kind === 'recovery' ||
+            !selfMembership ||
+            !state.members.has(selfMembership)
+          )
+            return [] as readonly {
+              readonly requestId: string;
+              readonly device: string;
+              readonly code: string;
+            }[];
+          const journal = Context.get(ctx, DistributionJournal);
+          const pendingRecipients = new Set<string>();
+          const page = yield* Effect.result(journal.pending(null, 100));
+          if (Result.isSuccess(page)) {
+            for (const taskId of page.success.ids) {
+              const task = yield* Effect.result(journal.load(taskId));
+              if (Result.isSuccess(task) && task.success && task.success.epoch === epoch)
+                pendingRecipients.add(task.success.recipient);
+            }
+          }
+          const items: {
+            readonly requestId: string;
+            readonly device: string;
+            readonly code: string;
+          }[] = [];
+          const seen = new Set<string>();
+          for (const [recipient, entry] of state.devices.entries()) {
+            if (recipient === selfHex || entry.kind === 'recovery') continue;
+            const membershipId = toHex(entry.membershipId.toBytes());
+            if (membershipId === selfMembership || !state.members.has(membershipId)) continue;
+            if (epoch === 0 && membershipId === ownerMembership) continue;
+            if (seen.has(membershipId)) continue;
+            const evidence = yield* keyDeliveryEvidence(recipient);
+            if (evidence === 'delivered') continue;
+            if (evidence === 'e2ee_key_not_sent' || pendingRecipients.has(recipient)) {
+              seen.add(membershipId);
+              items.push({ requestId: membershipId, device: recipient, code: evidence });
+            }
+          }
+          return items;
+        })
+      );
+    const memberDeliveryDevice = (requestId: string) =>
+      Effect.gen(function* () {
+        const view = yield* admitted(),
+          state = view.inspectState();
+        const selfHex = toHex(device.publicKey.toBytes());
+        for (const [recipient, entry] of state.devices.entries()) {
+          if (recipient === selfHex || entry.kind === 'recovery') continue;
+          if (toHex(entry.membershipId.toBytes()) === requestId && state.members.has(requestId))
+            return recipient;
+        }
+        return null;
+      });
     /** True only for an active member device of this device's own verified ledger, when
      * either that ledger already holds `epoch` and the installed key store genuinely lacks
      * it (a rotation not received yet), or the frame is ledger lag: `epoch` is at most
@@ -1461,6 +1557,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       keyRound: (mode?: PersonalKeyRoundMode, recipients?: readonly string[]) =>
         run(keyRound(mode, recipients)),
       keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
+      pendingMemberKeyDeliveries: () => run(pendingMemberKeyDeliveries()),
+      memberDeliveryDevice: (requestId: string) => run(memberDeliveryDevice(requestId)),
       keyPending: (epoch: number, unknownAuthority?: boolean) =>
         run(keyPending(epoch, unknownAuthority)),
       status: () => run(status()),
