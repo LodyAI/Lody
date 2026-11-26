@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Provider, createStore } from 'jotai';
+import { frameData, frameSteps, MotionGlobalConfig } from 'framer-motion';
 
 import { LoginPage } from '../src/components/login-page';
 import { AuthProvider } from '../src/providers/convex-provider';
@@ -162,7 +163,19 @@ describe('login page last-used method', () => {
   // completion callback must not steal focus back to the email input (which
   // would route password keystrokes into the visible email field).
   it('does not steal focus from the password field when the email view transition completes', async () => {
-    vi.useFakeTimers();
+    const prevManualTiming = MotionGlobalConfig.useManualTiming;
+    const prevTimestamp = frameData.timestamp;
+    const prevDelta = frameData.delta;
+    MotionGlobalConfig.useManualTiming = true;
+    const stepFrame = (deltaMs: number) => {
+      frameData.delta = deltaMs;
+      frameData.timestamp += deltaMs;
+      frameData.isProcessing = true;
+      for (const step of Object.values(frameSteps)) {
+        step.process(frameData);
+      }
+      frameData.isProcessing = false;
+    };
     try {
       await render();
       await click(/Continue with email/);
@@ -177,14 +190,21 @@ describe('login page last-used method', () => {
       });
       expect(document.activeElement).toBe(password);
 
+      // Drive the 320ms LoginViewSlot transition synchronously via Framer Motion's
+      // manual frame clock so shared-jsdom real rAF scheduling never races it.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
+        for (let i = 0; i < 12; i++) {
+          stepFrame(40);
+        }
       });
 
       expect(stage?.dataset.loginPhase).toBe('visible');
       expect(document.activeElement).toBe(password);
     } finally {
-      vi.useRealTimers();
+      frameData.isProcessing = false;
+      frameData.delta = prevDelta;
+      frameData.timestamp = prevTimestamp;
+      MotionGlobalConfig.useManualTiming = prevManualTiming;
     }
   });
 
