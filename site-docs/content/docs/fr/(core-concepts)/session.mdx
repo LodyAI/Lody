@@ -79,7 +79,7 @@ L'ouverture d'un projet déjà ouvert dans l'éditeur place la fenêtre existant
 
 Survolez une session dans la liste (ou appuyez dessus sur mobile) pour faire apparaître le bouton d'archivage en bas à droite. Cliquez dessus pour archiver la session.
 
-Les sessions archivées sont déplacées dans la liste des archives et conservent leur historique de conversation. La machine propriétaire peut récupérer un répertoire de worktree géré par Lody avant sa suppression définitive, en conservant la branche locale et en committant d'abord les modifications non ignorées en attente. Les fichiers ignorés peuvent être supprimés, et un script de nettoyage peut modifier des fichiers avant la sauvegarde. Enregistrez les fichiers nécessaires en dehors du worktree avant d'archiver. Consultez [Rétention et récupération des worktrees](/fr/docs/worktrees#automatic-cleanup) pour connaître les délais, les conditions de récupération et les limites de protection. Les sessions exécutées directement dans un répertoire de projet local ne voient pas ce répertoire supprimé par le nettoyage des worktrees gérés.
+Les sessions archivées sont déplacées dans la liste des archives et conservent leur historique de conversation. La machine propriétaire peut récupérer un répertoire de worktree géré par Lody avant sa suppression définitive, en conservant la branche locale et en committant d'abord les modifications non ignorées en attente. Les fichiers ignorés peuvent être supprimés, et un script de nettoyage peut modifier des fichiers avant la sauvegarde. Enregistrez les fichiers nécessaires en dehors du worktree avant d'archiver. Consultez [Rétention et récupération des worktrees](/fr/docs/worktrees#nettoyage-automatique) pour connaître les délais, les conditions de récupération et les limites de protection. Les sessions exécutées directement dans un répertoire de projet local ne voient pas ce répertoire supprimé par le nettoyage des worktrees gérés.
 
 ## Désarchiver des sessions
 
@@ -89,7 +89,7 @@ En bas à droite de la barre latérale gauche, cliquez sur le bouton de la liste
 
 ## Supprimer des sessions
 
-En bas à droite de la barre latérale gauche, cliquez sur le bouton de la liste des archives pour ouvrir les sessions archivées. Cliquez sur le bouton de suppression à côté d'une session pour la supprimer définitivement ainsi que son historique de conversation. Cette action est irréversible. Tout worktree géré restant demeure éligible au nettoyage selon la [même règle de sauvegarde](/fr/docs/worktrees#automatic-cleanup) ; la branche Git locale et les commits sont conservés.
+En bas à droite de la barre latérale gauche, cliquez sur le bouton de la liste des archives pour ouvrir les sessions archivées. Cliquez sur le bouton de suppression à côté d'une session pour la supprimer définitivement ainsi que son historique de conversation. Cette action est irréversible. Tout worktree géré restant demeure éligible au nettoyage selon la [même règle de sauvegarde](/fr/docs/worktrees#nettoyage-automatique) ; la branche Git locale et les commits sont conservés.
 
 Pour les sessions sans projet sélectionné, la suppression supprime également le répertoire de travail de discussion géré par Lody et tous les fichiers qu'il contient, sans sauvegarde ni récupération possible ; l'archivage ne récupère que les répertoires vides.
 

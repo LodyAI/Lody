@@ -23,7 +23,7 @@ export function baseOptions(locale: SiteLocale): BaseLayoutProps {
   return {
     nav: {
       title: docsNavTitle(),
-      url: localizeSitePath('/home', locale),
+      url: localizeSitePath('/', locale),
     },
     // Social + theme live only in `DocsSidebarFooter` (sidebar.footer).
     // Empty links + disabled themeSwitch avoid fumadocs' dual sun/moon pill.

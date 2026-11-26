@@ -160,7 +160,8 @@ export function switchSiteLocalePath(pathname: string, targetLocale: SiteLocale)
   const currentLocale = detectSiteLocaleFromPath(pathname);
   const currentPrefix = SITE_LOCALE_META[currentLocale].prefix;
   const rest = currentPrefix ? pathname.slice(currentPrefix.length) : pathname;
-  return localizeSitePath(rest.length === 0 ? '/' : rest, targetLocale);
+  const canonicalRest = rest === '/home' || rest === '/home/' || rest.length === 0 ? '/' : rest;
+  return localizeSitePath(canonicalRest, targetLocale);
 }
 
 export function buildLocaleAlternates(

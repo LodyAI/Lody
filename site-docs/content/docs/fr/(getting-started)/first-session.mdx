@@ -54,8 +54,8 @@ Add one test that asserts the status and version fields. Do not change other rou
 
 Lody crée la session et diffuse en direct le travail de l'agent. Un **round** correspond à un tour de l'agent et aux modifications de fichiers qu'il a produites. Pendant qu'un round est en cours, vous pouvez :
 
-- envoyer un message de suivi pour [**orienter**](/fr/docs/claude-codex-capabilities#steer-a-running-task) la tâche en cours plutôt que d'attendre qu'elle se termine ;
-- poser une question dans un [**Side Chat**](/fr/docs/session#right-sidebar-browser-and-side-chat) sans interrompre la tâche principale, lorsque l'agent prend en charge le fork natif ;
+- envoyer un message de suivi pour [**orienter**](/fr/docs/claude-codex-capabilities#orienter-une-tâche-en-cours) la tâche en cours plutôt que d'attendre qu'elle se termine ;
+- poser une question dans un [**Side Chat**](/fr/docs/session#barre-latérale-droite--navigateur-et-side-chat) sans interrompre la tâche principale, lorsque l'agent prend en charge le fork natif ;
 - arrêter le tour si l'agent part dans la mauvaise direction.
 
 </Step>
@@ -89,7 +89,7 @@ Lorsque la modification vous semble correcte, plusieurs options s'offrent à vou
 - **Conserver la branche.** Copiez le nom de la branche actuelle depuis la session, puis testez-la ou poussez-la depuis votre propre éditeur.
 - **L'ouvrir en local.** Sur ordinateur, utilisez **Open in** pour ouvrir le worktree dans votre éditeur.
 - **Créer une pull request.** Pour une session GitHub, utilisez **Create PR** au-dessus de la conversation. Lody associe la PR à la session et synchronise le statut CI. C'est le point de départ du [flux de travail recommandé](/fr/docs/workflow).
-- **Archiver la session.** Une fois le travail terminé, archivez-la depuis la barre latérale. L'archivage libère le worktree mais conserve la branche et la conversation afin que vous puissiez la restaurer plus tard. Consultez [Archiver les sessions](/fr/docs/session#archive-sessions).
+- **Archiver la session.** Une fois le travail terminé, archivez-la depuis la barre latérale. L'archivage libère le worktree mais conserve la branche et la conversation afin que vous puissiez la restaurer plus tard. Consultez [Archiver les sessions](/fr/docs/session#archiver-des-sessions).
 
 </Step>
 </Steps>
@@ -131,7 +131,7 @@ Oui. Utilisez le bouton d'arrêt dans la zone de saisie pour annuler le tour act
 
 ### Où va une session archivée ?
 
-Elle est déplacée vers la liste des archives en bas à droite de la barre latérale. La conversation et la branche sont conservées, et le worktree est recréé lorsque vous restaurez la session. Consultez [Archiver les sessions](/fr/docs/session#archive-sessions).
+Elle est déplacée vers la liste des archives en bas à droite de la barre latérale. La conversation et la branche sont conservées, et le worktree est recréé lorsque vous restaurez la session. Consultez [Archiver les sessions](/fr/docs/session#archiver-des-sessions).
 
 ## Étapes suivantes
 
