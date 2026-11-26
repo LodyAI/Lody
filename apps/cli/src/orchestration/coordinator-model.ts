@@ -11,6 +11,7 @@ import {
   getOperationProgressTargetKey,
   type OperationProgressStatusByTarget,
 } from '@lody/shared/session-data';
+import type { DepthLimitedIntent } from './inbox/model';
 const TARGET_OUTPUT_PREVIEW_MAX_BYTES = 8 * 1024;
 const truncateTargetOutput = (
   text: string
@@ -197,25 +198,32 @@ export function resolveOperationTargetMachineId(args: {
   return args.requesterMeta?.machineId;
 }
 
-export const buildChainDepthLimitNotice = (
-  limited: { intentId: string; pendingResults: number },
+export const buildChainDepthNotice = (notice: {
+  id: string;
+  source: 'delegationChainResultsHeld' | 'delegationChainDispatchRejected';
+  message: string;
+  timestamp: string;
+}): SessionHistoryInput => ({
+  id: notice.id,
+  role: 'system',
+  timestamp: notice.timestamp,
+  fileDiff: [],
+  items: [
+    {
+      type: 'system_notice',
+      name: 'agent_warning',
+      meta: { source: notice.source, message: notice.message },
+    },
+  ],
+});
+
+export const buildHeldResultsNotice = (
+  { intentId, pendingResults }: DepthLimitedIntent,
   timestamp: string
-): SessionHistoryInput => {
-  const count = limited.pendingResults;
-  return {
-    id: `chain-depth-limit:${limited.intentId}`,
-    role: 'system',
+): SessionHistoryInput =>
+  buildChainDepthNotice({
+    id: `chain-depth-limit:${intentId}`,
+    source: 'delegationChainResultsHeld',
     timestamp,
-    fileDiff: [],
-    items: [
-      {
-        type: 'system_notice',
-        name: 'agent_warning',
-        meta: {
-          source: 'delegationChainResultsHeld',
-          message: `The delegation chain reached its limit of ${LODY_MAX_CHAIN_DEPTH} hops, so ${count} delegated ${count === 1 ? 'result was' : 'results were'} not handed to the agent automatically. ${count === 1 ? 'It' : 'They'} will be included with your next message.`,
-        },
-      },
-    ],
-  };
-};
+    message: `The delegation chain reached its limit of ${LODY_MAX_CHAIN_DEPTH} hops, so ${pendingResults} delegated ${pendingResults === 1 ? 'result was' : 'results were'} not handed to the agent automatically. ${pendingResults === 1 ? 'It' : 'They'} will be included with your next message.`,
+  });

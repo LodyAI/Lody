@@ -8,7 +8,7 @@ import type {
 } from '@lody/shared';
 import type { HistoryAction, SessionTurnRead } from '@lody/shared/session-data';
 import { Context, Data, Effect } from 'effect';
-import type { InboxBatch } from './inbox/model';
+import type { DepthLimitedIntent, InboxBatch } from './inbox/model';
 
 export const TARGET_CATCH_UP_TIMEOUT_MS = 8_000;
 
@@ -36,10 +36,7 @@ export class CoordinatorPorts extends Context.Service<
     metadata(id: SessionId): Effect.Effect<{ meta: SessionMeta } | undefined, unknown>;
     execution(id: SessionId): { activeTurnId?: string };
     receipts: Effect.Effect<InboxBatch[], unknown>;
-    depthLimited: Effect.Effect<
-      Array<{ intentId: string; sessionId: string; pendingResults: number }>,
-      unknown
-    >;
+    depthLimited: Effect.Effect<DepthLimitedIntent[], unknown>;
     acknowledgeDepthLimited(intentId: string): Effect.Effect<void, unknown>;
     wakeInbox: Effect.Effect<void, unknown>;
     active(): boolean;

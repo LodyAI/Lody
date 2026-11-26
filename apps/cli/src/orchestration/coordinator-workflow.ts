@@ -19,7 +19,7 @@ import { Cause, Context, Effect, Exit, FiberMap, Layer, Scope, Semaphore } from 
 import { CoordinatorActivity } from './coordinator-activity';
 import {
   assistantOutputPreview,
-  buildChainDepthLimitNotice,
+  buildHeldResultsNotice,
   findSteerSuccessor,
   isTerminalAssistantEntry,
   MAX_STEER_HANDOFF_HOPS,
@@ -33,6 +33,7 @@ import {
   TargetCatchUpTimeoutError,
   type CoordinatorHistory,
 } from './coordinator-ports';
+import type { DepthLimitedIntent } from './inbox/model';
 import { OperationRepository } from './operation-repository';
 
 /** Where a delegated target's work stands after following applied steer handoffs. */
@@ -173,20 +174,8 @@ export class CoordinatorWorkflow {
   );
   reportDepthLimitedResults = Effect.fnUntraced(
     function* (this: CoordinatorWorkflow): Effect.fn.Return<void, unknown> {
-      const workflow = this;
       for (const limited of yield* this.ports.depthLimited) {
-        yield* Effect.gen(function* () {
-          const sessionId = limited.sessionId as SessionId;
-          const meta = yield* workflow.ports.metadata(sessionId);
-          if (!meta?.meta) return;
-          const backend = yield* workflow.ports.session(sessionId);
-          if (!workflow.started) return;
-          yield* backend.applyHistoryAction({
-            kind: 'upsert-turn',
-            turn: buildChainDepthLimitNotice(limited, new Date(workflow.now()).toISOString()),
-          });
-          yield* workflow.ports.acknowledgeDepthLimited(limited.intentId);
-        }).pipe(
+        yield* this.reportHeldResults(limited).pipe(
           Effect.catchCause((cause) =>
             Cause.hasInterrupts(cause)
               ? Effect.failCause(cause)
@@ -197,6 +186,22 @@ export class CoordinatorWorkflow {
           )
         );
       }
+    }.bind(this)
+  );
+  reportHeldResults = Effect.fnUntraced(
+    function* (
+      this: CoordinatorWorkflow,
+      limited: DepthLimitedIntent
+    ): Effect.fn.Return<void, unknown> {
+      const sessionId = limited.sessionId as SessionId;
+      if (!(yield* this.ports.metadata(sessionId))?.meta) return;
+      const backend = yield* this.ports.session(sessionId);
+      if (!this.started) return;
+      yield* backend.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: buildHeldResultsNotice(limited, new Date(this.now()).toISOString()),
+      });
+      yield* this.ports.acknowledgeDepthLimited(limited.intentId);
     }.bind(this)
   );
   reconcileOperation = Effect.fnUntraced(

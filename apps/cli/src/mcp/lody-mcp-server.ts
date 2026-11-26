@@ -185,6 +185,7 @@ import { LODY_SKILL_INSTRUCTIONS, registerLodySkills } from './skills/server';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
 import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
 import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
+import { buildChainDepthNotice } from '@/orchestration/coordinator-model';
 import { createSessionBackend } from '@/session/session-backend';
 import { version as cliVersion } from '@/pkg';
 import {
@@ -2921,22 +2922,12 @@ const recordChainDepthRejection = async (
     );
     await backend.applyHistoryAction({
       kind: 'upsert-turn',
-      turn: {
+      turn: buildChainDepthNotice({
         id: `chain-depth-limit:${session.id}:${sourceTurnId}`,
-        role: 'system',
+        source: 'delegationChainDispatchRejected',
         timestamp: new Date(getServerNow()).toISOString(),
-        fileDiff: [],
-        items: [
-          {
-            type: 'system_notice',
-            name: 'agent_warning',
-            meta: {
-              source: 'delegationChainDispatchRejected',
-              message: `This turn reached the delegation chain limit of ${LODY_MAX_CHAIN_DEPTH} hops, so the agent could not create Sessions or send chats from it. A new message from you starts a fresh chain.`,
-            },
-          },
-        ],
-      },
+        message: `This turn reached the delegation chain limit of ${LODY_MAX_CHAIN_DEPTH} hops, so the agent could not create Sessions or send chats from it. A new message from you starts a fresh chain.`,
+      }),
     });
   } catch (error) {
     getLogger('mcp').debug(
@@ -2947,7 +2938,8 @@ const recordChainDepthRejection = async (
 
 const resolveInvokingTurnContext = async (
   session: SessionMeta,
-  manager: LoroDocumentManager
+  manager: LoroDocumentManager,
+  purpose: 'dispatch' | 'inspect'
 ): Promise<InvokingTurnContext> => {
   const source = await resolveInvokingTurnSource();
   const notificationOriginTurnIds = [...source.notificationOriginTurnIds];
@@ -2975,7 +2967,7 @@ const resolveInvokingTurnContext = async (
   }
   const chainDepth = source.inputConfig.chainDepth ?? 0;
   if (chainDepth >= LODY_MAX_CHAIN_DEPTH) {
-    await recordChainDepthRejection(manager, session, source.id);
+    if (purpose === 'dispatch') await recordChainDepthRejection(manager, session, source.id);
     throw new LodyOperationStoreError(
       'CHAIN_DEPTH_EXCEEDED',
       `Delegation chain limit reached: this Turn is at hop ${chainDepth} of ${LODY_MAX_CHAIN_DEPTH}, so it cannot create Sessions or send chats.`,
@@ -3276,7 +3268,7 @@ const buildSessionCreateOptions = async (
       );
       throw new Error(`Session not found: ${ctx.sessionId}`);
     }
-    const invoking = await resolveInvokingTurnContext(currentSession, manager);
+    const invoking = await resolveInvokingTurnContext(currentSession, manager, 'inspect');
     const requesterUserId = invoking.identity.userId;
     const delegatedRequester = toDelegatedSessionRequester(invoking.identity);
     const machineEntries = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
@@ -3581,7 +3573,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         ctx.sessionId as SessionId,
         `mcp.session_create:${ctx.sessionId}:operation`
       );
-    const invoking = await resolveInvokingTurnContext(currentSession, manager);
+    const invoking = await resolveInvokingTurnContext(currentSession, manager, 'dispatch');
     const roleCatalog = args.agentRoleId
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
@@ -3882,7 +3874,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
     );
     const currentSession = initial.session;
     let metaSynced = initial.synced;
-    const invoking = await resolveInvokingTurnContext(currentSession, manager);
+    const invoking = await resolveInvokingTurnContext(currentSession, manager, 'dispatch');
     let resolvedSessionId = await createSessionIdResolver(manager)(args.sessionId);
     let targetSession = await readCurrentSessionMeta(manager, resolvedSessionId as SessionId);
     const buildRetryLookupCommand = (sessionId: string) => {
@@ -4354,7 +4346,7 @@ const runSessionQueueTool = async (args: SessionQueueToolInput): Promise<unknown
         `Requester Session not found: ${ctx.sessionId}`,
         false
       );
-    const invoking = await resolveInvokingTurnContext(currentSession, manager);
+    const invoking = await resolveInvokingTurnContext(currentSession, manager, 'inspect');
     const requester = toDelegatedSessionRequester(invoking.identity);
     await validateSessionChatTarget({
       auth,
@@ -4446,7 +4438,7 @@ const startSessionCreateManyOperation = async (
         `mcp.session_create_many:${ctx.sessionId}`
       );
     const expanded = args.items.map((item) => ({ ...(args.defaults ?? {}), ...item }));
-    const invoking = await resolveInvokingTurnContext(requester, manager);
+    const invoking = await resolveInvokingTurnContext(requester, manager, 'dispatch');
     const roleCatalog = expanded.some((item) => Boolean(item.agentRoleId))
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
@@ -4803,7 +4795,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
       );
     };
     let expanded = await resolveExpandedItems();
-    const invoking = await resolveInvokingTurnContext(requester, manager);
+    const invoking = await resolveInvokingTurnContext(requester, manager, 'dispatch');
     let canonicalCommand = {
       items: expanded,
       ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
@@ -5666,7 +5658,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           if (!currentSession) {
             throw new Error(`Session not found: ${ctx.sessionId}`);
           }
-          const invoking = await resolveInvokingTurnContext(currentSession, manager);
+          const invoking = await resolveInvokingTurnContext(currentSession, manager, 'dispatch');
           const roleCatalog = args.agentRoleId
             ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
             : undefined;
@@ -5782,7 +5774,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
             throw new Error(`Session not found: ${sessionId}`);
           }
           assertDifferentMcpSession(currentSession, targetSession);
-          const invoking = await resolveInvokingTurnContext(currentSession, manager);
+          const invoking = await resolveInvokingTurnContext(currentSession, manager, 'dispatch');
           if (sessionId === (await readInvokingChatSender(manager, currentSession, invoking))) {
             throw reverseChatError();
           }

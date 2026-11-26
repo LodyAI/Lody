@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { OrchestrationConnection } from '../platform/database';
 import {
   batchDepth,
+  type DepthLimitedIntent,
   type InboxBatch,
   type InboxInput,
   type InboxMember,
@@ -923,25 +924,15 @@ export class InboxSqlite {
     };
   }
   /** Automatic continuations refused by the chain cap whose Session has not been told yet. */
-  depthLimitedIntents(workspaceId: string): Array<{
-    intentId: string;
-    sessionId: string;
-    userId: string;
-    pendingResults: number;
-  }> {
+  depthLimitedIntents(workspaceId: string): DepthLimitedIntent[] {
     return this.db
       .prepare(
-        `SELECT i.intent_id AS intentId,i.session_id AS sessionId,i.user_id AS userId,
+        `SELECT i.intent_id AS intentId,i.session_id AS sessionId,
           (SELECT COUNT(*) FROM inbox_results r WHERE r.workspace_id=i.workspace_id AND r.session_id=i.session_id
             AND r.consumed=0 AND r.claim IS NULL) AS pendingResults
         FROM inbox_intents i WHERE i.workspace_id=? AND i.state='depth_limited' ORDER BY i.rowid`
       )
-      .all(workspaceId) as Array<{
-      intentId: string;
-      sessionId: string;
-      userId: string;
-      pendingResults: number;
-    }>;
+      .all(workspaceId) as DepthLimitedIntent[];
   }
   acknowledgeDepthLimited(intentId: string): void {
     this.db

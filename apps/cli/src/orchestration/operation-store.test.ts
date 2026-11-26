@@ -105,20 +105,32 @@ describe('LodyOperationStore', () => {
       };
       expect(snapshotAt(LODY_CHAIN_DEPTH_SOFT_LIMIT - 1)).not.toHaveProperty('chainBudget');
       expect(snapshotAt(LODY_CHAIN_DEPTH_SOFT_LIMIT)).toMatchObject({
-        chainBudget: { hop: 9, max: 16, remaining: 7 },
+        chainBudget: {
+          hop: LODY_CHAIN_DEPTH_SOFT_LIMIT + 1,
+          max: LODY_MAX_CHAIN_DEPTH,
+          remaining: LODY_MAX_CHAIN_DEPTH - LODY_CHAIN_DEPTH_SOFT_LIMIT - 1,
+        },
       });
       const last = snapshotAt(LODY_MAX_CHAIN_DEPTH - 1);
-      expect(last).toMatchObject({ chainBudget: { hop: 16, max: 16, remaining: 0 } });
-      if (!('chainBudget' in last) || !last.chainBudget) throw new Error('missing budget');
-      expect(last.chainBudget.warning).toContain('hop 16 of 16');
-      expect(last.chainBudget.warning).toContain('0 hops remain');
-      const finished = store.finish('requester-1' as SessionId, 'depth-15', {
-        type: 'result',
-        value: { items: [] },
+      expect(last).toMatchObject({
+        chainBudget: { hop: LODY_MAX_CHAIN_DEPTH, max: LODY_MAX_CHAIN_DEPTH, remaining: 0 },
       });
+      if (!('chainBudget' in last) || !last.chainBudget) throw new Error('missing budget');
+      expect(last.chainBudget.warning).toContain(
+        `hop ${LODY_MAX_CHAIN_DEPTH} of ${LODY_MAX_CHAIN_DEPTH}`
+      );
+      expect(last.chainBudget.warning).toContain('0 hops remain');
+      const finished = store.finish(
+        'requester-1' as SessionId,
+        `depth-${LODY_MAX_CHAIN_DEPTH - 1}`,
+        {
+          type: 'result',
+          value: { items: [] },
+        }
+      );
       expect(store.snapshot(finished)).toMatchObject({
         state: 'finished',
-        chainBudget: { hop: 16, remaining: 0 },
+        chainBudget: { hop: LODY_MAX_CHAIN_DEPTH, remaining: 0 },
       });
     } finally {
       store.close();

@@ -375,7 +375,6 @@ describe('durable Operation inbox', () => {
     expect(limited).toEqual({
       intentId: intent.intentId,
       sessionId: 'A',
-      userId: 'human',
       pendingResults: 2,
     });
     f.sql.acknowledgeDepthLimited(limited.intentId);
