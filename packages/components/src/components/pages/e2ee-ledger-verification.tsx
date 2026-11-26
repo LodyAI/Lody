@@ -214,7 +214,7 @@ function ResultAlert(props: { result: DialogResult }) {
   );
 }
 
-export type CameraState = 'idle' | 'starting' | 'scanning' | 'unavailable';
+export type CameraState = 'idle' | 'starting' | 'scanning' | 'denied' | 'unavailable';
 
 /** Decode passes at most this often (~14 fps): enough to scan, light on a phone. */
 const SCAN_INTERVAL_MS = 70;
@@ -353,10 +353,16 @@ export function useQrCamera(active: boolean, onCode: (text: string) => void) {
           setState('scanning');
           frame = requestAnimationFrame(tick);
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           opening = false;
-          // Denied, absent or busy: reading the code by eye still works.
-          if (!stopped) setState('unavailable');
+          if (stopped) return;
+          const name = (error as { name?: unknown } | null)?.name;
+          // Denied vs absent/busy: reading the code by eye still works in both cases.
+          setState(
+            name === 'NotAllowedError' || name === 'PermissionDeniedError'
+              ? 'denied'
+              : 'unavailable'
+          );
         });
     };
     const restart = () => {
@@ -445,8 +451,14 @@ function VerifyDialog(props: {
                     {t('e2ee.verify.startCamera')}
                   </Button>
                 ))}
-              {state === 'unavailable' && (
-                <p {...stylex.props(styles.footnote)}>{t('e2ee.verify.cameraUnavailable')}</p>
+              {(state === 'denied' || state === 'unavailable') && (
+                <p {...stylex.props(styles.footnote)}>
+                  {t(
+                    state === 'denied'
+                      ? 'e2ee.verify.cameraDenied'
+                      : 'e2ee.verify.cameraUnavailable'
+                  )}
+                </p>
               )}
               <div {...stylex.props(styles.manual)}>
                 <p {...stylex.props(styles.hint)}>{t('e2ee.verify.manualHint')}</p>

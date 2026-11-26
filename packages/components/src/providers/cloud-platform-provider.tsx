@@ -397,6 +397,26 @@ export function CloudPlatformProvider({
         describe: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.describe, request),
         history: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.history, request),
       },
+      onWorkspaceCreated: (workspace) => {
+        const current = workspacesStore.get();
+        if (
+          current.status !== 'ready' ||
+          current.workspaces.some((item) => item.id === workspace.id)
+        )
+          return;
+        workspacesStore.set({
+          ...current,
+          workspaces: [
+            ...current.workspaces,
+            {
+              id: workspace.id,
+              name: workspace.name,
+              slug: workspace.slug,
+              role: 'owner',
+            },
+          ],
+        });
+      },
       refreshWorkspaces: async () => {
         await readOrganization().refetchOrganizations();
       },

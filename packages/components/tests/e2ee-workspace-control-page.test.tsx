@@ -736,7 +736,7 @@ describe('QR camera', () => {
       facingMode: { ideal: 'environment' },
       width: { ideal: 720 },
     });
-    expect(probe.states.at(-1)).toBe('unavailable');
+    expect(probe.states.at(-1)).toBe('denied');
     await probe.unmount();
   });
 

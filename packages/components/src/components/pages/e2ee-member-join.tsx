@@ -1,12 +1,13 @@
 import {
   isLocalStorageFailure,
   isRequestUnavailable,
+  localStorageFailureKey,
   requestFailureCode,
-} from '@/lib/e2ee-actionable-failure';
+} from '../../lib/e2ee-actionable-failure';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { useCloudQueryState, usePlatform } from '@lody/platform/react';
+import { useCloudQueryState, usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import { Button } from '@lody/ui/button';
@@ -109,6 +110,9 @@ const styles = stylex.create({
   },
   waitingTitle: {
     margin: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
     fontSize: text.subheadlineSize,
     lineHeight: text.subheadlineLeading,
     fontWeight: 600,
@@ -180,6 +184,8 @@ type Props = {
   loading?: boolean;
   preview?: E2eeMemberReplies['preview'];
   previewError?: unknown;
+  alreadyMember?: boolean;
+  alreadyMemberSlug?: string | null;
   onRetryPreview?: () => void;
   onSignInRequested: () => void;
   onEmailVerificationRequested: () => void;
@@ -191,6 +197,8 @@ const CLAIM_INTERVAL_MS = 10_000;
 const KEY_WAIT_INTERVALS_MS = [500, 1000, 2000, 3000];
 /** Upper bound of the faster cadence, after which claims return to 10 s. */
 const KEY_WAIT_FAST_MS = 120_000;
+/** Surface the explanatory slow-wait hint after 20 s while keeping the 120 s fast cadence. */
+const KEY_WAIT_SLOW_UI_MS = 20_000;
 export function E2eeMemberJoinSurface(
   props: Pick<
     Props,
@@ -202,6 +210,7 @@ export function E2eeMemberJoinSurface(
   >
 ) {
   const platform = usePlatform();
+  const workspaces = usePlatformWorkspaces();
   const session = useStableSession();
   const {
     data: preview,
@@ -209,6 +218,10 @@ export function E2eeMemberJoinSurface(
     retry: retryPreview,
   } = useCloudQueryState(cloudOperations.e2eeMembers.preview, { token: props.offer.token });
   const sessionLoading = session.isPending || session.isRetrying || session.isOptimistic;
+  const existingWorkspace =
+    workspaces.status === 'ready'
+      ? workspaces.workspaces.find((workspace) => workspace.id === props.offer.workspaceId)
+      : undefined;
   return (
     <E2eeMemberJoin
       {...props}
@@ -220,18 +233,20 @@ export function E2eeMemberJoinSurface(
       loading={sessionLoading}
       preview={preview}
       previewError={previewError}
+      alreadyMember={Boolean(existingWorkspace)}
+      alreadyMemberSlug={existingWorkspace?.slug ?? null}
       onRetryPreview={retryPreview}
     />
   );
 }
 function memberJoinFailureKey(cause: unknown) {
-  if (isLocalStorageFailure(cause)) return 'e2ee.team.error.storage';
+  if (isLocalStorageFailure(cause)) return localStorageFailureKey('team');
   if (
     /^(?:e2ee_)?(?:invite|invitation|member_invitation|member_join)_(?:expired|invalid|not_found|unavailable|rejected)$/.test(
       requestFailureCode(cause) ?? ''
     )
   )
-    return 'e2ee.team.unavailable';
+    return 'e2ee.team.inviteExpired';
   if (isRequestUnavailable(cause)) return 'e2ee.team.error.network';
   return 'e2ee.team.retryOriginal';
 }
@@ -271,6 +286,8 @@ function JoinSession({
   emailVerified,
   preview,
   previewError,
+  alreadyMember,
+  alreadyMemberSlug,
   onRetryPreview,
   loading,
   onSignInRequested,
@@ -342,11 +359,18 @@ function JoinSession({
     if (!requestId || !runtime?.claimMemberJoin || !claimActive) return undefined;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let slowTimer: ReturnType<typeof setTimeout> | undefined;
     let checking = false;
     let wakePending = false;
     let committedSince: number | undefined;
     let keyWaitAttempt = 0;
     setSlowWait(false);
+    const armSlowWait = () => {
+      if (slowTimer !== undefined) return;
+      slowTimer = setTimeout(() => {
+        if (!disposed) setSlowWait(true);
+      }, KEY_WAIT_SLOW_UI_MS);
+    };
     const claim = async () => {
       let delay = CLAIM_INTERVAL_MS;
       checking = true;
@@ -363,10 +387,13 @@ function JoinSession({
         if (result.ready || ['rejected', 'cancelled'].includes(result.state)) return;
         if (result.state === 'committed') {
           committedSince ??= Date.now();
-          if (Date.now() - committedSince < KEY_WAIT_FAST_MS) {
+          const elapsed = Date.now() - committedSince;
+          if (elapsed >= KEY_WAIT_SLOW_UI_MS) setSlowWait(true);
+          else armSlowWait();
+          if (elapsed < KEY_WAIT_FAST_MS) {
             delay = KEY_WAIT_INTERVALS_MS[keyWaitAttempt]!;
             keyWaitAttempt = Math.min(keyWaitAttempt + 1, KEY_WAIT_INTERVALS_MS.length - 1);
-          } else setSlowWait(true);
+          }
         }
       } catch (cause) {
         if (!disposed) setError(memberJoinFailureKey(cause));
@@ -385,6 +412,8 @@ function JoinSession({
     const recheck = (reset = false) => {
       clearTimeout(timer);
       if (reset) {
+        clearTimeout(slowTimer);
+        slowTimer = undefined;
         committedSince = undefined;
         keyWaitAttempt = 0;
         setSlowWait(false);
@@ -400,6 +429,7 @@ function JoinSession({
       disposed = true;
       wake.current = undefined;
       clearTimeout(timer);
+      clearTimeout(slowTimer);
       window.removeEventListener('online', reconnect);
     };
   }, [runtime, offer.workspaceId, requestId, claimActive]);
@@ -443,10 +473,12 @@ function JoinSession({
   else if (!emailVerified) message = 'e2ee.team.verifyHelp';
   else if (!native) message = runtime ? 'e2ee.team.joinUpgrade' : 'e2ee.team.desktopRequired';
   else if (ready) message = 'e2ee.team.ready';
+  else if (alreadyMember && !request) message = 'e2ee.team.alreadyMember';
   else if (terminal) message = 'e2ee.team.rejected';
   else if (request?.state === 'committed') message = 'e2ee.team.waitingKey';
   else if (request) message = 'e2ee.team.waitingApproval';
-  else if (!pinMatches) message = 'e2ee.team.unavailable';
+  else if (!available) message = 'e2ee.team.inviteExpired';
+  else if (!pinMatches) message = 'e2ee.team.pinMismatch';
   else if (available?.matchesRecipient === false) message = 'e2ee.team.wrongEmail';
   const canOpenDesktop = canAttemptDesktopInviteHandoff();
   const descriptionText =
@@ -506,7 +538,10 @@ function JoinSession({
             )}
             {message === 'e2ee.team.waitingKey' ? (
               <div {...stylex.props(styles.waitingPanel)}>
-                <h2 {...stylex.props(styles.waitingTitle)}>{t(message)}</h2>
+                <h2 {...stylex.props(styles.waitingTitle)}>
+                  <Spinner size="small" />
+                  <span>{t(message)}</span>
+                </h2>
                 <p {...stylex.props(styles.muted)}>{t('e2ee.team.waitingKeyGuide')}</p>
                 {error ? (
                   <p role="status" {...stylex.props(styles.muted)}>
@@ -564,6 +599,7 @@ function JoinSession({
                 native &&
                 !recovering &&
                 !ready &&
+                !alreadyMember &&
                 !terminal &&
                 pinMatches &&
                 available?.matchesRecipient !== false &&
@@ -588,10 +624,13 @@ function JoinSession({
                   {t('e2ee.team.checkStatus')}
                 </Button>
               )}
-              {!loading && ready && (
+              {!loading && (ready || (alreadyMember && !request)) && (
                 <Button
                   onClick={() =>
-                    onWorkspaceRequested(available?.workspaceSlug ?? null, offer.workspaceId)
+                    onWorkspaceRequested(
+                      alreadyMemberSlug ?? available?.workspaceSlug ?? null,
+                      offer.workspaceId
+                    )
                   }
                 >
                   {t('e2ee.team.openWorkspace')}

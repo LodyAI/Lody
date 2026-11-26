@@ -330,13 +330,14 @@ function TeamSession({
       await action();
     } catch (error) {
       const kind = managementFailureKind(error);
-      const messageKey = approval
-        ? 'e2ee.team.retryOriginal'
-        : kind === 'generic'
-          ? 'e2ee.team.error.actionFailed'
-          : kind === 'network'
-            ? 'e2ee.team.error.actionNetwork'
-            : `e2ee.team.error.${kind}`;
+      const messageKey =
+        kind === 'unauthorized' || kind === 'conflict'
+          ? `e2ee.team.error.${kind}`
+          : approval
+            ? 'e2ee.team.retryOriginal'
+            : kind === 'generic'
+              ? 'e2ee.team.error.actionFailed'
+              : 'e2ee.team.error.actionNetwork';
       if (current())
         setMessage(
           t(

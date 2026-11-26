@@ -1350,4 +1350,81 @@ describe('pairing hardening', () => {
     await act(async () => cancelAfterRetry!.click());
     expect(backed).toBe(1);
   });
+
+  it('shows the 5s keep-open guidance before the 15s sync timeout in E2eeAutomaticPairingPage', async () => {
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+    });
+    vi.setSystemTime(NOW);
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    const runtime = {
+      automaticPairingState: async () => ({
+        id: 'sync-step',
+        workspaceId: 'w1',
+        workspaceName: 'Alpha',
+        deviceName: 'Phone',
+        comparisonCode: '123456',
+        phase: 'syncing' as const,
+        expiresAt: NOW + 600_000,
+      }),
+      startAutomaticPairing: async () => {
+        throw new Error('unexpected');
+      },
+      cancelAutomaticPairing: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingPage
+          runtime={runtime}
+          workspaceId="w1"
+          onJoined={() => {}}
+          onBack={() => {}}
+        />
+      )
+    );
+    await flush();
+    expect(container.textContent).toContain('e2ee.auto.syncing.help');
+    await tick(5_000);
+    await flush();
+    expect(container.textContent).toContain('e2ee.auto.syncing.keepOpen');
+    expect(container.querySelector('[data-testid="e2ee-sync-timeout"]')).toBeNull();
+  });
+
+  it('wakes instant QR approval immediately on subscribeAccountPairingApproval without waiting for poll', async () => {
+    const { E2eeInstantQrApprove } = await import('../src/components/pages/e2ee-instant-qr');
+    let onSignal: (() => void) | undefined;
+    let unsubscribed = false;
+    let submitted = false;
+    const lookupId = 'ab'.repeat(16);
+    const runtime = {
+      accountPairingCode: async () => ({
+        pairingString: CODE,
+        expiresAt: NOW + 600_000,
+        lookupId,
+      }),
+      subscribeAccountPairingApproval: (id: string, changed: () => void) => {
+        expect(id).toBe(lookupId);
+        onSignal = changed;
+        return () => {
+          unsubscribed = true;
+        };
+      },
+      inspectAccountPairing: async () => (submitted ? preview : null),
+      approveAccountPairing: async () => ({
+        workspaces: [{ workspaceId: 'w1', outcome: 'admitted' }],
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const joined: string[] = [];
+    await act(async () =>
+      root.render(<E2eeInstantQrApprove runtime={runtime} onJoined={(d) => joined.push(d)} />)
+    );
+    await flush();
+    expect(onSignal).toBeDefined();
+    submitted = true;
+    await act(async () => onSignal!());
+    await flush();
+    expect(joined).toEqual(['Synthetic phone']);
+    expect(unsubscribed).toBe(true);
+  });
 });

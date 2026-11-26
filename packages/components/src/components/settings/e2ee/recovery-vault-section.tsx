@@ -966,8 +966,10 @@ export function RecoveryVaultSection({
           : { label: t('e2ee.recovery.methodSaved'), tone: 'neutral' }
         : undefined,
     note:
-      mode === 'none' && !canCreateFile && !canCreatePasskey && !canCreatePassword
-        ? t('e2ee.recovery.createElsewhere')
+      mode === 'none'
+        ? !canCreateFile && !canCreatePasskey && !canCreatePassword
+          ? t('e2ee.recovery.createElsewhere')
+          : t('e2ee.recovery.fileNoneNote')
         : mode === 'replacing'
           ? t('e2ee.recovery.fileReplacing')
           : undefined,
@@ -1047,6 +1049,7 @@ export function RecoveryVaultSection({
             mode === 'ready' && hasPasskey === true
               ? { label: t('e2ee.recovery.methodSaved'), tone: 'success' }
               : undefined,
+          note: mode === 'none' ? t('e2ee.recovery.passkeyNoneNote') : undefined,
           info:
             mode === 'none' ? t('e2ee.recovery.passkeyNoneHelp') : t('e2ee.recovery.passkeyHelp'),
           leadActions: passkeyLeadActions,
@@ -1092,6 +1095,7 @@ export function RecoveryVaultSection({
             mode === 'ready' && hasPassword
               ? { label: t('e2ee.recovery.methodSaved'), tone: 'success' }
               : undefined,
+          note: mode === 'none' ? t('e2ee.recovery.passwordNoneNote') : undefined,
           info:
             mode === 'none'
               ? t('e2ee.recovery.passwordNoneHelp')
@@ -1121,11 +1125,13 @@ export function RecoveryVaultSection({
       )}
       {result?.kind === 'created' && (
         <p aria-live="polite">
-          {result.method === 'passkey'
-            ? t('e2ee.recovery.createdPasskey', { vaultId: short(result.vaultId) })
-            : result.method === 'password'
-              ? t('e2ee.recovery.createdPassword', { vaultId: short(result.vaultId) })
-              : t('e2ee.recovery.created', { vaultId: short(result.vaultId) })}
+          {unfinished.length > 0
+            ? t('e2ee.recovery.createdNeedsSetup', { vaultId: short(result.vaultId) })
+            : result.method === 'passkey'
+              ? t('e2ee.recovery.createdPasskey', { vaultId: short(result.vaultId) })
+              : result.method === 'password'
+                ? t('e2ee.recovery.createdPassword', { vaultId: short(result.vaultId) })
+                : t('e2ee.recovery.created', { vaultId: short(result.vaultId) })}
         </p>
       )}
       {result?.kind === 'opened' && (

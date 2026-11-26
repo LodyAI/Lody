@@ -1094,4 +1094,103 @@ describe('encrypted team joining', () => {
       container.querySelector('[data-testid="e2ee-team-host-desktop-required"]')
     ).not.toBeNull();
   });
+
+  it('surfaces unauthorized and conflict on member approval instead of retryOriginal', async () => {
+    for (const code of ['e2ee_member_management_unauthorized', 'e2ee_member_management_conflict']) {
+      await render(
+        <E2eeTeamSettings
+          workspaceId="team"
+          runtime={{
+            createMemberInvitation: async () => offer,
+            memberJoinRequests: async () => ({
+              ...empty,
+              items: [application('applicant', 'link')],
+            }),
+            approveMemberJoin: async () => {
+              throw Object.assign(new Error(code), { code });
+            },
+            rejectMemberJoin: async () => ({ state: 'rejected' }),
+            revokeMemberInvitation: async () => ({ revoked: true }),
+          }}
+        />
+      );
+      await settle();
+      await act(async () =>
+        container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]')!.click()
+      );
+      await settle();
+      const expected = code.endsWith('unauthorized')
+        ? 'e2ee.team.error.unauthorized'
+        : 'e2ee.team.error.conflict';
+      expect(container.textContent).toContain(expected);
+      expect(container.textContent).not.toContain('e2ee.team.retryOriginal');
+    }
+  });
+
+  it('offers direct open for existing members and separates expired links from pin mismatch', async () => {
+    const opened: Array<{ slug: string | null; id?: string }> = [];
+    const baseRuntime = {
+      prepareMemberJoin: async () => ({ requestId: 'r1', state: 'pending' as const }),
+      pendingMemberJoin: async () => null,
+      claimMemberJoin: async () => ({ state: 'pending' as const, ready: false }),
+    };
+    await render(
+      <E2eeMemberJoin
+        offer={offer}
+        runtime={baseRuntime}
+        accountId="u1"
+        emailVerified
+        alreadyMember
+        alreadyMemberSlug="team-slug"
+        preview={{ status: 'unavailable' }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={() => {}}
+        onWorkspaceRequested={(slug, id) => opened.push({ slug, id })}
+        onHomeRequested={() => {}}
+      />
+    );
+    await settle();
+    expect(container.textContent).toContain('e2ee.team.alreadyMember');
+    await act(async () => button('e2ee.team.openWorkspace').click());
+    expect(opened).toEqual([{ slug: 'team-slug', id: offer.workspaceId }]);
+
+    await render(
+      <E2eeMemberJoin
+        offer={offer}
+        runtime={baseRuntime}
+        accountId="u1"
+        emailVerified
+        preview={{ status: 'unavailable' }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={() => {}}
+        onWorkspaceRequested={() => {}}
+        onHomeRequested={() => {}}
+      />
+    );
+    await settle();
+    expect(container.textContent).toContain('e2ee.team.inviteExpired');
+
+    await render(
+      <E2eeMemberJoin
+        offer={offer}
+        runtime={baseRuntime}
+        accountId="u1"
+        emailVerified
+        preview={{
+          status: 'available',
+          workspaceName: 'Team',
+          workspaceSlug: 'team-slug',
+          offer: { ...offer, genesisHash: 'ff'.repeat(32) },
+          recipientEmailMasked: null,
+          matchesRecipient: true,
+        }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={() => {}}
+        onWorkspaceRequested={() => {}}
+        onHomeRequested={() => {}}
+      />
+    );
+    await settle();
+    expect(container.textContent).toContain('e2ee.team.pinMismatch');
+  });
 });

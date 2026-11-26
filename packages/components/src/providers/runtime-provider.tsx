@@ -1157,6 +1157,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
     const initialization = (async () => {
       let admitting = false;
+      let runtimeModulePromise: Promise<typeof import('./create-workspace-runtime')> | undefined;
       try {
         if (disposed) return;
         if (modeCloud && requiresAdmission) {
@@ -1222,6 +1223,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               nativeReaderOwner = requestedReader;
               nativeLeasePreallocated = true;
             }
+            // Preload the workspace runtime chunk and prefetch the Streams token in
+            // parallel with native.open. The token is never attached to Loro Repo until
+            // native.open finishes verifying genesisHash and createE2eeContent validates bucketId.
+            runtimeModulePromise = import('./create-workspace-runtime');
+            const prefetchedStreamsToken =
+              typeof native.contentStreamsToken === 'function'
+                ? native.contentStreamsToken(effectiveWorkspaceId).catch(() => null)
+                : undefined;
             const status = await native.open(
               effectiveWorkspaceId,
               undefined,
@@ -1303,13 +1312,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               refreshNative();
               return;
             }
-            refreshNative();
             encryptedAccess = createE2eeContent({
               runtime: native,
               workspaceId: effectiveWorkspaceId,
               genesisHash: descriptor.genesisHash,
               epoch: status.writeEpoch ?? status.epoch,
               rotationRequired: status.rotationRequired,
+              ...(prefetchedStreamsToken ? { prefetchedStreamsToken } : {}),
               onKeyUpdateRequired: (source) => {
                 if (disposed || retired) return;
                 if (source === 'seal-complete') {
@@ -1369,7 +1378,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // module is statically reachable from the root route, so the workspace
         // runtime stack loads only once a workspace runtime is actually needed.
         markTodayWindowBoot('runtime-start');
-        const { createWorkspaceRuntime } = await import('./create-workspace-runtime');
+        const { createWorkspaceRuntime } = await (runtimeModulePromise ??
+          import('./create-workspace-runtime'));
         markTodayWindowBoot('runtime-module');
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },

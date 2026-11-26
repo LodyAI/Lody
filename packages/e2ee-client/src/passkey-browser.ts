@@ -44,7 +44,10 @@ async function ceremony<A>(work: () => Promise<A>) {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'NotAllowedError')
+    if (
+      error instanceof DOMException &&
+      (error.name === 'NotAllowedError' || error.name === 'AbortError')
+    )
       throw new E2eePasskeyCancelled('e2ee_passkey_cancelled');
     throw error;
   }

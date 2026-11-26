@@ -366,31 +366,41 @@ export function E2eeWorkspaceConsole({
           let status;
           try {
             nativeAcquisition = (async () => {
-              if (pin) {
+              const observedCheckpoint =
+                readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined;
+              const openNative = async () => {
+                if (disposed) return undefined;
+                readerOwner =
+                  runtime.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
+                if (readerOwner) hostOpened = readerPreallocated = true;
+                const opened = await runtime.open(
+                  workspaceId,
+                  observedCheckpoint,
+                  accountId,
+                  readerOwner
+                );
+                hostOpened = true;
+                if (readerOwner && opened.readerOwner !== readerOwner)
+                  throw new Error('e2ee_reader_owner_mismatch');
+                readerOwner = opened.readerOwner;
+                readerGenesis = opened.genesisHash;
+                return opened;
+              };
+              try {
+                return await openNative();
+              } catch (openError) {
+                if (!pin || personalHostFailureCode(openError) !== 'missing-binding')
+                  throw openError;
                 try {
                   await runtime.recordCreated({ workspaceId, genesisHash: pin });
-                } catch (error) {
+                } catch (recordError) {
                   // Portable read-open does not implement desktop creation repair.
                   // All binding/custody failures still stop this read.
-                  if (personalHostFailureCode(error) !== 'unsupported') throw error;
+                  if (personalHostFailureCode(recordError) !== 'unsupported') throw recordError;
+                  throw openError;
                 }
+                return openNative();
               }
-              if (disposed) return undefined;
-              readerOwner =
-                runtime.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
-              if (readerOwner) hostOpened = readerPreallocated = true;
-              const opened = await runtime.open(
-                workspaceId,
-                readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined,
-                accountId,
-                readerOwner
-              );
-              hostOpened = true;
-              if (readerOwner && opened.readerOwner !== readerOwner)
-                throw new Error('e2ee_reader_owner_mismatch');
-              readerOwner = opened.readerOwner;
-              readerGenesis = opened.genesisHash;
-              return opened;
             })();
             status = await nativeAcquisition;
           } catch (error) {
@@ -515,36 +525,44 @@ export function E2eeWorkspaceConsole({
                 });
               }
             };
-            // A saved local view is visible before the first network request.
-            try {
-              const remote = await port.describe({ workspaceId });
-              if (disposed) return;
-              if (
-                !('contentMode' in remote) ||
-                remote.contentMode !== 'e2ee' ||
-                remote.genesisHash !== status.genesisHash
-              )
-                throw new Error('e2ee_genesis_conflict');
-              retainEncryptedWorkspaceMode(localStorage, accountId, remote);
-              await synchronize();
-            } catch (error) {
-              // The account-facing directory/history can only report a generic
-              // denial. Native refresh checks the retained device credential;
-              // only its exact whole-member result authorizes local erasure.
-              if (!disposed) {
-                try {
-                  await runtime.refresh(workspaceId, { keyMode: 'none' });
-                } catch (checked) {
-                  if (e2eeAccessLoss(checked)) throw checked;
+            // When a live ledgerHead subscription is available and the local pin already
+            // matches the fresh native open (which verified history from the host), skip
+            // the redundant immediate describe + synchronize; the subscription below
+            // catches any newer head immediately.
+            const skipInitialSync =
+              Boolean(port.subscribeLedgerHead) && pin === status.genesisHash && status.length > 0;
+            if (!skipInitialSync) {
+              // A saved local view is visible before the first network request.
+              try {
+                const remote = await port.describe({ workspaceId });
+                if (disposed) return;
+                if (
+                  !('contentMode' in remote) ||
+                  remote.contentMode !== 'e2ee' ||
+                  remote.genesisHash !== status.genesisHash
+                )
+                  throw new Error('e2ee_genesis_conflict');
+                retainEncryptedWorkspaceMode(localStorage, accountId, remote);
+                await synchronize();
+              } catch (error) {
+                // The account-facing directory/history can only report a generic
+                // denial. Native refresh checks the retained device credential;
+                // only its exact whole-member result authorizes local erasure.
+                if (!disposed) {
+                  try {
+                    await runtime.refresh(workspaceId, { keyMode: 'none' });
+                  } catch (checked) {
+                    if (e2eeAccessLoss(checked)) throw checked;
+                  }
                 }
+                if (classifyE2eeControlFailure(error).kind !== 'network') throw error;
+                // A disconnected refresh does not invalidate a verified local view.
+                // Reconnection or the existing Refresh action retries the same suffix.
+                if (!disposed)
+                  setState((previous) =>
+                    previous.scope === scope ? { ...previous, offline: true } : previous
+                  );
               }
-              if (classifyE2eeControlFailure(error).kind !== 'network') throw error;
-              // A disconnected refresh does not invalidate a verified local view.
-              // Reconnection or the existing Refresh action retries the same suffix.
-              if (!disposed)
-                setState((previous) =>
-                  previous.scope === scope ? { ...previous, offline: true } : previous
-                );
             }
             // The first subscription value closes the gap after initial catch-up.
             // Only original, verified history advances the local checkpoint.

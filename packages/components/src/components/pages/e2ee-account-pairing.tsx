@@ -109,19 +109,27 @@ function usePoll(
         }
       });
     };
-    const timer = setInterval(() => {
-      if (!running) run();
-    }, ms);
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribe?.(run);
     } catch {
       /* Live hints are optional; the poll still reads the same verified state. */
     }
+    const timer =
+      unsubscribe === undefined
+        ? setInterval(() => {
+            if (!running) run();
+          }, ms)
+        : undefined;
+    const onOnline = () => {
+      if (!running) run();
+    };
+    window.addEventListener('online', onOnline);
     if (immediate) run();
     return () => {
       stopped = true;
-      clearInterval(timer);
+      if (timer !== undefined) clearInterval(timer);
+      window.removeEventListener('online', onOnline);
       unsubscribe?.();
     };
   }, [active, ms, subscribe, immediate]);
@@ -272,7 +280,8 @@ export function E2eeAccountPairingRequest(props: {
         if (live.current) setError(failureKey(failure));
       }
     },
-    subscribeRequest
+    subscribeRequest,
+    true
   );
   const restart = () =>
     run(async () => {
@@ -593,8 +602,14 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
                 {t('e2ee.accountPair.approve.scan')}
               </Button>
             ))}
-          {cameraState === 'unavailable' && (
-            <p {...stylex.props(styles.muted)}>{t('e2ee.verify.cameraUnavailable')}</p>
+          {(cameraState === 'denied' || cameraState === 'unavailable') && (
+            <p {...stylex.props(styles.muted)}>
+              {t(
+                cameraState === 'denied'
+                  ? 'e2ee.verify.cameraDenied'
+                  : 'e2ee.verify.cameraUnavailable'
+              )}
+            </p>
           )}
           <Textarea
             aria-label={t('e2ee.accountPair.code.label')}

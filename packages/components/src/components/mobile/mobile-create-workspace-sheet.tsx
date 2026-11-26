@@ -11,9 +11,11 @@ import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import {
   createPreparedE2eeWorkspace,
+  e2eeCreationErrorCode,
   isE2eeCreationNotEnabled,
   reconcilePendingE2eeWorkspaces,
-} from '@/lib/create-e2ee-workspace';
+} from '../../lib/create-e2ee-workspace';
+import { isLocalStorageFailure, localStorageFailureKey } from '../../lib/e2ee-actionable-failure';
 import {
   clearPendingE2eeWorkspace,
   listPendingE2eeWorkspaces,
@@ -161,7 +163,7 @@ export function MobileCreateWorkspaceSheet({
   onOpenChange,
   onCreated,
 }: MobileCreateWorkspaceSheetProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const keyboard = useKeyboardAwareSheet({ chromeHeight: '9rem' });
   const maxHeight = useFoldAwareSheetHeight(92, true);
   const { createOrganization } = useOrganization();
@@ -298,12 +300,21 @@ export function MobileCreateWorkspaceSheet({
       }
       if (err instanceof Error && err.message === 'e2ee_creation_cancelled') return;
       if (encrypted) {
+        const refusalCode = e2eeCreationErrorCode(err);
+        const refusalReason =
+          refusalCode && i18n.exists(`e2ee.create.reason.${refusalCode}`)
+            ? t(`e2ee.create.reason.${refusalCode}`)
+            : undefined;
         setCreateError(
           isE2eeCreationNotEnabled(err)
             ? t('e2ee.create.notEnabled')
             : isE2eeActionTimeoutError(err)
               ? t('e2ee.create.timeout')
-              : t('e2ee.create.failed')
+              : isLocalStorageFailure(err)
+                ? t(localStorageFailureKey('create'))
+                : refusalReason
+                  ? t('e2ee.create.requestRemoved', { code: refusalReason })
+                  : t('e2ee.create.failed')
         );
       } else {
         setCreateError(t('organization.createFailed'));
@@ -463,7 +474,11 @@ export function MobileCreateWorkspaceSheet({
                 onClick={() => void handleSubmit()}
                 disabled={!canSubmit}
               >
-                {creating ? t('common.creating', 'Creating...') : t('common.create', 'Create')}
+                {creating
+                  ? encrypted
+                    ? t('e2ee.create.creating')
+                    : t('common.creating', 'Creating...')
+                  : t('common.create', 'Create')}
               </Button>
             ) : null}
           </div>

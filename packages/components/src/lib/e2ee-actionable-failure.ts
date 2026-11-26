@@ -1,8 +1,22 @@
 import { isTransientConvexQueryError } from './authed-convex-query';
+import { isElectronRenderer } from './electron';
+import { isNativeAppShell } from './native-platform';
+
+export function isWebBrowserStorageRuntime(): boolean {
+  return typeof window !== 'undefined' && !isElectronRenderer() && !isNativeAppShell();
+}
+
+export function localStorageFailureKey(surface: 'recovery' | 'create' | 'team'): string {
+  const web = isWebBrowserStorageRuntime();
+  if (surface === 'recovery')
+    return web ? 'e2ee.recovery.error.storageWeb' : 'e2ee.recovery.error.storage';
+  if (surface === 'create') return web ? 'e2ee.create.storageWeb' : 'e2ee.create.storage';
+  return web ? 'e2ee.team.error.storageWeb' : 'e2ee.team.error.storage';
+}
 
 export function recoveryAvailabilityMessage(code: string): string | undefined {
   if (code.includes('e2ee_recovery_unavailable')) return 'e2ee.recovery.error.unavailable';
-  if (code.includes('e2ee_recovery_storage')) return 'e2ee.recovery.error.storage';
+  if (code.includes('e2ee_recovery_storage')) return localStorageFailureKey('recovery');
   if (/e2ee_recovery_(?:conflict|rollback)/.test(code)) return 'e2ee.recovery.error.conflict';
 }
 
@@ -58,7 +72,9 @@ export function isLocalStorageFailure(error: unknown): boolean {
     _tag === 'LocalStoreError' ||
     _tag === 'ClientCustodyError' ||
     _tag === 'KeyProtectorError' ||
-    /^(?:QuotaExceededError|InvalidStateError|UnknownError|NotReadableError)$/.test(name ?? '') ||
+    /^(?:QuotaExceededError|InvalidStateError|UnknownError|NotReadableError|SecurityError)$/.test(
+      name ?? ''
+    ) ||
     /^(?:e2ee_)?(?:storage|permissions|corrupt|custody_unavailable|protection-unavailable)$/.test(
       requestFailureCode(error) ?? ''
     )

@@ -68,6 +68,8 @@ const clock = (seconds: number) =>
 const POLL_MS = 2000;
 /** The new device's poll for its QR join; the approving device signs within a second. */
 const QR_JOIN_POLL_MS = 800;
+/** After 5s of syncing, guide the person to keep Lody open on the approving device. */
+const SYNC_SLOW_HINT_MS = 5_000;
 /** After 15s of syncing without key failure, surface explicit retry and cancel exits. */
 const SYNC_TIMEOUT_MS = 15_000;
 /** A scanned join that verified approvals settled without this workspace: it was left
@@ -230,16 +232,23 @@ export function E2eeAutomaticPairingPage({
   const lost = state?.phase === 'revoked' || state?.phase === 'removed';
   const receiving =
     !lost && (state?.phase === 'syncing' || state?.phase === 'joined' || qr === 'joined');
+  const [syncSlowHint, setSyncSlowHint] = useState(false);
   const [syncTimedOut, setSyncTimedOut] = useState(false);
   const [syncAttempt, setSyncAttempt] = useState(0);
   useEffect(() => {
     if (!receiving || keyFailure) {
+      setSyncSlowHint(false);
       setSyncTimedOut(false);
       return undefined;
     }
+    setSyncSlowHint(false);
     setSyncTimedOut(false);
+    const slowTimer = setTimeout(() => setSyncSlowHint(true), SYNC_SLOW_HINT_MS);
     const timer = setTimeout(() => setSyncTimedOut(true), SYNC_TIMEOUT_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(slowTimer);
+      clearTimeout(timer);
+    };
   }, [receiving, keyFailure, syncAttempt]);
   const linkGuardRef = useRef({ busy, canStart, lostAllOpen, receiving });
   linkGuardRef.current = { busy, canStart, lostAllOpen, receiving };
@@ -362,11 +371,14 @@ export function E2eeAutomaticPairingPage({
       /* Live discovery is optional; scoped polling still verifies the same originals. */
     }
     void tick();
-    const timer = setInterval(() => void tick(), POLL_MS);
+    const timer = unsubscribe ? undefined : setInterval(() => void tick(), POLL_MS);
+    const onOnline = () => void tick();
+    window.addEventListener('online', onOnline);
     return () => {
       alive = false;
       unsubscribe?.();
-      clearInterval(timer);
+      if (timer !== undefined) clearInterval(timer);
+      window.removeEventListener('online', onOnline);
     };
   }, [runtime, workspaceId, generation, canStart]);
   const ownerRef = useRef({ runtime, workspaceId });
@@ -510,11 +522,14 @@ export function E2eeAutomaticPairingPage({
         /* Live subscription is optional; interval polling verifies the same request. */
       }
     }
-    const timer = setInterval(poll, QR_JOIN_POLL_MS);
+    poll();
+    const timer = unsubscribe ? undefined : setInterval(poll, QR_JOIN_POLL_MS);
+    window.addEventListener('online', poll);
     return () => {
       alive = false;
       unsubscribe?.();
-      clearInterval(timer);
+      if (timer !== undefined) clearInterval(timer);
+      window.removeEventListener('online', poll);
     };
     // The join belongs to this page's runtime and workspace; callbacks read refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -626,7 +641,15 @@ export function E2eeAutomaticPairingPage({
               {...lostAccess}
               workspaceId={workspaceId}
               workspaceName={lostAccess.workspaceName ?? state?.workspaceName}
-              {...(recovery ? { recovery: { ...recovery, onRecovered: recovered } } : {})}
+              {...(runtime.openBrowserRecovery
+                ? {
+                    recovery: undefined,
+                    entryVariant: 'link' as const,
+                    entryLabel: t('e2ee.lostAccess.entrySecondary'),
+                  }
+                : recovery
+                  ? { recovery: { ...recovery, onRecovered: recovered } }
+                  : {})}
               disabled={busy}
               onOpenChange={setLostAllOpen}
             />
@@ -700,7 +723,13 @@ export function E2eeAutomaticPairingPage({
           <>
             <p {...stylex.props(themeStyles.hint4, themeStyles.syncRow)}>
               {!keyFailure && <Spinner size="small" />}
-              <span>{t('e2ee.auto.syncing.help')}</span>
+              <span>
+                {t(
+                  syncSlowHint && !syncTimedOut
+                    ? 'e2ee.auto.syncing.keepOpen'
+                    : 'e2ee.auto.syncing.help'
+                )}
+              </span>
             </p>
             {!keyFailure && syncTimedOut && (
               <div {...stylex.props(themeStyles.spaced2)} data-testid="e2ee-sync-timeout">
@@ -783,9 +812,13 @@ export function E2eeAutomaticPairingPage({
             ) : qr === 'scanning' ? (
               <div {...stylex.props(themeStyles.layout3)} data-testid="e2ee-qr-viewfinder">
                 <video ref={qrVideo} muted playsInline {...stylex.props(themeStyles.panel)} />
-                {cameraState === 'unavailable' && (
+                {(cameraState === 'denied' || cameraState === 'unavailable') && (
                   <p role="alert" {...stylex.props(themeStyles.hint7)}>
-                    {t('e2ee.verify.cameraUnavailable')}
+                    {t(
+                      cameraState === 'denied'
+                        ? 'e2ee.verify.cameraDenied'
+                        : 'e2ee.verify.cameraUnavailable'
+                    )}
                   </p>
                 )}
                 <Button xstyle={themeStyles.spaced3} variant="ghost" onClick={() => setQr('idle')}>
@@ -1125,19 +1158,23 @@ export function E2eeAutomaticPairingInbox({
     void tick();
     // A hidden window does not poll; the subscription and the system notification
     // still run, and showing the window again checks at once.
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void tick();
-    }, POLL_MS);
+    const timer = unsubscribe
+      ? undefined
+      : setInterval(() => {
+          if (document.visibilityState === 'visible') void tick();
+        }, POLL_MS);
     // Restoring a minimized window presents a waiting request at once.
     const wake = () => {
       if (document.visibilityState === 'visible') void tick();
     };
     document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
     return () => {
       alive = false;
       unsubscribe?.();
-      clearInterval(timer);
+      if (timer !== undefined) clearInterval(timer);
       document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('online', wake);
     };
   }, [runtime]);
   const current = requests.find((row) => row.id === selected);
@@ -1496,9 +1533,13 @@ export function E2eeAutomaticPairingInbox({
                         playsInline
                         {...stylex.props(themeStyles.panel6)}
                       />
-                      {scanState === 'unavailable' && (
+                      {(scanState === 'denied' || scanState === 'unavailable') && (
                         <p role="alert" {...stylex.props(themeStyles.hint14)}>
-                          {t('e2ee.verify.cameraUnavailable')}
+                          {t(
+                            scanState === 'denied'
+                              ? 'e2ee.verify.cameraDenied'
+                              : 'e2ee.verify.cameraUnavailable'
+                          )}
                         </p>
                       )}
                       <Button

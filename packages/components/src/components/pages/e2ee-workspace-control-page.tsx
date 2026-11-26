@@ -1409,6 +1409,14 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
                       <Icon size={18} />
                     </span>
                     <span {...stylex.props(styles.mobileMenuLabel)}>{tabLabel(id)}</span>
+                    {id === 'recovery' && props.recoveryReady === false && (
+                      <span
+                        data-testid="e2ee-mobile-recovery-unset"
+                        {...stylex.props(styles.quiet)}
+                      >
+                        {t('e2ee.control.recoveryNotSet')}
+                      </span>
+                    )}
                     <ChevronRight
                       size={16}
                       aria-hidden="true"
