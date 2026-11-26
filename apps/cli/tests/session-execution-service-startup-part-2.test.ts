@@ -1623,6 +1623,118 @@ describe('SessionExecutionService', () => {
     });
   });
 
+  it('abandons an in-flight initial createSession on Stop so an unprompted acpSessionId is not persisted', async () => {
+    const sessionId = 'session-start-stop-abandon' as SessionId;
+    const userTurnId = 'user-1';
+    const turnId = `assistant:${userTurnId}`;
+    let persistedAcpSessionId: ACPSessionId | undefined;
+    const history: Array<Record<string, unknown>> = [
+      {
+        id: userTurnId,
+        role: 'user',
+        items: [{ type: 'text', text: 'first prompt' }],
+        status: 'pending',
+        read: false,
+      },
+    ];
+    const sessionDoc = withHistoryPort({
+      sessionId,
+      roomId: `session-${sessionId}`,
+      getMetaState: vi.fn(async () => ({
+        id: sessionId,
+        machineId: 'machine-1',
+        cliType: 'builtin',
+        agentType: 'codex',
+        acpSessionId: persistedAcpSessionId,
+        status: SessionStatusFactory.initializing(),
+      })),
+      getHistory: vi.fn(() => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        const next = updater(history);
+        history.splice(0, history.length, ...next);
+      }),
+      setStatus: vi.fn(async () => {}),
+      setProject: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      setACPSessionId: vi.fn(async (id: ACPSessionId) => {
+        persistedAcpSessionId = id;
+      }),
+    });
+
+    const createStarted = Promise.withResolvers<void>();
+    const releaseNewSession = Promise.withResolvers<void>();
+    const pendingCreateAbort = new AbortController();
+    const abandonPendingSessionCreate = vi.fn(() => {
+      pendingCreateAbort.abort(new Error('turn-cancelled'));
+      return true;
+    });
+    const sessionManager = {
+      getSession: vi.fn(() => null),
+      getPendingSession: vi.fn(() => null),
+      abandonPendingSessionCreate,
+      createSession: vi.fn(async () => {
+        createStarted.resolve();
+        await releaseNewSession.promise;
+        // Mirrors SessionManager.createSessionInnerWithAgent: abort before setACPSessionId.
+        pendingCreateAbort.signal.throwIfAborted();
+        await sessionDoc.setACPSessionId('codex-unmaterialized-thread' as ACPSessionId);
+        throw new Error('unexpected completion after abort');
+      }),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      validateSessionCredentials: vi.fn(async () => 'valid'),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({
+      sessionManager,
+      beginConversationTurn: vi.fn(() => turnId),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => ({ meta: await sessionDoc.getMetaState() })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    const startPromise = service.startSession({
+      type: 'session/create',
+      sessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      userTurnId,
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+      acpSessionConfig: {
+        prompt: 'first prompt',
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    } as never);
+
+    await createStarted.promise;
+    await expect(
+      service.cancelSession({
+        type: 'session/cancel',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        turnId,
+      })
+    ).resolves.toEqual({ success: true });
+    await startPromise;
+
+    expect(abandonPendingSessionCreate).toHaveBeenCalledWith(sessionId, 'turn-cancelled');
+    expect(pendingCreateAbort.signal.aborted).toBe(true);
+
+    releaseNewSession.resolve();
+    await Promise.resolve();
+    expect(persistedAcpSessionId).toBeUndefined();
+    expect(sessionDoc.setACPSessionId).not.toHaveBeenCalled();
+  });
+
   it('creates and starts a new session turn', async () => {
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
