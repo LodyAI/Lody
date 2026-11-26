@@ -1,7 +1,4 @@
 import * as stylex from '@stylexjs/stylex';
-import { Button } from '@lody/ui/button';
-import type { PendingE2eeWorkspace } from '@/lib/e2ee-workspace-storage';
-import { E2eeCreationRequestList } from './e2ee-creation-request-list';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Check, Cloud, Lock } from 'lucide-react';
@@ -96,97 +93,20 @@ const styles = stylex.create({
     lineHeight: 1.45,
     marginTop: space[1.5],
   },
-  requests: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: space[2],
-    marginTop: space[3],
-  },
-  requestsTop: {
-    marginTop: 0,
-    marginBottom: space[4],
-    paddingBottom: space[4],
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: colors.separator,
-  },
-  requestActions: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: space[2],
-    marginTop: space[1],
-  },
 });
 
 export function E2eeWorkspaceCreationOption(props: {
   selected: boolean;
   supported: boolean;
-  pending: boolean;
   disabled: boolean;
   paidRequired: boolean;
   onChange: (selected: boolean) => void;
   /** Automation id of the encrypted choice; a host keeps its established id. */
   encryptedChoiceTestId?: string;
-  requests?: PendingE2eeWorkspace[];
-  /** Saved requests the user archived: hidden from the default list, restorable. */
-  archivedRequests?: PendingE2eeWorkspace[];
-  selectedRequestId?: string | null;
-  onSelectRequest?: (requestId: string) => void;
-  onArchiveRequest?: (requestId: string) => void;
-  onRestoreRequest?: (requestId: string) => void;
-  onDeleteRequest?: (requestId: string) => void;
-  deletingRequestId?: string | null;
-  defaultArchiveOpen?: boolean;
-  onNewRequest?: () => void;
-  /** Stop resuming the selected saved request (kept in the list) and edit freely. */
-  onSetAside?: () => void;
 }) {
   const { t } = useTranslation();
-  const hasSavedRequests = Boolean(props.requests?.length || props.archivedRequests?.length);
-  const requestsBlock = hasSavedRequests ? (
-    <div {...stylex.props(styles.requests, props.pending && styles.requestsTop)}>
-      <E2eeCreationRequestList
-        requests={props.requests ?? []}
-        archivedRequests={props.archivedRequests ?? []}
-        selectedRequestId={props.selectedRequestId ?? null}
-        disabled={props.disabled}
-        defaultArchiveOpen={props.defaultArchiveOpen}
-        onSelectRequest={(requestId) => props.onSelectRequest?.(requestId)}
-        onArchiveRequest={(requestId) => props.onArchiveRequest?.(requestId)}
-        onRestoreRequest={(requestId) => props.onRestoreRequest?.(requestId)}
-        onDeleteRequest={(requestId) => props.onDeleteRequest?.(requestId)}
-        deletingRequestId={props.deletingRequestId ?? null}
-      />
-      {(props.onNewRequest || props.onSetAside) && (
-        <div {...stylex.props(styles.requestActions)}>
-          {props.onNewRequest && (
-            <Button
-              variant="secondary"
-              size="small"
-              disabled={props.disabled || Boolean(props.deletingRequestId)}
-              onClick={props.onNewRequest}
-            >
-              {t('e2ee.create.newRequest')}
-            </Button>
-          )}
-          {props.onSetAside && (
-            <Button
-              variant="ghost"
-              size="small"
-              disabled={props.disabled || Boolean(props.deletingRequestId)}
-              onClick={props.onSetAside}
-            >
-              {t('e2ee.create.setAside')}
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
-  ) : null;
   return (
     <section {...stylex.props(styles.section)}>
-      {props.pending && requestsBlock}
       <p id="e2ee-workspace-mode" {...stylex.props(styles.heading)}>
         {t('e2ee.create.label')}
       </p>
@@ -218,12 +138,10 @@ export function E2eeWorkspaceCreationOption(props: {
               </span>
             )}
           </span>
-          {!props.pending && (
-            <ul {...stylex.props(styles.choiceList)}>
-              <li>{t('e2ee.create.standardPoint1')}</li>
-              <li>{t('e2ee.create.standardPoint2')}</li>
-            </ul>
-          )}
+          <ul {...stylex.props(styles.choiceList)}>
+            <li>{t('e2ee.create.standardPoint1')}</li>
+            <li>{t('e2ee.create.standardPoint2')}</li>
+          </ul>
         </button>
         <button
           type="button"
@@ -232,7 +150,7 @@ export function E2eeWorkspaceCreationOption(props: {
           id={props.encryptedChoiceTestId ?? 'e2ee-workspace-create'}
           data-testid={props.encryptedChoiceTestId ?? 'e2ee-workspace-create'}
           aria-checked={props.selected}
-          disabled={props.disabled || props.pending || !props.supported}
+          disabled={props.disabled || !props.supported}
           onClick={() => props.onChange(true)}
           {...stylex.props(
             styles.choice,
@@ -251,16 +169,14 @@ export function E2eeWorkspaceCreationOption(props: {
               </span>
             )}
           </span>
-          {!props.pending && (
-            <ul {...stylex.props(styles.choiceList)}>
-              <li>{t('e2ee.create.encryptedPoint1')}</li>
-              <li>{t('e2ee.create.encryptedPoint2')}</li>
-              <li>{t('e2ee.create.encryptedPoint3')}</li>
-            </ul>
-          )}
+          <ul {...stylex.props(styles.choiceList)}>
+            <li>{t('e2ee.create.encryptedPoint1')}</li>
+            <li>{t('e2ee.create.encryptedPoint2')}</li>
+            <li>{t('e2ee.create.encryptedPoint3')}</li>
+          </ul>
         </button>
       </div>
-      {props.selected && !props.pending && (
+      {props.selected && (
         <p role="note" {...stylex.props(styles.help, styles.warning)}>
           {t('e2ee.create.lossWarning')}
         </p>
@@ -269,13 +185,7 @@ export function E2eeWorkspaceCreationOption(props: {
         <p {...stylex.props(styles.help)}>{t('e2ee.create.description')}</p>
       )}
       {!props.supported && <p {...stylex.props(styles.help)}>{t('e2ee.create.unsupported')}</p>}
-      {props.pending && (
-        <p role="status" {...stylex.props(styles.help)}>
-          {t('e2ee.create.pending')}
-        </p>
-      )}
-      {!props.pending && requestsBlock}
-      {props.selected && props.paidRequired && !props.pending && (
+      {props.selected && props.paidRequired && (
         <p {...stylex.props(styles.help)}>{t('e2ee.create.paidUnavailable')}</p>
       )}
     </section>

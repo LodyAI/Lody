@@ -14,18 +14,13 @@ import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-creation-option';
 import {
   createPreparedE2eeWorkspace,
-  deleteSavedE2eeCreation,
-  E2eeCreationDeleteError,
-  e2eeCreationChoice,
   e2eeCreationErrorCode,
   isE2eeCreationNotEnabled,
+  reconcilePendingE2eeWorkspaces,
 } from '@/lib/create-e2ee-workspace';
 import {
   clearPendingE2eeWorkspace,
-  isPendingE2eeCreationStorageKey,
-  listPendingE2eeWorkspacesByArchive,
   savePendingE2eeWorkspace,
-  setPendingE2eeWorkspaceArchived,
   type PendingE2eeWorkspace,
 } from '@/lib/e2ee-workspace-storage';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -144,18 +139,11 @@ function CreateWorkspaceAuthed({
   accountRef.current = accountId;
   const creationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
   const [encrypted, setEncrypted] = useState(false);
-  const [pendingCreation, setPendingCreation] = useState<PendingE2eeWorkspace | null>(null);
-  // Default list only; archived requests stay saved and are listed separately.
-  const [pendingRequests, setPendingRequests] = useState<PendingE2eeWorkspace[]>([]);
-  const [archivedRequests, setArchivedRequests] = useState<PendingE2eeWorkspace[]>([]);
-  const [intentAccount, setIntentAccount] = useState<string | null>(null);
-  const [intentReadFailed, setIntentReadFailed] = useState(false);
   const submitInFlight = useRef(false);
   const hidesBillingUi = isMobile || isNativeAppShell();
   const postHog = usePostHog();
   const {
     createOrganization,
-    deleteOrganization,
     organizations,
     loading: organizationsLoading,
     activeOrganization,
@@ -166,6 +154,8 @@ function CreateWorkspaceAuthed({
     if (!organizationsLoading) setOrgSettled(true);
   }, [organizationsLoading]);
   const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
   const signOut = useAuthSignOut();
   const followRedirect = useCallback(
     (target: string) => {
@@ -181,7 +171,6 @@ function CreateWorkspaceAuthed({
   );
   const [workspaceName, setWorkspaceName] = useState('');
   const [creating, setCreating] = useState(false);
-  const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [billingInterval, setBillingInterval] = useState<'month' | 'year'>('year');
   const creationAvailability = useCloudQuery(
@@ -201,80 +190,31 @@ function CreateWorkspaceAuthed({
     isAvailable: slugAvailable,
     error: slugErrorType,
   } = useWorkspaceSlugField(workspaceName);
-  const currentPending = pendingCreation?.accountId === accountId ? pendingCreation : null;
-  const creationChoice = e2eeCreationChoice({
-    featureEnabled: creationEnabled,
-    selected: encrypted,
-    resumable: Boolean(currentPending),
-    savedRequests: pendingRequests.length + archivedRequests.length,
-  });
-  const useEncryption = creationChoice.encrypt;
-  const pendingCreationRef = useRef(pendingCreation);
-  pendingCreationRef.current = pendingCreation;
-  // Leave the selected saved request without touching it: the form starts a new,
-  // independent intent. Never used for a request this page is still submitting.
-  const detachFromRequest = useCallback(() => {
-    setPendingCreation(null);
-    setWorkspaceName('');
-    resetWorkspaceSlug();
-    setEncrypted(creationEnabled);
-  }, [creationEnabled, resetWorkspaceSlug]);
-  const applyRequestLists = useCallback(
-    (lists: { active: PendingE2eeWorkspace[]; archived: PendingE2eeWorkspace[] }) => {
-      setPendingRequests(lists.active);
-      setArchivedRequests(lists.archived);
-      const selected = pendingCreationRef.current;
-      if (
-        selected &&
-        !submitInFlight.current &&
-        lists.archived.some((request) => request.requestId === selected.requestId)
-      )
-        detachFromRequest();
-    },
-    [detachFromRequest]
-  );
+  const useEncryption = creationEnabled && encrypted;
+
   useEffect(() => {
-    setPendingCreation(null);
-    setPendingRequests([]);
-    setArchivedRequests([]);
     setCreating(false);
-    setDeletingRequestId(null);
     setEncrypted(false);
-    setIntentReadFailed(false);
-    if (!accountId) return;
-    try {
-      const lists = listPendingE2eeWorkspacesByArchive(localStorage, accountId);
-      setPendingRequests(lists.active);
-      setArchivedRequests(lists.archived);
-      const pending = lists.active[0] ?? null;
-      setPendingCreation(pending);
-      setWorkspaceName(pending?.name ?? '');
-      if (pending) setWorkspaceSlug(pending.slug);
-      else resetWorkspaceSlug();
-      setEncrypted(Boolean(pending));
-    } catch {
-      setIntentReadFailed(true);
-    }
-    setIntentAccount(accountId);
-  }, [accountId, setWorkspaceSlug, resetWorkspaceSlug]);
-  useEffect(() => {
-    if (!accountId) return undefined;
-    const refresh = (event: StorageEvent) => {
-      if (!isPendingE2eeCreationStorageKey(event.key)) return;
-      try {
-        applyRequestLists(listPendingE2eeWorkspacesByArchive(localStorage, accountId));
-        setIntentReadFailed(false);
-      } catch {
-        setIntentReadFailed(true);
-      }
+    const port = platform.e2eeWorkspaces;
+    if (!accountId || !port?.prepareCreation) return undefined;
+    let active = true;
+    void reconcilePendingE2eeWorkspaces(
+      port,
+      localStorage,
+      accountId,
+      () => active && accountRef.current === accountId && !submitInFlight.current
+    ).then((result) => {
+      if (!result || !active || accountRef.current !== accountId || submitInFlight.current) return;
+      void navigateRef.current({
+        to: '/workspace/e2ee/$workspaceId',
+        params: { workspaceId: result.workspaceId },
+        replace: true,
+      });
+    });
+    return () => {
+      active = false;
     };
-    window.addEventListener('storage', refresh);
-    return () => window.removeEventListener('storage', refresh);
-  }, [accountId, applyRequestLists]);
-  // Individual unreadable intents stay isolated in storage. A failure to read
-  // storage itself still blocks encrypted creation because intent durability
-  // cannot be established.
-  const intentBlocked = intentReadFailed && creationEnabled;
+  }, [accountId, platform.e2eeWorkspaces]);
 
   const hasExistingWorkspaces = Boolean(organizations && organizations.length > 0);
   const paidRequired = creationAvailability?.canCreateFree === false;
@@ -289,11 +229,7 @@ function CreateWorkspaceAuthed({
   useReferralPolicyRefresh(referralOffer?.policy?.nextChangeAt, refreshPolicy);
   // Mirrors the early-return below: the form is only really shown when creating
   // is allowed for an existing-workspace user, or the user has none.
-  const willRenderCreateForm =
-    allowExisting === true ||
-    Boolean(currentPending) ||
-    pendingRequests.length > 0 ||
-    !hasExistingWorkspaces;
+  const willRenderCreateForm = allowExisting === true || !hasExistingWorkspaces;
   const pageViewedRef = useRef(false);
   // create_page_viewed: fire once the create form is actually rendered (org
   // list settled, not about to auto-redirect). is_first_workspace distinguishes
@@ -355,16 +291,7 @@ function CreateWorkspaceAuthed({
 
   // 检查用户是否已有组织，如果有则重定向
   useEffect(() => {
-    if (
-      !allowExisting &&
-      !currentPending &&
-      pendingRequests.length === 0 &&
-      intentAccount === accountId &&
-      !intentBlocked &&
-      !organizationsLoading &&
-      organizations &&
-      organizations.length > 0
-    ) {
+    if (!allowExisting && !organizationsLoading && organizations && organizations.length > 0) {
       if (redirect) {
         followRedirect(redirect);
       } else {
@@ -379,23 +306,13 @@ function CreateWorkspaceAuthed({
           setError(missingSlugMessage);
         }
       }
-    } else if (
-      !intentBlocked &&
-      !currentPending &&
-      !organizationsLoading &&
-      (!organizations || organizations.length === 0)
-    ) {
+    } else if (!organizationsLoading && (!organizations || organizations.length === 0)) {
       // Only the stale "no workspace to open" message; a creation failure stays visible.
       setError((current) => (current === missingSlugMessage ? null : current));
     }
   }, [
     activeOrganization,
     allowExisting,
-    currentPending,
-    pendingRequests.length,
-    intentAccount,
-    accountId,
-    intentBlocked,
     organizations,
     organizationsLoading,
     redirect,
@@ -410,19 +327,11 @@ function CreateWorkspaceAuthed({
 
   if (organizationsLoading) return null;
 
-  if (
-    !allowExisting &&
-    !currentPending &&
-    pendingRequests.length === 0 &&
-    intentAccount === accountId &&
-    !intentBlocked &&
-    organizations &&
-    organizations.length > 0
-  ) {
+  if (!allowExisting && organizations && organizations.length > 0) {
     return null;
   }
 
-  if (hidesBillingUi && paidRequired && !currentPending) {
+  if (hidesBillingUi && paidRequired) {
     // This replaces the whole form, including its way back, so it carries both
     // exits itself: the previous workspace when there is one, and the account.
     return (
@@ -461,21 +370,14 @@ function CreateWorkspaceAuthed({
   };
 
   const handleCreateWorkspace = async () => {
-    if (
-      !accountId ||
-      submitInFlight.current ||
-      creating ||
-      intentBlocked ||
-      intentAccount !== accountId
-    )
-      return;
+    if (!accountId || submitInFlight.current || creating) return;
     const startMs = getPerformanceNowMs();
     if (!workspaceName.trim()) {
       setError(t('organization.workspaceNameRequired'));
       captureCreateFailed('missing_name', startMs);
       return;
     }
-    if (!currentPending && (slugErrorType || slugChecking || !slugAvailable || !workspaceSlug)) {
+    if (slugErrorType || slugChecking || !slugAvailable || !workspaceSlug) {
       captureCreateFailed(
         slugChecking ? 'slug_checking' : slugErrorType ? 'slug_invalid' : 'slug_unavailable',
         startMs
@@ -495,47 +397,23 @@ function CreateWorkspaceAuthed({
       has_redirect: Boolean(redirect),
     });
 
-    let submittedIntent = currentPending;
-    let preparationCancelled = false;
+    let submittedIntent: PendingE2eeWorkspace | null = null;
     try {
       if (useEncryption) {
         const port = platform.e2eeWorkspaces;
-        if (!port?.prepareCreation || !accountId || (paidRequired && !currentPending)) {
+        if (!port?.prepareCreation || !accountId || paidRequired) {
           throw new Error('Encrypted workspace creation unavailable');
         }
-        const intent = currentPending ?? {
+        const intent: PendingE2eeWorkspace = {
           accountId,
           requestId: crypto.randomUUID(),
           name: workspaceName.trim(),
           slug: workspaceSlug,
         };
         submittedIntent = intent;
-        // Persist before generating an identity or sending a request. A lost
-        // response reuses these exact fields after reload, including its slug.
         savePendingE2eeWorkspace(localStorage, intent);
-        applyRequestLists(listPendingE2eeWorkspacesByArchive(localStorage, accountId));
-        setIntentReadFailed(false);
-        setPendingCreation(intent);
-        const result = await createPreparedE2eeWorkspace(
-          {
-            ...port,
-            prepareCreation: async (input) => {
-              try {
-                return await port.prepareCreation!(input);
-              } catch (error) {
-                if (error instanceof Error && error.message === 'e2ee_creation_cancelled') {
-                  if (!currentPending) clearPendingE2eeWorkspace(localStorage, intent);
-                  preparationCancelled = true;
-                }
-                throw error;
-              }
-            },
-          },
-          localStorage,
-          intent
-        );
+        const result = await createPreparedE2eeWorkspace(port, localStorage, intent);
         if (accountRef.current !== accountId) return;
-        setPendingCreation(null);
         await navigate({
           to: '/workspace/e2ee/$workspaceId',
           params: { workspaceId: result.workspaceId },
@@ -612,27 +490,15 @@ function CreateWorkspaceAuthed({
         }
       }
     } catch (err) {
-      if (accountRef.current !== accountId) return;
-      // A refusal that proves nothing was reserved removed the saved request:
-      // unlock the fields (keeping what was typed) instead of retrying it forever.
-      let removed = false;
       if (useEncryption && submittedIntent) {
-        const requestId = submittedIntent.requestId;
         try {
-          const lists = listPendingE2eeWorkspacesByArchive(localStorage, accountId);
-          setPendingRequests(lists.active);
-          setArchivedRequests(lists.archived);
-          const same = (request: PendingE2eeWorkspace) => request.requestId === requestId;
-          removed = !lists.active.some(same) && !lists.archived.some(same);
-          if (removed) setPendingCreation(null);
-          // Another window archived it while this submit ran: the late result stays
-          // in the archive instead of reviving the row or holding this form.
-          else if (lists.archived.some(same)) detachFromRequest();
+          clearPendingE2eeWorkspace(localStorage, submittedIntent);
         } catch {
-          // Storage stays authoritative; the next page load reads it again.
+          // Best-effort cleanup on failure.
         }
       }
-      if (preparationCancelled) return;
+      if (accountRef.current !== accountId) return;
+      if (err instanceof Error && err.message === 'e2ee_creation_cancelled') return;
       console.error('Failed to create workspace:', err);
       const code =
         err instanceof ConvexError && err.data && typeof err.data === 'object'
@@ -649,7 +515,7 @@ function CreateWorkspaceAuthed({
             : t('organization.createFailed')
           : isE2eeCreationNotEnabled(err)
             ? t('e2ee.create.notEnabled')
-            : removed
+            : refusalReason
               ? t('e2ee.create.requestRemoved', { code: refusalReason })
               : t('e2ee.create.failed')
       );
@@ -657,80 +523,6 @@ function CreateWorkspaceAuthed({
     } finally {
       submitInFlight.current = false;
       if (accountRef.current === accountId) setCreating(false);
-    }
-  };
-
-  const handleDeleteRequest = async (requestId: string) => {
-    if (!accountId || submitInFlight.current || creating || intentAccount !== accountId) return;
-    const request = [...pendingRequests, ...archivedRequests].find(
-      (item) => item.requestId === requestId && item.accountId === accountId
-    );
-    const port = platform.e2eeWorkspaces;
-    if (!request) return;
-    if (!port?.prepareCreation) {
-      setError(t('e2ee.create.deleteFailed'));
-      return;
-    }
-    submitInFlight.current = true;
-    setDeletingRequestId(requestId);
-    setError(null);
-    try {
-      await deleteSavedE2eeCreation({
-        port,
-        storage: localStorage,
-        pending: request,
-        deleteWorkspace: (id) => deleteOrganization(id, { isEncrypted: true }),
-        isCurrent: () => accountRef.current === accountId,
-      });
-      if (accountRef.current !== accountId) return;
-      if (pendingCreationRef.current?.requestId === requestId) detachFromRequest();
-    } catch (err) {
-      if (accountRef.current !== accountId) return;
-      console.error('Failed to delete saved creation request:', err);
-      setError(
-        err instanceof E2eeCreationDeleteError && err.stage === 'delete'
-          ? t('e2ee.create.deleteWorkspaceFailed')
-          : t('e2ee.create.deleteFailed')
-      );
-    } finally {
-      submitInFlight.current = false;
-      if (accountRef.current === accountId) {
-        setDeletingRequestId(null);
-        try {
-          applyRequestLists(listPendingE2eeWorkspacesByArchive(localStorage, accountId));
-          setIntentReadFailed(false);
-        } catch {
-          setIntentReadFailed(true);
-        }
-      }
-    }
-  };
-
-  const handleArchiveRequest = (requestId: string, archived: boolean) => {
-    if (
-      !accountId ||
-      submitInFlight.current ||
-      creating ||
-      deletingRequestId ||
-      intentAccount !== accountId
-    )
-      return;
-    const request = (archived ? pendingRequests : archivedRequests).find(
-      (item) => item.requestId === requestId && item.accountId === accountId
-    );
-    if (!request) return;
-    try {
-      setPendingE2eeWorkspaceArchived(localStorage, request, archived);
-      setError(null);
-    } catch (err) {
-      console.error('Failed to change saved creation request archive:', err);
-      setError(t('e2ee.create.archiveFailed'));
-    }
-    try {
-      applyRequestLists(listPendingE2eeWorkspacesByArchive(localStorage, accountId));
-      setIntentReadFailed(false);
-    } catch {
-      setIntentReadFailed(true);
     }
   };
 
@@ -748,77 +540,24 @@ function CreateWorkspaceAuthed({
     <CreateWorkspacePage
       workspaceName={workspaceName}
       workspaceSlug={workspaceSlug}
-      error={error ?? (intentBlocked ? t('e2ee.create.storageFailed') : null)}
+      error={error}
       creating={creating}
-      fieldsDisabled={Boolean(currentPending)}
       submitDisabled={
-        !accountId ||
-        deletingRequestId !== null ||
-        intentBlocked ||
-        intentAccount !== accountId ||
-        (useEncryption &&
-          (!platform.e2eeWorkspaces?.prepareCreation || (paidRequired && !currentPending)))
+        !accountId || (useEncryption && (!platform.e2eeWorkspaces?.prepareCreation || paidRequired))
       }
-      retryPendingCreation={Boolean(currentPending)}
       hasExistingWorkspaces={hasExistingWorkspaces}
       paidRequired={paidRequired && !useEncryption}
       creationOptions={
-        creationChoice.showOption ? (
+        creationEnabled ? (
           <E2eeWorkspaceCreationOption
             selected={useEncryption}
             supported={Boolean(platform.e2eeWorkspaces?.prepareCreation)}
-            pending={Boolean(currentPending)}
             disabled={creating}
             paidRequired={paidRequired}
             onChange={(next) => {
-              if (!next && currentPending) {
-                setPendingCreation(null);
-                setWorkspaceName('');
-                resetWorkspaceSlug();
-                setError(null);
-              }
               setEncrypted(next);
-            }}
-            requests={pendingRequests.filter((request) => request.accountId === accountId)}
-            archivedRequests={archivedRequests.filter((request) => request.accountId === accountId)}
-            onArchiveRequest={(requestId) => handleArchiveRequest(requestId, true)}
-            onRestoreRequest={(requestId) => handleArchiveRequest(requestId, false)}
-            onDeleteRequest={(requestId) => {
-              void handleDeleteRequest(requestId);
-            }}
-            deletingRequestId={deletingRequestId}
-            selectedRequestId={currentPending?.requestId ?? null}
-            onSelectRequest={(requestId) => {
-              const pending = pendingRequests.find(
-                (request) => request.requestId === requestId && request.accountId === accountId
-              );
-              if (!pending || creating || deletingRequestId) return;
-              setPendingCreation(pending);
-              setWorkspaceName(pending.name);
-              setWorkspaceSlug(pending.slug);
-              setEncrypted(true);
               setError(null);
             }}
-            onSetAside={
-              !creationEnabled && currentPending
-                ? () => {
-                    setPendingCreation(null);
-                    setEncrypted(false);
-                    setError(null);
-                  }
-                : undefined
-            }
-            onNewRequest={
-              creationEnabled && currentPending
-                ? () => {
-                    setPendingCreation(null);
-                    setWorkspaceName('');
-                    resetWorkspaceSlug();
-                    setEncrypted(true);
-                    setError(null);
-                  }
-                : undefined
-            }
           />
         ) : undefined
       }
@@ -839,8 +578,8 @@ function CreateWorkspaceAuthed({
       }
       slugChecking={slugChecking}
       slugAvailable={slugAvailable}
-      slugErrorType={currentPending ? null : slugErrorType}
-      canResetSlug={!currentPending && canResetSlug}
+      slugErrorType={slugErrorType}
+      canResetSlug={canResetSlug}
       onWorkspaceNameChange={(value) => {
         setWorkspaceName(value);
         setError(null);

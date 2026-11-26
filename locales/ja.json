@@ -2128,7 +2128,7 @@
   "organization.switchWorkspace": "ワークスペースを切り替え",
   "organization.unableToResolveWorkspace": "開けるワークスペースが見つかりませんでした。もう一度お試しいただくか、サポートにお問い合わせください。",
   "organization.welcomeDescription": "始めるために最初のワークスペースを作成しましょう",
-  "organization.welcomeTitle": "Lody Agent へようこそ",
+  "organization.welcomeTitle": "Lody へようこそ",
   "organization.workspace": "ワークスペース",
   "organization.workspaceName": "ワークスペース名",
   "organization.workspaceNameHint": "この名前は後から設定で変更できます",

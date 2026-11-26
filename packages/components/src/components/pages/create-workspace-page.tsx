@@ -57,9 +57,7 @@ export interface CreateWorkspacePageProps {
   workspaceSlug: string;
   error?: string | null;
   creating?: boolean;
-  fieldsDisabled?: boolean;
   submitDisabled?: boolean;
-  retryPendingCreation?: boolean;
   creationOptions?: ReactNode;
   slugChecking?: boolean;
   slugAvailable?: boolean;
@@ -85,9 +83,7 @@ export function CreateWorkspacePage({
   workspaceSlug,
   error = null,
   creating = false,
-  fieldsDisabled = false,
   submitDisabled = false,
-  retryPendingCreation = false,
   creationOptions,
   slugChecking = false,
   slugAvailable = false,
@@ -134,7 +130,7 @@ export function CreateWorkspacePage({
                 ? t('organization.createPlusWorkspaceTitle', 'Create a Plus workspace')
                 : hasExistingWorkspaces
                   ? t('organization.createNewWorkspace', 'Create New Workspace')
-                  : t('organization.welcomeTitle', 'Welcome to Lody Agent')}
+                  : t('organization.welcomeTitle', 'Welcome to Lody')}
             </Card.Title>
             <Card.Description {...stylex.props(styles.description)}>
               {paidRequired
@@ -152,7 +148,6 @@ export function CreateWorkspacePage({
           </Card.Header>
           <Card.Content>
             <div {...stylex.props(styles.formStack)}>
-              {retryPendingCreation ? creationOptions : null}
               <div {...stylex.props(styles.fieldStack)}>
                 <UiField.Label htmlFor="workspace-name">
                   {t('organization.workspaceName')}
@@ -168,7 +163,7 @@ export function CreateWorkspacePage({
                       onSubmit();
                     }
                   }}
-                  disabled={creating || fieldsDisabled}
+                  disabled={creating}
                   xstyle={error ? styles.fieldError : undefined}
                 />
                 {error ? <p {...stylex.props(surface.error)}>{error}</p> : null}
@@ -191,7 +186,7 @@ export function CreateWorkspacePage({
                         type="button"
                         {...stylex.props(styles.reset)}
                         onClick={onResetWorkspaceSlug}
-                        disabled={creating || fieldsDisabled}
+                        disabled={creating}
                       >
                         {t('organization.workspaceSlugReset')}
                       </button>
@@ -214,7 +209,7 @@ export function CreateWorkspacePage({
                   placeholder={t('organization.workspaceSlugPlaceholder', 'my-workspace')}
                   value={workspaceSlug}
                   onChange={(event) => onWorkspaceSlugChange(event.target.value)}
-                  disabled={creating || fieldsDisabled}
+                  disabled={creating}
                   xstyle={slugErrorType ? styles.fieldError : undefined}
                 />
                 {slugErrorType ? (
@@ -224,7 +219,7 @@ export function CreateWorkspacePage({
                 ) : null}
               </div>
 
-              {retryPendingCreation ? null : creationOptions}
+              {creationOptions}
 
               {paidRequired ? (
                 <div {...stylex.props(styles.fieldStack, styles.billing)}>
@@ -301,8 +296,9 @@ export function CreateWorkspacePage({
                   creating ||
                   submitDisabled ||
                   !workspaceName.trim() ||
-                  (!retryPendingCreation &&
-                    (slugChecking || Boolean(slugErrorType) || !slugAvailable))
+                  slugChecking ||
+                  Boolean(slugErrorType) ||
+                  !slugAvailable
                 }
                 {...stylex.props(surface.fullWidth)}
               >
@@ -318,11 +314,9 @@ export function CreateWorkspacePage({
                   </span>
                 ) : (
                   <span {...stylex.props(surface.row)}>
-                    {retryPendingCreation
-                      ? t('e2ee.create.resume')
-                      : paidRequired
-                        ? t('organization.continueToCheckout', 'Continue to checkout')
-                        : t('organization.createWorkspace', 'Create Workspace')}
+                    {paidRequired
+                      ? t('organization.continueToCheckout', 'Continue to checkout')
+                      : t('organization.createWorkspace', 'Create Workspace')}
                     <ArrowRight {...stylex.props(surface.smallIcon, styles.trailingIcon)} />
                   </span>
                 )}

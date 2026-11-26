@@ -2128,7 +2128,7 @@
   "organization.switchWorkspace": "Switch workspace",
   "organization.unableToResolveWorkspace": "Unable to find a workspace to open. Please try again or contact support.",
   "organization.welcomeDescription": "Let's create your first workspace to get started",
-  "organization.welcomeTitle": "Welcome to Lody Agent",
+  "organization.welcomeTitle": "Welcome to Lody",
   "organization.workspace": "Workspace",
   "organization.workspaceName": "Workspace Name",
   "organization.workspaceNameHint": "You can change this name later in settings",

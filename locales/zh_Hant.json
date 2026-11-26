@@ -2128,7 +2128,7 @@
   "organization.switchWorkspace": "切換工作區",
   "organization.unableToResolveWorkspace": "找不到可開啟的工作區。請再試一次或聯絡支援團隊。",
   "organization.welcomeDescription": "建立您的第一個工作區，立即開始使用",
-  "organization.welcomeTitle": "歡迎使用 Lody Agent",
+  "organization.welcomeTitle": "歡迎使用 Lody",
   "organization.workspace": "工作區",
   "organization.workspaceName": "工作區名稱",
   "organization.workspaceNameHint": "您稍後可以在「設定」中更改此名稱",

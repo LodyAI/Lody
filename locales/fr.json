@@ -2128,7 +2128,7 @@
   "organization.switchWorkspace": "Changer d'espace de travail",
   "organization.unableToResolveWorkspace": "Impossible de trouver un espace de travail à ouvrir. Veuillez réessayer ou contacter l'assistance.",
   "organization.welcomeDescription": "Créez votre premier espace de travail pour commencer",
-  "organization.welcomeTitle": "Bienvenue dans Lody Agent",
+  "organization.welcomeTitle": "Bienvenue dans Lody",
   "organization.workspace": "Espace de travail",
   "organization.workspaceName": "Nom de l'espace de travail",
   "organization.workspaceNameHint": "Vous pourrez modifier ce nom plus tard dans les paramètres",

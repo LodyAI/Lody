@@ -2128,7 +2128,7 @@
   "organization.switchWorkspace": "워크스페이스 전환",
   "organization.unableToResolveWorkspace": "열 수 있는 워크스페이스를 찾을 수 없습니다. 다시 시도하거나 고객 지원에 문의해 주세요.",
   "organization.welcomeDescription": "시작하려면 첫 번째 워크스페이스를 만들어 보세요",
-  "organization.welcomeTitle": "Lody Agent에 오신 것을 환영합니다",
+  "organization.welcomeTitle": "Lody에 오신 것을 환영합니다",
   "organization.workspace": "워크스페이스",
   "organization.workspaceName": "워크스페이스 이름",
   "organization.workspaceNameHint": "이 이름은 나중에 설정에서 변경할 수 있습니다",
