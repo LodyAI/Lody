@@ -7241,5 +7241,12 @@
   "e2ee.team.signedInAs": "{{email}} としてログイン中",
   "e2ee.team.wrongEmailFor": "この招待は {{invited}} 宛てです。続行するにはそのメールアドレスでログインしてください。",
   "e2ee.auto.tab.qr": "QR をスキャン",
-  "e2ee.auto.tab.code": "6 桁のコードを入力"
+  "e2ee.auto.tab.code": "6 桁のコードを入力",
+  "chat.runConfig.permissionDefaultClear": "デフォルトとして使わない",
+  "chat.runConfig.permissionDefaultSet": "新しい会話で使う",
+  "chat.runConfig.permissionDefaultCleared": "新しい会話では前回選んだ権限を使います",
+  "chat.runConfig.permissionDefaultSaved": "新しい会話はこの権限で始まります",
+  "chat.runConfig.permissionDefaultFailed": "デフォルトの権限を保存できませんでした",
+  "settings.agent.dialog.section.defaultPermission": "デフォルトの権限",
+  "settings.agent.dialog.defaultPermissionLastUsed": "前回選んだもの"
 }

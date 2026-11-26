@@ -7241,5 +7241,12 @@
   "e2ee.team.signedInAs": "Signed in as {{email}}",
   "e2ee.team.wrongEmailFor": "This invitation was sent to {{invited}}. Sign in with that email address to continue.",
   "e2ee.auto.tab.qr": "Scan QR",
-  "e2ee.auto.tab.code": "Enter 6-digit code"
+  "e2ee.auto.tab.code": "Enter 6-digit code",
+  "chat.runConfig.permissionDefaultClear": "Stop using as default",
+  "chat.runConfig.permissionDefaultSet": "Use for new conversations",
+  "chat.runConfig.permissionDefaultCleared": "New conversations use the last permission you picked",
+  "chat.runConfig.permissionDefaultSaved": "New conversations will start with this permission",
+  "chat.runConfig.permissionDefaultFailed": "Could not save the default permission",
+  "settings.agent.dialog.section.defaultPermission": "Default permission",
+  "settings.agent.dialog.defaultPermissionLastUsed": "Last one I picked"
 }

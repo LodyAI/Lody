@@ -1902,9 +1902,13 @@ const normalizeAgentSessionDefaults = (
   }
   const hasModelValues = Object.keys(modelConfigOptionValues).length > 0;
   const modelId = isNonEmptyString(value.modelId) ? value.modelId : undefined;
-  if (!modelId && !Object.keys(configOptionValues).length && !hasModelValues) return undefined;
+  const modeId = isNonEmptyString(value.modeId) ? value.modeId : undefined;
+  if (!modelId && !modeId && !Object.keys(configOptionValues).length && !hasModelValues) {
+    return undefined;
+  }
   return {
     ...(modelId ? { modelId } : {}),
+    ...(modeId ? { modeId } : {}),
     configOptionValues,
     ...(hasModelValues ? { modelConfigOptionValues } : {}),
   };
