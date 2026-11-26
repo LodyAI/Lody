@@ -1,12 +1,5 @@
 import { useOptionalAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { ShortcutTokenAttempts, shortcutTokenDiagnostic } from '@/lib/shortcut-token-attempt';
-import { deferredPostHog } from '@/lib/deferred-posthog';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
-import {
-  useLegacyWorkspaceQuery,
-  useLegacyWorkspaceMutation,
-  useLegacyWorkspaceAction,
-} from '@/hooks/use-legacy-workspace-query';
 import {
   createContext,
   useContext,
@@ -23,7 +16,6 @@ import type { PromptShortcutRuntime, ShortcutRuntimeSnapshot } from '@lody/share
 import { getShortcutResourceStreamId } from '@lody/shared/prompt-shortcuts/access';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import { cloudOperations as api } from '@/lib/cloud-api-operations';
 import { scheduleIdleTask } from '@/lib/idle-task';
 import {
   promptShortcutDatabaseName,
@@ -143,19 +135,9 @@ export function PromptShortcutProvider({
     scope.workspaceId === workspaceRuntime?.workspaceId
       ? scope.workspaceId
       : null;
-  const revoke = useLegacyWorkspaceMutation(api.promptShortcuts.revokeShortcut);
-  const grant = useLegacyWorkspaceAction(api.promptShortcuts.getStreamToken);
-  const attempt = useLegacyWorkspaceAction(api.promptShortcuts.getStreamTokenV2);
-  const directory = useLegacyWorkspaceQuery(
-    api.promptShortcuts.listAccessibleDocuments,
-    !encrypted && cloudSyncEnabled && workspaceId && userId ? { workspaceId } : 'skip'
-  );
   const current = useRef({
     workspaceId,
     userId,
-    revoke,
-    grant,
-    attempt,
     auth,
     authSessionId,
     getWorkspaceStreamsGrant: workspaceGrantProvider,
@@ -164,9 +146,6 @@ export function PromptShortcutProvider({
   current.current = {
     workspaceId,
     userId,
-    revoke,
-    grant,
-    attempt,
     auth,
     authSessionId,
     getWorkspaceStreamsGrant: workspaceGrantProvider,
@@ -232,26 +211,6 @@ export function PromptShortcutProvider({
       )
         throw new Error('Shortcut identity changed');
     };
-    const tokenAttempts = new ShortcutTokenAttempts({
-      attempt: (request) => current.current.attempt(request),
-      legacy: (request) => current.current.grant(request),
-      active: () => {
-        const identity = platform.identity.session.get();
-        return (
-          !disposed &&
-          current.current.workspaceId === workspaceId &&
-          current.current.userId === userId &&
-          current.current.authSessionId === authSessionId &&
-          identity.status === 'authenticated' &&
-          identity.user.id === userId
-        );
-      },
-      authRejected: () => current.current.auth?.requestAuthRecovery(),
-      report: (failure) => {
-        const diagnostic = shortcutTokenDiagnostic(failure);
-        deferredPostHog.captureException(diagnostic.error, diagnostic.properties);
-      },
-    });
     let lastWsToken: string | undefined;
     const webSocketAuth = workspaceGrantProvider
       ? async (context: LoroStreamsWebSocketAuthContext) => {
@@ -303,37 +262,25 @@ export function PromptShortcutProvider({
               check();
               if (encrypted && write && current.current.shortcutRole?.get() !== 'write')
                 throw new Error('e2ee_shortcuts_read_only');
-              if (resource.kind === 'workspace-index' || resource.kind === 'workspace-body') {
-                const getWorkspaceGrant = current.current.getWorkspaceStreamsGrant;
-                if (!getWorkspaceGrant) {
-                  throw new Error('Workspace Streams grant provider unavailable');
-                }
-                const result = await getWorkspaceGrant({
-                  write,
-                  forceRefresh: force,
-                });
-                check();
-                return {
-                  ...result,
-                  expiresIn: 300,
-                  streamId: getShortcutResourceStreamId(resource),
-                };
+              if (resource.kind !== 'workspace-index' && resource.kind !== 'workspace-body') {
+                throw new Error(
+                  encrypted ? 'e2ee_shortcut_legacy_forbidden' : 'shortcut_legacy_forbidden'
+                );
               }
-              if (encrypted) throw new Error('e2ee_shortcut_legacy_forbidden');
-              const result = await tokenAttempts.grant({
-                workspaceId,
+              const getWorkspaceGrant = current.current.getWorkspaceStreamsGrant;
+              if (!getWorkspaceGrant) {
+                throw new Error('Workspace Streams grant provider unavailable');
+              }
+              const result = await getWorkspaceGrant({
                 write,
-                target:
-                  resource.kind === 'body'
-                    ? resource
-                    : {
-                        kind: 'index',
-                        ownerUserId: resource.domain.ownerUserId,
-                        visibility: resource.domain.visibility,
-                      },
+                forceRefresh: force,
               });
               check();
-              return result;
+              return {
+                ...result,
+                expiresIn: 300,
+                streamId: getShortcutResourceStreamId(resource),
+              };
             },
           })
         : undefined;
@@ -346,24 +293,6 @@ export function PromptShortcutProvider({
                 check();
                 return sync.acquire(resource, write);
               },
-              ...(!encrypted
-                ? {
-                    revokeLegacy: async (
-                      entry: import('@lody/shared/prompt-shortcuts').PromptShortcutIndexEntry & {
-                        visibility: 'private' | 'workspace';
-                      }
-                    ) => {
-                      check();
-                      await current.current.revoke({
-                        workspaceId,
-                        shortcutId: entry.id,
-                        bodyDocId: entry.bodyDocId,
-                        visibility: entry.visibility,
-                      });
-                      check();
-                    },
-                  }
-                : {}),
               dispose: () => sync.dispose(),
             }
           : undefined
@@ -389,7 +318,6 @@ export function PromptShortcutProvider({
     const close = () => {
       if (closing) return closing;
       disposed = true;
-      tokenAttempts.dispose();
       setInstance((value) => (value?.runtime === owned ? null : value));
       closing = opening.then(async () => {
         const results = await Promise.allSettled([owned?.dispose()]);
@@ -428,17 +356,13 @@ export function PromptShortcutProvider({
   ]);
 
   useEffect(() => {
-    if (runtime && directory) void runtime.setDirectory(directory);
-  }, [runtime, directory]);
-  useEffect(() => {
     if (!runtime) return undefined;
     const retry = () => {
       void runtime.flush();
-      if (directory) void runtime.setDirectory(directory);
     };
     window.addEventListener('online', retry);
     return () => window.removeEventListener('online', retry);
-  }, [runtime, directory]);
+  }, [runtime]);
   return (
     <Context.Provider
       value={{

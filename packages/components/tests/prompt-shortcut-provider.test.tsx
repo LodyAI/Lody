@@ -190,7 +190,7 @@ describe('PromptShortcutProvider lifecycle', () => {
 
       if (transition === 'workspace') fixture.workspaceId = 'workspace-b';
       await render(transition !== 'readiness');
-      expect(() => first.setDirectory([])).toThrow('Shortcut runtime disposed');
+      expect(() => first.flush()).toThrow('Shortcut runtime disposed');
 
       const opening = deferred();
       fixture.createRepo.mockImplementationOnce(async () => {
@@ -209,7 +209,7 @@ describe('PromptShortcutProvider lifecycle', () => {
       expect(current).not.toBeNull();
       expect(current).not.toBe(first);
       expect(container.textContent).toBe('workspace-a');
-      await expect(current!.setDirectory([])).resolves.toBeUndefined();
+      await expect(current!.flush()).resolves.toBeUndefined();
     }
   );
 
@@ -301,7 +301,7 @@ describe('PromptShortcutProvider lifecycle', () => {
     await render();
     expect(rendered).not.toContain(first);
     expect(current).not.toBe(first);
-    expect(() => first.setDirectory([])).toThrow('Shortcut runtime disposed');
+    expect(() => first.flush()).toThrow('Shortcut runtime disposed');
     fixture.auth.confirmedUnauthenticated = true;
     await render();
     expect(current).toBeNull();
