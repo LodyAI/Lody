@@ -283,7 +283,9 @@ describe('recovery vault settings actions', () => {
     const buttons = () => [...container.querySelectorAll('button')];
     return {
       get labels() {
-        return buttons().map((button) => button.textContent);
+        return buttons()
+          .map((button) => button.textContent)
+          .filter(Boolean);
       },
       get primary() {
         return buttons()
@@ -656,10 +658,10 @@ describe('recovery vault settings actions', () => {
       }
     );
     try {
-      expect(view.text).toContain('e2ee.recovery.fileSaved');
-      expect(view.text).not.toContain('e2ee.recovery.fileSavedChecked');
+      expect(view.text).toContain('e2ee.recovery.methodSaved');
+      expect(view.text).not.toContain('e2ee.recovery.methodVerified');
       await view.click('e2ee.recovery.check');
-      expect(view.text).toContain('e2ee.recovery.fileSavedChecked');
+      expect(view.text).toContain('e2ee.recovery.methodVerified');
     } finally {
       view.done();
     }

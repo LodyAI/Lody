@@ -16,6 +16,7 @@ import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { CompactRow, CompactSection } from '../compact-layout';
 import { settingsMaterial } from '../material.stylex';
+import { SettingsInfo } from '../settings-info';
 import {
   useRecoveryPort,
   type RecoveryPasskey,
@@ -87,8 +88,9 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[3],
+    minHeight: '52px',
     paddingInline: space[4],
-    paddingBlock: space[3],
+    paddingBlock: '10px',
     minWidth: 0,
   },
   methodIdentity: {
@@ -116,10 +118,8 @@ const styles = stylex.create({
   },
   methodHeader: {
     display: 'flex',
-    alignItems: 'baseline',
-    flexWrap: 'wrap',
-    columnGap: space[1.5],
-    rowGap: '2px',
+    alignItems: 'center',
+    gap: space[1],
     minWidth: 0,
   },
   methodTitle: {
@@ -128,16 +128,21 @@ const styles = stylex.create({
     fontWeight: 500,
     lineHeight: 1.35,
     color: colors.label,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   methodMeta: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
     fontSize: text.footnoteSize,
     lineHeight: 1.35,
-    color: colors.tertiaryLabel,
-    whiteSpace: 'nowrap',
+    color: colors.secondaryLabel,
   },
   methodMetaSuccess: { color: colors.success },
   methodMetaWarning: { color: colors.warning },
-  methodHelper: {
+  methodNote: {
     margin: 0,
     fontSize: text.footnoteSize,
     lineHeight: 1.4,
@@ -728,8 +733,9 @@ export function RecoveryVaultSection({
     id,
     icon: Icon,
     title,
-    badge,
-    helper,
+    status,
+    info,
+    note,
     leadActions,
     secondaryActions,
     restoreAction,
@@ -737,8 +743,9 @@ export function RecoveryVaultSection({
     id: RecoveryUnlockMethod;
     icon: LucideIcon;
     title: string;
-    badge?: { label: string; tone: MethodMetaTone };
-    helper: string;
+    status?: { label: string; tone: MethodMetaTone };
+    info?: string;
+    note?: string;
     leadActions: MethodAction[];
     secondaryActions: MethodAction[];
     restoreAction: MethodAction | null;
@@ -757,19 +764,26 @@ export function RecoveryVaultSection({
           <div {...stylex.props(styles.methodBody)}>
             <div {...stylex.props(styles.methodHeader)}>
               <p {...stylex.props(styles.methodTitle)}>{title}</p>
-              {badge && (
-                <span
-                  {...stylex.props(
-                    styles.methodMeta,
-                    badge.tone === 'success' && styles.methodMetaSuccess,
-                    badge.tone === 'warning' && styles.methodMetaWarning
-                  )}
-                >
-                  · {badge.label}
-                </span>
-              )}
+              {info && <SettingsInfo label={title}>{info}</SettingsInfo>}
             </div>
-            <p {...stylex.props(styles.methodHelper)}>{helper}</p>
+            {status && (
+              <span
+                {...stylex.props(
+                  styles.methodMeta,
+                  status.tone === 'success' && styles.methodMetaSuccess,
+                  status.tone === 'warning' && styles.methodMetaWarning
+                )}
+              >
+                {status.tone === 'success' && (
+                  <span
+                    aria-hidden="true"
+                    {...stylex.props(styles.statusDot, styles.statusDotSuccess)}
+                  />
+                )}
+                {status.label}
+              </span>
+            )}
+            {note && <p {...stylex.props(styles.methodNote)}>{note}</p>}
           </div>
         </div>
         {(visibleAction || overflowActions.length > 0) && (
@@ -928,15 +942,19 @@ export function RecoveryVaultSection({
     id: 'file',
     icon: FileKey2,
     title: t('e2ee.recovery.file'),
-    badge:
-      mode === 'ready'
-        ? hasFile
-          ? checkedAt
-            ? { label: t('e2ee.recovery.methodVerified'), tone: 'success' }
-            : { label: t('e2ee.recovery.methodSaved'), tone: 'neutral' }
-          : { label: t('e2ee.recovery.workspace.notSet'), tone: 'warning' }
+    status:
+      mode === 'ready' && hasFile
+        ? checkedAt
+          ? { label: t('e2ee.recovery.methodVerified'), tone: 'success' }
+          : { label: t('e2ee.recovery.methodSaved'), tone: 'neutral' }
         : undefined,
-    helper:
+    note:
+      mode === 'none' && !canCreateFile && !canCreatePasskey && !canCreatePassword
+        ? t('e2ee.recovery.createElsewhere')
+        : mode === 'replacing'
+          ? t('e2ee.recovery.fileReplacing')
+          : undefined,
+    info:
       mode === 'ready' || mode === 'replacing'
         ? mode === 'replacing'
           ? t('e2ee.recovery.fileReplacing')
@@ -1008,13 +1026,11 @@ export function RecoveryVaultSection({
           id: 'passkey',
           icon: KeyRound,
           title: t('e2ee.recovery.passkey'),
-          badge:
+          status:
             mode === 'ready' && hasPasskey === true
               ? { label: t('e2ee.recovery.methodSaved'), tone: 'success' }
-              : mode === 'ready' && hasPasskey === false
-                ? { label: t('e2ee.recovery.workspace.notSet'), tone: 'neutral' }
-                : undefined,
-          helper:
+              : undefined,
+          info:
             mode === 'none' ? t('e2ee.recovery.passkeyNoneHelp') : t('e2ee.recovery.passkeyHelp'),
           leadActions: passkeyLeadActions,
           secondaryActions: passkeySecondaryActions,
@@ -1055,13 +1071,11 @@ export function RecoveryVaultSection({
           id: 'password',
           icon: Lock,
           title: t('e2ee.recovery.password'),
-          badge:
-            mode === 'ready'
-              ? hasPassword
-                ? { label: t('e2ee.recovery.methodSaved'), tone: 'success' }
-                : { label: t('e2ee.recovery.workspace.notSet'), tone: 'neutral' }
+          status:
+            mode === 'ready' && hasPassword
+              ? { label: t('e2ee.recovery.methodSaved'), tone: 'success' }
               : undefined,
-          helper:
+          info:
             mode === 'none'
               ? t('e2ee.recovery.passwordNoneHelp')
               : hasPassword
