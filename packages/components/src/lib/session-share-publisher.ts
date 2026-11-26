@@ -68,7 +68,11 @@ export async function captureSessionShare(options: {
     );
     options.signal.throwIfAborted();
     const histories = await Promise.all(
-      orderedStores.map((store) => store.sessionData.history.readAll())
+      orderedStores.map(async (store, index) =>
+        options.sessions[index]?.historyBackend === 'roost'
+          ? (await store.sessionData.snapshots.capture()).history
+          : store.sessionData.history.readAll()
+      )
     );
     options.signal.throwIfAborted();
     const prepared = prepareSharePackage({

@@ -33,9 +33,9 @@ Developer mode 下的 Beta 功能区域与其他仅开发者可见的 opt-in 一
 旧 metadata 缺少 discriminator 时解析为 Loro。卡片接收已有行数据，不订阅设置或加载历史。
 显示契约记录在[会话历史写入](../../../../specs/session-history-writes.zh.md)中。
 
-CLI 保留 npm 发布的 `@loro-dev/roost@0.3.1`，锁文件记录 registry 校验值，不再依赖
+CLI 保留 npm 发布的 `@loro-dev/roost@0.3.2`，锁文件记录 registry 校验值，不再依赖
 相邻源码目录。[原生运行时接入](../../proposed/architecture/2026-10-09-roost-native-runtime.zh.md)
-使用已发布的 `@loro-dev/roost-node@0.3.1` 代替另行复制的 owner 可执行文件，并保留此会话开关。
+使用已发布的 `@loro-dev/roost-node@0.3.2` 代替另行复制的 owner 可执行文件，并保留此会话开关。
 发布等待规则仅豁免浏览器包、原生主包及六个匹配平台包的固定版本。
 
 ## 验证
