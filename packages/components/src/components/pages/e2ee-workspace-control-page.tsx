@@ -8,6 +8,7 @@ import { Avatar } from '@lody/ui/avatar';
 import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { Button } from '@lody/ui/button';
 import { Collapsible } from '@lody/ui/collapsible';
+import { Spinner } from '@lody/ui/spinner';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 import { Children, Fragment, isValidElement, useMemo, useState, type ReactNode } from 'react';
@@ -114,7 +115,8 @@ const styles = stylex.create({
   },
   you: { color: colors.tertiaryLabel, fontWeight: 400, marginInlineStart: space[1.5] },
   memberRole: {
-    width: '5em',
+    minWidth: '5em',
+    flexShrink: 0,
     color: colors.secondaryLabel,
     fontSize: type.subheadlineSize,
     whiteSpace: 'nowrap',
@@ -192,6 +194,7 @@ const styles = stylex.create({
     fontSize: type.footnoteSize,
   },
   quiet: { color: colors.tertiaryLabel, fontSize: type.footnoteSize },
+  loadingRow: { display: 'flex', alignItems: 'center', gap: space[2] },
   muted: { color: colors.secondaryLabel },
   // Console frame: the same layout as a page and inside the Settings dialog.
   consolePage: {
@@ -241,9 +244,16 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: { default: 'column', '@media (max-width: 720px)': 'row' },
     gap: space[1],
-    padding: { default: space[3], '@media (max-width: 720px)': `${space[2]} ${space[3]}` },
+    paddingTop: { default: space[3], '@media (max-width: 720px)': space[2] },
+    paddingBottom: { default: space[3], '@media (max-width: 720px)': space[2] },
+    paddingInlineStart: space[3],
+    paddingInlineEnd: { default: space[3], '@media (max-width: 720px)': space[6] },
     backgroundColor: colors.secondaryBackground,
     overflowX: { default: 'visible', '@media (max-width: 720px)': 'auto' },
+    maskImage: {
+      default: 'none',
+      '@media (max-width: 720px)': 'linear-gradient(to right, black 88%, transparent)',
+    },
   },
   navIdentity: {
     display: { default: 'flex', '@media (max-width: 720px)': 'none' },
@@ -293,12 +303,25 @@ const styles = stylex.create({
     paddingBlock: space[4],
     paddingInline: { default: space[6], '@media (max-width: 720px)': space[4] },
   },
+  mainTitleGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  mainWorkspaceName: {
+    display: { default: 'none', '@media (max-width: 720px)': 'block' },
+    fontSize: type.footnoteSize,
+    color: colors.secondaryLabel,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
   mainTitle: {
     margin: 0,
     fontSize: type.titleSize,
     lineHeight: type.titleLeading,
     fontWeight: 600,
-    flexGrow: 1,
     minWidth: 0,
   },
   mainBody: {
@@ -346,6 +369,13 @@ const styles = stylex.create({
     color: '#ffffff',
   },
   checkMarkDone: { borderColor: colors.success, backgroundColor: colors.success },
+  checkText: {
+    flexGrow: 1,
+    minWidth: 0,
+    whiteSpace: 'normal',
+    textAlign: 'start',
+    fontWeight: 400,
+  },
   checkDoneText: { color: colors.secondaryLabel },
 });
 
@@ -663,6 +693,7 @@ function MembersSection(props: {
 }) {
   const { t } = useTranslation();
   const { names } = props;
+  const [actionError, setActionError] = useState<string>();
   return (
     <section
       data-testid="e2ee-members"
@@ -673,6 +704,11 @@ function MembersSection(props: {
         {t('e2ee.control.members')}
         <span {...stylex.props(styles.count)}>{props.overview.members.length}</span>
       </h2>
+      {actionError && (
+        <Alert.Root tone="warning" data-testid="e2ee-member-action-error">
+          <Alert.Description>{t(actionError)}</Alert.Description>
+        </Alert.Root>
+      )}
       <ul {...stylex.props(styles.list)}>
         {props.overview.members.map((member) => {
           const profile = names.profile(member.membershipId);
@@ -711,6 +747,7 @@ function MembersSection(props: {
                   name={name}
                   management={props.management}
                   onRotationSettled={props.onRotationSettled}
+                  onError={setActionError}
                 />
               )}
             </li>
@@ -752,6 +789,10 @@ export interface E2eeWorkspaceControlPageProps {
   onBack: () => void;
   /** Present only after the owning host accepted this device's read-open. */
   onOpen?: () => void;
+  /** Disables the Open workspace button while route metadata is still settling. */
+  openDisabled?: boolean;
+  /** Additional status notices rendered inside the main scroll body. */
+  notices?: ReactNode;
   /** Present where the host can check for app updates (desktop). */
   onCheckForUpdates?: () => void;
   /** Whether this workspace can be restored from the account recovery file or passkey.
@@ -855,8 +896,10 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           </Alert.Description>
         </Alert.Root>
       )}
+      {props.notices}
       {props.loading && !history && (
-        <p role="status" {...stylex.props(styles.quiet)}>
+        <p role="status" {...stylex.props(styles.quiet, styles.loadingRow)}>
+          <Spinner size="small" />
           {t('e2ee.control.loading')}
         </p>
       )}
@@ -879,6 +922,18 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
       {!keyUpdateState && history?.view.inspectState().epoch.rotationRequired && (
         <Alert.Root tone="warning">
           <Alert.Description>{t('e2ee.members.rotationHint')}</Alert.Description>
+          {rotate && (
+            <Alert.Actions>
+              <Button
+                variant="primary"
+                size="small"
+                data-testid="e2ee-rotation-required-rotate"
+                onClick={() => void retryKeyUpdate(rotate)}
+              >
+                {t('e2ee.security.complete')}
+              </Button>
+            </Alert.Actions>
+          )}
         </Alert.Root>
       )}
     </>
@@ -1012,11 +1067,15 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
             >
               {item.done ? <Check size={12} strokeWidth={3} /> : null}
             </span>
-            <span {...stylex.props(styles.eventText, item.done && styles.checkDoneText)}>
+            <span {...stylex.props(styles.checkText, item.done && styles.checkDoneText)}>
               {t(`e2ee.console.start.${item.id}`)}
             </span>
             {!item.done && item.tab && (
-              <Button size="small" variant="secondary" onClick={() => setTab(item.tab!)}>
+              <Button
+                size="small"
+                variant={item.id === 'recovery' ? 'primary' : 'secondary'}
+                onClick={() => setTab(item.tab!)}
+              >
                 {t(`e2ee.console.start.${item.id}Action`)}
               </Button>
             )}
@@ -1038,8 +1097,8 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
               <span {...stylex.props(styles.heroTitle)}>{t('e2ee.console.status')}</span>
               <span {...stylex.props(styles.heroHelp)}>
                 {t('e2ee.console.statusCounts', {
-                  members: overview.members.length,
-                  devices: deviceCount,
+                  members: t('e2ee.control.memberCount', { count: overview.members.length }),
+                  devices: t('e2ee.control.deviceCount', { count: deviceCount }),
                 })}
               </span>
             </div>
@@ -1129,13 +1188,18 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
               <ChevronLeft size={16} aria-hidden="true" />
             </Button>
           )}
-          <h1 data-testid="e2ee-workspace-control" {...stylex.props(styles.mainTitle)}>
-            {tabLabel(tab)}
-          </h1>
+          <div {...stylex.props(styles.mainTitleGroup)}>
+            {props.workspaceName && (
+              <span {...stylex.props(styles.mainWorkspaceName)}>{props.workspaceName}</span>
+            )}
+            <h1 data-testid="e2ee-workspace-control" {...stylex.props(styles.mainTitle)}>
+              {tabLabel(tab)}
+            </h1>
+          </div>
           {props.onOpen && (
             <Button
               variant="primary"
-              disabled={props.loading || Boolean(props.failure)}
+              disabled={props.loading || Boolean(props.failure) || props.openDisabled}
               onClick={props.onOpen}
             >
               {t('e2ee.control.openWorkspace')}

@@ -6,6 +6,7 @@ import zhCN from '../../../locales/zh_CN.json';
 import { ClientCustodyError } from '@lody/e2ee-core/services';
 import { classifyE2eeControlFailure } from '../src/lib/e2ee-control-failure';
 import { E2eeMemberActions } from '../src/components/pages/e2ee-member-actions';
+import { E2eeLostAccess } from '../src/components/pages/e2ee-lost-access';
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -751,5 +752,45 @@ describe('QR camera', () => {
     ]);
     expect(probe.states.at(-1)).toBe('unavailable');
     await probe.unmount();
+  });
+});
+
+describe('E2eeLostAccess delete confirmation guardrail', () => {
+  it('never enables delete confirmation when workspaceName is empty or whitespace', () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const submit = vi.fn().mockResolvedValue(undefined);
+    act(() =>
+      root!.render(
+        withTestI18n(
+          <E2eeLostAccess
+            workspaceId="ws-empty"
+            workspaceName=""
+            accountRole="owner"
+            removal={{
+              submit,
+              listed: async () => true,
+              refresh: () => {},
+            }}
+            onBackToWorkspaces={() => {}}
+            onRemoved={() => {}}
+          />,
+          testI18n
+        )
+      )
+    );
+    const deleteBtn = container.querySelector<HTMLButtonElement>(
+      '[data-testid="e2ee-lost-access-delete"]'
+    );
+    expect(deleteBtn).not.toBeNull();
+    act(() => deleteBtn!.click());
+    const confirmSubmit = container.querySelector<HTMLButtonElement>(
+      '[data-testid="e2ee-lost-access-submit"]'
+    );
+    expect(confirmSubmit).not.toBeNull();
+    expect(confirmSubmit!.disabled).toBe(true);
+    act(() => confirmSubmit!.click());
+    expect(submit).not.toHaveBeenCalled();
   });
 });

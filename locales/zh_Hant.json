@@ -108,7 +108,7 @@
   "sharing.e2ee.disclosure": "分享會將一份已解密的副本發佈到 E2EE 之外，伺服器將可讀取該內容。取消分享無法收回已被檢視或複製的內容。",
   "sharing.e2ee.confirm": "確認發佈解密副本",
   "e2ee.identity.restartTitle": "請重新啟動 Lody 以釋放加密資源",
-  "e2ee.identity.restartHelp": "舊的加密執行環境尚未確認釋放。請先結束並重新開啟 Lody 後再重試。在舊的寫入程序尚未解除前，無法啟動替代身分。",
+  "e2ee.identity.restartHelp": "先前的加密工作階段尚未完全釋放。請結束並重新開啟 Lody 後再重試。",
   "e2ee.identity.historyTitle": "本機加密歷史記錄需要復原",
   "e2ee.identity.historyHelp": "本機歷史記錄已損壞或無法驗證。請保留原始檔案，還原原檔案後重試；或明確封存此身分，再由另一台已授權裝置核准重新配對。已保留的信任憑證不會改變。",
   "e2ee.identity.pinTitle": "無法取得此裝置的受信任存取記錄",
@@ -526,7 +526,7 @@
   "e2ee.console.tabs.security": "安全碼與紀錄",
   "e2ee.console.tabs.recovery": "復原",
   "e2ee.console.status": "已開啟端對端加密",
-  "e2ee.console.statusCounts": "{{members}} 位成員 · {{devices}} 台裝置與機器。伺服器僅轉送無法讀取的資料。",
+  "e2ee.console.statusCounts": "{{members}} · {{devices}}。伺服器僅轉發無法讀取的資料。",
   "e2ee.console.adminRequired": "邀請成員、核准加入與移除成員需要管理員權限。",
   "e2ee.console.devicesElsewhere": "請在已開啟此工作區的裝置上，前往「設定 → 一般 → 端對端加密 → 加密與復原」管理裝置。",
   "e2ee.console.recoveryUnavailable": "此瀏覽器或裝置不支援復原備份。請開啟 Lody 桌面版或行動版應用程式，以透過 Passkey、復原密碼或復原檔案進行設定或還原，或在另一台受信任的裝置上保持開啟此工作區。",
@@ -7186,5 +7186,14 @@
   "e2ee.team.waitingKeyGuide": "您已通過核准！請聯繫邀請您的工作區管理員，請對方在已授權的裝置上開啟 Lody，系統即可安全傳送您的工作區金鑰。",
   "sessions.sendError.e2eeTimeout": "由於加密驗證逾時，訊息未能傳送。您的草稿已保留，請檢查網路連線後再試一次。",
   "sessions.sendError.e2eeRevoked": "由於此裝置已不再具備此工作區的加密存取權限，訊息未能傳送。您的草稿已保留，請重新配對裝置或聯繫管理員。",
-  "sessions.sendError.e2eeNotReady": "由於此裝置仍在同步工作區加密金鑰，訊息未能傳送。您的草稿已保留，請稍候片刻再試一次。"
+  "sessions.sendError.e2eeNotReady": "由於此裝置仍在同步工作區加密金鑰，訊息未能傳送。您的草稿已保留，請稍候片刻再試一次。",
+  "e2ee.offline.lessThanMinute": "不到 1 分鐘",
+  "e2ee.control.memberCount": "{{count}} 位成員",
+  "e2ee.control.memberCount_one": "{{count}} 位成員",
+  "e2ee.control.memberCount_other": "{{count}} 位成員",
+  "e2ee.recovery.planFailedTitle": "無法讀取復原狀態",
+  "e2ee.recovery.wrongPasskey": "Passkey 驗證失敗，或此 Passkey 無法解鎖此帳號的復原備份。",
+  "e2ee.security.revokeConfirmTitle": "撤銷裝置存取權限？",
+  "e2ee.security.revokeConfirmBody": "此裝置將失去此加密工作區的存取權限，如需再次使用必須重新核准配對。",
+  "e2ee.security.revokeSelfWarning": "這是你目前正在使用的裝置。撤銷後，本機將立即失去此工作區的存取權限。"
 }

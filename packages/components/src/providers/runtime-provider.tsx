@@ -34,7 +34,19 @@ import {
 } from '../components/workspace-key-reception-notice';
 import { WorkspaceHostIdentityNotice } from '../components/workspace-host-identity-notice';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useRouter } from '@tanstack/react-router';
 import { atom, useAtomValue, useSetAtom, useStore } from 'jotai';
+import { Button } from '@lody/ui/button';
+import { Card } from '@lody/ui/card';
+import { Spinner } from '@lody/ui/spinner';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import {
+  getPreferredOrdinaryWorkspaceSlug,
+  isNavigableWorkspaceSlug,
+  readPreferredWorkspaceSlug,
+} from '@/lib/workspace';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
 import {
   authTokenAtom,
@@ -122,14 +134,46 @@ type SavedMode = {
 };
 const FIRST_KEY_RECEPTION_RETRY_MS = [1_000, 2_000, 4_000] as const;
 const styles = stylex.create({
-  firstKeyNotice: {
-    position: 'fixed',
-    // Keep the action reachable above the workspace admission BootShell (z-index 30).
-    zIndex: 31,
-    bottom: 'env(safe-area-inset-bottom, 0px)',
-    insetInline: 0,
-    marginInline: 'auto',
-    maxWidth: '36rem',
+  waitingPage: {
+    display: 'flex',
+    minHeight: '100dvh',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+    padding: space[6],
+    boxSizing: 'border-box',
+  },
+  waitingCard: {
+    width: '100%',
+    maxWidth: '28rem',
+  },
+  waitingBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[3],
+  },
+  waitingHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+  },
+  waitingTitle: {
+    margin: 0,
+    fontSize: uiText.headlineSize,
+    fontWeight: 600,
+    color: colors.label,
+  },
+  waitingText: {
+    margin: 0,
+    fontSize: uiText.subheadlineSize,
+    color: colors.secondaryLabel,
+  },
+  waitingActions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: space[2],
+    paddingTop: space[1],
   },
 });
 type RuntimeKeyReceptionWait = KeyReceptionWait & {
@@ -1120,7 +1164,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               signal: initializationAbort.signal,
               deadlineMs: WORKSPACE_MODE_ADMISSION_TIMEOUT_MS,
             });
-            if (disposed) return;
+            if (disposed || retired) return;
           }
           admit(descriptor);
           admitting = false;
@@ -1369,7 +1413,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             setPresenceSyncState(state);
           },
         });
-        if (encryptedAccess) refreshNative();
         if (disposed || retired) {
           // The owner's cleanup or the retirement chain disposes it once.
           return;
@@ -1502,29 +1545,117 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     };
   }, [setBrowserOnline]);
 
-  const keyNotice =
+  const { t } = useTranslation();
+  const router = useRouter({ warn: false });
+  const [checkingKey, setCheckingKey] = useState(false);
+
+  const openKeyWait = Boolean(
     keyReceptionWait &&
+    keyReceptionWait.phase === 'open' &&
+    runtime === null &&
+    keyReceptionWait.workspaceId === effectiveWorkspaceId &&
+    keyReceptionWait.accountId === accountId &&
+    keyReceptionWait.workspaceSlug === workspaceSlug
+  );
+  const saveKeyNotice =
+    keyReceptionWait &&
+    keyReceptionWait.phase === 'save' &&
     keyReceptionWait.workspaceId === effectiveWorkspaceId &&
     keyReceptionWait.accountId === accountId &&
     keyReceptionWait.workspaceSlug === workspaceSlug &&
-    (keyReceptionWait.phase === 'open'
-      ? runtime === null
-      : keyUpdateWorkspace === runtime?.workspaceId &&
-        runtime?.workspaceId === effectiveWorkspaceId &&
-        runtime?.workspaceSlug === workspaceSlug) ? (
+    keyUpdateWorkspace === runtime?.workspaceId &&
+    runtime?.workspaceId === effectiveWorkspaceId &&
+    runtime?.workspaceSlug === workspaceSlug ? (
       <WorkspaceKeyReceptionNotice
         workspaceId={effectiveWorkspaceId}
         waiting={keyReceptionWait}
         onCheckAgain={() => retryKeyUpdateRef.current()}
       />
     ) : null;
+
+  const switchWorkspaceFromKeyWait = () => {
+    if (!router) return;
+    const workspacesState = platform.workspaces?.state.get();
+    const others =
+      workspacesState?.status === 'ready'
+        ? workspacesState.workspaces.filter((item) => item.id !== effectiveWorkspaceId)
+        : [];
+    const ordinarySlug = getPreferredOrdinaryWorkspaceSlug(
+      workspacesState?.status === 'ready'
+        ? others.find((item) => item.id === workspacesState.activeWorkspaceId)
+        : null,
+      others,
+      readPreferredWorkspaceSlug()
+    );
+    const fallbackSlug =
+      ordinarySlug ??
+      others.find(
+        (item): item is typeof item & { slug: string } =>
+          typeof item.slug === 'string' && isNavigableWorkspaceSlug(item.slug)
+      )?.slug;
+    void router.navigate(
+      fallbackSlug
+        ? { to: '/$workspaceName/chat', params: { workspaceName: fallbackSlug } }
+        : { to: '/workspace/create', search: { allowExisting: true } }
+    );
+  };
+
+  if (openKeyWait) {
+    return (
+      <div data-testid="e2ee-waiting-key-view" {...stylex.props(styles.waitingPage)}>
+        <Card.Root {...stylex.props(styles.waitingCard)}>
+          <div {...stylex.props(styles.waitingBody)}>
+            <div {...stylex.props(styles.waitingHeader)}>
+              <Spinner size="small" />
+              <h2 {...stylex.props(styles.waitingTitle)}>{t('e2ee.access.waitingKey.title')}</h2>
+            </div>
+            <p role="status" {...stylex.props(styles.waitingText)}>
+              {t('e2ee.content.receivingNewKeySlow')}
+            </p>
+            <div {...stylex.props(styles.waitingActions)}>
+              <Button
+                type="button"
+                variant="primary"
+                data-testid="e2ee-waiting-key-check"
+                disabled={checkingKey}
+                onClick={() => {
+                  setCheckingKey(true);
+                  retryKeyUpdateRef.current();
+                  setTimeout(() => setCheckingKey(false), 600);
+                }}
+              >
+                {checkingKey && <Spinner size="small" />}
+                {t('e2ee.content.retryHostIdentity')}
+              </Button>
+              {router && effectiveWorkspaceId && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    void router.navigate({
+                      to: '/workspace/e2ee/$workspaceId',
+                      params: { workspaceId: effectiveWorkspaceId },
+                    })
+                  }
+                >
+                  {t('e2ee.security.openConsole')}
+                </Button>
+              )}
+              {router && (
+                <Button type="button" variant="ghost" onClick={switchWorkspaceFromKeyWait}>
+                  {t('e2ee.lostAccess.back')}
+                </Button>
+              )}
+            </div>
+          </div>
+        </Card.Root>
+      </div>
+    );
+  }
+
   return (
     <>
-      {keyNotice && keyReceptionWait?.phase === 'open' ? (
-        <div {...stylex.props(styles.firstKeyNotice)}>{keyNotice}</div>
-      ) : (
-        keyNotice
-      )}
+      {saveKeyNotice}
       {hostIdentityWait?.workspaceId === effectiveWorkspaceId && (
         <WorkspaceHostIdentityNotice
           code={hostIdentityWait.code}

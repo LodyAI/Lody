@@ -1780,6 +1780,15 @@ describe('authorized device identities', () => {
       await act(async () =>
         (container.querySelector('[data-testid="e2ee-device-revoke"]') as HTMLButtonElement).click()
       );
+      expect(revoked).toEqual([]);
+      expect(document.querySelector('[data-testid="e2ee-revoke-self-warning"]')).not.toBeNull();
+      await act(async () =>
+        (
+          document.querySelector(
+            '[data-testid="e2ee-device-revoke-confirm-action"]'
+          ) as HTMLButtonElement
+        ).click()
+      );
       expect(revoked).toEqual([device.key]);
       const detail = container.querySelector(
         '[data-testid="e2ee-device-details"]'

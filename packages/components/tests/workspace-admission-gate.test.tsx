@@ -158,13 +158,19 @@ describe('WorkspaceAdmissionGate', () => {
     }
   );
 
-  it('explains terminal member removal and requires a new invitation', async () => {
+  it('explains terminal member removal and offers a way back to workspaces', async () => {
+    navigation.calls.length = 0;
     fail({ errorType: 'e2ee_member_removed' });
     await render();
     expect(text()).toContain('Workspace access removed');
     expect(text()).toContain('Rejoining requires a new invitation');
     expect(text()).not.toContain('workspace content');
-    expect(container.querySelector('button')).toBeNull();
+    const button = container.querySelector('button');
+    expect(button?.textContent).toBe('Back to workspaces');
+    await act(async () => button!.click());
+    expect(navigation.calls).toEqual([
+      { to: '/workspace/create', search: { allowExisting: true } },
+    ]);
   });
 
   it('explains a revoked device and offers to pair it again from the workspace control page', async () => {

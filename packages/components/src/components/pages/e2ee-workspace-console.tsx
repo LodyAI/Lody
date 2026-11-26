@@ -22,18 +22,29 @@ import {
 } from '@/lib/e2ee-member-removal';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { getMachineMetaMapAtom } from '@/atoms/machines';
+import { RouteMessage } from '@/components/route-message';
+import { E2eeDevicesPanel } from '@/components/settings/e2ee/security-panel';
+import { useLocalDeviceProfile } from '@/components/settings/e2ee/security-state';
 import { useE2eeRecoverySection } from '@/components/settings/e2ee/recovery-host';
 import { useRecoveryPort } from '@/components/settings/e2ee/recovery-port';
-import { useWorkspaceRecoveryReady } from '@/components/settings/e2ee/recovery-vault-section';
+import {
+  RecoveryVaultSection,
+  useWorkspaceRecoveryReady,
+} from '@/components/settings/e2ee/recovery-vault-section';
 import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
 import type { E2eeWorkspaceRemoval } from './e2ee-workspace-removal';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
-import type { E2eeRuntimeStatus } from '@lody/platform';
+import type { E2eeManagementState, E2eeRuntimeStatus, E2eeWorkspaceRuntime } from '@lody/platform';
 import type { WorkspaceId } from '@lody/shared';
-import { getPreferredOrdinaryWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
-import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
+import {
+  getPreferredOrdinaryWorkspaceSlug,
+  isNavigableWorkspaceSlug,
+  readPreferredWorkspaceSlug,
+} from '@/lib/workspace';
+import type { E2eeWorkspaceMemberProfiles, WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { mintAdmittedWorkspaceTicket } from '@/atoms/workspace-context';
 import { runtimeInitializingAtom } from '@/atoms/control-connection';
@@ -110,6 +121,85 @@ export interface E2eeWorkspaceConsoleProps {
   /** Ordinary account deletion/leave for a device with no approval; absent when the
    * host has no account workspaces. The server decides who may use either. */
   workspaceRemoval?: E2eeWorkspaceRemoval;
+}
+
+function StandaloneDevicesSection({
+  runtime,
+  workspaceId,
+  directory,
+  ledgerVersion,
+  onChanged,
+}: {
+  runtime: E2eeWorkspaceRuntime;
+  workspaceId: string;
+  directory?: E2eeWorkspaceMemberProfiles;
+  ledgerVersion?: string;
+  onChanged: () => Promise<void>;
+}) {
+  const [state, setState] = useState<E2eeManagementState>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>();
+  const localProfile = useLocalDeviceProfile();
+  const machines = useAtomValue(getMachineMetaMapAtom);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const reload = async () => {
+    if (!runtime.managementState) return;
+    try {
+      const next = await runtime.managementState(workspaceId);
+      if (live.current) {
+        setState(next);
+        setError(undefined);
+      }
+    } catch (cause) {
+      if (live.current) setError(cause ?? 'e2ee_management_retry');
+    }
+  };
+  useEffect(() => {
+    void reload();
+  }, [runtime, workspaceId, ledgerVersion]);
+  const perform = async (work: () => Promise<unknown>) => {
+    if (busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await work();
+      await reload();
+      await onChanged();
+    } catch (cause) {
+      if (live.current) setError(cause ?? 'e2ee_management_retry');
+    } finally {
+      if (live.current) setBusy(false);
+    }
+  };
+  return (
+    <E2eeDevicesPanel
+      state={state}
+      directory={directory}
+      localProfile={localProfile}
+      machines={machines}
+      busy={busy}
+      error={error}
+      onRetry={() => void perform(() => runtime.refresh(workspaceId))}
+      onUpdate={() =>
+        void perform(async () => {
+          if (!runtime.updateKeys) throw new Error('e2ee_management_unauthorized');
+          await runtime.updateKeys(workspaceId);
+        })
+      }
+      onRevoke={(key, confirmation) =>
+        perform(async () => {
+          if (!runtime.revokeDevice) throw new Error('e2ee_management_unauthorized');
+          await runtime.revokeDevice(workspaceId, key, confirmation);
+        })
+      }
+    />
+  );
 }
 
 /** The encryption console. It owns its account/workspace control reader and the
@@ -620,6 +710,7 @@ export function E2eeWorkspaceConsole({
   const [directory, setDirectory] = useState<{
     scope: string;
     profiles: ReadonlyMap<string, E2eeMemberProfile>;
+    raw: E2eeWorkspaceMemberProfiles;
   } | null>(null);
   const authenticated = session.status === 'authenticated' && session.user.id === accountId;
   useEffect(() => {
@@ -634,7 +725,7 @@ export function E2eeWorkspaceConsole({
           if (typeof profile.name === 'string' && profile.name.trim() !== '')
             profiles.set(profile.cryptoUserId, { name: profile.name, image: profile.image });
         }
-        setDirectory({ scope, profiles });
+        setDirectory({ scope, profiles, raw: result });
       },
       () => {
         // Labels are optional. Failed directory reads leave verified IDs/ordinals visible.
@@ -645,42 +736,97 @@ export function E2eeWorkspaceConsole({
     };
   }, [scope, authenticated, port, workspaceId, directoryRevision]);
   const current = state.identity === identity ? state : null;
+  const workspaceSlug =
+    workspaces.status === 'ready'
+      ? workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.slug
+      : null;
+  const authorizedPersonal = Boolean(
+    current?.scope === scope &&
+    !current.failure &&
+    current.nativeStatus?.workspaceId === workspaceId &&
+    current.nativeStatus.deviceKind === 'personal'
+  );
+  const canOpen = Boolean(workspaceSlug && authorizedPersonal && !current?.loading);
+  const workspaceRetryScope = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      presentation !== 'page' ||
+      !authorizedPersonal ||
+      workspaceSlug ||
+      workspaces.status === 'loading'
+    )
+      return;
+    const retryKey = `${scope}:${workspaces.status}`;
+    if (workspaceRetryScope.current === retryKey) return;
+    workspaceRetryScope.current = retryKey;
+    void platform.workspaces?.retry?.();
+  }, [
+    authorizedPersonal,
+    platform.workspaces,
+    presentation,
+    scope,
+    workspaceSlug,
+    workspaces.status,
+  ]);
+  const openCurrentWorkspace = () => {
+    // Navigation is only an entry point. RuntimeProvider reopens this
+    // approved identity and acquires purpose-bound grants before content.
+    if (scopeRef.current !== scope || !readOwner.current || !workspaceSlug) return;
+    const ticket =
+      accountId &&
+      mintAdmittedWorkspaceTicket({
+        accountId,
+        slug: workspaceSlug,
+        workspaceId: workspaceId as WorkspaceId,
+        hasDeviceCredential: Boolean(current?.nativeStatus?.hasDeviceCredential),
+        hasCurrentKey: Boolean(current?.nativeStatus?.hasCurrentKey),
+      });
+    if (ticket) {
+      clearWorkspace(ticket);
+    }
+    setRuntimeInitializing(true);
+    void navigate({
+      to: '/$workspaceName/chat',
+      params: { workspaceName: workspaceSlug },
+    });
+  };
   const backToWorkspaces = () => {
     if (onClose) {
       onClose();
       return;
     }
-    // Same choice as the create route's back exit: never an encrypted workspace,
-    // and never this one even if its display metadata lacks the content mode.
+    // Prefer an ordinary workspace; if this account only has encrypted workspaces,
+    // return to this authorized workspace or another navigable workspace instead of
+    // kicking the user to workspace creation.
     const others =
       workspaces.status === 'ready'
         ? workspaces.workspaces.filter((item) => item.id !== workspaceId)
         : [];
-    const slug = getPreferredOrdinaryWorkspaceSlug(
+    const ordinarySlug = getPreferredOrdinaryWorkspaceSlug(
       workspaces.status === 'ready'
         ? others.find((item) => item.id === workspaces.activeWorkspaceId)
         : null,
       others,
       readPreferredWorkspaceSlug()
     );
+    if (ordinarySlug) {
+      void navigate({ to: '/$workspaceName/chat', params: { workspaceName: ordinarySlug } });
+      return;
+    }
+    if (authorizedPersonal && workspaceSlug) {
+      openCurrentWorkspace();
+      return;
+    }
+    const otherSlug = others.find(
+      (item): item is typeof item & { slug: string } =>
+        typeof item.slug === 'string' && isNavigableWorkspaceSlug(item.slug)
+    )?.slug;
     void navigate(
-      slug
-        ? { to: '/$workspaceName/chat', params: { workspaceName: slug } }
+      otherSlug
+        ? { to: '/$workspaceName/chat', params: { workspaceName: otherSlug } }
         : { to: '/workspace/create', search: { allowExisting: true } }
     );
   };
-  const workspaceSlug =
-    workspaces.status === 'ready'
-      ? workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.slug
-      : null;
-  const canOpen = Boolean(
-    workspaceSlug &&
-    current?.scope === scope &&
-    !current.loading &&
-    !current.failure &&
-    current.nativeStatus?.workspaceId === workspaceId &&
-    current.nativeStatus.deviceKind === 'personal'
-  );
   const loadMore = async () => {
     const owner = readOwner.current;
     if (
@@ -798,12 +944,14 @@ export function E2eeWorkspaceConsole({
   const joinedKey = joinedCredential && current?.nativeStatus?.hasCurrentKey === true;
   const accountPairingKeyFailed =
     joinedCredential && !joinedKey && accountPairingJoins.get(identity)?.failed === true;
+  const signedOut = session.status === 'unauthenticated' && !session.uncertain;
   useEffect(() => {
-    if (accountPairingAccount === accountId) return;
-    accountPairingAccount = accountId;
+    const nextAccount = signedOut ? null : accountId;
+    if (accountPairingAccount === nextAccount) return;
+    accountPairingAccount = nextAccount;
     for (const join of accountPairingJoins.values()) join.cancel?.();
     accountPairingJoins.clear();
-  }, [accountId]);
+  }, [accountId, signedOut]);
   useEffect(() => {
     const join = accountPairingJoins.get(identity);
     if (!join || !joinedCredential || !workspaceSlug) return;
@@ -894,7 +1042,17 @@ export function E2eeWorkspaceConsole({
       failure: current?.failure ?? null,
     });
   };
-  if (current?.removed) return <p role="status">{t('e2ee.members.removed')}</p>;
+  if (current?.removed)
+    return (
+      <RouteMessage
+        gate={null}
+        testId="e2ee-member-removed"
+        title={t('e2ee.members.removedTitle')}
+        description={t('e2ee.members.removed')}
+        actionLabel={t('e2ee.lostAccess.back')}
+        onRetry={backToWorkspaces}
+      />
+    );
   const listedWorkspace =
     workspaces.status === 'ready'
       ? workspaces.workspaces.find((workspace) => workspace.id === workspaceId)
@@ -908,7 +1066,7 @@ export function E2eeWorkspaceConsole({
           recovery: {
             passkeyAvailable,
             restore: recoveryPort.restore,
-            onRecovered: refresh,
+            onRecovered: () => onAccountPairingJoined(false),
             onCheck: refresh,
           },
         }
@@ -989,7 +1147,7 @@ export function E2eeWorkspaceConsole({
         />
       </E2eeDeviceApprovalGuide>
     );
-  return (
+  const notices = (
     <>
       {current?.offline && (
         <p role="status" {...stylex.props(themeStyles.hint)}>
@@ -1007,179 +1165,181 @@ export function E2eeWorkspaceConsole({
             onReset={refresh}
           />
         )}
-      <E2eeWorkspaceControlPage
-        // Tabs and open disclosures belong to one workspace.
-        key={identity}
-        memberManagement={
-          current?.scope === scope &&
-          !current.loading &&
-          !current.failure &&
-          current.nativeStatus?.deviceKind === 'personal' &&
-          current.nativeStatus.hasDeviceCredential === true &&
-          (current.nativeStatus.memberRole === 'owner' ||
-            current.nativeStatus.memberRole === 'admin') &&
-          port?.runtime?.removeMember &&
-          port.runtime.setMemberRole
-            ? {
-                actorRole: current.nativeStatus.memberRole,
-                remove: (membershipId) =>
-                  manageMember(() => port.runtime!.removeMember!(workspaceId, membershipId)),
-                setRole: (membershipId, role) =>
-                  manageMember(() => port.runtime!.setMemberRole!(workspaceId, membershipId, role)),
-                ...(port.runtime.transferOwnership
-                  ? {
-                      transfer: (membershipId: string) =>
-                        manageMember(() =>
-                          port.runtime!.transferOwnership!(workspaceId, membershipId)
-                        ),
-                    }
-                  : {}),
-                ...(port.runtime.updateKeys
-                  ? { rotate: () => manageMember(() => port.runtime!.updateKeys!(workspaceId)) }
-                  : {}),
-              }
-            : undefined
-        }
-        workspaceId={workspaceId}
-        workspaceName={
-          workspaces.status === 'ready'
-            ? workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.name
-            : undefined
-        }
-        presentation={presentation}
-        initialTab={initialTab}
-        {...(onCheckForUpdates ? { onCheckForUpdates } : {})}
-        {...(resolvedRecoveryReady === undefined ? {} : { recoveryReady: resolvedRecoveryReady })}
-        memberRole={
-          current?.scope === scope && !current.failure
-            ? current.nativeStatus?.memberRole
-            : undefined
-        }
-        genesisHash={current?.descriptor?.genesisHash}
-        history={current?.history ?? null}
-        loading={!current || current.loading || current.scope !== scope}
-        failure={current?.failure ?? null}
-        unavailable={!port || !accountId}
-        memberProfiles={
-          authenticated && directory?.scope === scope ? directory.profiles : undefined
-        }
-        diagnostics={diagnostics}
-        onRepairLocal={() => {
-          if (!accountId) return;
-          repairUnreadableE2eeCaches(localStorage, accountId);
-          refresh();
-        }}
-        onResetProgress={() => {
-          if (!accountId) return;
-          resetObservedLedgerProgress(localStorage, accountId, workspaceId);
-          refresh();
-        }}
-        onLoadMore={() => {
-          void loadMore();
-        }}
-        onRefresh={refresh}
-        onOpen={
-          canOpen && presentation === 'page'
-            ? () => {
-                // Navigation is only an entry point. RuntimeProvider reopens this
-                // approved identity and acquires purpose-bound grants before content.
-                if (scopeRef.current === scope && readOwner.current && workspaceSlug) {
-                  const ticket =
-                    accountId &&
-                    mintAdmittedWorkspaceTicket({
-                      accountId,
-                      slug: workspaceSlug,
-                      workspaceId: workspaceId as WorkspaceId,
-                      hasDeviceCredential: Boolean(current?.nativeStatus?.hasDeviceCredential),
-                      hasCurrentKey: Boolean(current?.nativeStatus?.hasCurrentKey),
-                    });
-                  if (ticket) {
-                    clearWorkspace(ticket);
-                  }
-                  setRuntimeInitializing(true);
-                  void navigate({
-                    to: '/$workspaceName/chat',
-                    params: { workspaceName: workspaceSlug },
-                  });
-                }
-              }
-            : undefined
-        }
-        onBack={backToWorkspaces}
-      >
-        {port?.runtime && accountId && current?.history?.locallyPinned && (
-          <E2eeConsoleSection tab="members">
-            <E2eeTeamSettingsHost
-              key={identity + ':team'}
-              runtime={port.runtime}
-              workspaceId={workspaceId}
-              accountId={accountId}
-              profiles={directory?.scope === scope ? directory.profiles : undefined}
-              ledgerVersion={port.subscribeLedgerHead ? current.nativeStatus?.headHash : undefined}
-              onMembersChanged={async () => {
-                await manageMember();
-                if (scopeRef.current === scope) setDirectoryRevision((value) => value + 1);
-              }}
-            />
-          </E2eeConsoleSection>
-        )}
-        {port?.runtime && accountId && current?.history?.locallyPinned && (
-          <E2eeConsoleSection tab="devices">
-            <E2eeAddDeviceCard
-              key={identity + ':account-pairing'}
-              runtime={port.runtime}
-              defaultShowQr={showPairingCode === true}
-            />
-          </E2eeConsoleSection>
-        )}
-        {/* The per-workspace exchange is only for hosts without account pairing;
-            beside it, it would be a second, competing way to add the same device. */}
-        {port?.runtime && accountId && !port.runtime.inspectAccountPairing && (
-          <E2eeConsoleSection tab="devices">
-            <E2eePersonalPairing
-              key={identity}
-              accountId={accountId}
-              workspaceId={workspaceId}
-              runtime={port.runtime}
-              canApprove={Boolean(current?.history?.locallyPinned)}
-              approved={Boolean(
-                current?.scope === scope &&
-                !current.failure &&
-                current.nativeStatus?.deviceKind === 'personal'
-              )}
-              onJoined={refresh}
-            />
-          </E2eeConsoleSection>
-        )}
-        {sections ??
-          (DefaultRecoverySection && (
-            <E2eeConsoleSection tab="recovery">
-              <DefaultRecoverySection key={accountId ?? ''} accountId={accountId} />
-            </E2eeConsoleSection>
-          ))}
-        {port?.runtime?.beginRemoteMachinePairing && current?.history?.locallyPinned && (
-          <E2eeConsoleSection tab="devices">
-            <E2eeRemoteMachineDisclosure key={identity + ':remote-machine-disclosure'}>
-              <E2eeRemoteMachinePairing
-                key={identity + ':remote-machine'}
-                workspaceId={workspaceId}
-                runtime={port.runtime}
-              />
-            </E2eeRemoteMachineDisclosure>
-          </E2eeConsoleSection>
-        )}
-        {port && current?.history?.locallyPinned && (
-          <E2eeConsoleSection tab="security">
-            <E2eeLedgerAudit
-              key={identity + ':audit'}
-              workspaceId={workspaceId}
-              history={current.history}
-              read={port.history}
-            />
-          </E2eeConsoleSection>
-        )}
-      </E2eeWorkspaceControlPage>
     </>
+  );
+  return (
+    <E2eeWorkspaceControlPage
+      // Tabs and open disclosures belong to one workspace.
+      key={identity}
+      notices={notices}
+      memberManagement={
+        current?.scope === scope &&
+        !current.failure &&
+        current.nativeStatus?.deviceKind === 'personal' &&
+        current.nativeStatus.hasDeviceCredential === true &&
+        (current.nativeStatus.memberRole === 'owner' ||
+          current.nativeStatus.memberRole === 'admin') &&
+        port?.runtime?.removeMember &&
+        port.runtime.setMemberRole
+          ? {
+              actorRole: current.nativeStatus.memberRole,
+              remove: (membershipId) =>
+                manageMember(() => port.runtime!.removeMember!(workspaceId, membershipId)),
+              setRole: (membershipId, role) =>
+                manageMember(() => port.runtime!.setMemberRole!(workspaceId, membershipId, role)),
+              ...(port.runtime.transferOwnership
+                ? {
+                    transfer: (membershipId: string) =>
+                      manageMember(() =>
+                        port.runtime!.transferOwnership!(workspaceId, membershipId)
+                      ),
+                  }
+                : {}),
+              ...(port.runtime.updateKeys
+                ? { rotate: () => manageMember(() => port.runtime!.updateKeys!(workspaceId)) }
+                : {}),
+            }
+          : undefined
+      }
+      workspaceId={workspaceId}
+      workspaceName={
+        workspaces.status === 'ready'
+          ? workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.name
+          : undefined
+      }
+      presentation={presentation}
+      initialTab={initialTab}
+      {...(onCheckForUpdates ? { onCheckForUpdates } : {})}
+      {...(resolvedRecoveryReady === undefined ? {} : { recoveryReady: resolvedRecoveryReady })}
+      memberRole={
+        current?.scope === scope && !current.failure ? current.nativeStatus?.memberRole : undefined
+      }
+      genesisHash={current?.descriptor?.genesisHash}
+      history={current?.history ?? null}
+      loading={!current || current.loading || current.scope !== scope}
+      failure={current?.failure ?? null}
+      unavailable={!port || !accountId}
+      memberProfiles={authenticated && directory?.scope === scope ? directory.profiles : undefined}
+      diagnostics={diagnostics}
+      onRepairLocal={() => {
+        if (!accountId) return;
+        repairUnreadableE2eeCaches(localStorage, accountId);
+        refresh();
+      }}
+      onResetProgress={() => {
+        if (!accountId) return;
+        resetObservedLedgerProgress(localStorage, accountId, workspaceId);
+        refresh();
+      }}
+      onLoadMore={() => {
+        void loadMore();
+      }}
+      onRefresh={refresh}
+      onOpen={authorizedPersonal && presentation === 'page' ? openCurrentWorkspace : undefined}
+      openDisabled={!workspaceSlug}
+      onBack={backToWorkspaces}
+    >
+      {port?.runtime && accountId && current?.history?.locallyPinned && (
+        <E2eeConsoleSection tab="members">
+          <E2eeTeamSettingsHost
+            key={identity + ':team'}
+            runtime={port.runtime}
+            workspaceId={workspaceId}
+            accountId={accountId}
+            profiles={directory?.scope === scope ? directory.profiles : undefined}
+            ledgerVersion={port.subscribeLedgerHead ? current.nativeStatus?.headHash : undefined}
+            onMembersChanged={async () => {
+              await manageMember();
+              if (scopeRef.current === scope) setDirectoryRevision((value) => value + 1);
+            }}
+          />
+        </E2eeConsoleSection>
+      )}
+      {port?.runtime && accountId && current?.history?.locallyPinned && (
+        <E2eeConsoleSection tab="devices">
+          <E2eeAddDeviceCard
+            key={identity + ':account-pairing'}
+            runtime={port.runtime}
+            defaultShowQr={showPairingCode === true}
+          />
+        </E2eeConsoleSection>
+      )}
+      {/* The per-workspace exchange is only for hosts without account pairing;
+          beside it, it would be a second, competing way to add the same device. */}
+      {port?.runtime && accountId && !port.runtime.inspectAccountPairing && (
+        <E2eeConsoleSection tab="devices">
+          <E2eePersonalPairing
+            key={identity}
+            accountId={accountId}
+            workspaceId={workspaceId}
+            runtime={port.runtime}
+            canApprove={Boolean(current?.history?.locallyPinned)}
+            approved={Boolean(
+              current?.scope === scope &&
+              !current.failure &&
+              current.nativeStatus?.deviceKind === 'personal'
+            )}
+            onJoined={refresh}
+          />
+        </E2eeConsoleSection>
+      )}
+      {!sections &&
+        port?.runtime?.managementState &&
+        authorizedPersonal &&
+        current?.nativeStatus?.hasDeviceCredential && (
+          <E2eeConsoleSection tab="devices">
+            <StandaloneDevicesSection
+              key={identity + ':devices'}
+              runtime={port.runtime}
+              workspaceId={workspaceId}
+              directory={authenticated && directory?.scope === scope ? directory.raw : undefined}
+              ledgerVersion={current.nativeStatus.headHash}
+              onChanged={() => manageMember()}
+            />
+          </E2eeConsoleSection>
+        )}
+      {sections ??
+        (DefaultRecoverySection && (
+          <E2eeConsoleSection tab="recovery">
+            {DefaultRecoverySection === RecoveryVaultSection ? (
+              <RecoveryVaultSection
+                key={accountId ?? ''}
+                accountId={accountId}
+                onRestored={refresh}
+                onOpenWorkspace={
+                  authorizedPersonal && workspaceSlug && presentation === 'page'
+                    ? openCurrentWorkspace
+                    : undefined
+                }
+                onBackToWorkspaces={backToWorkspaces}
+              />
+            ) : (
+              <DefaultRecoverySection key={accountId ?? ''} accountId={accountId} />
+            )}
+          </E2eeConsoleSection>
+        ))}
+      {port?.runtime?.beginRemoteMachinePairing && current?.history?.locallyPinned && (
+        <E2eeConsoleSection tab="devices">
+          <E2eeRemoteMachineDisclosure key={identity + ':remote-machine-disclosure'}>
+            <E2eeRemoteMachinePairing
+              key={identity + ':remote-machine'}
+              workspaceId={workspaceId}
+              runtime={port.runtime}
+            />
+          </E2eeRemoteMachineDisclosure>
+        </E2eeConsoleSection>
+      )}
+      {port && current?.history?.locallyPinned && (
+        <E2eeConsoleSection tab="security">
+          <E2eeLedgerAudit
+            key={identity + ':audit'}
+            workspaceId={workspaceId}
+            history={current.history}
+            read={port.history}
+          />
+        </E2eeConsoleSection>
+      )}
+    </E2eeWorkspaceControlPage>
   );
 }
 

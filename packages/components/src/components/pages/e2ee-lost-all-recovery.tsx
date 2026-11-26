@@ -6,6 +6,7 @@ import { Alert } from '@lody/ui/alert';
 import { Badge, type BadgeTone } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
+import { Spinner } from '@lody/ui/spinner';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 
@@ -38,6 +39,8 @@ export interface E2eeLostAllRecoveryProps {
   onCheck?: () => void;
   /** The person has neither backup: go on to what can still be done. */
   onNoBackup?: () => void;
+  /** Exit recovery back to other workspaces when restore fails or only restores other workspaces. */
+  onBack?: () => void;
 }
 
 const styles = stylex.create({
@@ -112,7 +115,9 @@ const failureKey = (code: string, method: Method) => {
       : /e2ee_recovery_(?:authentication|invalid-input)/.test(code)
         ? method === 'password'
           ? 'e2ee.recovery.wrongPassword'
-          : 'e2ee.recovery.wrongFile'
+          : method === 'passkey'
+            ? 'e2ee.recovery.wrongPasskey'
+            : 'e2ee.recovery.wrongFile'
         : code.includes('e2ee_recovery_disabled')
           ? 'e2ee.recovery.disabled'
           : 'e2ee.lostAll.failed';
@@ -240,6 +245,11 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
           <p {...stylex.props(styles.lead)}>{t('e2ee.lostAll.result.revokeHint')}</p>
         )}
         <div {...stylex.props(styles.actions)}>
+          {!current && props.onBack && (
+            <Button variant="secondary" onClick={props.onBack}>
+              {t('e2ee.lostAccess.back')}
+            </Button>
+          )}
           {!current && !currentWaiting && props.onNoBackup && notCovered && (
             <Button variant="secondary" onClick={props.onNoBackup}>
               {t('e2ee.lostAll.cannotRestore')}
@@ -319,6 +329,7 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
           </Button>
         )}
         <Button disabled={!canSubmit} onClick={() => void run()}>
+          {busy && <Spinner size="small" />}
           {t('e2ee.lostAll.continue')}
         </Button>
       </div>

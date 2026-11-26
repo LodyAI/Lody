@@ -122,7 +122,7 @@ export function E2eeIdentityRecovery({
             </>
           ) : (
             <>
-              <Button variant="secondary" onClick={onReset}>
+              <Button variant="primary" onClick={onReset}>
                 {t('common.tryAgain')}
               </Button>
               {reset && !permissions && (

@@ -108,7 +108,7 @@
   "sharing.e2ee.disclosure": "Compartir publica una copia descifrada fuera de E2EE, donde el servidor puede leerla. Revocar el acceso compartido no puede retirar el contenido que ya haya sido visto o copiado.",
   "sharing.e2ee.confirm": "Publicar copia descifrada",
   "e2ee.identity.restartTitle": "Reinicia Lody para liberar los recursos cifrados",
-  "e2ee.identity.restartHelp": "El entorno de ejecución cifrado anterior no ha confirmado su liberación. Cierra y vuelve a abrir Lody antes de reintentarlo. No puede iniciarse una identidad de reemplazo mientras el escritor anterior siga sin resolverse.",
+  "e2ee.identity.restartHelp": "La sesión cifrada anterior no ha terminado de cerrarse. Cierra y vuelve a abrir Lody antes de intentarlo de nuevo.",
   "e2ee.identity.historyTitle": "El historial cifrado local necesita recuperación",
   "e2ee.identity.historyHelp": "El historial local está dañado o no se puede verificar. Conserva los archivos originales. Restaura los archivos originales y vuelve a intentarlo, o archiva explícitamente esta identidad y vuelve a emparejarla con la aprobación de otro dispositivo autorizado. La evidencia de confianza conservada permanece sin cambios.",
   "e2ee.identity.pinTitle": "El registro de acceso de confianza de este dispositivo no está disponible",
@@ -526,7 +526,7 @@
   "e2ee.console.tabs.security": "Código de seguridad e historial",
   "e2ee.console.tabs.recovery": "Recuperación",
   "e2ee.console.status": "El cifrado de extremo a extremo está activado",
-  "e2ee.console.statusCounts": "{{members}} miembros · {{devices}} dispositivos y máquinas. El servidor solo retransmite datos que no puede leer.",
+  "e2ee.console.statusCounts": "{{members}} · {{devices}}. El servidor solo retransmite datos que no puede leer.",
   "e2ee.console.adminRequired": "Invitar miembros, aprobar incorporaciones y eliminar miembros requiere permiso de administrador.",
   "e2ee.console.devicesElsewhere": "Administra los dispositivos desde Configuración → General → Cifrado de extremo a extremo → Cifrado y recuperación en un dispositivo que tenga este espacio de trabajo abierto.",
   "e2ee.console.recoveryUnavailable": "Las copias de seguridad de recuperación no están disponibles en este navegador o dispositivo. Abre la aplicación móvil o de escritorio de Lody para configurar o restaurar desde una passkey, contraseña de recuperación o archivo de recuperación, o mantén este espacio de trabajo abierto en otro dispositivo de confianza.",
@@ -7186,5 +7186,14 @@
   "e2ee.team.waitingKeyGuide": "¡Se aprobó tu acceso! Pídele al administrador del espacio de trabajo que te invitó que abra Lody en su dispositivo autorizado para que pueda enviar de forma segura las claves de tu espacio de trabajo.",
   "sessions.sendError.e2eeTimeout": "No se envió el mensaje porque expiró el tiempo de espera de verificación de cifrado. Se conserva tu borrador; comprueba tu conexión e inténtalo de nuevo.",
   "sessions.sendError.e2eeRevoked": "No se envió el mensaje porque este dispositivo ya no tiene acceso cifrado a este espacio de trabajo. Se conserva tu borrador; vuelve a vincular este dispositivo o contacta a un administrador.",
-  "sessions.sendError.e2eeNotReady": "No se envió el mensaje porque este dispositivo aún está sincronizando las claves de cifrado del espacio de trabajo. Se conserva tu borrador; espera un momento e inténtalo de nuevo."
+  "sessions.sendError.e2eeNotReady": "No se envió el mensaje porque este dispositivo aún está sincronizando las claves de cifrado del espacio de trabajo. Se conserva tu borrador; espera un momento e inténtalo de nuevo.",
+  "e2ee.offline.lessThanMinute": "menos de un minuto",
+  "e2ee.control.memberCount": "{{count}} miembros",
+  "e2ee.control.memberCount_one": "{{count}} miembro",
+  "e2ee.control.memberCount_other": "{{count}} miembros",
+  "e2ee.recovery.planFailedTitle": "Estado de recuperación no disponible",
+  "e2ee.recovery.wrongPasskey": "Error en la verificación de la clave de acceso o esta clave no desbloquea tu copia de recuperación.",
+  "e2ee.security.revokeConfirmTitle": "¿Revocar el acceso del dispositivo?",
+  "e2ee.security.revokeConfirmBody": "Este dispositivo perderá el acceso a este espacio de trabajo cifrado y deberá aprobarse de nuevo para volver a unirse.",
+  "e2ee.security.revokeSelfWarning": "Este es el dispositivo que estás usando ahora mismo. Revocarlo te bloqueará inmediatamente el acceso a este espacio de trabajo en este dispositivo."
 }

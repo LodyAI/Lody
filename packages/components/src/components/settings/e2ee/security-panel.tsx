@@ -9,6 +9,7 @@ import type { E2eeManagementState } from '@lody/platform';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Collapsible } from '@lody/ui/collapsible';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Avatar } from '@lody/ui/avatar';
 import { CachedAvatarImage } from '@/components/cached-avatar-img';
@@ -246,6 +247,7 @@ export function E2eeSecurityPanel({
   // When the failure card's one step is the console, the status row neither repeats
   // the explanation nor offers a second console button.
   const cardOpensConsole = !!error && errorCard(error).action === 'console' && !!onOpenConsole;
+  const hasAttention = Boolean(state?.rotationRequired || state?.updatePending || joinRequests);
   return (
     <div {...stylex.props(styles.panel)}>
       <CompactSection title={t('e2ee.security.title')}>
@@ -262,6 +264,7 @@ export function E2eeSecurityPanel({
           {/* Adding a device is the everyday task; everything else is one step further. */}
           {onOpenConsole && !cardOpensConsole && (
             <Button
+              variant={hasAttention ? 'secondary' : 'primary'}
               data-testid="e2ee-security-add-device"
               disabled={busy}
               onClick={() => onOpenConsole('devices')}
@@ -360,13 +363,17 @@ export function E2eeDevicesPanel({
   localProfile?: E2eeDeviceProfile;
   /** Workspace machine directory keyed by machine ID, used only for machine rows. */
   machines?: ReadonlyMap<string, E2eeDeviceMachineLabel>;
-  onRevoke: (key: string, confirmation?: { confirmedRecoveryOnly: true }) => void;
+  onRevoke: (key: string, confirmation?: { confirmedRecoveryOnly: true }) => void | Promise<void>;
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState(false);
   const error = effectiveError(state, actionError);
-  const updating = busy || !!state?.updateInProgress;
+  const updating = busy || revoking || !!state?.updateInProgress;
+  const confirmDevice = confirmKey
+    ? state?.devices.find((device) => device.key === confirmKey)
+    : undefined;
   return (
     <div {...stylex.props(styles.panel)}>
       {(state?.rotationRequired || state?.updatePending || error != null) && (
@@ -436,9 +443,7 @@ export function E2eeDevicesPanel({
                 helper={
                   <div {...stylex.props(styles.deviceInfo)}>
                     {info && <span {...stylex.props(styles.detail)}>{info}</span>}
-                    {device.self && (
-                      <span {...stylex.props(styles.detail)}>{t('e2ee.security.thisDevice')}</span>
-                    )}
+                    {device.self && <Badge tone="success">{t('e2ee.security.thisDevice')}</Badge>}
                     <Collapsible.Root {...stylex.props(styles.identifiers)}>
                       <Collapsible.Trigger
                         render={
@@ -477,12 +482,9 @@ export function E2eeDevicesPanel({
                       data-testid="e2ee-device-revoke"
                       data-device-key={device.key}
                       variant="secondary"
+                      tone="destructive"
                       disabled={updating}
-                      onClick={() =>
-                        device.requiresRecoveryConfirmation
-                          ? setConfirmKey(device.key)
-                          : onRevoke(device.key)
-                      }
+                      onClick={() => setConfirmKey(device.key)}
                     >
                       {t('e2ee.security.revoke')}
                     </Button>
@@ -496,21 +498,40 @@ export function E2eeDevicesPanel({
       <Dialog.Root
         open={confirmKey !== null}
         onOpenChange={(open) => {
-          if (!open) setConfirmKey(null);
+          if (!open && !updating) setConfirmKey(null);
         }}
       >
-        <Dialog.Content data-testid="e2ee-last-personal-confirm" width={440}>
+        <Dialog.Content
+          data-testid={
+            confirmDevice?.requiresRecoveryConfirmation
+              ? 'e2ee-last-personal-confirm'
+              : 'e2ee-device-revoke-confirm'
+          }
+          width={440}
+        >
           <Dialog.Header>
-            <Dialog.Title>{t('e2ee.security.lastPersonalTitle')}</Dialog.Title>
+            <Dialog.Title>
+              {t(
+                confirmDevice?.requiresRecoveryConfirmation
+                  ? 'e2ee.security.lastPersonalTitle'
+                  : 'e2ee.security.revokeConfirmTitle'
+              )}
+            </Dialog.Title>
             <Dialog.Description>
               {t(
-                state?.devices.find((device) => device.key === confirmKey)
-                  ?.recoveryDeviceAvailable === false
-                  ? 'e2ee.security.lastPersonalNoRecovery'
-                  : 'e2ee.security.lastPersonalWarning'
+                confirmDevice?.requiresRecoveryConfirmation
+                  ? confirmDevice.recoveryDeviceAvailable === false
+                    ? 'e2ee.security.lastPersonalNoRecovery'
+                    : 'e2ee.security.lastPersonalWarning'
+                  : 'e2ee.security.revokeConfirmBody'
               )}
             </Dialog.Description>
           </Dialog.Header>
+          {confirmDevice?.self && (
+            <Alert.Root tone="danger" data-testid="e2ee-revoke-self-warning">
+              <Alert.Description>{t('e2ee.security.revokeSelfWarning')}</Alert.Description>
+            </Alert.Root>
+          )}
           <Dialog.Footer>
             <Button variant="ghost" disabled={updating} onClick={() => setConfirmKey(null)}>
               {t('common.cancel')}
@@ -518,10 +539,22 @@ export function E2eeDevicesPanel({
             <Button
               tone="destructive"
               disabled={updating}
-              data-testid="e2ee-last-personal-revoke"
+              data-testid={
+                confirmDevice?.requiresRecoveryConfirmation
+                  ? 'e2ee-last-personal-revoke'
+                  : 'e2ee-device-revoke-confirm-action'
+              }
               onClick={() => {
-                if (confirmKey) onRevoke(confirmKey, { confirmedRecoveryOnly: true });
-                setConfirmKey(null);
+                if (!confirmKey || updating) return;
+                const keyToRevoke = confirmKey;
+                const confirmation = confirmDevice?.requiresRecoveryConfirmation
+                  ? ({ confirmedRecoveryOnly: true } as const)
+                  : undefined;
+                setRevoking(true);
+                void Promise.resolve(onRevoke(keyToRevoke, confirmation)).finally(() => {
+                  setRevoking(false);
+                  setConfirmKey(null);
+                });
               }}
             >
               {t('e2ee.security.revoke')}

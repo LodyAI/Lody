@@ -108,7 +108,7 @@
   "sharing.e2ee.disclosure": "共有すると、E2EE の外部に復号されたコピーが公開され、サーバーから読み取れる状態になります。共有を取り消しても、すでに閲覧またはコピーされた内容は取り戻せません。",
   "sharing.e2ee.confirm": "復号されたコピーを公開",
   "e2ee.identity.restartTitle": "暗号化リソースを解放するため Lody を再起動してください",
-  "e2ee.identity.restartHelp": "以前の暗号化ランタイムの解放が確認されていません。Lody を一度終了して開き直してから再試行してください。以前のライターが未解決のままでは、代替のアイデンティティを開始できません。",
+  "e2ee.identity.restartHelp": "以前の暗号化セッションの終了が完了していません。Lody を終了して再度開いてからやり直してください。",
   "e2ee.identity.historyTitle": "ローカルの暗号化履歴の復旧が必要です",
   "e2ee.identity.historyHelp": "ローカル履歴が破損しているか検証できません。元のファイルは削除せず保管してください。元のファイルを復元して再試行するか、このアイデンティティを明示的にアーカイブし、別の承認済みデバイスからの承認を得て再ペアリングしてください。保持されている信頼証明はそのまま維持されます。",
   "e2ee.identity.pinTitle": "このデバイスの信頼済みアクセス記録を利用できません",
@@ -526,7 +526,7 @@
   "e2ee.console.tabs.security": "セキュリティコードと履歴",
   "e2ee.console.tabs.recovery": "リカバリー",
   "e2ee.console.status": "エンドツーエンド暗号化が有効です",
-  "e2ee.console.statusCounts": "{{members}}人のメンバー · {{devices}}台のデバイスとマシン。サーバーは内容を解読できないデータの中継のみを行います。",
+  "e2ee.console.statusCounts": "{{members}} · {{devices}}。サーバーは読み取れないデータを中継するだけです。",
   "e2ee.console.adminRequired": "メンバーの招待、参加の承認、メンバーの削除には管理者権限が必要です。",
   "e2ee.console.devicesElsewhere": "このワークスペースを開いているデバイスで、「設定」→「一般」→「エンドツーエンド暗号化」→「暗号化とリカバリー」からデバイスを管理してください。",
   "e2ee.console.recoveryUnavailable": "このブラウザーまたはデバイスではリカバリーバックアップを利用できません。パスキー、リカバリーパスワード、またはリカバリーファイルの設定や復元を行うには、Lody デスクトップアプリまたはモバイルアプリを開くか、別の信頼できるデバイスでこのワークスペースを開いたままにしてください。",
@@ -7186,5 +7186,14 @@
   "e2ee.team.waitingKeyGuide": "承認されました！あなたを招待したワークスペース管理者に、承認済みのデバイスで Lody を開いてもらってください。ワークスペースのキーが安全に送信されます。",
   "sessions.sendError.e2eeTimeout": "暗号化の検証がタイムアウトしたため、メッセージを送信できませんでした。下書きは保持されています。接続を確認して再試行してください。",
   "sessions.sendError.e2eeRevoked": "このデバイスはワークスペースへの暗号化アクセス権を失ったため、メッセージを送信できませんでした。下書きは保持されています。このデバイスを再ペアリングするか、管理者に連絡してください。",
-  "sessions.sendError.e2eeNotReady": "このデバイスはまだワークスペースの暗号化キーを同期中のため、メッセージを送信できませんでした。下書きは保持されています。しばらく待ってから再試行してください。"
+  "sessions.sendError.e2eeNotReady": "このデバイスはまだワークスペースの暗号化キーを同期中のため、メッセージを送信できませんでした。下書きは保持されています。しばらく待ってから再試行してください。",
+  "e2ee.offline.lessThanMinute": "1 分未満",
+  "e2ee.control.memberCount": "{{count}} 人のメンバー",
+  "e2ee.control.memberCount_one": "{{count}} 人のメンバー",
+  "e2ee.control.memberCount_other": "{{count}} 人のメンバー",
+  "e2ee.recovery.planFailedTitle": "復旧ステータスを読み取れません",
+  "e2ee.recovery.wrongPasskey": "パスキーの認証に失敗したか、このパスキーでは復旧バックアップを解除できません。",
+  "e2ee.security.revokeConfirmTitle": "デバイスのアクセスを取り消しますか？",
+  "e2ee.security.revokeConfirmBody": "このデバイスはこの暗号化ワークスペースへのアクセスを失い、再度利用するには再承認が必要になります。",
+  "e2ee.security.revokeSelfWarning": "これは現在使用中のデバイスです。取り消すと、このデバイスからこのワークスペースへ即座にアクセスできなくなります。"
 }

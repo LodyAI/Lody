@@ -1,10 +1,12 @@
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { AlertTriangle, Clock, KeyRound, ShieldAlert, ShieldOff, WifiOff } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
+import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { radius, space } from '@lody/ui/tokens/scales.stylex';
 
 export type E2eeAccessState =
   | 'pendingApproval'
@@ -32,6 +34,20 @@ const styles = stylex.create({
   content: { display: 'grid', gap: space[4], minWidth: 0, overflowWrap: 'anywhere' },
   context: { margin: 0, color: colors.secondaryLabel, fontSize: '0.9em' },
   message: { display: 'grid', gap: space[2] },
+  titleRow: { display: 'flex', alignItems: 'center', gap: space[2] },
+  glyph: {
+    display: 'inline-grid',
+    placeItems: 'center',
+    flexShrink: 0,
+    width: 28,
+    height: 28,
+    borderRadius: radius.medium,
+    backgroundColor: colors.secondaryBackground,
+    color: colors.secondaryLabel,
+  },
+  glyphWarning: { color: colors.warning },
+  glyphDanger: { color: colors.destructive },
+  warning: { color: colors.warning },
   error: { color: colors.destructive },
   actions: { display: 'flex', flexWrap: 'wrap', gap: space[3] },
   list: { margin: 0, padding: 0, listStyle: 'none' },
@@ -100,7 +116,8 @@ function StatusCard({
   title,
   description,
   context,
-  error,
+  tone = 'neutral',
+  icon,
   actionLabel,
   pending,
   onAction,
@@ -109,20 +126,42 @@ function StatusCard({
   title: string;
   description: string;
   context: string;
-  error?: boolean;
+  tone?: 'neutral' | 'warning' | 'danger';
+  icon?: ReactNode;
   actionLabel: string;
   children?: ReactNode;
 } & Action) {
   const { t } = useTranslation();
   const id = useId();
   return (
-    <Card.Root role="region" aria-labelledby={`${id}-title`}>
+    <Card.Root role="region" aria-labelledby={`${id}-title`} data-status-tone={tone}>
       <div {...stylex.props(styles.content)}>
         <p {...stylex.props(styles.context)}>{context}</p>
         <div role="status" aria-atomic="true" {...stylex.props(styles.message)}>
-          <Card.Title as="h2" id={`${id}-title`}>
-            <span {...stylex.props(error && styles.error)}>{title}</span>
-          </Card.Title>
+          <div {...stylex.props(styles.titleRow)}>
+            {icon && (
+              <span
+                aria-hidden="true"
+                {...stylex.props(
+                  styles.glyph,
+                  tone === 'warning' && styles.glyphWarning,
+                  tone === 'danger' && styles.glyphDanger
+                )}
+              >
+                {icon}
+              </span>
+            )}
+            <Card.Title as="h2" id={`${id}-title`}>
+              <span
+                {...stylex.props(
+                  tone === 'danger' && styles.error,
+                  tone === 'warning' && styles.warning
+                )}
+              >
+                {title}
+              </span>
+            </Card.Title>
+          </div>
           <Card.Description id={`${id}-description`}>{description}</Card.Description>
           {pending ? <p {...stylex.props(styles.context)}>{t('e2ee.action.pending')}</p> : null}
         </div>
@@ -147,6 +186,28 @@ function StatusCard({
   );
 }
 
+const ACCESS_VISUAL: Record<
+  E2eeAccessState,
+  { tone: 'neutral' | 'warning' | 'danger'; icon: ReactNode }
+> = {
+  pendingApproval: { tone: 'neutral', icon: <Clock size={16} /> },
+  waitingKey: { tone: 'neutral', icon: <KeyRound size={16} /> },
+  incomplete: { tone: 'warning', icon: <AlertTriangle size={16} /> },
+  offline: { tone: 'warning', icon: <WifiOff size={16} /> },
+  revoked: { tone: 'danger', icon: <ShieldOff size={16} /> },
+  verificationFailed: { tone: 'danger', icon: <ShieldAlert size={16} /> },
+};
+
+const RECOVERY_VISUAL: Record<
+  E2eeRecoveryState,
+  { tone: 'neutral' | 'warning' | 'danger'; icon: ReactNode }
+> = {
+  notSet: { tone: 'warning', icon: <AlertTriangle size={16} /> },
+  importing: { tone: 'neutral', icon: <Spinner size="small" /> },
+  partial: { tone: 'warning', icon: <AlertTriangle size={16} /> },
+  failed: { tone: 'danger', icon: <ShieldAlert size={16} /> },
+};
+
 /** Presentational only: a click reports intent, never approval or key possession. */
 export function E2eeAccessStatus({
   state,
@@ -157,12 +218,14 @@ export function E2eeAccessStatus({
   scope: E2eeAffectedScope;
 } & Action) {
   const { t } = useTranslation();
+  const visual = ACCESS_VISUAL[state];
   return (
     <StatusCard
       title={t(`e2ee.access.${state}.title`)}
       description={t(`e2ee.access.${state}.description`)}
       context={t(`e2ee.scope.${scope.kind}`, { name: scope.name })}
-      error={state === 'verificationFailed' || state === 'revoked'}
+      tone={visual.tone}
+      icon={visual.icon}
       actionLabel={t(state === 'verificationFailed' ? 'e2ee.action.retry' : 'e2ee.action.check')}
       {...action}
     />
@@ -179,12 +242,14 @@ export function E2eeRecoveryStatus({
   workspaces: readonly E2eeRecoveryWorkspace[];
 } & Action) {
   const { t } = useTranslation();
+  const visual = RECOVERY_VISUAL[state];
   return (
     <StatusCard
       title={t(`e2ee.recovery.${state}.title`)}
       description={t(`e2ee.recovery.${state}.description`)}
       context={t('e2ee.recovery.label')}
-      error={state === 'failed'}
+      tone={visual.tone}
+      icon={visual.icon}
       actionLabel={t(state === 'notSet' ? 'e2ee.action.setup' : 'e2ee.action.retry')}
       {...action}
       pending={state === 'importing' || action.pending}

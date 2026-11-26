@@ -108,7 +108,7 @@
   "sharing.e2ee.disclosure": "Le partage publie une copie déchiffrée en dehors du chiffrement E2EE, où le serveur peut la lire. La révocation du partage ne permet pas de retirer un contenu déjà consulté ou copié.",
   "sharing.e2ee.confirm": "Publier une copie déchiffrée",
   "e2ee.identity.restartTitle": "Redémarrez Lody pour libérer les ressources chiffrées",
-  "e2ee.identity.restartHelp": "L'ancien environnement d'exécution chiffré n'a pas confirmé la libération des ressources. Quittez et rouvrez Lody avant de réessayer. Une identité de remplacement ne peut pas démarrer tant que l'ancien processus d'écriture n'est pas résolu.",
+  "e2ee.identity.restartHelp": "La session chiffrée précédente n’a pas fini de se fermer. Quittez et rouvrez Lody avant de réessayer.",
   "e2ee.identity.historyTitle": "L'historique chiffré local doit être récupéré",
   "e2ee.identity.historyHelp": "L'historique local est endommagé ou ne peut pas être vérifié. Conservez les originaux. Restaurez les fichiers d'origine et réessayez, ou archivez explicitement cette identité puis effectuez un nouvel appairage avec l'approbation d'un autre appareil autorisé. Les preuves de confiance conservées restent inchangées.",
   "e2ee.identity.pinTitle": "L'enregistrement d'accès approuvé de cet appareil est indisponible",
@@ -526,7 +526,7 @@
   "e2ee.console.tabs.security": "Code de sécurité et historique",
   "e2ee.console.tabs.recovery": "Récupération",
   "e2ee.console.status": "Le chiffrement de bout en bout est activé",
-  "e2ee.console.statusCounts": "{{members}} membres · {{devices}} appareils et machines. Le serveur ne relaie que des données qu’il ne peut pas lire.",
+  "e2ee.console.statusCounts": "{{members}} · {{devices}}. Le serveur ne relaie que des données qu’il ne peut pas lire.",
   "e2ee.console.adminRequired": "Inviter des membres, approuver des adhésions et retirer des membres nécessite des droits d’administrateur.",
   "e2ee.console.devicesElsewhere": "Gérez les appareils depuis Paramètres → Général → Chiffrement de bout en bout → Chiffrement et récupération sur un appareil où cet espace de travail est ouvert.",
   "e2ee.console.recoveryUnavailable": "Les sauvegardes de récupération ne sont pas disponibles dans ce navigateur ou sur cet appareil. Ouvrez l’application Lody sur ordinateur ou mobile pour configurer ou restaurer à l’aide d’une passkey, d’un mot de passe de récupération ou d’un fichier de récupération, ou gardez cet espace de travail ouvert sur un autre appareil de confiance.",
@@ -7186,5 +7186,14 @@
   "e2ee.team.waitingKeyGuide": "Votre demande est approuvée ! Demandez à l’administrateur de l’espace de travail qui vous a invité d’ouvrir Lody sur son appareil autorisé afin qu’il puisse vous envoyer en toute sécurité les clés de l’espace de travail.",
   "sessions.sendError.e2eeTimeout": "Le message n’a pas été envoyé car la vérification du chiffrement a expiré. Votre brouillon est conservé — vérifiez votre connexion et réessayez.",
   "sessions.sendError.e2eeRevoked": "Le message n’a pas été envoyé car cet appareil n’a plus d’accès chiffré à cet espace de travail. Votre brouillon est conservé — associez à nouveau cet appareil ou contactez un administrateur.",
-  "sessions.sendError.e2eeNotReady": "Le message n’a pas été envoyé car cet appareil est encore en train de synchroniser les clés de chiffrement de l’espace de travail. Votre brouillon est conservé — patientez un instant et réessayez."
+  "sessions.sendError.e2eeNotReady": "Le message n’a pas été envoyé car cet appareil est encore en train de synchroniser les clés de chiffrement de l’espace de travail. Votre brouillon est conservé — patientez un instant et réessayez.",
+  "e2ee.offline.lessThanMinute": "moins d’une minute",
+  "e2ee.control.memberCount": "{{count}} membres",
+  "e2ee.control.memberCount_one": "{{count}} membre",
+  "e2ee.control.memberCount_other": "{{count}} membres",
+  "e2ee.recovery.planFailedTitle": "État de récupération indisponible",
+  "e2ee.recovery.wrongPasskey": "Échec de la vérification de la clé d’accès, ou cette clé ne déverrouille pas votre sauvegarde de récupération.",
+  "e2ee.security.revokeConfirmTitle": "Révoquer l’accès de l’appareil ?",
+  "e2ee.security.revokeConfirmBody": "Cet appareil perdra l’accès à cet espace de travail chiffré et devra être approuvé à nouveau pour le rejoindre.",
+  "e2ee.security.revokeSelfWarning": "Il s’agit de l’appareil que vous utilisez actuellement. Sa révocation vous coupera immédiatement l’accès à cet espace de travail sur cet appareil."
 }
