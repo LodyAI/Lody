@@ -154,11 +154,11 @@ const action = <Reference extends FunctionReference<'action'>>(
  */
 export const cloudOperations = {
   analytics: {
-    getUsageSharing: defineCloudQuery<{ accountId: string }, boolean>(
+    getUsageSharing: defineCloudQuery<Record<string, never>, boolean>(
       'telemetry',
       'analytics:getUsageSharing'
     ),
-    setUsageSharing: defineCloudMutation<{ enabled: boolean; accountId: string }, null>(
+    setUsageSharing: defineCloudMutation<{ enabled: boolean }, null>(
       'telemetry',
       'analytics:setUsageSharing'
     ),

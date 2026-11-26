@@ -10,7 +10,9 @@ import {
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import {
+  beginAccountUsageSave,
   clearPostHogLocalStorage,
+  markAccountOptOutSubmitted,
   markUsageOptOutPending,
   readDeviceUsageSharing,
   subscribeUsageSharing,
@@ -28,33 +30,37 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
   const { t } = useTranslation();
   const session = usePlatformSession();
   const authenticated = session.status === 'authenticated';
+  const accountId = authenticated ? session.user.id : null;
   const preference = usePlatform().cloudApi?.useOptionalAuthenticatedQuery?.(
     cloudOperations.analytics.getUsageSharing,
-    session.status === 'authenticated' ? { accountId: session.user.id } : 'skip'
+    accountId ? {} : 'skip'
   );
   const account = preference?.data;
-  const loadingAccount = authenticated && preference !== undefined && typeof account !== 'boolean';
+  const accountError = preference?.error ?? null;
+  const loadingAccount =
+    authenticated && preference !== undefined && accountError === null && account === undefined;
   const save = useCloudMutation(cloudOperations.analytics.setUsageSharing);
   const device = useSyncExternalStore(subscribeUsageSharing, readDeviceUsageSharing, () => true);
   const [pending, setPending] = useState(false);
   const [retry, setRetry] = useState<boolean | null>(null);
-  const enabled = loadingAccount ? device : device && account !== false;
+  const enabled = device && account !== false;
   async function change(next: boolean) {
     setPending(true);
     setRetry(null);
+    const endSave = accountId ? beginAccountUsageSave(accountId) : null;
     try {
       if (!next) {
-        // Opt-out fails closed: stop this renderer and desktop processes immediately,
-        // even if the server is temporarily unreachable.
+        // Opt-out fails closed: mark pending before writing device state so
+        // LodyPostHogProvider in this or another window cannot mirror stale account=true back to on.
         const results = await Promise.allSettled([
           (async () => {
-            clearPostHogLocalStorage();
-            writeDeviceUsageSharing(false);
-            if (authenticated) {
-              markUsageOptOutPending(session.user.id, true);
+            if (accountId) {
+              markUsageOptOutPending(accountId, true);
             } else if (window.__LODY_ELECTRON__) {
               markUsageOptOutPending('next-login', true);
             }
+            clearPostHogLocalStorage();
+            writeDeviceUsageSharing(false);
           })(),
           (async () => {
             if (!window.__LODY_ELECTRON__) return;
@@ -62,20 +68,27 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
             if (!native) throw new Error('Missing desktop bridge');
             await native.app.setUsageSharingEnabled(false);
           })(),
-          authenticated ? save({ enabled: false, accountId: session.user.id }) : undefined,
+          accountId ? save({ enabled: false }) : undefined,
         ]);
         if (results.some((result) => result.status === 'rejected')) {
           setRetry(false);
           return;
         }
-        if (authenticated) markUsageOptOutPending(session.user.id, false);
+        if (accountId) {
+          if (preference === undefined || account === false) {
+            markUsageOptOutPending(accountId, false);
+          } else {
+            markAccountOptOutSubmitted(accountId, true);
+          }
+        }
         return;
       }
 
       // Re-enabling waits for the cloud preference before enabling local desktop/renderer capture.
-      if (authenticated) {
-        await save({ enabled: true, accountId: session.user.id });
-        markUsageOptOutPending(session.user.id, false);
+      if (accountId) {
+        await save({ enabled: true });
+        markUsageOptOutPending(accountId, false);
+        markAccountOptOutSubmitted(accountId, false);
       } else if (window.__LODY_ELECTRON__) {
         markUsageOptOutPending('next-login', false);
       }
@@ -88,6 +101,7 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
     } catch {
       setRetry(next);
     } finally {
+      endSave?.();
       setPending(false);
     }
   }
@@ -99,7 +113,7 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
       aria-label={label}
       aria-describedby={descriptionId}
       checked={enabled}
-      disabled={pending || loadingAccount}
+      disabled={pending || (!enabled && loadingAccount)}
       onCheckedChange={(value) => void change(value)}
     />
   );
@@ -120,7 +134,7 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
       </MobileSettingsRow>
     </MobileSettingsRowGroup>
   ) : (
-    <CompactRow label={label} helper={helper}>
+    <CompactRow label={label} helper={helper} helperBlock={retry !== null}>
       {control}
     </CompactRow>
   );

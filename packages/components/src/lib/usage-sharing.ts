@@ -2,6 +2,29 @@ const key = 'lody:usage-sharing';
 const accountKey = 'lody:usage-sharing-account-blocked';
 let sessionBlocked = false;
 let accountAllowed = true;
+const inFlightAccountSaves = new Set<string>();
+const submittedAccountOptOuts = new Set<string>();
+
+export function beginAccountUsageSave(accountId: string): () => void {
+  inFlightAccountSaves.add(accountId);
+  submittedAccountOptOuts.delete(accountId);
+  return () => {
+    inFlightAccountSaves.delete(accountId);
+  };
+}
+
+export function isAccountUsageSaveInFlight(accountId: string): boolean {
+  return inFlightAccountSaves.has(accountId);
+}
+
+export function markAccountOptOutSubmitted(accountId: string, submitted: boolean): void {
+  if (submitted) submittedAccountOptOuts.add(accountId);
+  else submittedAccountOptOuts.delete(accountId);
+}
+
+export function hasSubmittedAccountOptOut(accountId: string): boolean {
+  return submittedAccountOptOuts.has(accountId);
+}
 
 export function readDeviceUsageChoice(): boolean | null {
   if (typeof window === 'undefined' || sessionBlocked) return false;
