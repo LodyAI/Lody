@@ -664,6 +664,13 @@ export interface LoroSidebarProps {
   /** The filter trigger element rendered in-flow on the first visible section
       header. Caller-owned so its open state survives remounting between slots. */
   desktopFilterAction?: ReactNode;
+  /** Desktop only: the applied filter (Owner is …), held above the scrolling list. */
+  desktopFilterBar?: ReactNode;
+  /**
+   * Desktop only: `F` pressed inside the sidebar outside a text field. The
+   * caller opens its people filter, as Linear's filter shortcut does.
+   */
+  onFilterShortcut?: () => void;
   /**
    * In-flow content rendered after {@link sessionListProps} inside the scroll
    * viewport (workspace mode only). LoroAppSidebar uses this to place the Chats
@@ -945,7 +952,6 @@ const defaultLabels: LoroSidebarLabels = {
     emptyAllTasks: 'No tasks yet',
     emptyAllTasksHint: 'Tasks in this workspace will appear here.',
     showAllTasksAction: 'Show all tasks',
-    memberYou: 'You',
   },
   updated: {
     heading: 'Chats',
@@ -1296,6 +1302,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   activeNav = null,
   topContent,
   desktopFilterAction,
+  desktopFilterBar,
+  onFilterShortcut,
   afterSessionListContent,
   bottomFloatingContent,
   repoSections = defaultRepoSections,
@@ -1962,6 +1970,18 @@ export const LoroSidebar = memo(function LoroSidebar({
       // No overflow-hidden here: the resize sash extends past the right border
       // so its hit area straddles the edge; the inner content div clips instead.
       className={cn(shellProps.className, className)}
+      onKeyDown={
+        !isMobile && onFilterShortcut
+          ? (event) => {
+              if (event.key !== 'f' && event.key !== 'F') return;
+              if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+              const target = event.target as HTMLElement;
+              if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
+              event.preventDefault();
+              onFilterShortcut();
+            }
+          : undefined
+      }
       style={
         canResize
           ? {
@@ -2088,6 +2108,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           />
         </div>
 
+        {!isMobile ? desktopFilterBar : null}
         <ScrollArea
           viewportRef={scrollViewportRef}
           className={cn(

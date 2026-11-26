@@ -8,6 +8,7 @@ import {
   type SidebarFilterMember,
 } from '@/components/sidebar-filter-popover';
 import { toggleTaskOwnerSelection } from '@/lib/session-visibility';
+import { SidebarOwnerFilterBar } from '@/components/sidebar-owner-filter';
 import type { SidebarChatScope, SidebarOrganizeMode } from '@/atoms/sidebar-state';
 const storyLayoutStyles = stylex.create({
   caption: {
@@ -72,12 +73,15 @@ function FilterShell({
   organize: organizeArg,
   scope: scopeArg,
   defaultOpen,
+  ownerOpen: ownerOpenArg,
   members,
   memberIds: memberIdsArg = [],
 }: {
   organize: SidebarOrganizeMode;
   scope: SidebarChatScope;
   defaultOpen?: boolean;
+  /** Open the Owner list with the menu. */
+  ownerOpen?: boolean;
   members?: SidebarFilterMember[];
   memberIds?: string[];
 }) {
@@ -89,6 +93,7 @@ function FilterShell({
   const scope = selection.scope;
   const setScope = (next: SidebarChatScope) => setSelection({ scope: next, memberIds: [] });
   const [open, setOpen] = useState(!!defaultOpen);
+  const [ownerOpen, setOwnerOpen] = useState(!!ownerOpenArg);
   const currentUserId = members?.find((member) => member.isCurrentUser)?.userId;
   const [showUpdatedProjectNames, setShowUpdatedProjectNames] = useState(true);
   const [showBranchNames, setShowBranchNames] = useState(false);
@@ -142,6 +147,8 @@ function FilterShell({
           }
           open={open}
           onOpenChange={setOpen}
+          ownerOpen={ownerOpen}
+          onOwnerOpenChange={setOwnerOpen}
           showUpdatedProjectNames={showUpdatedProjectNames}
           onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
           showBranchNames={showBranchNames}
@@ -197,33 +204,75 @@ export const TeamScope: Story = {
   },
 };
 
+const FIRST = ['Alice', 'Bob', 'Carol', 'Dave', 'Erin', 'Frank', 'Grace', 'Heidi', 'Ivan', 'Judy'];
+const LAST = ['Wang', 'Chen', 'Liu', 'Zhou', 'Lin'];
+/** A 50-person workspace: you plus 49 synthetic teammates. */
 const teamMembers: SidebarFilterMember[] = [
   { userId: 'u-me', name: 'Sam Lee', isCurrentUser: true },
-  { userId: 'u-alice', name: 'Alice Wang' },
-  { userId: 'u-bob', name: 'Bob Chen' },
-  { userId: 'u-carol', name: 'Carol Liu' },
-  { userId: 'u-dave', name: 'Dave Zhou' },
+  ...Array.from({ length: 49 }, (_, index) => ({
+    userId: `u-${index}`,
+    name: `${FIRST[index % FIRST.length]} ${LAST[Math.floor(index / FIRST.length) % LAST.length]}`,
+  })),
 ];
 
-/** All Tasks narrowed to two teammates: their rows are ticked and the trigger carries a dot. */
-export const TeamMembersSelected: Story = {
+/** The menu stays three task rows; the Owner row names who is chosen. */
+export const OwnerFilterApplied: Story = {
   args: {
     organize: 'status',
     scope: 'team',
     members: teamMembers,
-    memberIds: ['u-alice', 'u-bob'],
+    memberIds: ['u-0', 'u-11', 'u-22'],
     defaultOpen: true,
   },
 };
 
-/** My Tasks in a team workspace: only your own row is ticked. */
-export const TeamMembersMyTasks: Story = {
+/** The Owner list in a 50-person team: search first, you on top, chosen people next. */
+export const OwnerListLargeTeam: Story = {
   args: {
     organize: 'status',
-    scope: 'my',
+    scope: 'team',
     members: teamMembers,
+    memberIds: ['u-0', 'u-11', 'u-22'],
     defaultOpen: true,
+    ownerOpen: true,
   },
+};
+
+function OwnerBarShell({ memberIds }: { memberIds: string[] }) {
+  const [selected, setSelected] = useState<string[]>(memberIds);
+  return (
+    <div {...stylex.props(barStoryStyles.sidebar)}>
+      <SidebarOwnerFilterBar
+        members={teamMembers}
+        selectedMemberIds={selected}
+        onToggleMember={(id) =>
+          setSelected((prev) =>
+            prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]
+          )
+        }
+        onClear={() => setSelected([])}
+      />
+    </div>
+  );
+}
+
+const barStoryStyles = stylex.create({
+  sidebar: {
+    width: 260,
+    paddingBlock: 'calc(var(--spacing) * 3)',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+  },
+});
+
+/** The applied filter above the sidebar list, as Linear writes it. */
+export const OwnerFilterBarOnePerson: StoryObj<typeof OwnerBarShell> = {
+  render: () => <OwnerBarShell memberIds={['u-0']} />,
+};
+
+export const OwnerFilterBarSeveral: StoryObj<typeof OwnerBarShell> = {
+  render: () => <OwnerBarShell memberIds={['u-0', 'u-11', 'u-22', 'u-33']} />,
 };
 
 const themeStyles = stylex.create({

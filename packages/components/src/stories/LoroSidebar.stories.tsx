@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { SidebarOwnerFilterBar } from '@/components/sidebar-owner-filter';
 import {
   commands,
   getCommandKeybindings,
@@ -1163,6 +1164,31 @@ export const StatusMode: Story = {
   args: {
     ...UpdatedMode.args!,
     organizeMode: 'status',
+  },
+};
+
+const ownerFilterStoryMembers = [
+  { userId: 'u-me', name: 'Sam Lee', isCurrentUser: true },
+  { userId: 'u-alice', name: 'Alice Wang' },
+  { userId: 'u-bob', name: 'Bob Chen' },
+  { userId: 'u-carol', name: 'Carol Liu' },
+];
+
+/** Status view narrowed to two teammates: the applied filter sits above the list. */
+export const StatusModeOwnerFilter: Story = {
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...StatusMode.args!,
+    chatScope: 'team',
+    chatScopeNarrowed: true,
+    desktopFilterBar: (
+      <SidebarOwnerFilterBar
+        members={ownerFilterStoryMembers}
+        selectedMemberIds={['u-alice', 'u-bob']}
+        onToggleMember={() => {}}
+        onClear={() => {}}
+      />
+    ),
   },
 };
 

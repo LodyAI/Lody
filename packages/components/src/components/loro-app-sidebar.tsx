@@ -471,6 +471,7 @@ import {
   SidebarFilterPopover,
   type SidebarFilterMember,
 } from '@/components/sidebar-filter-popover';
+import { SidebarOwnerFilterBar } from '@/components/sidebar-owner-filter';
 import { Button } from '@lody/ui/button';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -3571,7 +3572,18 @@ export function LoroAppSidebar({
         'Tasks in this workspace will appear here.'
       ),
       showAllTasksAction: t('sidebar.filter.showAllTasks', 'Show all tasks'),
-      memberYou: t('sidebar.filter.memberYou', 'You'),
+    }),
+    [t]
+  );
+  const ownerFilterLabels = useMemo(
+    () => ({
+      owner: t('sidebar.filter.owner', 'Owner'),
+      is: t('sidebar.filter.ownerIs', 'is'),
+      isAnyOf: t('sidebar.filter.ownerIsAnyOf', 'is any of'),
+      searchPlaceholder: t('sidebar.filter.ownerSearch', 'Search people…'),
+      empty: t('sidebar.filter.ownerEmpty', 'No matching people'),
+      clear: t('sidebar.filter.ownerClear', 'Clear owner filter'),
+      you: t('sidebar.filter.memberYou', 'You'),
     }),
     [t]
   );
@@ -3582,6 +3594,40 @@ export function LoroAppSidebar({
   // close an open popover.
   const [sidebarFilterOpen, setSidebarFilterOpen] = useState(false);
   const closeFilterOnHide = useCallback(() => setSidebarFilterOpen(false), []);
+  const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
+  const [ownerBarOpen, setOwnerBarOpen] = useState(false);
+  const handleSidebarFilterOpenChange = useCallback((next: boolean) => {
+    setSidebarFilterOpen(next);
+    if (!next) setOwnerMenuOpen(false);
+  }, []);
+  const handleClearTaskOwners = useCallback(
+    () => setTaskOwnerSelection({ scope: 'team', memberIds: [] }),
+    [setTaskOwnerSelection]
+  );
+  // `F`, as in Linear: reopen the applied filter's people list, or open the
+  // menu straight onto the Owner list.
+  const canFilterByOwner = filterMembers.length > 1;
+  const handleFilterShortcut = useCallback(() => {
+    if (!canFilterByOwner) return;
+    if (selectedTaskOwnerIds.length > 0) {
+      setOwnerBarOpen(true);
+      return;
+    }
+    setSidebarFilterOpen(true);
+    setOwnerMenuOpen(true);
+  }, [canFilterByOwner, selectedTaskOwnerIds.length]);
+  const sidebarOwnerFilterBar =
+    !isMobile && canFilterByOwner ? (
+      <SidebarOwnerFilterBar
+        members={filterMembers}
+        selectedMemberIds={selectedTaskOwnerIds}
+        onToggleMember={handleToggleTaskOwner}
+        onClear={handleClearTaskOwners}
+        labels={ownerFilterLabels}
+        open={ownerBarOpen}
+        onOpenChange={setOwnerBarOpen}
+      />
+    ) : null;
   const sidebarFilterPopover = !isMobile ? (
     <SidebarFilterPopover
       organize={organizeMode}
@@ -3591,6 +3637,9 @@ export function LoroAppSidebar({
       members={filterMembers}
       selectedMemberIds={selectedTaskOwnerIds}
       onToggleMember={handleToggleTaskOwner}
+      ownerLabels={ownerFilterLabels}
+      ownerOpen={ownerMenuOpen}
+      onOwnerOpenChange={setOwnerMenuOpen}
       showUpdatedProjectNames={showUpdatedProjectNames}
       onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
       showBranchNames={showBranchNames}
@@ -3599,7 +3648,7 @@ export function LoroAppSidebar({
       onHideEmptyProjectsChange={handleHideEmptyProjectsChange}
       labels={filterLabels}
       open={sidebarFilterOpen}
-      onOpenChange={setSidebarFilterOpen}
+      onOpenChange={handleSidebarFilterOpenChange}
       side="right"
       align="start"
       triggerSize="mini"
@@ -4787,6 +4836,8 @@ export function LoroAppSidebar({
         organizeMode={organizeMode}
         chatScope={chatScope}
         chatScopeNarrowed={selectedTaskOwnerIds.length > 0}
+        desktopFilterBar={sidebarOwnerFilterBar}
+        onFilterShortcut={handleFilterShortcut}
         pinnedItems={pinnedItems}
         pinnedSectionCollapsed={pinnedSectionCollapsed}
         pinnedSections={pinnedSections}
