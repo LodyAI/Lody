@@ -894,7 +894,7 @@ jobs:
           ((github.event_name == 'push' || inputs.component == 'android') &&
         needs.release.outputs.publish_requested == 'true' &&
         contains(fromJSON(needs.release.outputs.paths_released), 'apps/mobile-capacitor')) }}
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
     env:
       LODY_ENV: ${{ needs.release.outputs.target_environment == 'production' && 'production' || 'staging' }}

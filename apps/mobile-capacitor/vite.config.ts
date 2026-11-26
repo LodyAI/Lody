@@ -89,7 +89,12 @@ export default defineConfig(({ mode }) => {
       diffCssCompatPlugin(),
       pdfAbortCompatPlugin(),
       stylex.vite(stylexOptions),
-      tsconfigPaths(),
+      tsconfigPaths({
+        projects: [
+          `${__dirname}/tsconfig.app.json`,
+          `${__dirname}/../../packages/components/tsconfig.json`,
+        ],
+      }),
       // frimousse constructs these JSON URLs at runtime, so Capacitor builds
       // must ship the same bundled dataset as the other app hosts.
       emojibaseAssetsPlugin(),
@@ -120,6 +125,7 @@ export default defineConfig(({ mode }) => {
       // disabling CSS minification too would leave PDF/Monaco nesting intact.
       cssMinify: 'lightningcss',
       minify: false,
+      reportCompressedSize: false,
       emptyOutDir: true,
     },
   };

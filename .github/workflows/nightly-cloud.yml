@@ -500,7 +500,7 @@ jobs:
       - candidate
       - prepare
     if: needs.prepare.outputs.publish == 'true'
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     environment: cloud-nightly
     env:
       LODY_ENV: production
@@ -620,7 +620,8 @@ jobs:
           unset ANDROID_KEYSTORE_BASE64
           corepack pnpm --filter @lody/mobile-capacitor run ci:sync:android:nightly
           (cd apps/mobile-capacitor/android && ./gradlew --no-daemon :app:assembleRelease -PmobileVersionName="${MOBILE_VERSION_NAME}" -PmobileVersionCode="${MOBILE_VERSION_CODE}")
-          APKANALYZER="$(command -v apkanalyzer)"
+          APKANALYZER="$(command -v apkanalyzer || find "${ANDROID_HOME}/cmdline-tools" -name apkanalyzer -type f | sort | tail -n 1)"
+          test -n "${APKANALYZER}" || { echo "Missing apkanalyzer" >&2; exit 1; }
           export APKANALYZER
           APKSIGNER="$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort | tail -n 1)"
           export APKSIGNER
