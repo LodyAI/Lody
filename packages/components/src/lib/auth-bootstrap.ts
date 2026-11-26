@@ -32,9 +32,7 @@ export function writeStoredAuthToken(token: string): void {
 
   try {
     localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 export function clearStoredAuthToken(): void {
@@ -44,9 +42,7 @@ export function clearStoredAuthToken(): void {
 
   try {
     localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 export function readAuthBootstrapSnapshot(): AuthBootstrapSnapshot | null {

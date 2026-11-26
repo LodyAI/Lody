@@ -4,8 +4,14 @@
  *
  * Prose comments in product source only ever shrink. Each scanned scope keeps a
  * baseline count of lines that carry a `//` line comment or a `/*` block comment
- * in scripts/comment-ratchet-baseline.json; a scope that gains comment lines
- * fails the check. Deleting comments always passes.
+ * in scripts/comment-ratchet-baseline.json. Deleting comments always passes.
+ *
+ * A change is judged by what it adds, never by the baseline's slack: locally
+ * the working tree (untracked files included) against its merge base with
+ * origin/main, and on a pull request merge ref the merged tree against the
+ * base tip. A scope may grow only as far as the same change raises its baseline
+ * (`--update`), so concurrent changes cannot jointly exceed it. A push to the
+ * base branch, or a checkout without one, is checked against the baseline.
  *
  * Exempt (not counted, allowed to grow):
  * - `/**` JSDoc blocks: machine-consumed API documentation.
@@ -21,13 +27,14 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const baselinePath = path.join(repoRoot, 'scripts', 'comment-ratchet-baseline.json');
+const baselineRel = 'scripts/comment-ratchet-baseline.json';
+const baselinePath = path.join(repoRoot, baselineRel);
+const baseBranchRef = 'origin/main';
 
 const scanRoots = ['apps', 'packages', 'e2e'];
 const scanExtensions = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs']);
@@ -103,7 +110,7 @@ export function scanComments(source) {
     }
     if (state === 'code') {
       if (c === "'") {
-        stack.push("sq");
+        stack.push('sq');
       } else if (c === '"') {
         stack.push('dq');
       } else if (c === '`') {
@@ -121,7 +128,9 @@ export function scanComments(source) {
             startLine,
             endLine: line,
             text,
-            directive: text.startsWith('/') ? /^\/ <(reference|types)\b/.test(text) : isDirective(text),
+            directive: text.startsWith('/')
+              ? /^\/ <(reference|types)\b/.test(text)
+              : isDirective(text),
           });
           i = end;
           continue;
@@ -239,79 +248,37 @@ function countFile(source) {
   return { counted: counted.size, exempt: exempt.size, jsdocLines };
 }
 
-// The baseline must not shift with checkout state: untracked install/codegen
-// artifacts and checked-out native client submodules are excluded by using
-// tracked sources only. On pull_request, CI checks out the merge ref whose
-// worktree also contains newer base-branch commits; the second merge parent
-// is the PR head itself, so under CI a merge HEAD is scanned at that ref
-// instead of the merged worktree. Native submodule sources live in their own
-// repositories and are out of this ratchet's scope.
-function listTrackedFiles(root) {
-  return execFileSync('git', ['ls-files', '--cached', '-z'], {
+function git(root, args) {
+  return execFileSync('git', args, {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
-  })
-    .split('\0')
-    .filter(Boolean);
-}
-
-function resolveScanSource(root) {
-  if (process.env.CI !== 'true' && process.env.GITHUB_ACTIONS !== 'true')
-    return { kind: 'worktree' };
-  try {
-    // `rev-list --parents` hides parents at the shallow-fetch boundary; the
-    // commit object headers keep them, so parse `parent` lines directly.
-    const commit = execFileSync('git', ['cat-file', '-p', 'HEAD'], {
-      cwd: root,
-      encoding: 'utf8',
-    });
-    const parents = [...commit.matchAll(/^parent (\S+)$/gm)].map((m) => m[1]);
-    if (parents.length < 2) return { kind: 'worktree' };
-    const prHead = parents[1];
-    try {
-      execFileSync('git', ['cat-file', '-e', `${prHead}^{commit}`], { cwd: root });
-    } catch {
-      execFileSync('git', ['fetch', '--no-tags', '--depth=1', 'origin', prHead], {
-        cwd: root,
-        stdio: 'inherit',
-      });
-    }
-    const dir = mkdtempSync(path.join(tmpdir(), 'comment-ratchet-'));
-    try {
-      execFileSync('git', ['archive', '-o', `${dir}/tree.tar`, prHead], { cwd: root });
-      execFileSync('tar', ['-xf', `${dir}/tree.tar`, '-C', dir]);
-    } finally {
-      rmSync(`${dir}/tree.tar`, { force: true });
-    }
-    process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
-    return { kind: 'dir', dir };
-  } catch {
-    return { kind: 'worktree' };
-  }
-}
-
-function readSource(source, rel, root) {
-  const base = source.kind === 'dir' ? source.dir : root;
-  return readFileSync(path.join(base, rel), 'utf8');
-}
-
-export function collectCounts(root = repoRoot, source = resolveScanSource(root)) {
-  const files = listTrackedFiles(root).filter(
-    (rel) => {
-    const ext = path.extname(rel);
-    if (!scanExtensions.has(ext)) return false;
-    if (!scanRoots.some((r) => rel === r || rel.startsWith(`${r}/`))) return false;
-    if (excludedPrefixes.some((p) => rel.startsWith(p))) return false;
-    if (excludedFilePatterns.some((p) => p.test(rel))) return false;
-    return true;
+    stdio: ['ignore', 'pipe', 'ignore'],
   });
+}
+
+const splitZ = (text) => text.split('\0').filter(Boolean);
+
+function isScanned(rel) {
+  if (!scanExtensions.has(path.extname(rel))) return false;
+  if (!scanRoots.some((r) => rel === r || rel.startsWith(`${r}/`))) return false;
+  if (excludedPrefixes.some((p) => rel.startsWith(p))) return false;
+  return !excludedFilePatterns.some((p) => p.test(rel));
+}
+
+// Tracked sources only, so untracked install/codegen artifacts and checked-out
+// native client submodules never shift the counts.
+function listTrackedFiles(root) {
+  return splitZ(git(root, ['ls-files', '--cached', '-z']));
+}
+
+export function collectCounts(root = repoRoot) {
   const scopes = new Map();
   const fileCounts = new Map();
-  for (const rel of files) {
+  for (const rel of listTrackedFiles(root).filter(isScanned)) {
     let counts;
     try {
-      counts = countFile(readSource(source, rel, root));
+      counts = countFile(readFileSync(path.join(root, rel), 'utf8'));
     } catch {
       continue;
     }
@@ -324,7 +291,94 @@ export function collectCounts(root = repoRoot, source = resolveScanSource(root))
     entry.files += 1;
     scopes.set(scope, entry);
   }
-  return { scopes, fileCounts, source };
+  return { scopes, fileCounts };
+}
+
+function hasCommit(root, rev) {
+  try {
+    git(root, ['cat-file', '-e', `${rev}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What the change is compared with. `head: null` is the working tree.
+ * Under CI a merge HEAD is a pull request merge ref: its first parent is the
+ * base tip, which a shallow checkout may need to fetch.
+ */
+export function resolveComparison(root, env = process.env) {
+  if (env.CI === 'true' || env.GITHUB_ACTIONS === 'true') {
+    try {
+      const commit = git(root, ['cat-file', '-p', 'HEAD']);
+      const parents = [...commit.matchAll(/^parent (\S+)$/gm)].map((m) => m[1]);
+      if (parents.length < 2) return { kind: 'baseline' };
+      const [baseTip] = parents;
+      if (!hasCommit(root, baseTip))
+        execFileSync('git', ['fetch', '--no-tags', '--depth=1', 'origin', baseTip], {
+          cwd: root,
+          stdio: 'inherit',
+        });
+      return { kind: 'change', base: baseTip, head: 'HEAD', label: 'the base tip' };
+    } catch {
+      return { kind: 'baseline' };
+    }
+  }
+  try {
+    const base = git(root, ['merge-base', 'HEAD', baseBranchRef]).trim();
+    return base
+      ? { kind: 'change', base, head: null, label: `its merge base with ${baseBranchRef}` }
+      : { kind: 'baseline' };
+  } catch {
+    return { kind: 'baseline' };
+  }
+}
+
+function readAt(root, rev, rel) {
+  if (rev === null) return readFileSync(path.join(root, rel), 'utf8');
+  return git(root, ['show', `${rev}:${rel}`]);
+}
+
+function countAt(root, rev, rel) {
+  try {
+    return countFile(readAt(root, rev, rel)).counted;
+  } catch {
+    return 0;
+  }
+}
+
+function baselineAt(root, rev) {
+  try {
+    return JSON.parse(readAt(root, rev, baselineRel)).scopes ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function changedFiles(root, { base, head }) {
+  const tracked = splitZ(
+    git(root, ['diff', '--name-only', '--no-renames', '-z', base, ...(head ? [head] : [])])
+  );
+  const untracked = head
+    ? []
+    : splitZ(git(root, ['ls-files', '--others', '--exclude-standard', '-z']));
+  return [...new Set([...tracked, ...untracked])].filter(isScanned).sort();
+}
+
+/** Per-scope comment growth of the change, with the files that grew. */
+export function measureChange(root, comparison) {
+  const scopes = new Map();
+  for (const rel of changedFiles(root, comparison)) {
+    const delta = countAt(root, comparison.head, rel) - countAt(root, comparison.base, rel);
+    if (delta === 0) continue;
+    const scope = scopeOf(rel);
+    const entry = scopes.get(scope) ?? { delta: 0, grown: [] };
+    entry.delta += delta;
+    if (delta > 0) entry.grown.push({ rel, delta });
+    scopes.set(scope, entry);
+  }
+  return scopes;
 }
 
 function loadBaseline() {
@@ -335,15 +389,83 @@ function loadBaseline() {
   }
 }
 
+function overBaseline(scopes, baseline) {
+  const over = [];
+  for (const [scope, entry] of scopes) {
+    const allowed = baseline.scopes[scope];
+    if (allowed === undefined) {
+      if (entry.counted > 0)
+        over.push(
+          `${scope}: ${entry.counted} comment lines but no baseline entry (new scopes must start at zero)`
+        );
+    } else if (entry.counted > allowed)
+      over.push(`${scope}: ${entry.counted} comment lines exceeds baseline ${allowed}`);
+  }
+  return over;
+}
+
+function checkChange(comparison) {
+  const growth = measureChange(repoRoot, comparison);
+  const headBaseline = baselineAt(repoRoot, comparison.head);
+  const baseBaseline = baselineAt(repoRoot, comparison.base);
+  const failures = [];
+  for (const [scope, entry] of [...growth.entries()].sort()) {
+    const raised = Math.max(0, (headBaseline[scope] ?? 0) - (baseBaseline[scope] ?? 0));
+    if (entry.delta <= raised) continue;
+    const files = entry.grown.map(({ rel, delta }) => `    ${rel}: +${delta}`).join('\n');
+    failures.push(`  ${scope}: +${entry.delta} comment lines\n${files}`);
+  }
+  if (failures.length > 0) {
+    process.stderr.write(
+      `Comment ratchet: this change adds prose comments against ${comparison.label}. Prose comments may only shrink; delete comments or move durable rationale into docs/notes.\n${failures.join('\n')}\nIf a refactor merely moved comments between scopes, run: node scripts/check-comment-ratchet.mjs --update\n`
+    );
+    process.exit(1);
+  }
+  const { scopes } = collectCounts(repoRoot);
+  const inherited = overBaseline(scopes, loadBaseline());
+  if (inherited.length > 0)
+    process.stdout.write(
+      `Comment ratchet: the base already exceeds the baseline; not counted against this change:\n${inherited
+        .map((s) => `  ${s.replace(/ comment lines exceeds baseline /, ' > ')}`)
+        .join('\n')}\n`
+    );
+  process.stdout.write(
+    `Comment ratchet: this change adds no prose comments against ${comparison.label}.\n`
+  );
+}
+
+function checkBaseline() {
+  const { scopes } = collectCounts(repoRoot);
+  const baseline = loadBaseline();
+  const failures = overBaseline(scopes, baseline);
+  const shrunk = [];
+  for (const [scope, entry] of scopes) {
+    const allowed = baseline.scopes[scope];
+    if (allowed !== undefined && entry.counted < allowed)
+      shrunk.push(`${scope}: ${entry.counted} < ${allowed}`);
+  }
+  if (shrunk.length > 0)
+    process.stdout.write(
+      `Comment ratchet: scopes below baseline (run --update to tighten):\n${shrunk.map((s) => `  ${s}`).join('\n')}\n`
+    );
+  if (failures.length > 0) {
+    process.stderr.write(
+      `Comment ratchet exceeded baseline. Prose comments may only shrink; delete comments or move durable rationale into docs/notes.\n${failures.map((f) => `  ${f}`).join('\n')}\nIf a refactor merely moved comments between scopes, run: node scripts/check-comment-ratchet.mjs --update\n`
+    );
+    process.exit(1);
+  }
+  process.stdout.write('Comment ratchet: all scopes at or below baseline.\n');
+}
+
 function main() {
   const args = process.argv.slice(2);
-  const { scopes, fileCounts, source } = collectCounts(repoRoot);
 
   if (args.includes('--dump')) {
     const dir = args[args.indexOf('--dump') + 1] ?? '';
+    const { fileCounts } = collectCounts(repoRoot);
     for (const [rel] of fileCounts) {
       if (dir && !rel.startsWith(dir)) continue;
-      const text = readSource(source, rel, repoRoot);
+      const text = readFileSync(path.join(repoRoot, rel), 'utf8');
       for (const c of scanComments(text)) {
         const firstLine = c.text.split('\n')[0].trim().slice(0, 160);
         process.stdout.write(
@@ -355,6 +477,7 @@ function main() {
   }
 
   if (args.includes('--report')) {
+    const { scopes } = collectCounts(repoRoot);
     const sorted = [...scopes.entries()].sort((a, b) => b[1].counted - a[1].counted);
     let total = 0;
     let totalExempt = 0;
@@ -374,6 +497,7 @@ function main() {
   }
 
   if (args.includes('--update')) {
+    const { scopes } = collectCounts(repoRoot);
     const baseline = { version: 1, scopes: {} };
     for (const [scope, entry] of [...scopes.entries()].sort()) {
       baseline.scopes[scope] = entry.counted;
@@ -383,33 +507,9 @@ function main() {
     return;
   }
 
-  const baseline = loadBaseline();
-  const failures = [];
-  const shrunk = [];
-  for (const [scope, entry] of scopes) {
-    const allowed = baseline.scopes[scope];
-    if (allowed === undefined) {
-      if (entry.counted > 0)
-        failures.push(
-          `${scope}: ${entry.counted} comment lines but no baseline entry (new scopes must start at zero)`
-        );
-      continue;
-    }
-    if (entry.counted > allowed)
-      failures.push(`${scope}: ${entry.counted} comment lines exceeds baseline ${allowed}`);
-    else if (entry.counted < allowed) shrunk.push(`${scope}: ${entry.counted} < ${allowed}`);
-  }
-  if (shrunk.length > 0)
-    process.stdout.write(
-      `Comment ratchet: scopes below baseline (run --update to tighten):\n${shrunk.map((s) => `  ${s}`).join('\n')}\n`
-    );
-  if (failures.length > 0) {
-    process.stderr.write(
-      `Comment ratchet exceeded baseline. Prose comments may only shrink; delete comments or move durable rationale into docs/notes.\n${failures.map((f) => `  ${f}`).join('\n')}\nIf a refactor merely moved comments between scopes, run: node scripts/check-comment-ratchet.mjs --update\n`
-    );
-    process.exit(1);
-  }
-  process.stdout.write('Comment ratchet: all scopes at or below baseline.\n');
+  const comparison = resolveComparison(repoRoot);
+  if (comparison.kind === 'change') checkChange(comparison);
+  else checkBaseline();
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

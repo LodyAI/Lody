@@ -757,9 +757,7 @@ async function startLocalAcpProtocol<T>(
       }
       try {
         fs.rmSync(env.CODEX_HOME, { recursive: true, force: true });
-      } catch {
-        // ignore
-      }
+      } catch {}
     };
 
     captureAcpSpawnStarted(spawnAnalyticsProps);
