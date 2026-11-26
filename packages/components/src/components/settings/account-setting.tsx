@@ -12,7 +12,7 @@ import { useRouter } from '@tanstack/react-router';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { isE2eeActionTimeoutError } from '@/providers/cloud-e2ee-workspaces';
+import { isE2eeActionTimeoutError } from '../../providers/cloud-e2ee-workspaces';
 import {
   deleteAccountWorkspace,
   hasEncryptedContentMode,

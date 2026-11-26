@@ -24,7 +24,7 @@ import {
   savePendingE2eeWorkspace,
   type PendingE2eeWorkspace,
 } from '@/lib/e2ee-workspace-storage';
-import { isE2eeActionTimeoutError } from '@/providers/cloud-e2ee-workspaces';
+import { isE2eeActionTimeoutError } from '../../providers/cloud-e2ee-workspaces';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { useTranslation } from 'react-i18next';

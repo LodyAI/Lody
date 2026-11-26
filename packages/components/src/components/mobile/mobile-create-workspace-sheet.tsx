@@ -20,7 +20,7 @@ import {
   savePendingE2eeWorkspace,
   type PendingE2eeWorkspace,
 } from '@/lib/e2ee-workspace-storage';
-import { isE2eeActionTimeoutError } from '@/providers/cloud-e2ee-workspaces';
+import { isE2eeActionTimeoutError } from '../../providers/cloud-e2ee-workspaces';
 import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-creation-option';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
