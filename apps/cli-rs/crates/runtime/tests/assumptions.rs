@@ -1,5 +1,6 @@
 use lody_app::{
-    AppCommand, AppQuery, AppResponse, SessionId, TurnId, VerifiedPrincipal, WorkspaceId,
+    AppCommand, AppQuery, AppResponse, MachineId, SessionId, TurnId, UserId, VerifiedPrincipal,
+    WorkspaceId,
 };
 use lody_kernel::{Generation, KernelEvent, SessionPhase};
 use lody_ports::{
@@ -7,19 +8,24 @@ use lody_ports::{
     AdmittedTurnInput, ArtifactRegistryPort, DiffCaptureScope, DiffStorePort, EnginePort,
     EpochKeyMaterial, HistoryPort, HistoryTurnRecord, InboxStorePort, InstalledArtifact,
     LocalProjectId, LocalProjectRecord, ManagedArtifactSource, PermissionDecision, PortError,
-    PortErrorKind, PortResult, ProjectStorePort, QueuedDraftItem, SessionMetaSnapshot,
-    StaticMachineIdentity, SteerVerdict, StorageLeaseMode, SubmissionStage, TurnDiffSummary,
-    TurnTerminalOutcome, UnavailableScheduleStore, WorkspaceSecurityMode, WorktreeLease,
-    WorktreePort,
+    PortErrorKind, PortResult, ProjectStorePort, QueuedDraftItem, ScheduleEditPatch,
+    ScheduleProposalInput, ScheduleProposalOutcome, ScheduleRecord, ScheduleRepoPort,
+    SessionMetaSnapshot, SessionRunStatus, StaticMachineIdentity, SteerVerdict, StorageLeaseMode,
+    SubmissionStage, TurnDiffSummary, TurnTerminalOutcome, UnavailableScheduleLedger,
+    UnavailableScheduleRepo, WorkspaceSecurityMode, WorktreeLease, WorktreePort,
 };
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
+use serde_json::json;
 use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-struct TestEngine;
+#[derive(Default)]
+struct TestEngine {
+    sessions: Mutex<HashMap<(WorkspaceId, SessionId), SessionMetaSnapshot>>,
+}
 impl EnginePort for TestEngine {
     fn is_connected(&self) -> bool {
         true
@@ -29,12 +35,21 @@ impl EnginePort for TestEngine {
     }
     fn read_session_meta(
         &self,
-        _: &WorkspaceId,
-        _: &SessionId,
+        ws: &WorkspaceId,
+        sid: &SessionId,
     ) -> PortResult<Option<SessionMetaSnapshot>> {
-        Ok(None)
+        Ok(self
+            .sessions
+            .lock()
+            .expect("sessions lock")
+            .get(&(ws.clone(), sid.clone()))
+            .cloned())
     }
-    fn upsert_session_meta(&self, _: &SessionMetaSnapshot) -> PortResult<()> {
+    fn upsert_session_meta(&self, meta: &SessionMetaSnapshot) -> PortResult<()> {
+        self.sessions.lock().expect("sessions lock").insert(
+            (meta.workspace_id.clone(), meta.session_id.clone()),
+            meta.clone(),
+        );
         Ok(())
     }
     fn promote_next_queued_draft(
@@ -53,6 +68,74 @@ impl EnginePort for TestEngine {
         _: &[EpochKeyMaterial],
     ) -> PortResult<()> {
         Ok(())
+    }
+}
+
+#[derive(Default)]
+struct RecordingScheduleRepo {
+    proposals: Mutex<Vec<(SessionId, UserId, String)>>,
+}
+impl ScheduleRepoPort for RecordingScheduleRepo {
+    fn list_schedules(
+        &self,
+        _: &WorkspaceId,
+        _: Option<&str>,
+        _: usize,
+        _: usize,
+    ) -> PortResult<Vec<ScheduleRecord>> {
+        Ok(Vec::new())
+    }
+    fn get_schedule(&self, _: &WorkspaceId, _: &str) -> PortResult<Option<ScheduleRecord>> {
+        Ok(None)
+    }
+    fn propose_schedule(
+        &self,
+        input: &ScheduleProposalInput,
+    ) -> PortResult<ScheduleProposalOutcome> {
+        self.proposals.lock().expect("proposals lock").push((
+            input.invoking_session_id.clone(),
+            input.author.clone(),
+            input.request_id.clone(),
+        ));
+        Ok(ScheduleProposalOutcome {
+            proposal_id: format!("prop:{}", input.request_id),
+            schedule_id: None,
+            request_id: input.request_id.clone(),
+            base_revision: None,
+            status: "pending".to_string(),
+        })
+    }
+    fn propose_schedule_edit(
+        &self,
+        _: &WorkspaceId,
+        invoking_session_id: &SessionId,
+        author: &UserId,
+        schedule_id: &str,
+        request_id: &str,
+        _: &ScheduleEditPatch,
+    ) -> PortResult<ScheduleProposalOutcome> {
+        self.proposals.lock().expect("proposals lock").push((
+            invoking_session_id.clone(),
+            author.clone(),
+            request_id.to_string(),
+        ));
+        Ok(ScheduleProposalOutcome {
+            proposal_id: format!("prop-edit:{request_id}"),
+            schedule_id: Some(schedule_id.to_string()),
+            request_id: request_id.to_string(),
+            base_revision: Some(1),
+            status: "pending".to_string(),
+        })
+    }
+    fn pause_schedule(
+        &self,
+        _: &WorkspaceId,
+        _: Option<&SessionId>,
+        _: &UserId,
+        _: &str,
+        _: &str,
+    ) -> PortResult<bool> {
+        Ok(true)
     }
 }
 
@@ -196,17 +279,24 @@ impl InboxStorePort for MemoryInbox {
     }
 }
 
-struct NoopDiff;
-impl DiffStorePort for NoopDiff {
+#[derive(Default)]
+struct RecordingDiff {
+    scopes: Mutex<Vec<(SessionId, DiffCaptureScope)>>,
+}
+impl DiffStorePort for RecordingDiff {
     fn capture_turn_snapshot(
         &self,
         _: &WorkspaceId,
         sid: &SessionId,
         tid: &TurnId,
         _: &Path,
-        _: &DiffCaptureScope,
+        scope: &DiffCaptureScope,
         _: i64,
     ) -> PortResult<TurnDiffSummary> {
+        self.scopes
+            .lock()
+            .expect("scopes lock")
+            .push((sid.clone(), scope.clone()));
         Ok(TurnDiffSummary {
             session_id: sid.clone(),
             turn_id: tid.clone(),
@@ -234,19 +324,33 @@ impl ArtifactRegistryPort for NoopArtifacts {
     }
 }
 
-struct NoopWorktree;
-impl WorktreePort for NoopWorktree {
+#[derive(Default)]
+struct RecordingWorktree {
+    acquired_bases: Mutex<Vec<Option<String>>>,
+}
+impl WorktreePort for RecordingWorktree {
     fn supports_git_worktree(&self) -> bool {
-        false
+        true
     }
     fn acquire_worktree(
         &self,
-        _: &LocalProjectId,
-        _: &Path,
-        _: &SessionId,
-        _: Option<&str>,
+        project_id: &LocalProjectId,
+        project_root: &Path,
+        session_id: &SessionId,
+        base_branch: Option<&str>,
     ) -> PortResult<WorktreeLease> {
-        Err(PortError::new(PortErrorKind::Unavailable, "noop"))
+        let captured = base_branch.map(ToOwned::to_owned);
+        self.acquired_bases
+            .lock()
+            .expect("acquired_bases lock")
+            .push(captured.clone());
+        Ok(WorktreeLease {
+            session_id: session_id.clone(),
+            project_id: project_id.clone(),
+            branch_name: format!("session/{}", session_id.0),
+            base_branch: captured,
+            worktree_path: project_root.join("wt").join(&session_id.0),
+        })
     }
     fn release_worktree(&self, _: &WorktreeLease) -> PortResult<()> {
         Ok(())
@@ -301,8 +405,8 @@ impl AcpLauncherPort for FakeAcpLauncher {
     }
 }
 
-struct NoopProjects;
-impl ProjectStorePort for NoopProjects {
+struct FixedProjects;
+impl ProjectStorePort for FixedProjects {
     fn register_project(&self, name: &str, root: &Path) -> PortResult<LocalProjectRecord> {
         Ok(LocalProjectRecord {
             project_id: LocalProjectId("p1".to_string()),
@@ -311,7 +415,15 @@ impl ProjectStorePort for NoopProjects {
             git_summary: None,
         })
     }
-    fn get_project(&self, _: &LocalProjectId) -> PortResult<Option<LocalProjectRecord>> {
+    fn get_project(&self, pid: &LocalProjectId) -> PortResult<Option<LocalProjectRecord>> {
+        if pid.0 == "p1" {
+            return Ok(Some(LocalProjectRecord {
+                project_id: pid.clone(),
+                name: "demo".to_string(),
+                root_path: PathBuf::from("/tmp/demo-repo"),
+                git_summary: None,
+            }));
+        }
         Ok(None)
     }
     fn list_projects(&self) -> PortResult<Vec<LocalProjectRecord>> {
@@ -319,31 +431,69 @@ impl ProjectStorePort for NoopProjects {
     }
 }
 
+struct UnwiredEngine;
+impl EnginePort for UnwiredEngine {
+    fn is_connected(&self) -> bool {
+        false
+    }
+    fn read_workspace_security_mode(&self, _: &WorkspaceId) -> PortResult<WorkspaceSecurityMode> {
+        Err(PortError::new(PortErrorKind::Unavailable, "unwired"))
+    }
+    fn read_session_meta(
+        &self,
+        _: &WorkspaceId,
+        _: &SessionId,
+    ) -> PortResult<Option<SessionMetaSnapshot>> {
+        Err(PortError::new(PortErrorKind::Unavailable, "unwired"))
+    }
+    fn upsert_session_meta(&self, _: &SessionMetaSnapshot) -> PortResult<()> {
+        Err(PortError::new(PortErrorKind::Unavailable, "unwired"))
+    }
+    fn promote_next_queued_draft(
+        &self,
+        _: &WorkspaceId,
+        _: &SessionId,
+    ) -> PortResult<Option<QueuedDraftItem>> {
+        Err(PortError::new(PortErrorKind::Unavailable, "unwired"))
+    }
+    fn set_message_queue_paused(&self, _: &WorkspaceId, _: &SessionId, _: bool) -> PortResult<()> {
+        Err(PortError::new(PortErrorKind::Unavailable, "unwired"))
+    }
+    fn install_workspace_epoch_keys(
+        &self,
+        _: &WorkspaceId,
+        _: &[EpochKeyMaterial],
+    ) -> PortResult<()> {
+        Err(PortError::new(PortErrorKind::Unavailable, "unwired"))
+    }
+}
+
 fn build_test_runtime(
     cancel_calls: Arc<AtomicUsize>,
     history: Arc<MemoryHistory>,
 ) -> DaemonRuntime {
-    let mid = lody_app::MachineId("m_test".to_string());
+    let mid = MachineId("m_test".to_string());
     DaemonRuntime::with_settling_timeout(
         DaemonDependencies {
             machine_id: mid.clone(),
             identity: Arc::new(StaticMachineIdentity(mid)),
-            default_cwd: std::path::PathBuf::from("."),
+            default_cwd: PathBuf::from("."),
             shell_command: ("/bin/sh".to_string(), Vec::new()),
             agent_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
             terminal_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
             storage_lease_mode: StorageLeaseMode::OnlineHost,
             storage_lease: None,
-            engine: Arc::new(TestEngine),
+            engine: Arc::new(TestEngine::default()),
             history,
             inbox: Arc::new(MemoryInbox::default()),
-            projects: Arc::new(NoopProjects),
-            schedules: Arc::new(UnavailableScheduleStore),
-            diff_store: Arc::new(NoopDiff),
+            projects: Arc::new(FixedProjects),
+            schedule_repo: Arc::new(UnavailableScheduleRepo),
+            schedule_ledger: Arc::new(UnavailableScheduleLedger),
+            diff_store: Arc::new(RecordingDiff::default()),
             artifacts: Arc::new(NoopArtifacts(ManagedArtifactSource::Disabled)),
             acp: Arc::new(FakeAcpLauncher { cancel_calls }),
             pty: Arc::new(lody_ports::UnavailablePtyPort),
-            worktree: Arc::new(NoopWorktree),
+            worktree: Arc::new(RecordingWorktree::default()),
             backend: None,
         },
         Duration::from_millis(100),
@@ -385,6 +535,7 @@ async fn control_cancel_preempts_backlog_coalesces_writes_and_isolates_sibling_f
                 session_id: broken_sid.clone(),
                 turn_id: TurnId("t_fail".to_string()),
                 local_project_id: None,
+                base_branch: None,
                 use_worktree: false,
                 adapter_id: "broken".to_string(),
                 custom_acp: None,
@@ -407,6 +558,7 @@ async fn control_cancel_preempts_backlog_coalesces_writes_and_isolates_sibling_f
                 session_id: healthy_sid.clone(),
                 turn_id: TurnId("t_stream".to_string()),
                 local_project_id: None,
+                base_branch: None,
                 use_worktree: false,
                 adapter_id: "ok".to_string(),
                 custom_acp: None,
@@ -530,6 +682,7 @@ async fn detaching_and_erasing_one_workspace_preserves_sibling_workspace_and_rej
                     session_id: session_id.clone(),
                     turn_id: TurnId("t_1".to_string()),
                     local_project_id: None,
+                    base_branch: None,
                     use_worktree: false,
                     adapter_id: "ok".to_string(),
                     custom_acp: None,
@@ -622,6 +775,7 @@ async fn child_delegation_rejects_when_stopped_or_over_depth_and_delivers_receip
                 session_id: parent_sid.clone(),
                 turn_id: TurnId("t_parent_1".to_string()),
                 local_project_id: None,
+                base_branch: None,
                 use_worktree: false,
                 adapter_id: "ok".to_string(),
                 custom_acp: None,
@@ -633,10 +787,17 @@ async fn child_delegation_rejects_when_stopped_or_over_depth_and_delivers_receip
     let parent_handle = runtime.session_handle(&ws, &parent_sid).unwrap();
     wait_for_running_or_idle(&parent_handle, true).await;
 
+    let mcp_parent = VerifiedPrincipal::AgentSession {
+        workspace_id: ws.clone(),
+        session_id: parent_sid.clone(),
+        machine_id: MachineId("m_test".to_string()),
+        account_id: None,
+    };
+
     let child_sid = SessionId("s_child_1".to_string());
     runtime
         .execute_async(
-            &caller,
+            &mcp_parent,
             AppCommand::DelegateChildSession {
                 workspace_id: ws.clone(),
                 parent_session_id: parent_sid.clone(),
@@ -651,9 +812,15 @@ async fn child_delegation_rejects_when_stopped_or_over_depth_and_delivers_receip
         .await
         .expect("depth-1 child delegation admitted");
 
+    let mcp_child = VerifiedPrincipal::AgentSession {
+        workspace_id: ws.clone(),
+        session_id: child_sid.clone(),
+        machine_id: MachineId("m_test".to_string()),
+        account_id: None,
+    };
     let grandchild_err = runtime
         .execute_async(
-            &caller,
+            &mcp_child,
             AppCommand::DelegateChildSession {
                 workspace_id: ws.clone(),
                 parent_session_id: child_sid.clone(),
@@ -718,7 +885,7 @@ async fn child_delegation_rejects_when_stopped_or_over_depth_and_delivers_receip
 
     let stopped_err = runtime
         .execute_async(
-            &caller,
+            &mcp_parent,
             AppCommand::DelegateChildSession {
                 workspace_id: ws.clone(),
                 parent_session_id: parent_sid.clone(),
@@ -733,6 +900,322 @@ async fn child_delegation_rejects_when_stopped_or_over_depth_and_delivers_receip
         .await
         .unwrap_err();
     assert_eq!(stopped_err.kind, PortErrorKind::Forbidden);
+
+    runtime.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn schedule_service_boundary_rejects_non_owners_and_unwired_engine_while_preserving_worktree_base()
+ {
+    let mid = MachineId("m_host".to_string());
+    let unwired_runtime = DaemonRuntime::with_settling_timeout(
+        DaemonDependencies {
+            machine_id: mid.clone(),
+            identity: Arc::new(StaticMachineIdentity(mid.clone())),
+            default_cwd: PathBuf::from("."),
+            shell_command: ("/bin/sh".to_string(), Vec::new()),
+            agent_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
+            terminal_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
+            storage_lease_mode: StorageLeaseMode::OnlineHost,
+            storage_lease: None,
+            engine: Arc::new(UnwiredEngine),
+            history: Arc::new(MemoryHistory::default()),
+            inbox: Arc::new(MemoryInbox::default()),
+            projects: Arc::new(FixedProjects),
+            schedule_repo: Arc::new(UnavailableScheduleRepo),
+            schedule_ledger: Arc::new(UnavailableScheduleLedger),
+            diff_store: Arc::new(RecordingDiff::default()),
+            artifacts: Arc::new(NoopArtifacts(ManagedArtifactSource::Disabled)),
+            acp: Arc::new(FakeAcpLauncher {
+                cancel_calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            pty: Arc::new(lody_ports::UnavailablePtyPort),
+            worktree: Arc::new(RecordingWorktree::default()),
+            backend: None,
+        },
+        Duration::from_millis(100),
+    );
+
+    let ws = WorkspaceId("ws_sched".to_string());
+    let sid = SessionId("sess_owner_1".to_string());
+    let mcp_caller = VerifiedPrincipal::AgentSession {
+        workspace_id: ws.clone(),
+        session_id: sid.clone(),
+        machine_id: mid.clone(),
+        account_id: None,
+    };
+
+    let unwired_err = unwired_runtime
+        .execute_async(
+            &mcp_caller,
+            AppCommand::ProposeSchedule {
+                workspace_id: ws.clone(),
+                invoking_session_id: sid.clone(),
+                request_id: "req_1".to_string(),
+                title: "Nightly".to_string(),
+                prompt_text: "audit".to_string(),
+                rule: json!({ "kind": "daily", "hour": 2, "minute": 0 }),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(unwired_err.kind, PortErrorKind::Unavailable);
+    unwired_runtime.shutdown().await;
+
+    let engine = Arc::new(TestEngine::default());
+    let schedule_repo = Arc::new(RecordingScheduleRepo::default());
+    let diff_store = Arc::new(RecordingDiff::default());
+    let worktree = Arc::new(RecordingWorktree::default());
+    let runtime = DaemonRuntime::with_settling_timeout(
+        DaemonDependencies {
+            machine_id: mid.clone(),
+            identity: Arc::new(StaticMachineIdentity(mid.clone())),
+            default_cwd: PathBuf::from("."),
+            shell_command: ("/bin/sh".to_string(), Vec::new()),
+            agent_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
+            terminal_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
+            storage_lease_mode: StorageLeaseMode::OnlineHost,
+            storage_lease: None,
+            engine: Arc::clone(&engine) as Arc<dyn EnginePort>,
+            history: Arc::new(MemoryHistory::default()),
+            inbox: Arc::new(MemoryInbox::default()),
+            projects: Arc::new(FixedProjects),
+            schedule_repo: Arc::clone(&schedule_repo) as Arc<dyn ScheduleRepoPort>,
+            schedule_ledger: Arc::new(UnavailableScheduleLedger),
+            diff_store: Arc::clone(&diff_store) as Arc<dyn DiffStorePort>,
+            artifacts: Arc::new(NoopArtifacts(ManagedArtifactSource::Disabled)),
+            acp: Arc::new(FakeAcpLauncher {
+                cancel_calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            pty: Arc::new(lody_ports::UnavailablePtyPort),
+            worktree: Arc::clone(&worktree) as Arc<dyn WorktreePort>,
+            backend: None,
+        },
+        Duration::from_millis(100),
+    );
+
+    assert_eq!(
+        runtime
+            .execute_async(
+                &mcp_caller,
+                AppCommand::ProposeSchedule {
+                    workspace_id: ws.clone(),
+                    invoking_session_id: sid.clone(),
+                    request_id: "req_missing".to_string(),
+                    title: "Nightly".to_string(),
+                    prompt_text: "audit".to_string(),
+                    rule: json!({ "kind": "daily", "hour": 2, "minute": 0 }),
+                },
+            )
+            .await
+            .unwrap_err()
+            .kind,
+        PortErrorKind::Forbidden
+    );
+
+    engine
+        .upsert_session_meta(&SessionMetaSnapshot {
+            workspace_id: ws.clone(),
+            session_id: sid.clone(),
+            root_session_id: sid.clone(),
+            owner_user_id: UserId("u_alice".to_string()),
+            owner_machine_id: mid.clone(),
+            deleted: true,
+            local_project_id: Some(LocalProjectId("p1".to_string())),
+            base_branch: Some("release".to_string()),
+            title: None,
+            status: SessionRunStatus::Running,
+            queue_paused: false,
+            queued_count: 0,
+        })
+        .unwrap();
+
+    assert_eq!(
+        runtime
+            .execute_async(
+                &mcp_caller,
+                AppCommand::ProposeSchedule {
+                    workspace_id: ws.clone(),
+                    invoking_session_id: sid.clone(),
+                    request_id: "req_deleted".to_string(),
+                    title: "Nightly".to_string(),
+                    prompt_text: "audit".to_string(),
+                    rule: json!({ "kind": "daily", "hour": 2, "minute": 0 }),
+                },
+            )
+            .await
+            .unwrap_err()
+            .kind,
+        PortErrorKind::Forbidden
+    );
+
+    engine
+        .upsert_session_meta(&SessionMetaSnapshot {
+            workspace_id: ws.clone(),
+            session_id: sid.clone(),
+            root_session_id: sid.clone(),
+            owner_user_id: UserId("u_alice".to_string()),
+            owner_machine_id: MachineId("m_other_machine".to_string()),
+            deleted: false,
+            local_project_id: Some(LocalProjectId("p1".to_string())),
+            base_branch: Some("release".to_string()),
+            title: None,
+            status: SessionRunStatus::Running,
+            queue_paused: false,
+            queued_count: 0,
+        })
+        .unwrap();
+
+    assert_eq!(
+        runtime
+            .execute_async(
+                &mcp_caller,
+                AppCommand::ProposeSchedule {
+                    workspace_id: ws.clone(),
+                    invoking_session_id: sid.clone(),
+                    request_id: "req_wrong_machine".to_string(),
+                    title: "Nightly".to_string(),
+                    prompt_text: "audit".to_string(),
+                    rule: json!({ "kind": "daily", "hour": 2, "minute": 0 }),
+                },
+            )
+            .await
+            .unwrap_err()
+            .kind,
+        PortErrorKind::Forbidden
+    );
+
+    engine
+        .upsert_session_meta(&SessionMetaSnapshot {
+            workspace_id: ws.clone(),
+            session_id: sid.clone(),
+            root_session_id: sid.clone(),
+            owner_user_id: UserId("u_alice".to_string()),
+            owner_machine_id: mid.clone(),
+            deleted: false,
+            local_project_id: Some(LocalProjectId("p1".to_string())),
+            base_branch: Some("release".to_string()),
+            title: None,
+            status: SessionRunStatus::Running,
+            queue_paused: false,
+            queued_count: 0,
+        })
+        .unwrap();
+
+    assert_eq!(
+        runtime
+            .execute_async(
+                &mcp_caller,
+                AppCommand::ProposeSchedule {
+                    workspace_id: ws.clone(),
+                    invoking_session_id: sid.clone(),
+                    request_id: "req_raw_cron".to_string(),
+                    title: "Nightly".to_string(),
+                    prompt_text: "audit".to_string(),
+                    rule: json!("0 2 * * *"),
+                },
+            )
+            .await
+            .unwrap_err()
+            .kind,
+        PortErrorKind::InvalidInput
+    );
+
+    runtime
+        .execute_async(
+            &mcp_caller,
+            AppCommand::ProposeSchedule {
+                workspace_id: ws.clone(),
+                invoking_session_id: sid.clone(),
+                request_id: "req_valid".to_string(),
+                title: "Nightly".to_string(),
+                prompt_text: "audit".to_string(),
+                rule: json!({ "kind": "daily", "hour": 2, "minute": 0 }),
+            },
+        )
+        .await
+        .expect("verified session owner proposal routed with real UserId");
+    assert_eq!(
+        schedule_repo.proposals.lock().unwrap().as_slice(),
+        &[(
+            sid.clone(),
+            UserId("u_alice".to_string()),
+            "req_valid".to_string()
+        )]
+    );
+
+    let guest_host = VerifiedPrincipal::LocalHost {
+        caller_pid: Some(9),
+        account_id: Some(UserId("u_guest".to_string())),
+    };
+    runtime
+        .execute_async(
+            &guest_host,
+            AppCommand::CreateSession {
+                workspace_id: ws.clone(),
+                session_id: sid.clone(),
+                turn_id: TurnId("t_rel_1".to_string()),
+                local_project_id: Some(LocalProjectId("p1".to_string())),
+                base_branch: Some("release".to_string()),
+                use_worktree: true,
+                adapter_id: "ok".to_string(),
+                custom_acp: None,
+                prompt: "work on release".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let handle = runtime.session_handle(&ws, &sid).unwrap();
+    wait_for_running_or_idle(&handle, true).await;
+
+    assert_eq!(
+        runtime
+            .execute_async(
+                &mcp_caller,
+                AppCommand::ProposeSchedule {
+                    workspace_id: ws.clone(),
+                    invoking_session_id: sid.clone(),
+                    request_id: "req_guest_mismatch".to_string(),
+                    title: "Nightly".to_string(),
+                    prompt_text: "audit".to_string(),
+                    rule: json!({ "kind": "daily", "hour": 2, "minute": 0 }),
+                },
+            )
+            .await
+            .unwrap_err()
+            .kind,
+        PortErrorKind::Forbidden
+    );
+
+    handle
+        .send_event(KernelEvent::AgentOutputChunk {
+            generation: Generation(1),
+            text: "done".to_string(),
+            observed_at_ms: 1000,
+        })
+        .await
+        .unwrap();
+    handle
+        .send_event(KernelEvent::AgentPromptFinished {
+            generation: Generation(1),
+        })
+        .await
+        .unwrap();
+    wait_for_running_or_idle(&handle, false).await;
+
+    assert_eq!(
+        worktree.acquired_bases.lock().unwrap().as_slice(),
+        &[Some("release".to_string())]
+    );
+    assert_eq!(
+        diff_store.scopes.lock().unwrap().as_slice(),
+        &[(
+            sid,
+            DiffCaptureScope::WorktreeBranch {
+                base_branch: Some("release".to_string())
+            }
+        )]
+    );
 
     runtime.shutdown().await;
 }

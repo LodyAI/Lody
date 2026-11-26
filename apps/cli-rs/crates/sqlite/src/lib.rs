@@ -17,7 +17,7 @@ use lody_ports::{
     UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-pub use schedule::SqliteScheduleStore;
+pub use schedule::SqliteScheduleLedgerStore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;

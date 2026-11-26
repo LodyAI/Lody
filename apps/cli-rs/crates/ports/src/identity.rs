@@ -158,6 +158,12 @@ pub enum VerifiedPrincipal {
         caller_pid: Option<u32>,
         account_id: Option<UserId>,
     },
+    AgentSession {
+        workspace_id: WorkspaceId,
+        session_id: SessionId,
+        machine_id: MachineId,
+        account_id: Option<UserId>,
+    },
     ConnectedMember {
         profile_id: ProfileId,
         user_id: UserId,
@@ -171,13 +177,22 @@ pub enum VerifiedPrincipal {
 }
 
 impl VerifiedPrincipal {
+    pub fn has_local_host_authority(&self) -> bool {
+        matches!(self, Self::LocalHost { .. })
+    }
+
     pub fn is_remote(&self) -> bool {
-        !matches!(self, Self::LocalHost { .. })
+        matches!(
+            self,
+            Self::ConnectedMember { .. } | Self::EncryptedMember { .. }
+        )
     }
 
     pub fn effective_user_id(&self) -> Option<&UserId> {
         match self {
-            Self::LocalHost { account_id, .. } => account_id.as_ref(),
+            Self::LocalHost { account_id, .. } | Self::AgentSession { account_id, .. } => {
+                account_id.as_ref()
+            }
             Self::ConnectedMember { user_id, .. } => Some(user_id),
             Self::EncryptedMember {
                 execution_user_id, ..

@@ -6,8 +6,6 @@ use crate::identity::{LocalProjectId, SessionId, TurnId, UserId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const MAX_SCHEDULE_PROMPT_BYTES: usize = 32 * 1024;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StorageLeaseMode {
@@ -197,152 +195,167 @@ pub trait DiffStorePort: Send + Sync {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleRunState {
+    Pending,
+    Prepared,
+    Dispatched,
+    RetryWait,
+    Finished,
+    Failed,
+    Skipped,
+}
+
+impl ScheduleRunState {
+    pub fn as_wire_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Prepared => "prepared",
+            Self::Dispatched => "dispatched",
+            Self::RetryWait => "retry_wait",
+            Self::Finished => "finished",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+
+    pub fn from_wire_str(raw: &str) -> Option<Self> {
+        match raw {
+            "pending" => Some(Self::Pending),
+            "prepared" => Some(Self::Prepared),
+            "dispatched" => Some(Self::Dispatched),
+            "retry_wait" => Some(Self::RetryWait),
+            "finished" => Some(Self::Finished),
+            "failed" => Some(Self::Failed),
+            "skipped" => Some(Self::Skipped),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ScheduleRecord {
-    pub schedule_id: String,
+pub struct ScheduleCursorRecord {
     pub workspace_id: WorkspaceId,
-    pub session_id: Option<SessionId>,
-    pub author_user_id: UserId,
-    pub title: String,
-    pub cron_expr: String,
-    pub prompt_text: String,
-    pub enabled: bool,
-    pub content_revision: u64,
+    pub schedule_id: String,
+    pub activation_id: String,
+    pub fingerprint: String,
+    pub last_slot: Option<i64>,
+    pub next_slot: Option<i64>,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ScheduleEditPatch {
-    pub title: Option<String>,
-    pub prompt_text: Option<String>,
-    pub cron_expr: Option<String>,
+pub struct ScheduleLedgerRunRecord {
+    pub run_key: String,
+    pub workspace_id: WorkspaceId,
+    pub schedule_id: String,
+    pub state: ScheduleRunState,
+    pub planned_at: i64,
+    pub payload_json: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScheduleProposalOutcome {
-    pub proposal_id: String,
-    pub schedule_id: Option<String>,
-    pub request_id: String,
-    pub base_revision: Option<u64>,
-    pub status: String,
-}
-
-pub trait ScheduleStorePort: Send + Sync {
-    fn list_schedules(
-        &self,
-        workspace_id: &WorkspaceId,
-        query: Option<&str>,
-        limit: usize,
-        offset: usize,
-    ) -> PortResult<Vec<ScheduleRecord>>;
-    fn get_schedule(
+pub trait ScheduleLedgerPort: Send + Sync {
+    fn read_planning_cursor(
         &self,
         workspace_id: &WorkspaceId,
         schedule_id: &str,
-    ) -> PortResult<Option<ScheduleRecord>>;
-    fn upsert_schedule(&self, record: &ScheduleRecord) -> PortResult<()>;
-    fn propose_schedule(
+        activation_id: &str,
+    ) -> PortResult<Option<ScheduleCursorRecord>>;
+    fn commit_planned_slot(
+        &self,
+        cursor: &ScheduleCursorRecord,
+        run: Option<&ScheduleLedgerRunRecord>,
+    ) -> PortResult<()>;
+    fn get_run(&self, run_key: &str) -> PortResult<Option<ScheduleLedgerRunRecord>>;
+    fn unfinished_runs(
         &self,
         workspace_id: &WorkspaceId,
-        author: &UserId,
-        request_id: &str,
-        title: &str,
-        prompt_text: &str,
-        cron_expr: &str,
-    ) -> PortResult<ScheduleProposalOutcome>;
-    fn propose_schedule_edit(
+    ) -> PortResult<Vec<ScheduleLedgerRunRecord>>;
+    fn transition_run(
+        &self,
+        run_key: &str,
+        allowed_from: &[ScheduleRunState],
+        next_state: ScheduleRunState,
+        updated_payload_json: &str,
+    ) -> PortResult<()>;
+    fn has_consumed_complete_message(
         &self,
         workspace_id: &WorkspaceId,
-        author: &UserId,
         schedule_id: &str,
-        request_id: &str,
-        patch: &ScheduleEditPatch,
-    ) -> PortResult<ScheduleProposalOutcome>;
-    fn pause_schedule(
-        &self,
-        workspace_id: &WorkspaceId,
-        author: &UserId,
-        schedule_id: &str,
-        request_id: &str,
     ) -> PortResult<bool>;
+    fn erase_workspace_ledger(&self, _workspace_id: &WorkspaceId) -> PortResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]
-pub struct UnavailableScheduleStore;
+pub struct UnavailableScheduleLedger;
 
-impl ScheduleStorePort for UnavailableScheduleStore {
-    fn list_schedules(
-        &self,
-        _workspace_id: &WorkspaceId,
-        _query: Option<&str>,
-        _limit: usize,
-        _offset: usize,
-    ) -> PortResult<Vec<ScheduleRecord>> {
-        Err(PortError::new(
-            PortErrorKind::Unavailable,
-            "schedule store unavailable",
-        ))
-    }
-
-    fn get_schedule(
+impl ScheduleLedgerPort for UnavailableScheduleLedger {
+    fn read_planning_cursor(
         &self,
         _workspace_id: &WorkspaceId,
         _schedule_id: &str,
-    ) -> PortResult<Option<ScheduleRecord>> {
+        _activation_id: &str,
+    ) -> PortResult<Option<ScheduleCursorRecord>> {
         Err(PortError::new(
             PortErrorKind::Unavailable,
-            "schedule store unavailable",
+            "schedule ledger unavailable",
         ))
     }
 
-    fn upsert_schedule(&self, _record: &ScheduleRecord) -> PortResult<()> {
+    fn commit_planned_slot(
+        &self,
+        _cursor: &ScheduleCursorRecord,
+        _run: Option<&ScheduleLedgerRunRecord>,
+    ) -> PortResult<()> {
         Err(PortError::new(
             PortErrorKind::Unavailable,
-            "schedule store unavailable",
+            "schedule ledger unavailable",
         ))
     }
 
-    fn propose_schedule(
+    fn get_run(&self, _run_key: &str) -> PortResult<Option<ScheduleLedgerRunRecord>> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule ledger unavailable",
+        ))
+    }
+
+    fn unfinished_runs(
         &self,
         _workspace_id: &WorkspaceId,
-        _author: &UserId,
-        _request_id: &str,
-        _title: &str,
-        _prompt_text: &str,
-        _cron_expr: &str,
-    ) -> PortResult<ScheduleProposalOutcome> {
+    ) -> PortResult<Vec<ScheduleLedgerRunRecord>> {
         Err(PortError::new(
             PortErrorKind::Unavailable,
-            "schedule store unavailable",
+            "schedule ledger unavailable",
         ))
     }
 
-    fn propose_schedule_edit(
+    fn transition_run(
+        &self,
+        _run_key: &str,
+        _allowed_from: &[ScheduleRunState],
+        _next_state: ScheduleRunState,
+        _updated_payload_json: &str,
+    ) -> PortResult<()> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule ledger unavailable",
+        ))
+    }
+
+    fn has_consumed_complete_message(
         &self,
         _workspace_id: &WorkspaceId,
-        _author: &UserId,
         _schedule_id: &str,
-        _request_id: &str,
-        _patch: &ScheduleEditPatch,
-    ) -> PortResult<ScheduleProposalOutcome> {
-        Err(PortError::new(
-            PortErrorKind::Unavailable,
-            "schedule store unavailable",
-        ))
-    }
-
-    fn pause_schedule(
-        &self,
-        _workspace_id: &WorkspaceId,
-        _author: &UserId,
-        _schedule_id: &str,
-        _request_id: &str,
     ) -> PortResult<bool> {
         Err(PortError::new(
             PortErrorKind::Unavailable,
-            "schedule store unavailable",
+            "schedule ledger unavailable",
         ))
     }
 }

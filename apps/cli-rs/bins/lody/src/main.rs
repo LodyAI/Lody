@@ -2,7 +2,7 @@
 
 use lody_acp::{ManagedArtifactInstaller, PortablePtyManager, StdioAcpLauncher};
 use lody_app::ApplicationService;
-use lody_engine::{FlockProjectStore, RepoEngineClient, RoostHistoryStore};
+use lody_engine::{EngineScheduleRepo, FlockProjectStore, RepoEngineClient, RoostHistoryStore};
 use lody_entry::{
     DispatchPlan, OneShotAction, execute_offline_oneshot, format_restore_machine_id_error,
     format_restore_machine_id_output, parse_cli_args, probe_live_daemon, serve_local_daemon,
@@ -11,12 +11,12 @@ use lody_entry::{
 use lody_env::HostEnv;
 use lody_ports::{
     BackendPort, MachineIdentityPort, ManagedArtifactSource, PortErrorKind, PortResult,
-    ScheduleStorePort, StorageLeaseMode, StorageLeasePort,
+    ScheduleLedgerPort, ScheduleRepoPort, StorageLeaseMode, StorageLeasePort,
 };
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
 use lody_sqlite::{
     FileStorageLease, LocalMachineIdentityStore, MachineIdentityConfig, SqliteDataLayout,
-    SqliteScheduleStore, SqliteStore,
+    SqliteScheduleLedgerStore, SqliteStore,
 };
 use lody_worktree::{GitWorktreeManager, LocalTurnDiffStore};
 use std::path::PathBuf;
@@ -118,8 +118,8 @@ fn compose_runtime(
 
     let diff_store = Arc::new(LocalTurnDiffStore::new(&effective_data_dir));
     let layout = SqliteDataLayout::with_machine_id(&effective_data_dir, machine_id.0.clone());
-    let schedules =
-        Arc::new(SqliteScheduleStore::open(&layout.schedules_db())?) as Arc<dyn ScheduleStorePort>;
+    let schedule_ledger = Arc::new(SqliteScheduleLedgerStore::open(&layout.schedules_db())?)
+        as Arc<dyn ScheduleLedgerPort>;
     let sqlite = Arc::new(SqliteStore::open(layout)?);
 
     Ok(DaemonRuntime::new(DaemonDependencies {
@@ -137,7 +137,8 @@ fn compose_runtime(
         history: Arc::new(RoostHistoryStore),
         inbox: sqlite as Arc<dyn lody_ports::InboxStorePort>,
         projects: Arc::new(FlockProjectStore),
-        schedules,
+        schedule_repo: Arc::new(EngineScheduleRepo) as Arc<dyn ScheduleRepoPort>,
+        schedule_ledger,
         diff_store,
         artifacts: Arc::new(
             ManagedArtifactInstaller::with_install_root(artifact_source, runtimes_root)

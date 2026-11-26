@@ -498,12 +498,16 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 generation: expected_gen,
                 user_turn_durable,
                 stale_acp_retries_used,
-                ..
+                prior_warm_agent,
             } if expected_gen == generation => {
-                state.native_activity = if agent.advertises_session_activity {
-                    NativeSessionActivity::Idle
-                } else {
+                state.native_activity = if !agent.advertises_session_activity {
                     NativeSessionActivity::Unsupported
+                } else if prior_warm_agent.is_some()
+                    && !matches!(state.native_activity, NativeSessionActivity::Unsupported)
+                {
+                    state.native_activity
+                } else {
+                    NativeSessionActivity::Idle
                 };
                 state.inbox.mark_submitted(&invocation.turn_id);
                 let prompt_text = invocation.prompt_text.clone();

@@ -319,4 +319,69 @@ fn non_worktree_diff_scope_tracks_only_uncommitted_changes_and_branch_queries_pa
             .iter()
             .any(|e| e.relative_path.starts_with("node_modules"))
     );
+
+    let rel_repo = temp.path().join("release-repo");
+    init_git_repo(&rel_repo);
+    run_git(&rel_repo, &["checkout", "-b", "release"]);
+    fs::write(
+        rel_repo.join("release_baseline.rs"),
+        "pub fn release() {}\n",
+    )
+    .unwrap();
+    run_git(&rel_repo, &["add", "release_baseline.rs"]);
+    run_git(
+        &rel_repo,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@lody.invalid",
+            "-c",
+            "commit.gpgSign=false",
+            "commit",
+            "-m",
+            "feat: release baseline commit",
+        ],
+    );
+    run_git(&rel_repo, &["checkout", "main"]);
+
+    let release_wt_lease = mgr
+        .acquire_worktree(
+            &LocalProjectId("proj-release".to_string()),
+            &rel_repo,
+            &SessionId("00000000-0000-4000-8000-000000000099".to_string()),
+            Some("release"),
+        )
+        .unwrap();
+    assert_eq!(release_wt_lease.base_branch.as_deref(), Some("release"));
+    fs::write(
+        release_wt_lease.worktree_path.join("session_only_edit.rs"),
+        "pub fn session_edit() {}\n",
+    )
+    .unwrap();
+
+    let release_wt_summary = diff_store
+        .capture_turn_snapshot(
+            &ws,
+            &SessionId("s_release_wt".to_string()),
+            &TurnId("t_rel_1".to_string()),
+            &release_wt_lease.worktree_path,
+            &DiffCaptureScope::WorktreeBranch {
+                base_branch: release_wt_lease.base_branch.clone(),
+            },
+            11_000,
+        )
+        .unwrap();
+    assert!(
+        !release_wt_summary
+            .files
+            .iter()
+            .any(|f| f.relative_path == "release_baseline.rs")
+    );
+    assert!(
+        release_wt_summary
+            .files
+            .iter()
+            .any(|f| f.relative_path == "session_only_edit.rs")
+    );
 }

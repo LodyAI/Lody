@@ -166,6 +166,7 @@ pub struct WorktreeLease {
     pub session_id: SessionId,
     pub project_id: LocalProjectId,
     pub branch_name: String,
+    pub base_branch: Option<String>,
     pub worktree_path: PathBuf,
 }
 

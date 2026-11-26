@@ -3,7 +3,9 @@
 use lody_ports::{
     EnginePort, EpochKeyMaterial, HistoryPort, HistoryTurnRecord, LocalProjectId,
     LocalProjectRecord, PortError, PortErrorKind, PortResult, ProjectStorePort, QueuedDraftItem,
-    SessionId, SessionMetaSnapshot, TurnId, WorkspaceId, WorkspaceSecurityMode,
+    ScheduleEditPatch, ScheduleProposalInput, ScheduleProposalOutcome, ScheduleRecord,
+    ScheduleRepoPort, SessionId, SessionMetaSnapshot, TurnId, UserId, WorkspaceId,
+    WorkspaceSecurityMode,
 };
 use std::path::{Path, PathBuf};
 
@@ -92,6 +94,59 @@ impl ProjectStorePort for FlockProjectStore {
 
     fn list_projects(&self) -> PortResult<Vec<LocalProjectRecord>> {
         Err(not_wired("Flock project catalog"))
+    }
+}
+
+#[derive(Default)]
+pub struct EngineScheduleRepo;
+
+impl ScheduleRepoPort for EngineScheduleRepo {
+    fn list_schedules(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _query: Option<&str>,
+        _limit: usize,
+        _offset: usize,
+    ) -> PortResult<Vec<ScheduleRecord>> {
+        Err(not_wired("Loro/Flock schedule repository"))
+    }
+
+    fn get_schedule(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _schedule_id: &str,
+    ) -> PortResult<Option<ScheduleRecord>> {
+        Err(not_wired("Loro/Flock schedule repository"))
+    }
+
+    fn propose_schedule(
+        &self,
+        _input: &ScheduleProposalInput,
+    ) -> PortResult<ScheduleProposalOutcome> {
+        Err(not_wired("Loro/Flock schedule proposal channel"))
+    }
+
+    fn propose_schedule_edit(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _invoking_session_id: &SessionId,
+        _author: &UserId,
+        _schedule_id: &str,
+        _request_id: &str,
+        _patch: &ScheduleEditPatch,
+    ) -> PortResult<ScheduleProposalOutcome> {
+        Err(not_wired("Loro/Flock schedule proposal channel"))
+    }
+
+    fn pause_schedule(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _invoking_session_id: Option<&SessionId>,
+        _author: &UserId,
+        _schedule_id: &str,
+        _request_id: &str,
+    ) -> PortResult<bool> {
+        Err(not_wired("Loro/Flock schedule registry"))
     }
 }
 

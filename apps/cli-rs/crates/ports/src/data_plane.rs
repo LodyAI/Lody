@@ -1,10 +1,72 @@
 #![forbid(unsafe_code)]
 
-use crate::error::PortResult;
+use crate::error::{PortError, PortErrorKind, PortResult};
 use crate::identity::{
     LocalProjectId, MachineId, SessionId, TurnId, UserId, WorkspaceId, WorkspaceSecurityMode,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+pub const MAX_SCHEDULE_PROMPT_BYTES: usize = 32 * 1024;
+
+pub fn validate_schedule_identifier(label: &str, raw: &str) -> PortResult<String> {
+    let trimmed = raw.trim();
+    let valid = !trimmed.is_empty()
+        && trimmed.len() <= 50
+        && trimmed
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    if !valid {
+        return Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            format!("{label} must be 1..=50 ASCII [a-zA-Z0-9_-] characters"),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+pub fn validate_schedule_title(raw: &str) -> PortResult<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 200 {
+        return Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            "schedule title must be 1..=200 non-blank characters",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+pub fn validate_schedule_prompt(raw: &str) -> PortResult<()> {
+    if raw.trim().is_empty() {
+        return Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            "schedule prompt cannot be blank",
+        ));
+    }
+    if raw.len() > MAX_SCHEDULE_PROMPT_BYTES {
+        return Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            format!("schedule prompt exceeds {MAX_SCHEDULE_PROMPT_BYTES} bytes"),
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_schedule_rule(rule: &Value) -> PortResult<()> {
+    let Some(obj) = rule.as_object() else {
+        return Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            "schedule rule must be a structured named rule object, not a raw cron string",
+        ));
+    };
+    if obj.is_empty() {
+        return Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            "schedule rule object cannot be empty",
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -29,8 +91,11 @@ pub struct SessionMetaSnapshot {
     pub workspace_id: WorkspaceId,
     pub session_id: SessionId,
     pub root_session_id: SessionId,
+    pub owner_user_id: UserId,
     pub owner_machine_id: MachineId,
+    pub deleted: bool,
     pub local_project_id: Option<LocalProjectId>,
+    pub base_branch: Option<String>,
     pub title: Option<String>,
     pub status: SessionRunStatus,
     pub queue_paused: bool,
@@ -135,5 +200,153 @@ pub trait HistoryPort: Send + Sync {
     ) -> PortResult<()>;
     fn erase_workspace_turns(&self, _workspace_id: &WorkspaceId) -> PortResult<()> {
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleRecord {
+    pub schedule_id: String,
+    pub workspace_id: WorkspaceId,
+    pub session_id: Option<SessionId>,
+    pub author_user_id: UserId,
+    pub title: String,
+    pub rule: Value,
+    pub prompt_text: String,
+    pub enabled: bool,
+    pub content_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleEditPatch {
+    pub title: Option<String>,
+    pub prompt_text: Option<String>,
+    pub rule: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleProposalInput {
+    pub workspace_id: WorkspaceId,
+    pub invoking_session_id: SessionId,
+    pub author: UserId,
+    pub request_id: String,
+    pub title: String,
+    pub prompt_text: String,
+    pub rule: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleProposalOutcome {
+    pub proposal_id: String,
+    pub schedule_id: Option<String>,
+    pub request_id: String,
+    pub base_revision: Option<u64>,
+    pub status: String,
+}
+
+pub trait ScheduleRepoPort: Send + Sync {
+    fn list_schedules(
+        &self,
+        workspace_id: &WorkspaceId,
+        query: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> PortResult<Vec<ScheduleRecord>>;
+    fn get_schedule(
+        &self,
+        workspace_id: &WorkspaceId,
+        schedule_id: &str,
+    ) -> PortResult<Option<ScheduleRecord>>;
+    fn propose_schedule(
+        &self,
+        input: &ScheduleProposalInput,
+    ) -> PortResult<ScheduleProposalOutcome>;
+    fn propose_schedule_edit(
+        &self,
+        workspace_id: &WorkspaceId,
+        invoking_session_id: &SessionId,
+        author: &UserId,
+        schedule_id: &str,
+        request_id: &str,
+        patch: &ScheduleEditPatch,
+    ) -> PortResult<ScheduleProposalOutcome>;
+    fn pause_schedule(
+        &self,
+        workspace_id: &WorkspaceId,
+        invoking_session_id: Option<&SessionId>,
+        author: &UserId,
+        schedule_id: &str,
+        request_id: &str,
+    ) -> PortResult<bool>;
+}
+
+#[derive(Default)]
+pub struct UnavailableScheduleRepo;
+
+impl ScheduleRepoPort for UnavailableScheduleRepo {
+    fn list_schedules(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _query: Option<&str>,
+        _limit: usize,
+        _offset: usize,
+    ) -> PortResult<Vec<ScheduleRecord>> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule repository unavailable",
+        ))
+    }
+
+    fn get_schedule(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _schedule_id: &str,
+    ) -> PortResult<Option<ScheduleRecord>> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule repository unavailable",
+        ))
+    }
+
+    fn propose_schedule(
+        &self,
+        _input: &ScheduleProposalInput,
+    ) -> PortResult<ScheduleProposalOutcome> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule repository unavailable",
+        ))
+    }
+
+    fn propose_schedule_edit(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _invoking_session_id: &SessionId,
+        _author: &UserId,
+        _schedule_id: &str,
+        _request_id: &str,
+        _patch: &ScheduleEditPatch,
+    ) -> PortResult<ScheduleProposalOutcome> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule repository unavailable",
+        ))
+    }
+
+    fn pause_schedule(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _invoking_session_id: Option<&SessionId>,
+        _author: &UserId,
+        _schedule_id: &str,
+        _request_id: &str,
+    ) -> PortResult<bool> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule repository unavailable",
+        ))
     }
 }

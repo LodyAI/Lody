@@ -16,8 +16,11 @@ pub use backend::{
     WellKnownDiscoveryDocument, derive_recovery_service_locator,
 };
 pub use data_plane::{
-    EnginePort, EpochKeyMaterial, HistoryBlock, HistoryPort, HistoryTurnRecord, QueuedDraftItem,
-    SessionMetaSnapshot, SessionRunStatus, TurnTerminalOutcome,
+    EnginePort, EpochKeyMaterial, HistoryBlock, HistoryPort, HistoryTurnRecord,
+    MAX_SCHEDULE_PROMPT_BYTES, QueuedDraftItem, ScheduleEditPatch, ScheduleProposalInput,
+    ScheduleProposalOutcome, ScheduleRecord, ScheduleRepoPort, SessionMetaSnapshot,
+    SessionRunStatus, TurnTerminalOutcome, UnavailableScheduleRepo, validate_schedule_identifier,
+    validate_schedule_prompt, validate_schedule_rule, validate_schedule_title,
 };
 pub use error::{PortError, PortErrorKind, PortResult};
 pub use execution::{
@@ -39,8 +42,7 @@ pub use identity::{
 pub use storage::{
     AdmissionVerdict, AdmittedTurnInput, AutomationProgramRecord, AutomationStorePort,
     DelegatedResultRecord, DiffCaptureScope, DiffFileEntry, DiffStorePort, InboxCategory,
-    InboxStorePort, LocalProjectRecord, MAX_SCHEDULE_PROMPT_BYTES, ProjectStorePort,
-    ScheduleEditPatch, ScheduleProposalOutcome, ScheduleRecord, ScheduleStorePort,
-    StorageLeaseMode, StorageLeasePort, SubmissionStage, TurnDiffCompression, TurnDiffEventInput,
-    TurnDiffSummary, UnavailableScheduleStore,
+    InboxStorePort, LocalProjectRecord, ProjectStorePort, ScheduleCursorRecord, ScheduleLedgerPort,
+    ScheduleLedgerRunRecord, ScheduleRunState, StorageLeaseMode, StorageLeasePort, SubmissionStage,
+    TurnDiffCompression, TurnDiffEventInput, TurnDiffSummary, UnavailableScheduleLedger,
 };

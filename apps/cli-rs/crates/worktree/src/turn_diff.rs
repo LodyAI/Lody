@@ -1619,14 +1619,44 @@ fn read_git_revision_file(workdir: &Path, rev: &str, rel_path: &str) -> Option<S
     String::from_utf8(out.stdout).ok()
 }
 
-fn resolve_worktree_merge_base(workdir: &Path, explicit_base: Option<&str>) -> Option<String> {
-    let candidates: Vec<&str> = match explicit_base {
-        Some(b) if !b.trim().is_empty() => vec![b.trim()],
-        _ => vec!["origin/HEAD", "main", "master"],
+pub fn git_diff_base_ref_candidates(preferred_base_branch: Option<&str>) -> Vec<String> {
+    let mut out = Vec::with_capacity(7);
+    let mut push_unique = |candidate: String| {
+        if !candidate.is_empty() && !out.contains(&candidate) {
+            out.push(candidate);
+        }
     };
-    for base in candidates {
+
+    if let Some(preferred) = preferred_base_branch
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if preferred.starts_with("refs/remotes/") {
+            push_unique(preferred.to_string());
+        } else {
+            let branch = preferred.strip_prefix("refs/heads/").unwrap_or(preferred);
+            push_unique(format!("origin/{branch}"));
+            push_unique(preferred.to_string());
+        }
+    }
+
+    for fallback in [
+        "origin/HEAD",
+        "origin/main",
+        "main",
+        "origin/master",
+        "master",
+    ] {
+        push_unique(fallback.to_string());
+    }
+    out
+}
+
+fn resolve_worktree_merge_base(workdir: &Path, explicit_base: Option<&str>) -> Option<String> {
+    let candidates = git_diff_base_ref_candidates(explicit_base);
+    for base in &candidates {
         let Ok(out) = Command::new("git")
-            .args(["merge-base", base, "HEAD"])
+            .args(["merge-base", base.as_str(), "HEAD"])
             .current_dir(workdir)
             .stdin(Stdio::null())
             .stderr(Stdio::null())

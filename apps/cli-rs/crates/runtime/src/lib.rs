@@ -11,15 +11,18 @@ pub use actor::{
 use lody_app::{
     AppCommand, AppQuery, AppResponse, ApplicationService, AttachedWorkspaceView, CapabilitySet,
     CustomCommandSpec, DaemonStatusView, HistoryTurnRecord, LocalProjectId, MachineId,
-    McpHttpEndpointConfig, PortError, PortErrorKind, PortResult, ProfileId, SessionId,
-    SessionRuntimeStatus, StorageLeaseMode, TerminalEventSink, TurnId, UserId, VerifiedPrincipal,
-    WorkspaceId, WorkspaceSecurityMode, enforce_command_policy,
+    McpHttpEndpointConfig, PortError, PortErrorKind, PortResult, ProfileId, ScheduleEditPatch,
+    SessionId, SessionRuntimeStatus, StorageLeaseMode, TerminalEventSink, TurnId, UserId,
+    VerifiedPrincipal, WorkspaceId, WorkspaceSecurityMode, enforce_command_policy,
+    enforce_query_policy,
 };
 use lody_kernel::{ChildRejectReason, FrozenTurnInvocation, SessionPhase, TurnSourceKind};
 use lody_ports::{
     AcpLauncherPort, AdmittedTurnInput, ArtifactRegistryPort, BackendPort, DiffStorePort,
     EnginePort, HistoryPort, InboxCategory, InboxStorePort, MachineIdentityPort, ProjectStorePort,
-    PtyPort, ScheduleStorePort, StorageLeasePort, TerminalOpenSpec, WorktreePort,
+    PtyPort, ScheduleLedgerPort, ScheduleProposalInput, ScheduleRepoPort, StorageLeasePort,
+    TerminalOpenSpec, WorktreePort, validate_schedule_identifier, validate_schedule_prompt,
+    validate_schedule_rule, validate_schedule_title,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -46,7 +49,8 @@ pub struct DaemonDependencies {
     pub history: Arc<dyn HistoryPort>,
     pub inbox: Arc<dyn InboxStorePort>,
     pub projects: Arc<dyn ProjectStorePort>,
-    pub schedules: Arc<dyn ScheduleStorePort>,
+    pub schedule_repo: Arc<dyn ScheduleRepoPort>,
+    pub schedule_ledger: Arc<dyn ScheduleLedgerPort>,
     pub diff_store: Arc<dyn DiffStorePort>,
     pub artifacts: Arc<dyn ArtifactRegistryPort>,
     pub acp: Arc<dyn AcpLauncherPort>,
@@ -206,6 +210,17 @@ impl DaemonRuntime {
             .attach_or_update(workspace_id, mode)
     }
 
+    fn erase_local_workspace_stores(&self, workspace_id: &WorkspaceId) -> PortResult<()> {
+        self.deps.inbox.erase_workspace_inbox(workspace_id)?;
+        self.deps.diff_store.erase_workspace_diffs(workspace_id)?;
+        ignore_unwired(
+            self.deps
+                .schedule_ledger
+                .erase_workspace_ledger(workspace_id),
+        )?;
+        ignore_unwired(self.deps.history.erase_workspace_turns(workspace_id))
+    }
+
     pub async fn detach_workspace(
         &self,
         workspace_id: &WorkspaceId,
@@ -220,9 +235,7 @@ impl DaemonRuntime {
         match disposition {
             DetachDisposition::Absent => {
                 if erase_local_state {
-                    self.deps.inbox.erase_workspace_inbox(workspace_id)?;
-                    self.deps.diff_store.erase_workspace_diffs(workspace_id)?;
-                    ignore_unwired(self.deps.history.erase_workspace_turns(workspace_id))?;
+                    self.erase_local_workspace_stores(workspace_id)?;
                 }
                 Ok(0)
             }
@@ -244,13 +257,7 @@ impl DaemonRuntime {
                 }
 
                 let erase_res = if erase_local_state {
-                    self.deps
-                        .inbox
-                        .erase_workspace_inbox(workspace_id)
-                        .and_then(|()| self.deps.diff_store.erase_workspace_diffs(workspace_id))
-                        .and_then(|()| {
-                            ignore_unwired(self.deps.history.erase_workspace_turns(workspace_id))
-                        })
+                    self.erase_local_workspace_stores(workspace_id)
                 } else {
                     Ok(())
                 };
@@ -275,6 +282,7 @@ impl DaemonRuntime {
         depth: u8,
         local_project_id: Option<LocalProjectId>,
         explicit_project_root: Option<PathBuf>,
+        explicit_base_branch: Option<String>,
         use_worktree: bool,
         custom_acp: Option<CustomCommandSpec>,
         parent_delegation: Option<ParentDelegationTarget>,
@@ -296,6 +304,23 @@ impl DaemonRuntime {
             },
         };
 
+        let base_branch = explicit_base_branch
+            .and_then(|b| {
+                let trimmed = b.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            })
+            .or_else(|| {
+                if !use_worktree {
+                    return None;
+                }
+                self.deps
+                    .engine
+                    .read_session_meta(workspace_id, session_id)
+                    .ok()
+                    .flatten()
+                    .and_then(|m| m.base_branch)
+            });
+
         let mut guard = self.workspaces.write().expect("workspaces lock");
         let mount = guard.get_or_insert_mount(workspace_id, engine_mode)?;
         if let Some(existing) = mount.sessions.get(session_id) {
@@ -312,6 +337,7 @@ impl DaemonRuntime {
                 depth,
                 local_project_id,
                 project_root,
+                base_branch,
                 use_worktree,
                 custom_acp,
                 parent_delegation,
@@ -325,33 +351,116 @@ impl DaemonRuntime {
         Ok(handle)
     }
 
-    fn verified_requester(caller: &VerifiedPrincipal) -> UserId {
-        caller
-            .effective_user_id()
-            .cloned()
-            .unwrap_or_else(|| UserId("local-host".to_string()))
+    async fn resolve_session_dispatch_requester(
+        &self,
+        caller: &VerifiedPrincipal,
+    ) -> PortResult<UserId> {
+        match caller {
+            VerifiedPrincipal::AgentSession {
+                workspace_id,
+                session_id,
+                machine_id,
+                account_id,
+            } => {
+                if machine_id != &self.deps.machine_id {
+                    return Err(PortError::new(
+                        PortErrorKind::Forbidden,
+                        "agent session machineId does not match this host",
+                    ));
+                }
+                if let Some(uid) = account_id {
+                    return Ok(uid.clone());
+                }
+                if let Some(handle) = self.session_handle(workspace_id, session_id)
+                    && let Ok(Some(uid)) = handle.inspect_driving_user().await
+                {
+                    return Ok(uid);
+                }
+                if let Ok(Some(meta)) = self.deps.engine.read_session_meta(workspace_id, session_id)
+                    && !meta.deleted
+                    && &meta.workspace_id == workspace_id
+                    && meta.owner_machine_id == self.deps.machine_id
+                {
+                    return Ok(meta.owner_user_id);
+                }
+                Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "invoking agent session is not active on this host",
+                ))
+            }
+            _ => Ok(caller
+                .effective_user_id()
+                .cloned()
+                .unwrap_or_else(|| UserId("local-host".to_string()))),
+        }
     }
 
-    fn caller_invocation(
+    async fn authorize_schedule_caller(
+        &self,
         caller: &VerifiedPrincipal,
-        turn_id: &str,
-        adapter_id: &str,
-        prompt: String,
-    ) -> FrozenTurnInvocation {
-        let requester_user_id = Self::verified_requester(caller).0;
-        let signed_intent_verified = matches!(
-            caller,
-            VerifiedPrincipal::LocalHost { .. } | VerifiedPrincipal::EncryptedMember { .. }
-        );
-        FrozenTurnInvocation {
-            turn_id: turn_id.to_string(),
-            requester_user_id,
-            prompt_text: prompt,
-            source: TurnSourceKind::Human,
-            adapter_id: adapter_id.to_string(),
-            mcp_selection_digest: "default".to_string(),
-            signed_intent_verified,
+        workspace_id: &WorkspaceId,
+        invoking_session_id: Option<&SessionId>,
+    ) -> PortResult<UserId> {
+        let effective_session_id = match caller {
+            VerifiedPrincipal::AgentSession {
+                session_id,
+                machine_id,
+                ..
+            } => {
+                if machine_id != &self.deps.machine_id {
+                    return Err(PortError::new(
+                        PortErrorKind::Forbidden,
+                        "Schedule tools require the invoking Session owner",
+                    ));
+                }
+                Some(session_id)
+            }
+            _ => invoking_session_id,
+        };
+
+        if let Some(sid) = effective_session_id {
+            let meta_opt = self.deps.engine.read_session_meta(workspace_id, sid)?;
+            let Some(meta) = meta_opt else {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "Schedule tools require the invoking Session owner",
+                ));
+            };
+            if meta.deleted
+                || &meta.workspace_id != workspace_id
+                || meta.owner_machine_id != self.deps.machine_id
+            {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "Schedule tools require the invoking Session owner",
+                ));
+            }
+            if let Some(caller_uid) = caller.effective_user_id()
+                && caller_uid != &meta.owner_user_id
+            {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "Schedule tools require the invoking Session owner",
+                ));
+            }
+            if let Some(handle) = self.session_handle(workspace_id, sid)
+                && let Ok(Some(driving_uid)) = handle.inspect_driving_user().await
+                && driving_uid != meta.owner_user_id
+            {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "Schedule tools require the invoking Session owner",
+                ));
+            }
+            return Ok(meta.owner_user_id);
         }
+
+        caller.effective_user_id().cloned().ok_or_else(|| {
+            PortError::new(
+                PortErrorKind::Unauthorized,
+                "Schedule commands require a verified user identity",
+            )
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -364,16 +473,19 @@ impl DaemonRuntime {
         depth: u8,
         local_project_id: Option<LocalProjectId>,
         explicit_project_root: Option<PathBuf>,
+        explicit_base_branch: Option<String>,
         use_worktree: bool,
         adapter_id: String,
         custom_acp: Option<CustomCommandSpec>,
         parent_delegation: Option<ParentDelegationTarget>,
         prompt: String,
     ) -> PortResult<AppResponse> {
-        let requester = Self::verified_requester(caller);
+        let requester = self.resolve_session_dispatch_requester(caller).await?;
         let signed_intent_verified = matches!(
             caller,
-            VerifiedPrincipal::LocalHost { .. } | VerifiedPrincipal::EncryptedMember { .. }
+            VerifiedPrincipal::LocalHost { .. }
+                | VerifiedPrincipal::AgentSession { .. }
+                | VerifiedPrincipal::EncryptedMember { .. }
         );
         let _ = self.deps.inbox.admit_turn(&AdmittedTurnInput {
             workspace_id: workspace_id.clone(),
@@ -416,6 +528,7 @@ impl DaemonRuntime {
             depth,
             local_project_id,
             explicit_project_root,
+            explicit_base_branch,
             use_worktree,
             custom_acp,
             parent_delegation,
@@ -504,6 +617,7 @@ impl DaemonRuntime {
                 session_id,
                 turn_id,
                 local_project_id,
+                base_branch,
                 use_worktree,
                 adapter_id,
                 custom_acp,
@@ -517,6 +631,7 @@ impl DaemonRuntime {
                     0,
                     local_project_id,
                     None,
+                    base_branch,
                     use_worktree,
                     adapter_id,
                     custom_acp,
@@ -545,6 +660,7 @@ impl DaemonRuntime {
                     0,
                     None,
                     None,
+                    None,
                     false,
                     adapter_id,
                     custom_acp,
@@ -559,10 +675,25 @@ impl DaemonRuntime {
                 turn_id,
                 prompt,
             } => {
+                let requester = self.resolve_session_dispatch_requester(caller).await?;
                 let handle = self
                     .session_handle(&workspace_id, &session_id)
                     .ok_or_else(|| PortError::new(PortErrorKind::NotFound, "session not active"))?;
-                let invocation = Self::caller_invocation(caller, &turn_id.0, "default", prompt);
+                let signed_intent_verified = matches!(
+                    caller,
+                    VerifiedPrincipal::LocalHost { .. }
+                        | VerifiedPrincipal::AgentSession { .. }
+                        | VerifiedPrincipal::EncryptedMember { .. }
+                );
+                let invocation = FrozenTurnInvocation {
+                    turn_id: turn_id.0,
+                    requester_user_id: requester.0,
+                    prompt_text: prompt,
+                    source: TurnSourceKind::Human,
+                    adapter_id: "default".to_string(),
+                    mcp_selection_digest: "default".to_string(),
+                    signed_intent_verified,
+                };
                 let verdict = handle.steer(invocation).await?;
                 Ok(AppResponse::TurnSteered {
                     session_id,
@@ -574,6 +705,7 @@ impl DaemonRuntime {
                 session_id,
                 pause_inbox,
             } => {
+                let _ = self.resolve_session_dispatch_requester(caller).await?;
                 if let Some(handle) = self.session_handle(&workspace_id, &session_id) {
                     handle.cancel(pause_inbox).await?;
                 } else {
@@ -659,6 +791,7 @@ impl DaemonRuntime {
                     grant.child_depth,
                     None,
                     grant.inherited_project_root,
+                    None,
                     false,
                     adapter_id,
                     effective_custom,
@@ -684,52 +817,97 @@ impl DaemonRuntime {
             }
             AppCommand::ProposeSchedule {
                 workspace_id,
+                invoking_session_id,
                 request_id,
                 title,
                 prompt_text,
-                cron_expr,
+                rule,
             } => {
-                let author = Self::verified_requester(caller);
-                let out = self.deps.schedules.propose_schedule(
-                    &workspace_id,
-                    &author,
-                    &request_id,
-                    &title,
-                    &prompt_text,
-                    &cron_expr,
-                )?;
+                let author = self
+                    .authorize_schedule_caller(caller, &workspace_id, Some(&invoking_session_id))
+                    .await?;
+                let valid_req = validate_schedule_identifier("requestId", &request_id)?;
+                let valid_title = validate_schedule_title(&title)?;
+                validate_schedule_prompt(&prompt_text)?;
+                validate_schedule_rule(&rule)?;
+                let out = self
+                    .deps
+                    .schedule_repo
+                    .propose_schedule(&ScheduleProposalInput {
+                        workspace_id,
+                        invoking_session_id,
+                        author,
+                        request_id: valid_req,
+                        title: valid_title,
+                        prompt_text,
+                        rule,
+                    })?;
                 Ok(AppResponse::ScheduleProposed(out))
             }
             AppCommand::ProposeScheduleEdit {
                 workspace_id,
+                invoking_session_id,
                 schedule_id,
                 request_id,
                 patch,
             } => {
-                let author = Self::verified_requester(caller);
-                let out = self.deps.schedules.propose_schedule_edit(
+                let author = self
+                    .authorize_schedule_caller(caller, &workspace_id, Some(&invoking_session_id))
+                    .await?;
+                let valid_sched = validate_schedule_identifier("scheduleId", &schedule_id)?;
+                let valid_req = validate_schedule_identifier("requestId", &request_id)?;
+                let normalized_title = match &patch.title {
+                    Some(t) => Some(validate_schedule_title(t)?),
+                    None => None,
+                };
+                if let Some(p) = &patch.prompt_text {
+                    validate_schedule_prompt(p)?;
+                }
+                if let Some(r) = &patch.rule {
+                    validate_schedule_rule(r)?;
+                }
+                if normalized_title.is_none() && patch.prompt_text.is_none() && patch.rule.is_none()
+                {
+                    return Err(PortError::new(
+                        PortErrorKind::InvalidInput,
+                        "propose_edit requires at least one of title, prompt, or rule",
+                    ));
+                }
+                let normalized_patch = ScheduleEditPatch {
+                    title: normalized_title,
+                    prompt_text: patch.prompt_text,
+                    rule: patch.rule,
+                };
+                let out = self.deps.schedule_repo.propose_schedule_edit(
                     &workspace_id,
+                    &invoking_session_id,
                     &author,
-                    &schedule_id,
-                    &request_id,
-                    &patch,
+                    &valid_sched,
+                    &valid_req,
+                    &normalized_patch,
                 )?;
                 Ok(AppResponse::ScheduleProposed(out))
             }
             AppCommand::PauseSchedule {
                 workspace_id,
+                invoking_session_id,
                 schedule_id,
                 request_id,
             } => {
-                let author = Self::verified_requester(caller);
-                let changed = self.deps.schedules.pause_schedule(
+                let author = self
+                    .authorize_schedule_caller(caller, &workspace_id, invoking_session_id.as_ref())
+                    .await?;
+                let valid_sched = validate_schedule_identifier("scheduleId", &schedule_id)?;
+                let valid_req = validate_schedule_identifier("requestId", &request_id)?;
+                let changed = self.deps.schedule_repo.pause_schedule(
                     &workspace_id,
+                    invoking_session_id.as_ref(),
                     &author,
-                    &schedule_id,
-                    &request_id,
+                    &valid_sched,
+                    &valid_req,
                 )?;
                 Ok(AppResponse::SchedulePaused {
-                    schedule_id,
+                    schedule_id: valid_sched,
                     changed,
                 })
             }
@@ -788,61 +966,99 @@ impl DaemonRuntime {
         caller: &VerifiedPrincipal,
         query: AppQuery,
     ) -> PortResult<AppResponse> {
-        if let AppQuery::GetSessionStatuses {
-            workspace_id,
-            session_ids,
-        } = query
-        {
-            let now_ms = current_epoch_ms_u64();
-            let mut statuses = Vec::with_capacity(session_ids.len());
-            for sid in session_ids {
-                if let Some(handle) = self.session_handle(&workspace_id, &sid)
-                    && let Ok((phase, live_out_of_turn)) = handle.inspect_status(now_ms).await
-                {
-                    let (exec_state, phase_str, active_turn_id) = match phase {
-                        SessionPhase::Idle { .. } if live_out_of_turn => ("busy", "running", None),
-                        SessionPhase::Idle { .. } => ("idle", "idle", None),
-                        SessionPhase::Preparing { invocation, .. } => {
-                            ("busy", "initializing", Some(TurnId(invocation.turn_id)))
-                        }
-                        SessionPhase::Running(running) => {
-                            let p = if running.pending_permissions.is_empty() {
-                                "running"
-                            } else {
-                                "waiting_permission"
-                            };
-                            ("busy", p, Some(TurnId(running.invocation.turn_id)))
-                        }
-                        SessionPhase::Settling { invocation, .. } => {
-                            ("busy", "settling", Some(TurnId(invocation.turn_id)))
-                        }
-                        SessionPhase::EditAndResendBarrier {
-                            replacement_invocation,
-                            ..
-                        } => (
-                            "busy",
-                            "initializing",
-                            Some(TurnId(replacement_invocation.turn_id)),
-                        ),
-                    };
-                    statuses.push(SessionRuntimeStatus {
-                        session_id: sid,
-                        execution_state: exec_state.to_string(),
-                        phase: phase_str.to_string(),
-                        active_turn_id,
-                    });
-                } else {
-                    statuses.push(SessionRuntimeStatus {
-                        session_id: sid,
-                        execution_state: "idle".to_string(),
-                        phase: "idle".to_string(),
-                        active_turn_id: None,
-                    });
+        enforce_query_policy(caller, &query)?;
+
+        match query {
+            AppQuery::GetSessionStatuses {
+                workspace_id,
+                session_ids,
+            } => {
+                let now_ms = current_epoch_ms_u64();
+                let mut statuses = Vec::with_capacity(session_ids.len());
+                for sid in session_ids {
+                    if let Some(handle) = self.session_handle(&workspace_id, &sid)
+                        && let Ok((phase, live_out_of_turn)) = handle.inspect_status(now_ms).await
+                    {
+                        let (exec_state, phase_str, active_turn_id) = match phase {
+                            SessionPhase::Idle { .. } if live_out_of_turn => {
+                                ("busy", "running", None)
+                            }
+                            SessionPhase::Idle { .. } => ("idle", "idle", None),
+                            SessionPhase::Preparing { invocation, .. } => {
+                                ("busy", "initializing", Some(TurnId(invocation.turn_id)))
+                            }
+                            SessionPhase::Running(running) => {
+                                let p = if running.pending_permissions.is_empty() {
+                                    "running"
+                                } else {
+                                    "waiting_permission"
+                                };
+                                ("busy", p, Some(TurnId(running.invocation.turn_id)))
+                            }
+                            SessionPhase::Settling { invocation, .. } => {
+                                ("busy", "settling", Some(TurnId(invocation.turn_id)))
+                            }
+                            SessionPhase::EditAndResendBarrier {
+                                replacement_invocation,
+                                ..
+                            } => (
+                                "busy",
+                                "initializing",
+                                Some(TurnId(replacement_invocation.turn_id)),
+                            ),
+                        };
+                        statuses.push(SessionRuntimeStatus {
+                            session_id: sid,
+                            execution_state: exec_state.to_string(),
+                            phase: phase_str.to_string(),
+                            active_turn_id,
+                        });
+                    } else {
+                        statuses.push(SessionRuntimeStatus {
+                            session_id: sid,
+                            execution_state: "idle".to_string(),
+                            phase: "idle".to_string(),
+                            active_turn_id: None,
+                        });
+                    }
                 }
+                Ok(AppResponse::SessionStatuses { statuses })
             }
-            return Ok(AppResponse::SessionStatuses { statuses });
+            AppQuery::ListSchedules {
+                workspace_id,
+                invoking_session_id,
+                filter_query,
+                limit,
+                offset,
+            } => {
+                let _author = self
+                    .authorize_schedule_caller(caller, &workspace_id, invoking_session_id.as_ref())
+                    .await?;
+                let schedules = self.deps.schedule_repo.list_schedules(
+                    &workspace_id,
+                    filter_query.as_deref(),
+                    limit,
+                    offset,
+                )?;
+                Ok(AppResponse::SchedulesListed { schedules })
+            }
+            AppQuery::GetSchedule {
+                workspace_id,
+                invoking_session_id,
+                schedule_id,
+            } => {
+                let _author = self
+                    .authorize_schedule_caller(caller, &workspace_id, invoking_session_id.as_ref())
+                    .await?;
+                let valid_id = validate_schedule_identifier("scheduleId", &schedule_id)?;
+                let schedule = self
+                    .deps
+                    .schedule_repo
+                    .get_schedule(&workspace_id, &valid_id)?;
+                Ok(AppResponse::ScheduleRead { schedule })
+            }
+            other => self.query_sync(caller, other),
         }
-        self.query_sync(caller, query)
     }
 
     pub async fn shutdown(&self) {
@@ -857,7 +1073,9 @@ impl DaemonRuntime {
         }
     }
 
-    fn query_sync(&self, _caller: &VerifiedPrincipal, query: AppQuery) -> PortResult<AppResponse> {
+    fn query_sync(&self, caller: &VerifiedPrincipal, query: AppQuery) -> PortResult<AppResponse> {
+        enforce_query_policy(caller, &query)?;
+
         match query {
             AppQuery::DaemonStatus => {
                 let (active_profile_id, server_origin) = match &self.deps.backend {
@@ -896,8 +1114,14 @@ impl DaemonRuntime {
                 let projects = self.deps.projects.list_projects()?;
                 Ok(AppResponse::ProjectsListed { projects })
             }
-            AppQuery::InspectProjectGitSummary { root_path } => {
-                let summary = self.deps.worktree.inspect_git_summary(&root_path);
+            AppQuery::InspectProjectGitSummary {
+                local_project_id,
+                root_path,
+                ..
+            } => {
+                let resolved_root =
+                    self.resolve_project_root_for_query(local_project_id.as_ref(), root_path)?;
+                let summary = self.deps.worktree.inspect_git_summary(&resolved_root);
                 Ok(AppResponse::ProjectGitSummary(summary))
             }
             AppQuery::ListProjectBranches {
@@ -977,11 +1201,26 @@ impl DaemonRuntime {
             }
             AppQuery::ListSchedules {
                 workspace_id,
+                invoking_session_id,
                 filter_query,
                 limit,
                 offset,
             } => {
-                let schedules = self.deps.schedules.list_schedules(
+                if invoking_session_id.is_some()
+                    || matches!(caller, VerifiedPrincipal::AgentSession { .. })
+                {
+                    return Err(PortError::new(
+                        PortErrorKind::Internal,
+                        "session-bound schedule queries require async runtime execution",
+                    ));
+                }
+                let _uid = caller.effective_user_id().ok_or_else(|| {
+                    PortError::new(
+                        PortErrorKind::Unauthorized,
+                        "Schedule commands require a verified user identity",
+                    )
+                })?;
+                let schedules = self.deps.schedule_repo.list_schedules(
                     &workspace_id,
                     filter_query.as_deref(),
                     limit,
@@ -991,12 +1230,28 @@ impl DaemonRuntime {
             }
             AppQuery::GetSchedule {
                 workspace_id,
+                invoking_session_id,
                 schedule_id,
             } => {
+                if invoking_session_id.is_some()
+                    || matches!(caller, VerifiedPrincipal::AgentSession { .. })
+                {
+                    return Err(PortError::new(
+                        PortErrorKind::Internal,
+                        "session-bound schedule queries require async runtime execution",
+                    ));
+                }
+                let _uid = caller.effective_user_id().ok_or_else(|| {
+                    PortError::new(
+                        PortErrorKind::Unauthorized,
+                        "Schedule commands require a verified user identity",
+                    )
+                })?;
+                let valid_id = validate_schedule_identifier("scheduleId", &schedule_id)?;
                 let schedule = self
                     .deps
-                    .schedules
-                    .get_schedule(&workspace_id, &schedule_id)?;
+                    .schedule_repo
+                    .get_schedule(&workspace_id, &valid_id)?;
                 Ok(AppResponse::ScheduleRead { schedule })
             }
             AppQuery::ListTerminals { session_id } => {

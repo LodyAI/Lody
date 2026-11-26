@@ -139,6 +139,43 @@ fn live_daemon_enforces_mcp_http_guards_delegates_child_and_caps_terminal_socket
         true
     );
 
+    let (git_status_code, git_status_body) = send_unix_http(
+        Path::new(&meta.control_socket_path),
+        "POST",
+        "/project-control",
+        meta.token.as_deref(),
+        Some(&json!({
+            "type": "local-project/git-state",
+            "machineId": "machine-e2e-fixed",
+            "workspaceId": "local",
+            "localProjectId": "proj-registered-1"
+        })),
+    )
+    .unwrap();
+    assert_eq!(git_status_code, 200);
+    let git_status_json: Value = serde_json::from_str(&git_status_body).unwrap();
+    assert_eq!(git_status_json["ok"], false);
+    assert_eq!(git_status_json["type"], "local-project/git-state");
+    assert_eq!(git_status_json["error"], "daemon_unavailable");
+
+    let (mismatch_code, mismatch_body) = send_unix_http(
+        Path::new(&meta.control_socket_path),
+        "POST",
+        "/project-control",
+        meta.token.as_deref(),
+        Some(&json!({
+            "type": "local-project/git-state",
+            "machineId": "foreign-machine",
+            "workspaceId": "local",
+            "localProjectId": "proj-registered-1"
+        })),
+    )
+    .unwrap();
+    assert_eq!(mismatch_code, 200);
+    let mismatch_json: Value = serde_json::from_str(&mismatch_body).unwrap();
+    assert_eq!(mismatch_json["ok"], false);
+    assert_eq!(mismatch_json["error"], "machine_mismatch");
+
     let term_sock = resolve_terminal_socket_path(&data_dir, "lody-oss").unwrap();
     {
         let mut s = UnixStream::connect(&term_sock).expect("connect terminal.sock");
@@ -180,6 +217,7 @@ fn live_daemon_enforces_mcp_http_guards_delegates_child_and_caps_terminal_socket
     let wait_until = Instant::now() + Duration::from_secs(10);
     let mut saw_accepted_child = false;
     let mut saw_rejected_grandchild = false;
+    let mut saw_schedule_unavailable = false;
     let mut saw_parent_receipt_wakeup = false;
 
     while Instant::now() < wait_until {
@@ -200,6 +238,12 @@ fn live_daemon_enforces_mcp_http_guards_delegates_child_and_caps_terminal_socket
                         .and_then(Value::as_str)
                         .is_some_and(|o| o.starts_with("rejected:"))
             });
+            saw_schedule_unavailable = events.iter().any(|e| {
+                e.get("event").and_then(Value::as_str) == Some("mcp-schedule")
+                    && e.get("outcome")
+                        .and_then(Value::as_str)
+                        .is_some_and(|o| o.starts_with("rejected:") && o.contains("UNAVAILABLE"))
+            });
             let parent_prompt_count = events
                 .iter()
                 .filter(|e| {
@@ -208,7 +252,11 @@ fn live_daemon_enforces_mcp_http_guards_delegates_child_and_caps_terminal_socket
                 })
                 .count();
             saw_parent_receipt_wakeup = parent_prompt_count >= 1;
-            if saw_accepted_child && saw_rejected_grandchild && saw_parent_receipt_wakeup {
+            if saw_accepted_child
+                && saw_rejected_grandchild
+                && saw_schedule_unavailable
+                && saw_parent_receipt_wakeup
+            {
                 break;
             }
         }
@@ -219,6 +267,10 @@ fn live_daemon_enforces_mcp_http_guards_delegates_child_and_caps_terminal_socket
     assert!(
         saw_rejected_grandchild,
         "child depth=1 MCP delegation to grandchild must be rejected"
+    );
+    assert!(
+        saw_schedule_unavailable,
+        "lody_schedule must report UNAVAILABLE instead of fake local success while engine is unwired"
     );
     assert!(
         saw_parent_receipt_wakeup,

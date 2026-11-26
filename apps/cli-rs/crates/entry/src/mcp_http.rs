@@ -7,8 +7,8 @@ use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use lody_app::{
-    AppCommand, AppQuery, AppResponse, ApplicationService, McpHttpEndpointConfig, PortError,
-    PortErrorKind, PortResult, ScheduleEditPatch, SessionId, TurnId, VerifiedPrincipal,
+    AppCommand, AppQuery, AppResponse, ApplicationService, MachineId, McpHttpEndpointConfig,
+    PortError, PortErrorKind, PortResult, ScheduleEditPatch, SessionId, TurnId, VerifiedPrincipal,
     WorkspaceId,
 };
 use serde_json::{Value, json};
@@ -358,14 +358,31 @@ fn mcp_tool_result(payload: &Value, is_error: bool) -> Value {
     })
 }
 
+fn mcp_error_code(kind: PortErrorKind) -> &'static str {
+    match kind {
+        PortErrorKind::InvalidInput => "INVALID_INPUT",
+        PortErrorKind::Unauthorized => "UNAUTHORIZED",
+        PortErrorKind::Forbidden => "FORBIDDEN",
+        PortErrorKind::NotFound => "NOT_FOUND",
+        PortErrorKind::Conflict => "CONFLICT",
+        PortErrorKind::CapabilityUnavailable => "CAPABILITY_UNAVAILABLE",
+        PortErrorKind::EntitlementReadOnly => "ENTITLEMENT_READ_ONLY",
+        PortErrorKind::Timeout => "TIMEOUT",
+        PortErrorKind::Unavailable => "UNAVAILABLE",
+        PortErrorKind::Internal => "INTERNAL",
+    }
+}
+
 async fn execute_tool_call(
     st: &Arc<McpHttpServerState>,
     ctx: &McpRequestContext,
     tool_name: &str,
     args: &Value,
 ) -> Value {
-    let caller = VerifiedPrincipal::LocalHost {
-        caller_pid: None,
+    let caller = VerifiedPrincipal::AgentSession {
+        workspace_id: ctx.workspace_id.clone(),
+        session_id: ctx.session_id.clone(),
+        machine_id: MachineId(ctx.machine_id.clone()),
         account_id: None,
     };
     let service = Arc::clone(&st.service);
@@ -610,6 +627,7 @@ async fn execute_tool_call(
                     }
                     let q = AppQuery::GetSchedule {
                         workspace_id: ctx.workspace_id.clone(),
+                        invoking_session_id: Some(ctx.session_id.clone()),
                         schedule_id: schedule_id.to_string(),
                     };
                     return match tokio::task::spawn_blocking(move || service.query(&caller, q))
@@ -625,15 +643,20 @@ async fn execute_tool_call(
                             false,
                         ),
                         Ok(Ok(AppResponse::ScheduleRead { schedule: None })) => mcp_tool_result(
-                            &json!({ "ok": false, "error": "Schedule not found" }),
+                            &json!({ "ok": false, "code": "NOT_FOUND", "error": "Schedule not found" }),
                             true,
                         ),
                         Ok(Ok(_)) => {
                             mcp_tool_result(&json!({ "error": "unexpected response" }), true)
                         }
-                        Ok(Err(err)) => {
-                            mcp_tool_result(&json!({ "ok": false, "error": err.message }), true)
-                        }
+                        Ok(Err(err)) => mcp_tool_result(
+                            &json!({
+                                "ok": false,
+                                "code": mcp_error_code(err.kind),
+                                "error": err.message,
+                            }),
+                            true,
+                        ),
                         Err(err) => mcp_tool_result(&json!({ "error": err.to_string() }), true),
                     };
                 }
@@ -653,6 +676,7 @@ async fn execute_tool_call(
                     .unwrap_or(0);
                 let q = AppQuery::ListSchedules {
                     workspace_id: ctx.workspace_id.clone(),
+                    invoking_session_id: Some(ctx.session_id.clone()),
                     filter_query,
                     limit,
                     offset,
@@ -662,9 +686,14 @@ async fn execute_tool_call(
                         mcp_tool_result(&json!({ "schedules": schedules }), false)
                     }
                     Ok(Ok(_)) => mcp_tool_result(&json!({ "error": "unexpected response" }), true),
-                    Ok(Err(err)) => {
-                        mcp_tool_result(&json!({ "ok": false, "error": err.message }), true)
-                    }
+                    Ok(Err(err)) => mcp_tool_result(
+                        &json!({
+                            "ok": false,
+                            "code": mcp_error_code(err.kind),
+                            "error": err.message,
+                        }),
+                        true,
+                    ),
                     Err(err) => mcp_tool_result(&json!({ "error": err.to_string() }), true),
                 };
             }
@@ -677,7 +706,14 @@ async fn execute_tool_call(
                     mcp_tool_result(&json!({ "projects": projects }), false)
                 }
                 Ok(Ok(_)) => mcp_tool_result(&json!({ "error": "unexpected response" }), true),
-                Ok(Err(err)) => mcp_tool_result(&json!({ "error": err.message }), true),
+                Ok(Err(err)) => mcp_tool_result(
+                    &json!({
+                        "ok": false,
+                        "code": mcp_error_code(err.kind),
+                        "error": err.message,
+                    }),
+                    true,
+                ),
                 Err(err) => mcp_tool_result(&json!({ "error": err.to_string() }), true),
             }
         }
@@ -688,59 +724,53 @@ async fn execute_tool_call(
                 "propose" => {
                     let Some(request_id) = sub.get("requestId").and_then(Value::as_str) else {
                         return mcp_tool_result(
-                            &json!({ "ok": false, "error": "requestId is required" }),
+                            &json!({ "ok": false, "code": "INVALID_INPUT", "error": "requestId is required" }),
                             true,
                         );
                     };
                     let Some(title) = sub.get("title").and_then(Value::as_str) else {
                         return mcp_tool_result(
-                            &json!({ "ok": false, "error": "title is required" }),
+                            &json!({ "ok": false, "code": "INVALID_INPUT", "error": "title is required" }),
                             true,
                         );
                     };
                     let Some(prompt_text) = sub.get("prompt").and_then(Value::as_str) else {
                         return mcp_tool_result(
-                            &json!({ "ok": false, "error": "prompt is required" }),
+                            &json!({ "ok": false, "code": "INVALID_INPUT", "error": "prompt is required" }),
                             true,
                         );
                     };
-                    let cron_expr = match sub.get("rule") {
-                        Some(Value::String(s)) => s.clone(),
-                        Some(other) => other.to_string(),
-                        None => {
-                            return mcp_tool_result(
-                                &json!({ "ok": false, "error": "rule is required" }),
-                                true,
-                            );
-                        }
+                    let Some(rule) = sub.get("rule").cloned() else {
+                        return mcp_tool_result(
+                            &json!({ "ok": false, "code": "INVALID_INPUT", "error": "rule is required" }),
+                            true,
+                        );
                     };
                     AppCommand::ProposeSchedule {
                         workspace_id: ctx.workspace_id.clone(),
+                        invoking_session_id: ctx.session_id.clone(),
                         request_id: request_id.to_string(),
                         title: title.to_string(),
                         prompt_text: prompt_text.to_string(),
-                        cron_expr,
+                        rule,
                     }
                 }
                 "propose_edit" => {
                     let Some(schedule_id) = sub.get("scheduleId").and_then(Value::as_str) else {
                         return mcp_tool_result(
-                            &json!({ "ok": false, "error": "scheduleId is required" }),
+                            &json!({ "ok": false, "code": "INVALID_INPUT", "error": "scheduleId is required" }),
                             true,
                         );
                     };
                     let Some(request_id) = sub.get("requestId").and_then(Value::as_str) else {
                         return mcp_tool_result(
-                            &json!({ "ok": false, "error": "requestId is required" }),
+                            &json!({ "ok": false, "code": "INVALID_INPUT", "error": "requestId is required" }),
                             true,
                         );
                     };
-                    let cron_expr = sub.get("rule").map(|r| match r {
-                        Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    });
                     AppCommand::ProposeScheduleEdit {
                         workspace_id: ctx.workspace_id.clone(),
+                        invoking_session_id: ctx.session_id.clone(),
                         schedule_id: schedule_id.to_string(),
                         request_id: request_id.to_string(),
                         patch: ScheduleEditPatch {
@@ -752,32 +782,33 @@ async fn execute_tool_call(
                                 .get("prompt")
                                 .and_then(Value::as_str)
                                 .map(ToOwned::to_owned),
-                            cron_expr,
+                            rule: sub.get("rule").cloned(),
                         },
                     }
                 }
                 "pause" => {
                     let Some(schedule_id) = sub.get("scheduleId").and_then(Value::as_str) else {
                         return mcp_tool_result(
-                            &json!({ "ok": false, "error": "scheduleId is required" }),
+                            &json!({ "ok": false, "code": "INVALID_INPUT", "error": "scheduleId is required" }),
                             true,
                         );
                     };
                     let Some(request_id) = sub.get("requestId").and_then(Value::as_str) else {
                         return mcp_tool_result(
-                            &json!({ "ok": false, "error": "requestId is required" }),
+                            &json!({ "ok": false, "code": "INVALID_INPUT", "error": "requestId is required" }),
                             true,
                         );
                     };
                     AppCommand::PauseSchedule {
                         workspace_id: ctx.workspace_id.clone(),
+                        invoking_session_id: Some(ctx.session_id.clone()),
                         schedule_id: schedule_id.to_string(),
                         request_id: request_id.to_string(),
                     }
                 }
                 other => {
                     return mcp_tool_result(
-                        &json!({ "ok": false, "error": format!("unknown schedule action '{other}'") }),
+                        &json!({ "ok": false, "code": "INVALID_INPUT", "error": format!("unknown schedule action '{other}'") }),
                         true,
                     );
                 }
@@ -794,9 +825,14 @@ async fn execute_tool_call(
                     false,
                 ),
                 Ok(Ok(_)) => mcp_tool_result(&json!({ "error": "unexpected response" }), true),
-                Ok(Err(err)) => {
-                    mcp_tool_result(&json!({ "ok": false, "error": err.message }), true)
-                }
+                Ok(Err(err)) => mcp_tool_result(
+                    &json!({
+                        "ok": false,
+                        "code": mcp_error_code(err.kind),
+                        "error": err.message,
+                    }),
+                    true,
+                ),
                 Err(err) => mcp_tool_result(&json!({ "error": err.to_string() }), true),
             }
         }

@@ -73,6 +73,9 @@ pub enum ControlCommand {
     InspectWorkdir {
         reply: oneshot::Sender<Option<PathBuf>>,
     },
+    InspectDrivingUser {
+        reply: oneshot::Sender<Option<UserId>>,
+    },
     Shutdown {
         reply: oneshot::Sender<()>,
     },
@@ -215,6 +218,16 @@ impl SessionHandle {
             .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor dropped reply"))
     }
 
+    pub async fn inspect_driving_user(&self) -> PortResult<Option<UserId>> {
+        let (tx, rx) = oneshot::channel();
+        self.control_tx
+            .send(ControlCommand::InspectDrivingUser { reply: tx })
+            .await
+            .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor closed"))?;
+        rx.await
+            .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor dropped reply"))
+    }
+
     pub async fn shutdown(&self) {
         let (tx, rx) = oneshot::channel();
         if self
@@ -295,6 +308,7 @@ pub struct SessionSpawnOptions {
     pub depth: u8,
     pub local_project_id: Option<LocalProjectId>,
     pub project_root: Option<PathBuf>,
+    pub base_branch: Option<String>,
     pub use_worktree: bool,
     pub custom_acp: Option<CustomCommandSpec>,
     pub parent_delegation: Option<ParentDelegationTarget>,
@@ -771,6 +785,12 @@ impl SessionActor {
                 let _ = reply.send(self.current_workdir());
                 false
             }
+            ControlCommand::InspectDrivingUser { reply } => {
+                let uid = (!self.state.default_requester_user_id.is_empty())
+                    .then(|| UserId(self.state.default_requester_user_id.clone()));
+                let _ = reply.send(uid);
+                false
+            }
             ControlCommand::Shutdown { reply } => {
                 self.abort_pending_prepare();
                 self.process_event_loop(KernelEvent::CancelRequested { pause_inbox: false })
@@ -1216,10 +1236,14 @@ impl SessionActor {
                 let workspace_id = self.opts.workspace_id.clone();
                 let session_id = self.opts.session_id.clone();
                 let workdir = self.current_workdir();
-                let scope = if self.worktree_lease.is_some() {
-                    DiffCaptureScope::WorktreeBranch { base_branch: None }
-                } else {
-                    DiffCaptureScope::UncommittedOnly
+                let scope = match &self.worktree_lease {
+                    Some(lease) => DiffCaptureScope::WorktreeBranch {
+                        base_branch: lease
+                            .base_branch
+                            .clone()
+                            .or_else(|| self.opts.base_branch.clone()),
+                    },
+                    None => DiffCaptureScope::UncommittedOnly,
                 };
                 let timeout_dur = self.opts.settling_timeout;
                 let now_ms = current_epoch_ms_i64();
@@ -1344,10 +1368,12 @@ impl SessionActor {
         if self.opts.use_worktree
             && let (Some(pid), Some(root)) = (&self.opts.local_project_id, &self.opts.project_root)
         {
-            let lease =
-                self.deps
-                    .worktree
-                    .acquire_worktree(pid, root, &self.opts.session_id, None)?;
+            let lease = self.deps.worktree.acquire_worktree(
+                pid,
+                root,
+                &self.opts.session_id,
+                self.opts.base_branch.as_deref(),
+            )?;
             let path = lease.worktree_path.clone();
             self.worktree_lease = Some(lease);
             return Ok(path);

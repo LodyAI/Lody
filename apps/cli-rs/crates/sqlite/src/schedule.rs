@@ -1,197 +1,140 @@
 use crate::map_sql_err;
 use lody_ports::{
-    MAX_SCHEDULE_PROMPT_BYTES, PortError, PortErrorKind, PortResult, ScheduleEditPatch,
-    ScheduleProposalOutcome, ScheduleRecord, ScheduleStorePort, SessionId, UserId, WorkspaceId,
+    PortError, PortErrorKind, PortResult, ScheduleCursorRecord, ScheduleLedgerPort,
+    ScheduleLedgerRunRecord, ScheduleRunState, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 
-#[derive(Debug, Serialize, Deserialize)]
-struct StoredProposalPatch {
-    title: Option<String>,
-    prompt_text: Option<String>,
-    cron_expr: Option<String>,
+const SCHEDULE_LEDGER_USER_VERSION: i64 = 1;
+
+fn set_private_permissions(db_path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(parent) = db_path.parent() {
+            let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+        }
+        let _ = fs::set_permissions(db_path, fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = db_path;
+    }
 }
 
-fn validate_schedule_identifier(label: &str, raw: &str) -> PortResult<String> {
-    let trimmed = raw.trim();
-    let valid = !trimmed.is_empty()
-        && trimmed.len() <= 50
-        && trimmed
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
-    if !valid {
-        return Err(PortError::new(
-            PortErrorKind::InvalidInput,
-            format!("{label} must be 1..=50 ASCII [a-zA-Z0-9_-] characters"),
-        ));
+fn verify_no_foreign_schedule_tables(tx: &rusqlite::Transaction<'_>) -> PortResult<()> {
+    let mut stmt = tx
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(map_sql_err)?;
+    let mut tables = BTreeSet::new();
+    for item in rows {
+        tables.insert(item.map_err(map_sql_err)?);
     }
-    Ok(trimmed.to_string())
-}
-
-fn validate_schedule_prompt(raw: &str) -> PortResult<()> {
-    if raw.trim().is_empty() {
-        return Err(PortError::new(
-            PortErrorKind::InvalidInput,
-            "schedule prompt cannot be blank",
-        ));
-    }
-    if raw.len() > MAX_SCHEDULE_PROMPT_BYTES {
-        return Err(PortError::new(
-            PortErrorKind::InvalidInput,
-            format!("schedule prompt exceeds {MAX_SCHEDULE_PROMPT_BYTES} bytes"),
-        ));
+    for name in &tables {
+        if name != "schedule_cursors" && name != "schedule_runs" {
+            return Err(PortError::new(
+                PortErrorKind::Conflict,
+                format!("unrecognized table '{name}' in schedules.sqlite"),
+            ));
+        }
     }
     Ok(())
 }
 
-fn validate_schedule_title(raw: &str) -> PortResult<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 200 {
-        return Err(PortError::new(
-            PortErrorKind::InvalidInput,
-            "schedule title must be 1..=200 non-blank characters",
-        ));
-    }
-    Ok(trimmed.to_string())
-}
-
-pub struct SqliteScheduleStore {
+pub struct SqliteScheduleLedgerStore {
     conn: Mutex<Connection>,
 }
 
-impl SqliteScheduleStore {
+impl SqliteScheduleLedgerStore {
     pub fn open(db_path: &Path) -> PortResult<Self> {
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
         }
-        let conn = Connection::open(db_path).map_err(map_sql_err)?;
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA busy_timeout = 5000;
-             CREATE TABLE IF NOT EXISTS schedules (
+        let mut conn = Connection::open(db_path).map_err(map_sql_err)?;
+        set_private_permissions(db_path);
+        conn.execute_batch("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;")
+            .map_err(map_sql_err)?;
+
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(map_sql_err)?;
+
+        let version: i64 = tx
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(map_sql_err)?;
+        if version > SCHEDULE_LEDGER_USER_VERSION {
+            return Err(PortError::new(
+                PortErrorKind::Conflict,
+                "Schedule database requires a newer CLI",
+            ));
+        }
+
+        verify_no_foreign_schedule_tables(&tx)?;
+
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schedule_cursors (
+                 workspace_id TEXT NOT NULL,
                  schedule_id TEXT NOT NULL,
-                 workspace_id TEXT NOT NULL,
-                 session_id TEXT,
-                 author_user_id TEXT NOT NULL,
-                 title TEXT NOT NULL,
-                 cron_expr TEXT NOT NULL,
-                 prompt_text TEXT NOT NULL,
-                 enabled INTEGER NOT NULL DEFAULT 1,
-                 content_revision INTEGER NOT NULL DEFAULT 1,
-                 PRIMARY KEY(workspace_id, schedule_id)
+                 activation_id TEXT NOT NULL,
+                 fingerprint TEXT NOT NULL,
+                 last_slot INTEGER,
+                 next_slot INTEGER,
+                 updated_at INTEGER NOT NULL,
+                 PRIMARY KEY (workspace_id, schedule_id, activation_id)
              );
-             CREATE TABLE IF NOT EXISTS schedule_proposals (
-                 proposal_id TEXT PRIMARY KEY,
+             CREATE TABLE IF NOT EXISTS schedule_runs (
+                 run_key TEXT PRIMARY KEY,
                  workspace_id TEXT NOT NULL,
-                 schedule_id TEXT,
-                 author_user_id TEXT NOT NULL,
-                 request_id TEXT NOT NULL,
-                 kind TEXT NOT NULL,
-                 patch_json TEXT NOT NULL,
-                 base_revision INTEGER,
-                 status TEXT NOT NULL DEFAULT 'pending',
-                 UNIQUE(workspace_id, author_user_id, request_id)
-             );",
+                 schedule_id TEXT NOT NULL,
+                 state TEXT NOT NULL,
+                 planned_at INTEGER NOT NULL,
+                 payload TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS schedule_runs_workspace_state
+                 ON schedule_runs(workspace_id, state);
+             CREATE INDEX IF NOT EXISTS schedule_runs_history
+                 ON schedule_runs(workspace_id, schedule_id, planned_at DESC);
+             PRAGMA user_version = 1;",
         )
         .map_err(map_sql_err)?;
+
+        tx.commit().map_err(map_sql_err)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
 }
 
-impl ScheduleStorePort for SqliteScheduleStore {
-    fn list_schedules(
-        &self,
-        workspace_id: &WorkspaceId,
-        query: Option<&str>,
-        limit: usize,
-        offset: usize,
-    ) -> PortResult<Vec<ScheduleRecord>> {
-        let clamped_limit = i64::try_from(limit.clamp(1, 100)).unwrap_or(30);
-        let clamped_offset = i64::try_from(offset.min(100_000)).unwrap_or(0);
-        let filter = query
-            .map(str::trim)
-            .filter(|q| !q.is_empty())
-            .map(|q| q.to_ascii_lowercase());
-
-        let conn = self.conn.lock().expect("schedule sqlite lock");
-        let mut stmt = conn
-            .prepare(
-                "SELECT schedule_id, session_id, author_user_id, title, cron_expr, prompt_text,
-                        enabled, content_revision
-                 FROM schedules
-                 WHERE workspace_id = ?1
-                 ORDER BY schedule_id ASC",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map(params![&workspace_id.0], |r| {
-                let sid: Option<String> = r.get(1)?;
-                let rev: i64 = r.get(7)?;
-                Ok(ScheduleRecord {
-                    schedule_id: r.get(0)?,
-                    workspace_id: workspace_id.clone(),
-                    session_id: sid.map(SessionId),
-                    author_user_id: UserId(r.get(2)?),
-                    title: r.get(3)?,
-                    cron_expr: r.get(4)?,
-                    prompt_text: r.get(5)?,
-                    enabled: r.get::<_, i64>(6)? != 0,
-                    content_revision: u64::try_from(rev).unwrap_or(1),
-                })
-            })
-            .map_err(map_sql_err)?;
-
-        let mut matched = Vec::new();
-        for item in rows {
-            let rec = item.map_err(map_sql_err)?;
-            if let Some(ref q) = filter
-                && !rec.title.to_ascii_lowercase().contains(q)
-                && !rec.schedule_id.to_ascii_lowercase().contains(q)
-            {
-                continue;
-            }
-            matched.push(rec);
-        }
-
-        let skip = usize::try_from(clamped_offset).unwrap_or(0);
-        let take = usize::try_from(clamped_limit).unwrap_or(30);
-        Ok(matched.into_iter().skip(skip).take(take).collect())
-    }
-
-    fn get_schedule(
+impl ScheduleLedgerPort for SqliteScheduleLedgerStore {
+    fn read_planning_cursor(
         &self,
         workspace_id: &WorkspaceId,
         schedule_id: &str,
-    ) -> PortResult<Option<ScheduleRecord>> {
-        let valid_id = validate_schedule_identifier("scheduleId", schedule_id)?;
-        let conn = self.conn.lock().expect("schedule sqlite lock");
+        activation_id: &str,
+    ) -> PortResult<Option<ScheduleCursorRecord>> {
+        let conn = self.conn.lock().expect("schedule ledger lock");
         conn.query_row(
-            "SELECT schedule_id, session_id, author_user_id, title, cron_expr, prompt_text,
-                    enabled, content_revision
-             FROM schedules
-             WHERE workspace_id = ?1 AND schedule_id = ?2",
-            params![&workspace_id.0, &valid_id],
+            "SELECT fingerprint, last_slot, next_slot, updated_at
+             FROM schedule_cursors
+             WHERE workspace_id = ?1 AND schedule_id = ?2 AND activation_id = ?3",
+            params![&workspace_id.0, schedule_id, activation_id],
             |r| {
-                let sid: Option<String> = r.get(1)?;
-                let rev: i64 = r.get(7)?;
-                Ok(ScheduleRecord {
-                    schedule_id: r.get(0)?,
+                Ok(ScheduleCursorRecord {
                     workspace_id: workspace_id.clone(),
-                    session_id: sid.map(SessionId),
-                    author_user_id: UserId(r.get(2)?),
-                    title: r.get(3)?,
-                    cron_expr: r.get(4)?,
-                    prompt_text: r.get(5)?,
-                    enabled: r.get::<_, i64>(6)? != 0,
-                    content_revision: u64::try_from(rev).unwrap_or(1),
+                    schedule_id: schedule_id.to_string(),
+                    activation_id: activation_id.to_string(),
+                    fingerprint: r.get(0)?,
+                    last_slot: r.get(1)?,
+                    next_slot: r.get(2)?,
+                    updated_at: r.get(3)?,
                 })
             },
         )
@@ -199,333 +142,242 @@ impl ScheduleStorePort for SqliteScheduleStore {
         .map_err(map_sql_err)
     }
 
-    fn upsert_schedule(&self, record: &ScheduleRecord) -> PortResult<()> {
-        let valid_id = validate_schedule_identifier("scheduleId", &record.schedule_id)?;
-        let valid_title = validate_schedule_title(&record.title)?;
-        validate_schedule_prompt(&record.prompt_text)?;
+    fn commit_planned_slot(
+        &self,
+        cursor: &ScheduleCursorRecord,
+        run: Option<&ScheduleLedgerRunRecord>,
+    ) -> PortResult<()> {
+        let mut conn = self.conn.lock().expect("schedule ledger lock");
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(map_sql_err)?;
 
-        let conn = self.conn.lock().expect("schedule sqlite lock");
-        conn.execute(
-            "INSERT INTO schedules
-             (schedule_id, workspace_id, session_id, author_user_id, title, cron_expr,
-              prompt_text, enabled, content_revision)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(workspace_id, schedule_id) DO UPDATE SET
-               session_id = excluded.session_id,
-               title = excluded.title,
-               cron_expr = excluded.cron_expr,
-               prompt_text = excluded.prompt_text,
-               enabled = excluded.enabled,
-               content_revision = schedules.content_revision + 1",
+        if let Some(existing_fp) = tx
+            .query_row(
+                "SELECT fingerprint FROM schedule_cursors
+                 WHERE workspace_id = ?1 AND schedule_id = ?2 AND activation_id = ?3",
+                params![
+                    &cursor.workspace_id.0,
+                    &cursor.schedule_id,
+                    &cursor.activation_id
+                ],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?
+            && existing_fp != cursor.fingerprint
+        {
+            return Err(PortError::new(
+                PortErrorKind::Conflict,
+                "Activation fingerprint changed without a new activation",
+            ));
+        }
+
+        if let Some(run_rec) = run {
+            tx.execute(
+                "INSERT OR IGNORE INTO schedule_runs
+                 (run_key, workspace_id, schedule_id, state, planned_at, payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    &run_rec.run_key,
+                    &run_rec.workspace_id.0,
+                    &run_rec.schedule_id,
+                    run_rec.state.as_wire_str(),
+                    run_rec.planned_at,
+                    &run_rec.payload_json,
+                ],
+            )
+            .map_err(map_sql_err)?;
+        }
+
+        tx.execute(
+            "INSERT INTO schedule_cursors
+             (workspace_id, schedule_id, activation_id, fingerprint, last_slot, next_slot, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(workspace_id, schedule_id, activation_id) DO UPDATE SET
+               last_slot = excluded.last_slot,
+               next_slot = excluded.next_slot,
+               updated_at = excluded.updated_at",
             params![
-                &valid_id,
-                &record.workspace_id.0,
-                record.session_id.as_ref().map(|s| s.0.as_str()),
-                &record.author_user_id.0,
-                &valid_title,
-                &record.cron_expr,
-                &record.prompt_text,
-                i64::from(record.enabled),
-                i64::try_from(record.content_revision.max(1)).unwrap_or(1),
+                &cursor.workspace_id.0,
+                &cursor.schedule_id,
+                &cursor.activation_id,
+                &cursor.fingerprint,
+                cursor.last_slot,
+                cursor.next_slot,
+                cursor.updated_at,
             ],
         )
         .map_err(map_sql_err)?;
+
+        tx.commit().map_err(map_sql_err)?;
         Ok(())
     }
 
-    fn propose_schedule(
+    fn get_run(&self, run_key: &str) -> PortResult<Option<ScheduleLedgerRunRecord>> {
+        let conn = self.conn.lock().expect("schedule ledger lock");
+        let row: Option<(String, String, String, i64, String)> = conn
+            .query_row(
+                "SELECT workspace_id, schedule_id, state, planned_at, payload
+                 FROM schedule_runs WHERE run_key = ?1",
+                params![run_key],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+
+        let Some((ws, sched_id, state_raw, planned_at, payload_json)) = row else {
+            return Ok(None);
+        };
+        let state = ScheduleRunState::from_wire_str(&state_raw).ok_or_else(|| {
+            PortError::new(
+                PortErrorKind::Internal,
+                format!("unknown schedule run state '{state_raw}'"),
+            )
+        })?;
+        Ok(Some(ScheduleLedgerRunRecord {
+            run_key: run_key.to_string(),
+            workspace_id: WorkspaceId(ws),
+            schedule_id: sched_id,
+            state,
+            planned_at,
+            payload_json,
+        }))
+    }
+
+    fn unfinished_runs(
         &self,
         workspace_id: &WorkspaceId,
-        author: &UserId,
-        request_id: &str,
-        title: &str,
-        prompt_text: &str,
-        cron_expr: &str,
-    ) -> PortResult<ScheduleProposalOutcome> {
-        let req_id = validate_schedule_identifier("requestId", request_id)?;
-        let valid_title = validate_schedule_title(title)?;
-        validate_schedule_prompt(prompt_text)?;
-        if cron_expr.trim().is_empty() {
-            return Err(PortError::new(
-                PortErrorKind::InvalidInput,
-                "schedule rule cannot be empty",
-            ));
+    ) -> PortResult<Vec<ScheduleLedgerRunRecord>> {
+        let conn = self.conn.lock().expect("schedule ledger lock");
+        let mut stmt = conn
+            .prepare(
+                "SELECT run_key, schedule_id, state, planned_at, payload
+                 FROM schedule_runs
+                 WHERE workspace_id = ?1 AND state NOT IN ('finished', 'failed', 'skipped')
+                 ORDER BY planned_at ASC, run_key ASC",
+            )
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map(params![&workspace_id.0], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(map_sql_err)?;
+
+        let mut out = Vec::new();
+        for item in rows {
+            let (run_key, schedule_id, state_raw, planned_at, payload_json) =
+                item.map_err(map_sql_err)?;
+            let state = ScheduleRunState::from_wire_str(&state_raw).ok_or_else(|| {
+                PortError::new(
+                    PortErrorKind::Internal,
+                    format!("unknown schedule run state '{state_raw}'"),
+                )
+            })?;
+            out.push(ScheduleLedgerRunRecord {
+                run_key,
+                workspace_id: workspace_id.clone(),
+                schedule_id,
+                state,
+                planned_at,
+                payload_json,
+            });
         }
+        Ok(out)
+    }
 
-        let patch = StoredProposalPatch {
-            title: Some(valid_title),
-            prompt_text: Some(prompt_text.to_string()),
-            cron_expr: Some(cron_expr.trim().to_string()),
-        };
-        let patch_json = serde_json::to_string(&patch)
-            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
-
-        let mut conn = self.conn.lock().expect("schedule sqlite lock");
+    fn transition_run(
+        &self,
+        run_key: &str,
+        allowed_from: &[ScheduleRunState],
+        next_state: ScheduleRunState,
+        updated_payload_json: &str,
+    ) -> PortResult<()> {
+        let mut conn = self.conn.lock().expect("schedule ledger lock");
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sql_err)?;
 
-        if let Some((proposal_id, existing_kind, existing_patch, status)) = tx
+        let current_raw: Option<String> = tx
             .query_row(
-                "SELECT proposal_id, kind, patch_json, status FROM schedule_proposals
-                 WHERE workspace_id = ?1 AND author_user_id = ?2 AND request_id = ?3",
-                params![&workspace_id.0, &author.0, &req_id],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                        r.get::<_, String>(3)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(map_sql_err)?
-        {
-            if existing_kind != "create" || existing_patch != patch_json {
-                return Err(PortError::new(
-                    PortErrorKind::Conflict,
-                    "requestId already belongs to a different schedule proposal",
-                ));
-            }
-            return Ok(ScheduleProposalOutcome {
-                proposal_id,
-                schedule_id: None,
-                request_id: req_id,
-                base_revision: None,
-                status,
-            });
-        }
-
-        let proposal_id = format!("prop-create:{}:{}", workspace_id.0, req_id);
-        tx.execute(
-            "INSERT INTO schedule_proposals
-             (proposal_id, workspace_id, schedule_id, author_user_id, request_id, kind, patch_json, base_revision, status)
-             VALUES (?1, ?2, NULL, ?3, ?4, 'create', ?5, NULL, 'pending')",
-            params![&proposal_id, &workspace_id.0, &author.0, &req_id, &patch_json],
-        )
-        .map_err(map_sql_err)?;
-        tx.commit().map_err(map_sql_err)?;
-
-        Ok(ScheduleProposalOutcome {
-            proposal_id,
-            schedule_id: None,
-            request_id: req_id,
-            base_revision: None,
-            status: "pending".to_string(),
-        })
-    }
-
-    fn propose_schedule_edit(
-        &self,
-        workspace_id: &WorkspaceId,
-        author: &UserId,
-        schedule_id: &str,
-        request_id: &str,
-        patch: &ScheduleEditPatch,
-    ) -> PortResult<ScheduleProposalOutcome> {
-        let sched_id = validate_schedule_identifier("scheduleId", schedule_id)?;
-        let req_id = validate_schedule_identifier("requestId", request_id)?;
-
-        let normalized_title = match &patch.title {
-            Some(t) => Some(validate_schedule_title(t)?),
-            None => None,
-        };
-        if let Some(p) = &patch.prompt_text {
-            validate_schedule_prompt(p)?;
-        }
-        let normalized_cron = match &patch.cron_expr {
-            Some(c) => {
-                let trimmed = c.trim();
-                if trimmed.is_empty() {
-                    return Err(PortError::new(
-                        PortErrorKind::InvalidInput,
-                        "schedule rule cannot be empty",
-                    ));
-                }
-                Some(trimmed.to_string())
-            }
-            None => None,
-        };
-
-        if normalized_title.is_none() && patch.prompt_text.is_none() && normalized_cron.is_none() {
-            return Err(PortError::new(
-                PortErrorKind::InvalidInput,
-                "propose_edit requires at least one of title, prompt, or rule",
-            ));
-        }
-
-        let stored_patch = StoredProposalPatch {
-            title: normalized_title,
-            prompt_text: patch.prompt_text.clone(),
-            cron_expr: normalized_cron,
-        };
-        let patch_json = serde_json::to_string(&stored_patch)
-            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
-
-        let mut conn = self.conn.lock().expect("schedule sqlite lock");
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(map_sql_err)?;
-
-        if let Some((
-            proposal_id,
-            existing_kind,
-            existing_sched,
-            existing_patch,
-            base_rev,
-            status,
-        )) = tx
-            .query_row(
-                "SELECT proposal_id, kind, schedule_id, patch_json, base_revision, status
-                 FROM schedule_proposals
-                 WHERE workspace_id = ?1 AND author_user_id = ?2 AND request_id = ?3",
-                params![&workspace_id.0, &author.0, &req_id],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, Option<String>>(2)?,
-                        r.get::<_, String>(3)?,
-                        r.get::<_, Option<i64>>(4)?,
-                        r.get::<_, String>(5)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(map_sql_err)?
-        {
-            if existing_kind != "edit"
-                || existing_sched.as_deref() != Some(sched_id.as_str())
-                || existing_patch != patch_json
-            {
-                return Err(PortError::new(
-                    PortErrorKind::Conflict,
-                    "requestId already belongs to a different schedule proposal",
-                ));
-            }
-            return Ok(ScheduleProposalOutcome {
-                proposal_id,
-                schedule_id: Some(sched_id),
-                request_id: req_id,
-                base_revision: base_rev.and_then(|r| u64::try_from(r).ok()),
-                status,
-            });
-        }
-
-        let Some((owner_id, cur_title, cur_cron, cur_prompt, cur_rev)) = tx
-            .query_row(
-                "SELECT author_user_id, title, cron_expr, prompt_text, content_revision
-                 FROM schedules
-                 WHERE workspace_id = ?1 AND schedule_id = ?2",
-                params![&workspace_id.0, &sched_id],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                        r.get::<_, String>(3)?,
-                        r.get::<_, i64>(4)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(map_sql_err)?
-        else {
-            return Err(PortError::new(
-                PortErrorKind::NotFound,
-                format!("schedule '{sched_id}' is unavailable"),
-            ));
-        };
-
-        if owner_id != author.0 {
-            return Err(PortError::new(
-                PortErrorKind::Forbidden,
-                "propose_edit requires ownership of the target schedule",
-            ));
-        }
-
-        let title_changed = stored_patch.title.as_ref().is_some_and(|t| t != &cur_title);
-        let prompt_changed = stored_patch
-            .prompt_text
-            .as_ref()
-            .is_some_and(|p| p != &cur_prompt);
-        let cron_changed = stored_patch
-            .cron_expr
-            .as_ref()
-            .is_some_and(|c| c != &cur_cron);
-
-        if !title_changed && !prompt_changed && !cron_changed {
-            return Err(PortError::new(
-                PortErrorKind::InvalidInput,
-                "proposed schedule edit makes no changes to current title, prompt, or rule",
-            ));
-        }
-
-        let proposal_id = format!("prop-edit:{}:{}:{}", workspace_id.0, sched_id, req_id);
-        tx.execute(
-            "INSERT INTO schedule_proposals
-             (proposal_id, workspace_id, schedule_id, author_user_id, request_id, kind, patch_json, base_revision, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'edit', ?6, ?7, 'pending')",
-            params![
-                &proposal_id,
-                &workspace_id.0,
-                &sched_id,
-                &author.0,
-                &req_id,
-                &patch_json,
-                cur_rev,
-            ],
-        )
-        .map_err(map_sql_err)?;
-        tx.commit().map_err(map_sql_err)?;
-
-        Ok(ScheduleProposalOutcome {
-            proposal_id,
-            schedule_id: Some(sched_id),
-            request_id: req_id,
-            base_revision: u64::try_from(cur_rev).ok(),
-            status: "pending".to_string(),
-        })
-    }
-
-    fn pause_schedule(
-        &self,
-        workspace_id: &WorkspaceId,
-        author: &UserId,
-        schedule_id: &str,
-        request_id: &str,
-    ) -> PortResult<bool> {
-        let sched_id = validate_schedule_identifier("scheduleId", schedule_id)?;
-        let _ = validate_schedule_identifier("requestId", request_id)?;
-
-        let conn = self.conn.lock().expect("schedule sqlite lock");
-        let Some(owner_id): Option<String> = conn
-            .query_row(
-                "SELECT author_user_id FROM schedules WHERE workspace_id = ?1 AND schedule_id = ?2",
-                params![&workspace_id.0, &sched_id],
+                "SELECT state FROM schedule_runs WHERE run_key = ?1",
+                params![run_key],
                 |r| r.get(0),
             )
             .optional()
-            .map_err(map_sql_err)?
-        else {
+            .map_err(map_sql_err)?;
+
+        let Some(raw) = current_raw else {
             return Err(PortError::new(
-                PortErrorKind::NotFound,
-                format!("schedule '{sched_id}' not found"),
+                PortErrorKind::Conflict,
+                "Schedule run state changed",
             ));
         };
-        if owner_id != author.0 {
+        let Some(current) = ScheduleRunState::from_wire_str(&raw) else {
             return Err(PortError::new(
-                PortErrorKind::Forbidden,
-                "pause requires ownership of the target schedule",
+                PortErrorKind::Internal,
+                format!("unknown schedule run state '{raw}'"),
             ));
-        }
-        let changed = conn
-            .execute(
-                "UPDATE schedules SET enabled = 0 WHERE workspace_id = ?1 AND schedule_id = ?2 AND enabled != 0",
-                params![&workspace_id.0, &sched_id],
+        };
+        if !allowed_from.contains(&current) {
+            return Err(PortError::new(
+                PortErrorKind::Conflict,
+                "Schedule run state changed",
+            ));
+        };
+
+        tx.execute(
+            "UPDATE schedule_runs SET state = ?1, payload = ?2 WHERE run_key = ?3",
+            params![next_state.as_wire_str(), updated_payload_json, run_key],
+        )
+        .map_err(map_sql_err)?;
+        tx.commit().map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    fn has_consumed_complete_message(
+        &self,
+        workspace_id: &WorkspaceId,
+        schedule_id: &str,
+    ) -> PortResult<bool> {
+        let conn = self.conn.lock().expect("schedule ledger lock");
+        let found: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM schedule_runs
+                 WHERE workspace_id = ?1 AND schedule_id = ?2
+                   AND state IN ('dispatched', 'finished')
+                   AND json_extract(payload, '$.message') IS NOT NULL
+                 LIMIT 1",
+                params![&workspace_id.0, schedule_id],
+                |r| r.get(0),
             )
+            .optional()
             .map_err(map_sql_err)?;
-        Ok(changed > 0)
+        Ok(found.is_some())
+    }
+
+    fn erase_workspace_ledger(&self, workspace_id: &WorkspaceId) -> PortResult<()> {
+        let mut conn = self.conn.lock().expect("schedule ledger lock");
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(map_sql_err)?;
+        tx.execute(
+            "DELETE FROM schedule_cursors WHERE workspace_id = ?1",
+            params![&workspace_id.0],
+        )
+        .map_err(map_sql_err)?;
+        tx.execute(
+            "DELETE FROM schedule_runs WHERE workspace_id = ?1",
+            params![&workspace_id.0],
+        )
+        .map_err(map_sql_err)?;
+        tx.commit().map_err(map_sql_err)?;
+        Ok(())
     }
 }

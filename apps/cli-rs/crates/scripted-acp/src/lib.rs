@@ -48,6 +48,11 @@ pub enum PromptDirective {
     Hold {
         barrier_dir: PathBuf,
     },
+    Activity {
+        state: String,
+        background_task_count: u64,
+        override_session_id: Option<String>,
+    },
     McpInfo,
     McpDelegate {
         child_prompt: String,
@@ -91,6 +96,20 @@ pub fn parse_prompt_directive(prompt_text: &str) -> PromptDirective {
     if let Some(rest) = directive.strip_prefix("HOLD:") {
         return PromptDirective::Hold {
             barrier_dir: PathBuf::from(rest),
+        };
+    }
+    if let Some(rest) = directive.strip_prefix("ACTIVITY:") {
+        let mut parts = rest.splitn(3, ':');
+        let state = parts.next().unwrap_or("idle").to_string();
+        let background_task_count = parts
+            .next()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0);
+        let override_session_id = parts.next().map(ToOwned::to_owned);
+        return PromptDirective::Activity {
+            state,
+            background_task_count,
+            override_session_id,
         };
     }
     if directive == "MCP_INFO" {
@@ -360,7 +379,8 @@ fn process_requests<W: Write>(
                                 "mcpCapabilities": { "http": true },
                                 "_meta": {
                                     "lody": {
-                                        "sessionArchive": { "version": 1, "mode": "native" }
+                                        "sessionArchive": { "version": 1, "mode": "native" },
+                                        "sessionActivity": { "version": 1 }
                                     }
                                 }
                             },
@@ -487,6 +507,7 @@ fn process_requests<W: Write>(
                     PromptDirective::EditFile { .. } => "edit",
                     PromptDirective::Permission { .. } => "permission",
                     PromptDirective::Hold { .. } => "hold",
+                    PromptDirective::Activity { .. } => "activity",
                     PromptDirective::McpInfo => "mcp-info",
                     PromptDirective::McpDelegate { .. } => "mcp-delegate",
                     PromptDirective::Crash => "crash",
@@ -502,6 +523,37 @@ fn process_requests<W: Write>(
                 });
 
                 match directive {
+                    PromptDirective::Activity {
+                        state,
+                        background_task_count,
+                        override_session_id,
+                    } => {
+                        let target_sid = override_session_id.unwrap_or_else(|| session_id.clone());
+                        send_json(
+                            writer,
+                            &json!({
+                                "jsonrpc": "2.0",
+                                "method": "_lody/session/activity_update",
+                                "params": {
+                                    "version": 1,
+                                    "sessionId": target_sid,
+                                    "state": state,
+                                    "backgroundTaskCount": background_task_count
+                                }
+                            }),
+                        )?;
+                        emit_text_chunk(writer, &session_id, "Activity updated.")?;
+                        finish_prompt(
+                            writer,
+                            recorder,
+                            pid,
+                            &id,
+                            &session_id,
+                            "activity",
+                            marker,
+                            "end_turn",
+                        )?;
+                    }
                     PromptDirective::Crash => {
                         emit_text_chunk(writer, &session_id, "Crash triggered.")?;
                         recorder.record(RecordedAcpEvent {
@@ -599,11 +651,31 @@ fn process_requests<W: Write>(
                             .unwrap()
                             .get(&session_id)
                             .and_then(|s| s.mcp_servers.as_array()?.first().cloned());
-                        let outcome_str = match mcp_entry {
-                            Some(entry) => {
-                                invoke_loopback_mcp_session_create(&entry, &child_prompt)
-                            }
-                            None => "err:no_mcp_server".to_string(),
+                        let (outcome_str, schedule_outcome) = match mcp_entry {
+                            Some(entry) => (
+                                invoke_loopback_mcp_tool(
+                                    &entry,
+                                    "lody_session_create",
+                                    json!({ "prompt": child_prompt }),
+                                ),
+                                invoke_loopback_mcp_tool(
+                                    &entry,
+                                    "lody_schedule",
+                                    json!({
+                                        "action": "propose",
+                                        "arguments": {
+                                            "requestId": "req_e2e_1",
+                                            "title": "Nightly",
+                                            "prompt": "check",
+                                            "rule": { "kind": "daily", "hour": 2, "minute": 0 }
+                                        }
+                                    }),
+                                ),
+                            ),
+                            None => (
+                                "err:no_mcp_server".to_string(),
+                                "err:no_mcp_server".to_string(),
+                            ),
                         };
                         recorder.record(RecordedAcpEvent {
                             pid,
@@ -612,6 +684,15 @@ fn process_requests<W: Write>(
                             mode: Some("mcp-delegate".to_string()),
                             marker: marker.clone(),
                             outcome: Some(outcome_str.clone()),
+                            stop_reason: None,
+                        });
+                        recorder.record(RecordedAcpEvent {
+                            pid,
+                            event: "mcp-schedule".to_string(),
+                            session_id: Some(session_id.clone()),
+                            mode: Some("mcp-schedule".to_string()),
+                            marker: marker.clone(),
+                            outcome: Some(schedule_outcome),
                             stop_reason: None,
                         });
                         emit_text_chunk(
@@ -868,7 +949,7 @@ fn send_error<W: Write>(
     )
 }
 
-fn invoke_loopback_mcp_session_create(mcp_entry: &Value, child_prompt: &str) -> String {
+fn invoke_loopback_mcp_tool(mcp_entry: &Value, tool_name: &str, tool_args: Value) -> String {
     use std::io::Read as _;
     use std::net::TcpStream;
 
@@ -892,10 +973,8 @@ fn invoke_loopback_mcp_session_create(mcp_entry: &Value, child_prompt: &str) -> 
         "id": 1,
         "method": "tools/call",
         "params": {
-            "name": "lody_session_create",
-            "arguments": {
-                "prompt": child_prompt,
-            }
+            "name": tool_name,
+            "arguments": tool_args,
         }
     }))
     .unwrap_or_default();

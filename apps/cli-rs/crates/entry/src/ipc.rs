@@ -261,6 +261,21 @@ async fn handle_daemon_shutdown(
     Ok(Json(json!({ "ok": true })))
 }
 
+fn map_project_control_error_code(kind: PortErrorKind) -> &'static str {
+    match kind {
+        PortErrorKind::InvalidInput => "invalid_request",
+        PortErrorKind::Unauthorized
+        | PortErrorKind::Forbidden
+        | PortErrorKind::EntitlementReadOnly => "access_denied",
+        PortErrorKind::NotFound => "local_project_not_found",
+        PortErrorKind::Conflict => "already_exists",
+        PortErrorKind::Unavailable
+        | PortErrorKind::CapabilityUnavailable
+        | PortErrorKind::Timeout => "daemon_unavailable",
+        PortErrorKind::Internal => "execution_failed",
+    }
+}
+
 async fn handle_project_control(
     State(st): State<Arc<ServerState>>,
     headers: HeaderMap,
@@ -272,6 +287,20 @@ async fn handle_project_control(
         account_id: None,
     };
     let kind = payload.get("type").and_then(Value::as_str).unwrap_or("");
+    if let Some(req_machine_id) = payload
+        .get("machineId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        && req_machine_id != st.machine_id
+    {
+        return Ok(Json(json!({
+            "ok": false,
+            "type": kind,
+            "error": "machine_mismatch",
+            "message": format!("Requested machineId '{req_machine_id}' does not match local daemon '{}'.", st.machine_id),
+        })));
+    }
     let service = Arc::clone(&st.service);
 
     match kind {
@@ -364,7 +393,7 @@ async fn handle_project_control(
                 Err(err) => Ok(Json(json!({
                     "ok": false,
                     "type": "local-project/list-branches",
-                    "error": format!("{:?}", err.kind),
+                    "error": map_project_control_error_code(err.kind),
                     "message": err.message,
                 }))),
             }
@@ -418,24 +447,37 @@ async fn handle_project_control(
                 Err(err) => Ok(Json(json!({
                     "ok": false,
                     "type": "local-project/search-files",
-                    "error": format!("{:?}", err.kind),
+                    "error": map_project_control_error_code(err.kind),
                     "message": err.message,
                 }))),
             }
         }
         "local-project/git-state" => {
+            let workspace_id = WorkspaceId(
+                payload
+                    .get("workspaceId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("local")
+                    .to_string(),
+            );
+            let local_project_id = payload
+                .get("localProjectId")
+                .and_then(Value::as_str)
+                .map(|s| LocalProjectId(s.to_string()));
             let root_path = payload
                 .get("rootPath")
                 .and_then(Value::as_str)
-                .map(PathBuf::from)
-                .ok_or_else(|| (StatusCode::BAD_REQUEST, "missing rootPath".to_string()))?;
-            let q = AppQuery::InspectProjectGitSummary { root_path };
+                .map(PathBuf::from);
+            let q = AppQuery::InspectProjectGitSummary {
+                workspace_id,
+                local_project_id,
+                root_path,
+            };
             let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-                .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
             match resp {
-                AppResponse::ProjectGitSummary(summary) => {
+                Ok(AppResponse::ProjectGitSummary(summary)) => {
                     let result = if summary.git {
                         let mut branches = Vec::new();
                         if let Some(ref cur) = summary.current_branch {
@@ -462,10 +504,16 @@ async fn handle_project_control(
                         "result": result,
                     })))
                 }
-                _ => Err((
+                Ok(_) => Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "unexpected response".to_string(),
                 )),
+                Err(err) => Ok(Json(json!({
+                    "ok": false,
+                    "type": "local-project/git-state",
+                    "error": map_project_control_error_code(err.kind),
+                    "message": err.message,
+                }))),
             }
         }
         _ => {
@@ -572,6 +620,14 @@ async fn handle_session_control(
                 .and_then(|p| p.get("localProjectId"))
                 .and_then(Value::as_str)
                 .map(|s| LocalProjectId(s.to_string()));
+            let base_branch = payload
+                .get("project")
+                .and_then(|p| p.get("branch"))
+                .and_then(Value::as_str)
+                .or_else(|| payload.get("baseBranch").and_then(Value::as_str))
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(ToOwned::to_owned);
             let use_worktree = payload
                 .get("project")
                 .and_then(|p| p.get("useWorktree"))
@@ -583,6 +639,7 @@ async fn handle_session_control(
                 session_id,
                 turn_id,
                 local_project_id,
+                base_branch,
                 use_worktree,
                 adapter_id,
                 custom_acp,

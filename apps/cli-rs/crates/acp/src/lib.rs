@@ -363,6 +363,10 @@ struct SharedProcessState {
     child: Mutex<Child>,
     pending_rpc: Mutex<HashMap<u64, mpsc::Sender<Result<Value, String>>>>,
     pending_permissions: Mutex<HashMap<String, Value>>,
+    init_rpc_id: AtomicU64,
+    session_new_rpc_id: AtomicU64,
+    advertises_session_activity: AtomicBool,
+    current_acp_session_id: Mutex<Option<String>>,
     active_prompt_id: AtomicU64,
     prompt_in_flight: AtomicBool,
     terminated: AtomicBool,
@@ -386,7 +390,20 @@ impl SharedProcessState {
     }
 
     fn call_blocking(&self, method: &str, params: Value, timeout: Duration) -> PortResult<Value> {
+        self.call_blocking_tracked(method, params, timeout, None)
+    }
+
+    fn call_blocking_tracked(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        tracked_id_slot: Option<&AtomicU64>,
+    ) -> PortResult<Value> {
         let req_id = self.next_rpc_id.fetch_add(1, Ordering::SeqCst);
+        if let Some(slot) = tracked_id_slot {
+            slot.store(req_id, Ordering::SeqCst);
+        }
         let (tx, rx) = mpsc::channel();
         self.pending_rpc
             .lock()
@@ -494,6 +511,10 @@ fn spawn_acp_process(
         child: Mutex::new(child),
         pending_rpc: Mutex::new(HashMap::new()),
         pending_permissions: Mutex::new(HashMap::new()),
+        init_rpc_id: AtomicU64::new(0),
+        session_new_rpc_id: AtomicU64::new(0),
+        advertises_session_activity: AtomicBool::new(false),
+        current_acp_session_id: Mutex::new(None),
         active_prompt_id: AtomicU64::new(0),
         prompt_in_flight: AtomicBool::new(false),
         terminated: AtomicBool::new(false),
@@ -520,15 +541,19 @@ impl StdioAcpSession {
         let shared = spawn_acp_process(spec, sink)?;
 
         let handshake = (|| -> PortResult<(String, bool)> {
-            let init_res = shared.call_blocking(
+            let init_res = shared.call_blocking_tracked(
                 "initialize",
                 json!({
                     "protocolVersion": 1,
                     "clientInfo": { "name": "lody", "version": "0.1.0" }
                 }),
                 handshake_timeout,
+                Some(&shared.init_rpc_id),
             )?;
             let (advertises_activity, _) = parse_lody_extension_capabilities(&init_res);
+            shared
+                .advertises_session_activity
+                .store(advertises_activity, Ordering::SeqCst);
 
             let mcp_servers: Vec<Value> = spec
                 .mcp_mounts
@@ -548,13 +573,14 @@ impl StdioAcpSession {
                 })
                 .collect();
 
-            let new_res = shared.call_blocking(
+            let new_res = shared.call_blocking_tracked(
                 "session/new",
                 json!({
                     "cwd": spec.cwd,
                     "mcpServers": mcp_servers,
                 }),
                 handshake_timeout,
+                Some(&shared.session_new_rpc_id),
             )?;
 
             let sid = new_res
@@ -567,6 +593,10 @@ impl StdioAcpSession {
                     )
                 })
                 .map(ToOwned::to_owned)?;
+            *shared
+                .current_acp_session_id
+                .lock()
+                .expect("current_acp_session_id lock") = Some(sid.clone());
             Ok((sid, advertises_activity))
         })();
 
@@ -663,11 +693,22 @@ impl AcpSessionPort for StdioAcpSession {
     }
 }
 
-fn parse_activity_state(raw: &str) -> Option<AcpNativeActivity> {
-    match raw {
+fn parse_session_activity_update(
+    params: &Value,
+    expected_session_id: &str,
+) -> Option<AcpNativeActivity> {
+    if params.get("version").and_then(Value::as_u64) != Some(1) {
+        return None;
+    }
+    let session_id = params.get("sessionId").and_then(Value::as_str)?;
+    if session_id.is_empty() || session_id != expected_session_id {
+        return None;
+    }
+    let background_task_count = params.get("backgroundTaskCount").and_then(Value::as_u64)?;
+    match params.get("state").and_then(Value::as_str)? {
+        "running" | "requires_action" => Some(AcpNativeActivity::Running),
+        "idle" if background_task_count > 0 => Some(AcpNativeActivity::Background),
         "idle" => Some(AcpNativeActivity::Idle),
-        "running" | "working" => Some(AcpNativeActivity::Running),
-        "background" => Some(AcpNativeActivity::Background),
         _ => None,
     }
 }
@@ -692,6 +733,25 @@ fn run_stdout_reader(
             && (msg.get("result").is_some() || msg.get("error").is_some());
         if is_response {
             if let Some(id_num) = msg.get("id").and_then(Value::as_u64) {
+                if msg.get("error").is_none()
+                    && let Some(res_val) = msg.get("result")
+                {
+                    if id_num != 0 && shared.init_rpc_id.load(Ordering::SeqCst) == id_num {
+                        let (advertises, _) = parse_lody_extension_capabilities(res_val);
+                        shared
+                            .advertises_session_activity
+                            .store(advertises, Ordering::SeqCst);
+                    } else if id_num != 0
+                        && shared.session_new_rpc_id.load(Ordering::SeqCst) == id_num
+                        && let Some(sid) = res_val.get("sessionId").and_then(Value::as_str)
+                    {
+                        *shared
+                            .current_acp_session_id
+                            .lock()
+                            .expect("current_acp_session_id lock") = Some(sid.to_string());
+                    }
+                }
+
                 if let Some(tx) = shared
                     .pending_rpc
                     .lock()
@@ -729,18 +789,27 @@ fn run_stdout_reader(
         }
 
         let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
+        let normalized_method = method.strip_prefix('_').unwrap_or(method);
         let params = msg.get("params").cloned().unwrap_or(Value::Null);
-        match method {
+        match normalized_method {
             "session/update" => {
                 if let Some(update) = params.get("update") {
                     dispatch_session_update(update, sink.as_ref());
                 }
             }
-            "_lody/session/activity" => {
-                if let Some(state_str) = params.get("state").and_then(Value::as_str)
-                    && let Some(activity) = parse_activity_state(state_str)
-                {
-                    sink.on_acp_event(AcpInboundEvent::SessionActivity { activity });
+            "lody/session/activity_update" => {
+                if shared.advertises_session_activity.load(Ordering::SeqCst) {
+                    let current_sid = shared
+                        .current_acp_session_id
+                        .lock()
+                        .expect("current_acp_session_id lock")
+                        .clone();
+                    if let Some(expected_sid) = current_sid
+                        && let Some(activity) =
+                            parse_session_activity_update(&params, &expected_sid)
+                    {
+                        sink.on_acp_event(AcpInboundEvent::SessionActivity { activity });
+                    }
                 }
             }
             "session/request_permission" => {
@@ -830,13 +899,6 @@ fn dispatch_session_update(update: &Value, sink: &dyn AcpEventSink) {
                 title,
                 status,
             });
-        }
-        "session_activity" => {
-            if let Some(state_str) = update.get("state").and_then(Value::as_str)
-                && let Some(activity) = parse_activity_state(state_str)
-            {
-                sink.on_acp_event(AcpInboundEvent::SessionActivity { activity });
-            }
         }
         _ => {}
     }

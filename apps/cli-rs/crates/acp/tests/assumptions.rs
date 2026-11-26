@@ -1,7 +1,7 @@
 use lody_acp::{ManagedArtifactInstaller, PortablePtyManager, StdioAcpLauncher};
 use lody_ports::{
-    AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpSessionArchiveOutcome, AcpSpawnSpec,
-    ArtifactRegistryPort, ManagedArtifactSource, PortErrorKind, PtyPort, SessionId,
+    AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpNativeActivity, AcpSessionArchiveOutcome,
+    AcpSpawnSpec, ArtifactRegistryPort, ManagedArtifactSource, PortErrorKind, PtyPort, SessionId,
     TERMINAL_MAX_PER_SESSION, TerminalOpenSpec,
 };
 use std::collections::BTreeMap;
@@ -84,6 +84,47 @@ fn explicit_termination_suppresses_spurious_crash_while_unexpected_exit_surfaces
         .set_session_archived(&spec, "native-sess-1", true)
         .expect("negotiate native sessionArchive without session/new");
     assert_eq!(archive_outcome, AcpSessionArchiveOutcome::Native);
+
+    let (tx3, rx3) = mpsc::channel();
+    let session3 = launcher
+        .launch_session(&spec, Arc::new(ChannelSink(tx3)))
+        .expect("launch activity session");
+    assert!(session3.advertises_session_activity());
+
+    for directive in [
+        "[SCRIPTED:ACTIVITY:requires_action:0]",
+        "[SCRIPTED:ACTIVITY:idle:2]",
+        "[SCRIPTED:ACTIVITY:idle:0:foreign-acp-session]",
+        "[SCRIPTED:ACTIVITY:idle:0]",
+    ] {
+        session3.send_prompt(directive).expect("send activity turn");
+        loop {
+            let ev = rx3
+                .recv_timeout(Duration::from_secs(5))
+                .expect("await prompt finish");
+            if matches!(ev, AcpInboundEvent::PromptFinished { .. }) {
+                break;
+            }
+            if let AcpInboundEvent::SessionActivity { activity } = ev {
+                match directive {
+                    "[SCRIPTED:ACTIVITY:requires_action:0]" => {
+                        assert_eq!(activity, AcpNativeActivity::Running);
+                    }
+                    "[SCRIPTED:ACTIVITY:idle:2]" => {
+                        assert_eq!(activity, AcpNativeActivity::Background);
+                    }
+                    "[SCRIPTED:ACTIVITY:idle:0:foreign-acp-session]" => {
+                        panic!("foreign ACP sessionId activity_update must be ignored");
+                    }
+                    "[SCRIPTED:ACTIVITY:idle:0]" => {
+                        assert_eq!(activity, AcpNativeActivity::Idle);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    session3.terminate().expect("terminate session3");
 }
 
 #[test]

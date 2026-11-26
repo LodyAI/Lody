@@ -12,3 +12,6 @@ lody-app.workspace = true
 lody-kernel.workspace = true
 lody-ports.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

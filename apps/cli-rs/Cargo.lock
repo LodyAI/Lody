@@ -1076,6 +1076,7 @@ dependencies = [
  "lody-app",
  "lody-kernel",
  "lody-ports",
+ "serde_json",
  "tokio",
 ]
 

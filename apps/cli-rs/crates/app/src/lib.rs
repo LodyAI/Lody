@@ -4,15 +4,16 @@ pub use lody_ports::{
     AnchorSyncStatus, BackendProfile, BranchListPage, BranchListQuery, CapabilitySet,
     CustomCommandSpec, DiffCaptureScope, DiffFileEntry, EntitlementStatus, FileSearchResult,
     HistoryBlock, HistoryTurnRecord, LocalProjectGitSummary, LocalProjectId, LocalProjectRecord,
-    MachineId, MachineIdentityRestoreOutcome, McpHttpHeader, PermissionDecision,
-    PlatformCapability, PortError, PortErrorKind, PortResult, ProfileId, ScannedFileEntry,
-    ScannedFileIndex, ScheduleEditPatch, ScheduleProposalOutcome, ScheduleRecord, SessionId,
-    SessionMetaSnapshot, SteerVerdict, StorageLeaseMode, TERMINAL_MAX_PER_SESSION,
+    MAX_SCHEDULE_PROMPT_BYTES, MachineId, MachineIdentityRestoreOutcome, McpHttpHeader,
+    PermissionDecision, PlatformCapability, PortError, PortErrorKind, PortResult, ProfileId,
+    ScannedFileEntry, ScannedFileIndex, ScheduleEditPatch, ScheduleProposalOutcome, ScheduleRecord,
+    SessionId, SessionMetaSnapshot, SteerVerdict, StorageLeaseMode, TERMINAL_MAX_PER_SESSION,
     TerminalAttachReplay, TerminalEventSink, TerminalOpenOutcome, TerminalOutboundEvent,
     TerminalSnapshot, TurnDiffSummary, TurnId, TurnTerminalOutcome, UserId, VerifiedPrincipal,
     WorkspaceId, WorkspaceSecurityMode,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -58,6 +59,7 @@ pub enum AppCommand {
         session_id: SessionId,
         turn_id: TurnId,
         local_project_id: Option<LocalProjectId>,
+        base_branch: Option<String>,
         use_worktree: bool,
         adapter_id: String,
         custom_acp: Option<CustomCommandSpec>,
@@ -102,19 +104,22 @@ pub enum AppCommand {
     },
     ProposeSchedule {
         workspace_id: WorkspaceId,
+        invoking_session_id: SessionId,
         request_id: String,
         title: String,
         prompt_text: String,
-        cron_expr: String,
+        rule: Value,
     },
     ProposeScheduleEdit {
         workspace_id: WorkspaceId,
+        invoking_session_id: SessionId,
         schedule_id: String,
         request_id: String,
         patch: ScheduleEditPatch,
     },
     PauseSchedule {
         workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
         schedule_id: String,
         request_id: String,
     },
@@ -213,7 +218,9 @@ pub enum AppQuery {
     ListAttachedWorkspaces,
     ListProjects,
     InspectProjectGitSummary {
-        root_path: PathBuf,
+        workspace_id: WorkspaceId,
+        local_project_id: Option<LocalProjectId>,
+        root_path: Option<PathBuf>,
     },
     ListProjectBranches {
         workspace_id: WorkspaceId,
@@ -249,17 +256,41 @@ pub enum AppQuery {
     },
     ListSchedules {
         workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
         filter_query: Option<String>,
         limit: usize,
         offset: usize,
     },
     GetSchedule {
         workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
         schedule_id: String,
     },
     ListTerminals {
         session_id: SessionId,
     },
+}
+
+impl AppQuery {
+    pub fn target_workspace(&self) -> Option<&WorkspaceId> {
+        match self {
+            Self::InspectProjectGitSummary { workspace_id, .. }
+            | Self::ListProjectBranches { workspace_id, .. }
+            | Self::SearchProjectFiles { workspace_id, .. }
+            | Self::ListSessions { workspace_id }
+            | Self::GetSessionStatuses { workspace_id, .. }
+            | Self::GetSessionHistory { workspace_id, .. }
+            | Self::GetTurnDiff { workspace_id, .. }
+            | Self::ListSchedules { workspace_id, .. }
+            | Self::GetSchedule { workspace_id, .. } => Some(workspace_id),
+            Self::DaemonStatus
+            | Self::MachineIdentity
+            | Self::ListAttachedWorkspaces
+            | Self::ListProjects
+            | Self::ScanProjectFiles { .. }
+            | Self::ListTerminals { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -364,11 +395,61 @@ pub fn enforce_command_policy(
     cmd: &AppCommand,
     entitlement: Option<&EntitlementStatus>,
 ) -> PortResult<()> {
-    if cmd.requires_local_host_authority() && caller.is_remote() {
+    if cmd.requires_local_host_authority() && !caller.has_local_host_authority() {
         return Err(PortError::new(
             PortErrorKind::Forbidden,
             "host configuration, machine identity restore, workspace mount control, local terminals, and local project registration require local host authority",
         ));
+    }
+
+    if let VerifiedPrincipal::AgentSession {
+        workspace_id: caller_ws,
+        session_id: caller_sid,
+        ..
+    } = caller
+    {
+        if let Some(target_ws) = cmd.target_workspace()
+            && target_ws != caller_ws
+        {
+            return Err(PortError::new(
+                PortErrorKind::Forbidden,
+                "agent session principal cannot execute commands in another workspace",
+            ));
+        }
+
+        match cmd {
+            AppCommand::DelegateChildSession {
+                parent_session_id, ..
+            } if parent_session_id != caller_sid => {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "agent session principal can only delegate from its own invoking session",
+                ));
+            }
+            AppCommand::ProposeSchedule {
+                invoking_session_id,
+                ..
+            }
+            | AppCommand::ProposeScheduleEdit {
+                invoking_session_id,
+                ..
+            } if invoking_session_id != caller_sid => {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "Schedule tools require the invoking Session owner",
+                ));
+            }
+            AppCommand::PauseSchedule {
+                invoking_session_id,
+                ..
+            } if invoking_session_id.as_ref() != Some(caller_sid) => {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "Schedule tools require the invoking Session owner",
+                ));
+            }
+            _ => {}
+        }
     }
 
     if cmd.is_new_remote_dispatch(caller)
@@ -377,6 +458,43 @@ pub fn enforce_command_policy(
         return Err(PortError::entitlement_read_only(reason.clone()));
     }
 
+    Ok(())
+}
+
+pub fn enforce_query_policy(caller: &VerifiedPrincipal, query: &AppQuery) -> PortResult<()> {
+    if let VerifiedPrincipal::AgentSession {
+        workspace_id: caller_ws,
+        session_id: caller_sid,
+        ..
+    } = caller
+    {
+        if let Some(target_ws) = query.target_workspace()
+            && target_ws.0 != "*"
+            && target_ws != caller_ws
+        {
+            return Err(PortError::new(
+                PortErrorKind::Forbidden,
+                "agent session principal cannot query another workspace",
+            ));
+        }
+
+        match query {
+            AppQuery::ListSchedules {
+                invoking_session_id,
+                ..
+            }
+            | AppQuery::GetSchedule {
+                invoking_session_id,
+                ..
+            } if invoking_session_id.as_ref() != Some(caller_sid) => {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "Schedule tools require the invoking Session owner",
+                ));
+            }
+            _ => {}
+        }
+    }
     Ok(())
 }
 

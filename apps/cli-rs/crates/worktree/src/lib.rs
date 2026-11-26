@@ -24,7 +24,8 @@ pub use turn_diff::{
     CODEC_GZIP, CODEC_RAW, CODEC_ZSTD, LocalTurnDiffStore, ReconstructedSnapshotPair,
     SqliteTurnDiffStore, TURN_DIFF_APPLICATION_ID, TURN_DIFF_SCHEMA_VERSION, TrackedLatestText,
     TurnDiffGcStats, TurnDiffIntegrityStats, TurnDiffStoreConfig, compress_chunk,
-    compute_line_diff_counts, decompress_chunk, safe_workspace_segment, workspace_diff_db_path,
+    compute_line_diff_counts, decompress_chunk, git_diff_base_ref_candidates,
+    safe_workspace_segment, workspace_diff_db_path,
 };
 
 pub struct GitWorktreeManager {
@@ -86,6 +87,26 @@ fn is_worktree_dirty(worktree_path: &Path) -> bool {
     !String::from_utf8_lossy(&out.stdout).trim().is_empty()
 }
 
+fn resolve_default_worktree_base(project_root: &Path) -> Option<String> {
+    let summary = inspect_git_summary(project_root);
+    if let Some(branch) = summary.current_branch.filter(|b| !b.trim().is_empty()) {
+        return Some(branch);
+    }
+    let out = Command::new("git")
+        .args(["rev-parse", "--verify", "HEAD^{commit}"])
+        .current_dir(project_root)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8(out.stdout).ok()?;
+    let trimmed = sha.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 impl WorktreePort for GitWorktreeManager {
     fn supports_git_worktree(&self) -> bool {
         true
@@ -98,6 +119,10 @@ impl WorktreePort for GitWorktreeManager {
         session_id: &SessionId,
         base_branch: Option<&str>,
     ) -> PortResult<WorktreeLease> {
+        let normalized_base = base_branch
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
         let sanitized_sid: String = session_id
             .0
             .chars()
@@ -116,6 +141,7 @@ impl WorktreePort for GitWorktreeManager {
                     session_id: session_id.clone(),
                     project_id: project_id.clone(),
                     branch_name,
+                    base_branch: normalized_base,
                     worktree_path,
                 });
             }
@@ -127,6 +153,9 @@ impl WorktreePort for GitWorktreeManager {
                 ),
             ));
         }
+
+        let effective_base =
+            normalized_base.or_else(|| resolve_default_worktree_base(project_root));
 
         if let Some(parent) = worktree_path.parent() {
             fs::create_dir_all(parent)
@@ -140,7 +169,7 @@ impl WorktreePort for GitWorktreeManager {
             .arg("-B")
             .arg(&branch_name)
             .arg(wt_str.as_ref());
-        if let Some(base) = base_branch {
+        if let Some(ref base) = effective_base {
             cmd.arg(base);
         }
         let out = cmd
@@ -163,6 +192,7 @@ impl WorktreePort for GitWorktreeManager {
             session_id: session_id.clone(),
             project_id: project_id.clone(),
             branch_name,
+            base_branch: effective_base,
             worktree_path,
         })
     }

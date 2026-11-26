@@ -1,13 +1,14 @@
 use lody_ports::{
-    AdmissionVerdict, AdmittedTurnInput, InboxCategory, InboxStorePort, MAX_SCHEDULE_PROMPT_BYTES,
-    MachineId, MachineIdentityPort, PortErrorKind, ScheduleEditPatch, ScheduleRecord,
-    ScheduleStorePort, SessionId, StorageLeaseMode, StorageLeasePort, SubmissionStage, TurnId,
-    UserId, WorkspaceId,
+    AdmissionVerdict, AdmittedTurnInput, InboxCategory, InboxStorePort, MachineId,
+    MachineIdentityPort, PortErrorKind, ScheduleCursorRecord, ScheduleLedgerPort,
+    ScheduleLedgerRunRecord, ScheduleRunState, SessionId, StorageLeaseMode, StorageLeasePort,
+    SubmissionStage, TurnId, UserId, WorkspaceId,
 };
 use lody_sqlite::{
     FileStorageLease, HardwareProbeResult, LocalMachineIdentityStore, MachineIdentityConfig,
-    SqliteDataLayout, SqliteScheduleStore, SqliteStore, resolve_linux_machine_id,
+    SqliteDataLayout, SqliteScheduleLedgerStore, SqliteStore, resolve_linux_machine_id,
 };
+use rusqlite::Connection;
 use std::fs;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -253,91 +254,101 @@ fn machine_identity_isolates_custom_data_dir_skips_containers_and_refuses_restor
 }
 
 #[test]
-fn schedule_edit_proposals_enforce_prompt_ceiling_ownership_and_full_prompt_reads() {
+fn schedule_ledger_matches_node_schema_rejects_future_versions_and_tracks_once_message_consumption()
+{
     let temp = tempfile::tempdir().unwrap();
-    let store = SqliteScheduleStore::open(&temp.path().join("schedules.sqlite")).unwrap();
+
+    let future_db = temp.path().join("future-schedules.sqlite");
+    {
+        let conn = Connection::open(&future_db).unwrap();
+        conn.execute_batch("PRAGMA user_version = 2;").unwrap();
+    }
+    assert_eq!(
+        SqliteScheduleLedgerStore::open(&future_db)
+            .err()
+            .map(|e| e.kind),
+        Some(PortErrorKind::Conflict)
+    );
+
+    let foreign_db = temp.path().join("foreign-schedules.sqlite");
+    {
+        let conn = Connection::open(&foreign_db).unwrap();
+        conn.execute_batch("CREATE TABLE schedules (schedule_id TEXT PRIMARY KEY);")
+            .unwrap();
+    }
+    assert_eq!(
+        SqliteScheduleLedgerStore::open(&foreign_db)
+            .err()
+            .map(|e| e.kind),
+        Some(PortErrorKind::Conflict)
+    );
+
+    let shared_db = temp.path().join("schedules.sqlite");
+    {
+        let conn = Connection::open(&shared_db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schedule_cursors (
+               workspace_id TEXT NOT NULL, schedule_id TEXT NOT NULL, activation_id TEXT NOT NULL,
+               fingerprint TEXT NOT NULL, last_slot INTEGER, next_slot INTEGER, updated_at INTEGER NOT NULL,
+               PRIMARY KEY (workspace_id, schedule_id, activation_id)
+             );
+             CREATE TABLE schedule_runs (
+               run_key TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, schedule_id TEXT NOT NULL,
+               state TEXT NOT NULL, planned_at INTEGER NOT NULL, payload TEXT NOT NULL
+             );
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    }
+
+    let ledger = SqliteScheduleLedgerStore::open(&shared_db).unwrap();
     let ws = WorkspaceId("ws_sched".to_string());
-    let owner = UserId("u_owner".to_string());
-    let other = UserId("u_other".to_string());
+    let cursor = ScheduleCursorRecord {
+        workspace_id: ws.clone(),
+        schedule_id: "sched_once".to_string(),
+        activation_id: "act_1".to_string(),
+        fingerprint: "fp_v1".to_string(),
+        last_slot: Some(1_000),
+        next_slot: None,
+        updated_at: 1_000,
+    };
+    let run = ScheduleLedgerRunRecord {
+        run_key: "sched_once:act_1:1000".to_string(),
+        workspace_id: ws.clone(),
+        schedule_id: "sched_once".to_string(),
+        state: ScheduleRunState::Pending,
+        planned_at: 1_000,
+        payload_json:
+            r#"{"runKey":"sched_once:act_1:1000","state":"pending","message":{"version":1}}"#
+                .to_string(),
+    };
+    ledger.commit_planned_slot(&cursor, Some(&run)).unwrap();
 
-    let long_prompt = "p".repeat(20_000);
-    store
-        .upsert_schedule(&ScheduleRecord {
-            schedule_id: "sched_1".to_string(),
-            workspace_id: ws.clone(),
-            session_id: None,
-            author_user_id: owner.clone(),
-            title: "Nightly audit".to_string(),
-            cron_expr: "0 2 * * *".to_string(),
-            prompt_text: long_prompt.clone(),
-            enabled: true,
-            content_revision: 1,
-        })
-        .unwrap();
+    let drift = ScheduleCursorRecord {
+        fingerprint: "fp_mutated_without_new_activation".to_string(),
+        ..cursor.clone()
+    };
+    assert_eq!(
+        ledger.commit_planned_slot(&drift, None).unwrap_err().kind,
+        PortErrorKind::Conflict
+    );
 
-    let full = store
-        .get_schedule(&ws, "sched_1")
-        .unwrap()
-        .expect("schedule exists");
-    assert_eq!(full.prompt_text.len(), 20_000);
-
-    let noop = store
-        .propose_schedule_edit(
-            &ws,
-            &owner,
-            "sched_1",
-            "req_noop",
-            &ScheduleEditPatch {
-                title: Some("Nightly audit".to_string()),
-                prompt_text: None,
-                cron_expr: None,
-            },
-        )
-        .unwrap_err();
-    assert_eq!(noop.kind, PortErrorKind::InvalidInput);
-
-    let too_large = store
-        .propose_schedule_edit(
-            &ws,
-            &owner,
-            "sched_1",
-            "req_big",
-            &ScheduleEditPatch {
-                title: None,
-                prompt_text: Some("x".repeat(MAX_SCHEDULE_PROMPT_BYTES + 1)),
-                cron_expr: None,
-            },
-        )
-        .unwrap_err();
-    assert_eq!(too_large.kind, PortErrorKind::InvalidInput);
-
-    let non_owner = store
-        .propose_schedule_edit(
-            &ws,
-            &other,
-            "sched_1",
-            "req_foreign",
-            &ScheduleEditPatch {
-                title: Some("Hijack".to_string()),
-                prompt_text: None,
-                cron_expr: None,
-            },
-        )
-        .unwrap_err();
-    assert_eq!(non_owner.kind, PortErrorKind::Forbidden);
-
-    let p1 = store
-        .propose_schedule_edit(
-            &ws,
-            &owner,
-            "sched_1",
-            "req_ok",
-            &ScheduleEditPatch {
-                title: Some("Updated nightly audit".to_string()),
-                prompt_text: None,
-                cron_expr: None,
-            },
+    assert!(
+        !ledger
+            .has_consumed_complete_message(&ws, "sched_once")
+            .unwrap()
+    );
+    ledger
+        .transition_run(
+            &run.run_key,
+            &[ScheduleRunState::Pending],
+            ScheduleRunState::Dispatched,
+            r#"{"runKey":"sched_once:act_1:1000","state":"dispatched","message":{"version":1}}"#,
         )
         .unwrap();
-    assert_eq!(p1.base_revision, Some(1));
+    assert!(
+        ledger
+            .has_consumed_complete_message(&ws, "sched_once")
+            .unwrap()
+    );
 }

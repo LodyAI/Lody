@@ -224,6 +224,12 @@ pub enum VerifiedPrincipal {
         caller_pid: Option&lt;u32&gt;,
         account_id: Option&lt;UserId&gt;,
     },
+    AgentSession {
+        workspace_id: WorkspaceId,
+        session_id: SessionId,
+        machine_id: MachineId,
+        account_id: Option&lt;UserId&gt;,
+    },
     ConnectedMember {
         profile_id: ProfileId,
         user_id: UserId,
@@ -383,13 +389,13 @@ pub fn enforce_command_policy(
         <p><code>storage.rs</code></p>
       </td>
       <td>
-        <p><code>DiffStorePort</code><br /><code>ScheduleStorePort</code><br /><code>AutomationStorePort</code></p>
+        <p><code>DiffStorePort</code><br /><code>ScheduleLedgerPort</code><br /><code>AutomationStorePort</code></p>
       </td>
       <td>
-        <p><code>capture_turn_snapshot / read_turn_diff</code>、<code>list_schedules / upsert_schedule</code>、<code>list_programs / erase_workspace_store</code></p>
+        <p><code>capture_turn_snapshot / read_turn_diff</code>、<code>read_planning_cursor / commit_planned_slot / transition_run</code>、<code>list_programs / erase_workspace_store</code></p>
       </td>
       <td>
-        <p>保留现有 SQLite 文件名以支持新旧版本无损回滚；<code>automations/&lt;workspace&gt;.sqlite</code> 保持按工作区分库，支持 E2EE 移除成员时物理擦除。</p>
+        <p>保留现有 SQLite 文件名与表结构（<code>schedules.sqlite</code> 仅存本机执行账本 <code>schedule_cursors</code> / <code>schedule_runs</code>，Schedule 定义与确认卡归属数据平面 <code>ScheduleRepoPort</code>），支持新旧版本共享目录无损交接。</p>
       </td>
     </tr>
     <tr>
