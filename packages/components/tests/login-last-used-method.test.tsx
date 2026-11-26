@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Provider, createStore } from 'jotai';
+import { MotionGlobalConfig, frameData, processFrame } from 'framer-motion';
 
 import { LoginPage } from '../src/components/login-page';
 import { AuthProvider } from '../src/providers/convex-provider';
@@ -162,6 +163,10 @@ describe('login page last-used method', () => {
   // completion callback must not steal focus back to the email input (which
   // would route password keystrokes into the visible email field).
   it('does not steal focus from the password field when the email view transition completes', async () => {
+    // Motion binds the real requestAnimationFrame at import, so fake timers cannot
+    // finish its tween; drive Motion's frames on a manual timeline instead.
+    const manualTiming = MotionGlobalConfig.useManualTiming;
+    MotionGlobalConfig.useManualTiming = true;
     vi.useFakeTimers();
     try {
       await render();
@@ -178,6 +183,8 @@ describe('login page last-used method', () => {
       expect(document.activeElement).toBe(password);
 
       await act(async () => {
+        const start = frameData.timestamp;
+        for (const elapsed of [0, 16, 500]) processFrame(start + elapsed);
         await vi.advanceTimersByTimeAsync(500);
       });
 
@@ -185,6 +192,7 @@ describe('login page last-used method', () => {
       expect(document.activeElement).toBe(password);
     } finally {
       vi.useRealTimers();
+      MotionGlobalConfig.useManualTiming = manualTiming;
     }
   });
 
