@@ -170,13 +170,23 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - name: Install self-host TLS prerequisites (mkcert)
+      - name: Install self-host prerequisites (mkcert + convex-local-backend)
         if: vars.SELFHOST_E2E_ENABLED == 'true'
         shell: bash
+        env:
+          CONVEX_BACKEND_VERSION: precompiled-2026-10-22-1447815
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mkcert libnss3-tools
+          CONVEX_DIR="${HOME}/.cache/convex/binaries/${CONVEX_BACKEND_VERSION}"
+          mkdir -p "${CONVEX_DIR}"
+          curl -fsSL \
+            "https://github.com/get-convex/convex-backend/releases/download/${CONVEX_BACKEND_VERSION}/convex-local-backend-x86_64-unknown-linux-gnu.zip" \
+            -o "${RUNNER_TEMP}/convex-local-backend.zip"
+          unzip -q -o "${RUNNER_TEMP}/convex-local-backend.zip" -d "${CONVEX_DIR}"
+          chmod +x "${CONVEX_DIR}/convex-local-backend"
+          rm -f "${RUNNER_TEMP}/convex-local-backend.zip"
 
       - name: Checkout self-host E2E harness (read-only deploy key)
         if: vars.SELFHOST_E2E_ENABLED == 'true'
@@ -256,13 +266,23 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - name: Install self-host TLS prerequisites (mkcert)
+      - name: Install self-host prerequisites (mkcert + convex-local-backend)
         if: vars.SELFHOST_E2E_ENABLED == 'true'
         shell: bash
+        env:
+          CONVEX_BACKEND_VERSION: precompiled-2026-10-22-1447815
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mkcert libnss3-tools
+          CONVEX_DIR="${HOME}/.cache/convex/binaries/${CONVEX_BACKEND_VERSION}"
+          mkdir -p "${CONVEX_DIR}"
+          curl -fsSL \
+            "https://github.com/get-convex/convex-backend/releases/download/${CONVEX_BACKEND_VERSION}/convex-local-backend-x86_64-unknown-linux-gnu.zip" \
+            -o "${RUNNER_TEMP}/convex-local-backend.zip"
+          unzip -q -o "${RUNNER_TEMP}/convex-local-backend.zip" -d "${CONVEX_DIR}"
+          chmod +x "${CONVEX_DIR}/convex-local-backend"
+          rm -f "${RUNNER_TEMP}/convex-local-backend.zip"
 
       - name: Checkout self-host E2E harness (read-only deploy key)
         if: vars.SELFHOST_E2E_ENABLED == 'true'
