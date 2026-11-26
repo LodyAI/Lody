@@ -7349,5 +7349,7 @@
   "e2ee.team.mobileBrowserUnsupported": "Мобильные браузеры не могут напрямую открыть Lody Desktop. Откройте эту ссылку-приглашение на компьютере с установленным Lody Desktop.",
   "e2ee.team.checkStatus": "Проверить статус",
   "e2ee.team.signedInAs": "Вход выполнен как {{email}}",
-  "e2ee.team.wrongEmailFor": "Это приглашение отправлено на {{invited}}. Войдите с этим адресом, чтобы продолжить."
+  "e2ee.team.wrongEmailFor": "Это приглашение отправлено на {{invited}}. Войдите с этим адресом, чтобы продолжить.",
+  "e2ee.auto.tab.qr": "Сканировать QR",
+  "e2ee.auto.tab.code": "Ввести 6-значный код"
 }

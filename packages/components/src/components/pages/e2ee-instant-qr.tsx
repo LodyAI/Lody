@@ -189,17 +189,32 @@ const styles = stylex.create({
     gap: space[3],
     textAlign: 'center',
   },
+  rootCompact: {
+    gap: space[2],
+  },
   qr: {
     backgroundColor: '#ffffff',
     padding: space[2],
     borderRadius: radius.medium,
+    boxShadow: '0 0 0 1px oklch(0 0 0 / 0.08)',
     lineHeight: 0,
   },
   qrFaded: { opacity: 0.15, width: 212, height: 212 },
+  qrFadedCompact: { width: 180, height: 180 },
   frame: { position: 'relative', display: 'grid', placeItems: 'center' },
   overlay: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' },
   lead: { margin: 0, fontWeight: 600 },
-  quiet: { margin: 0, color: colors.secondaryLabel, fontSize: type.footnoteSize },
+  leadCompact: {
+    fontSize: type.subheadlineSize,
+    lineHeight: type.subheadlineLeading,
+    fontWeight: 500,
+  },
+  quiet: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: type.footnoteSize,
+    lineHeight: type.footnoteLeading,
+  },
   status: {
     margin: 0,
     display: 'inline-flex',
@@ -229,6 +244,10 @@ export function E2eeInstantQrApprove(props: {
   /** Called once a device joined through this code. */
   onJoined?: (deviceName: string) => void;
   pollMs?: number;
+  /** Compact density for dialogs where space is constrained. */
+  compact?: boolean;
+  /** Omit the inline expiry line when the parent header already displays it. */
+  hideExpiry?: boolean;
 }) {
   const { t } = useTranslation();
   const { phase, refresh } = useInstantQrOffer(props.runtime, {
@@ -259,20 +278,25 @@ export function E2eeInstantQrApprove(props: {
         data-testid="e2ee-instant-qr"
         data-e2ee-pairing-surface=""
         data-phase={phase.kind}
-        {...stylex.props(styles.root)}
+        {...stylex.props(styles.root, props.compact && styles.rootCompact)}
       >
-        <p {...stylex.props(styles.lead)}>{t('e2ee.instantQr.lead')}</p>
+        <p {...stylex.props(styles.lead, props.compact && styles.leadCompact)}>
+          {t('e2ee.instantQr.lead')}
+        </p>
         <div {...stylex.props(styles.frame)}>
           {pairingString ? (
             <div {...stylex.props(styles.qr)}>
               <LedgerQrCode
                 payload={qrPayload(pairingString)}
-                size={196}
+                size={props.compact ? 164 : 196}
                 label={t('e2ee.accountPair.code.label')}
               />
             </div>
           ) : (
-            <div aria-hidden="true" {...stylex.props(styles.qr, styles.qrFaded)} />
+            <div
+              aria-hidden="true"
+              {...stylex.props(styles.qr, styles.qrFaded, props.compact && styles.qrFadedCompact)}
+            />
           )}
           {phase.kind === 'loading' && (
             <span {...stylex.props(styles.overlay)}>
@@ -284,7 +308,7 @@ export function E2eeInstantQrApprove(props: {
           {phase.kind === 'showing' && (
             <>
               <p {...stylex.props(styles.quiet)}>{t('e2ee.instantQr.help')}</p>
-              {secondsLeft !== null && secondsLeft < 60 * 60 && (
+              {!props.hideExpiry && secondsLeft !== null && secondsLeft < 60 * 60 && (
                 <p data-testid="e2ee-instant-qr-expiry" {...stylex.props(styles.quiet)}>
                   {secondsLeft === 0
                     ? t('e2ee.auto.expired.short')

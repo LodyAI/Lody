@@ -7209,5 +7209,7 @@
   "e2ee.team.mobileBrowserUnsupported": "Les navigateurs mobiles ne peuvent pas ouvrir Lody Desktop directement. Ouvrez ce lien d’invitation sur un ordinateur disposant de Lody Desktop.",
   "e2ee.team.checkStatus": "Vérifier l’état",
   "e2ee.team.signedInAs": "Connecté en tant que {{email}}",
-  "e2ee.team.wrongEmailFor": "Cette invitation a été envoyée à {{invited}}. Connectez-vous avec cette adresse pour continuer."
+  "e2ee.team.wrongEmailFor": "Cette invitation a été envoyée à {{invited}}. Connectez-vous avec cette adresse pour continuer.",
+  "e2ee.auto.tab.qr": "Scanner le QR",
+  "e2ee.auto.tab.code": "Saisir le code à 6 chiffres"
 }

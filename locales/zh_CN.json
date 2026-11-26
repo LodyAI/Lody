@@ -7209,5 +7209,7 @@
   "e2ee.team.mobileBrowserUnsupported": "手机浏览器无法直接唤起 Lody 桌面端。请在已安装 Lody 桌面端的电脑上打开此邀请链接。",
   "e2ee.team.checkStatus": "检查状态",
   "e2ee.team.signedInAs": "当前登录账号：{{email}}",
-  "e2ee.team.wrongEmailFor": "此邀请发送给了 {{invited}}，请使用该邮箱登录以继续。"
+  "e2ee.team.wrongEmailFor": "此邀请发送给了 {{invited}}，请使用该邮箱登录以继续。",
+  "e2ee.auto.tab.qr": "扫码授权",
+  "e2ee.auto.tab.code": "输入 6 位验证码"
 }

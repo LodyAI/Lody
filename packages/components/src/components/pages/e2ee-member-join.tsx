@@ -12,7 +12,7 @@ import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
 import { Spinner } from '@lody/ui/spinner';
-import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Check } from 'lucide-react';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useStableSession } from '@/hooks/useStableSession';
@@ -34,30 +34,93 @@ const styles = stylex.create({
     backgroundColor: colors.background,
   },
   card: { width: '100%', maxWidth: 460 },
-  stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
-  actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
-  steps: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' },
-  step: { display: 'grid', gridTemplateColumns: '22px minmax(0, 1fr)', columnGap: space[3] },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  actions: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  steps: {
+    listStyle: 'none',
+    margin: 0,
+    paddingBlock: space[3],
+    paddingInline: space[3],
+    borderRadius: radius.medium,
+    backgroundColor: colors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  step: { display: 'grid', gridTemplateColumns: '20px minmax(0, 1fr)', columnGap: space[3] },
   rail: { display: 'flex', flexDirection: 'column', alignItems: 'center' },
   dot: {
-    width: 22,
-    height: 22,
+    width: 20,
+    height: 20,
     borderRadius: '50%',
     display: 'grid',
     placeItems: 'center',
     fontSize: text.captionSize,
-    fontWeight: 700,
-    backgroundColor: colors.secondaryBackground,
+    fontWeight: 600,
+    fontVariantNumeric: 'tabular-nums',
+    backgroundColor: colors.elevatedBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
     color: colors.tertiaryLabel,
   },
-  dotDone: { backgroundColor: colors.success, color: '#ffffff' },
-  dotCurrent: { backgroundColor: colors.label, color: colors.background },
-  line: { width: 2, flexGrow: 1, minHeight: space[3], backgroundColor: colors.separator },
+  dotDone: { backgroundColor: colors.success, borderColor: colors.success, color: '#ffffff' },
+  dotCurrent: {
+    backgroundColor: colors.label,
+    borderColor: colors.label,
+    color: colors.background,
+  },
+  line: { width: '1.5px', flexGrow: 1, minHeight: space[3], backgroundColor: colors.separator },
   lineDone: { backgroundColor: colors.success },
-  stepText: { paddingBottom: space[3], color: colors.tertiaryLabel },
+  stepText: {
+    paddingBottom: space[3],
+    fontSize: text.subheadlineSize,
+    lineHeight: '20px',
+    color: colors.tertiaryLabel,
+  },
+  stepTextLast: { paddingBottom: 0 },
   stepTextActive: { color: colors.label },
-  muted: { margin: 0, color: colors.secondaryLabel, fontSize: text.subheadlineSize },
-  link: { color: colors.label, textDecoration: 'underline' },
+  stepTextCurrent: { fontWeight: 600 },
+  signedInBar: {
+    margin: 0,
+    paddingBlock: space[2],
+    paddingInline: space[3],
+    borderRadius: radius.small,
+    backgroundColor: colors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  waitingPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    padding: space[3],
+    borderRadius: radius.medium,
+    backgroundColor: colors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+  },
+  waitingTitle: {
+    margin: 0,
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 600,
+    color: colors.label,
+  },
+  muted: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  link: { color: colors.label, textDecoration: 'underline', textUnderlineOffset: '3px' },
 });
 
 const JOIN_STEPS = ['accept', 'approval', 'key', 'open'] as const;
@@ -87,7 +150,14 @@ function JoinProgress(props: { current: number }) {
                 <span {...stylex.props(styles.line, done && styles.lineDone)} />
               )}
             </span>
-            <span {...stylex.props(styles.stepText, (done || current) && styles.stepTextActive)}>
+            <span
+              {...stylex.props(
+                styles.stepText,
+                index === JOIN_STEPS.length - 1 && styles.stepTextLast,
+                (done || current) && styles.stepTextActive,
+                current && styles.stepTextCurrent
+              )}
+            >
               {t(`e2ee.team.steps.${step}`)}
             </span>
           </li>
@@ -431,29 +501,37 @@ function JoinSession({
                 </a>
               </p>
             )}
-            {email && <p {...stylex.props(styles.muted)}>{t('e2ee.team.signedInAs', { email })}</p>}
+            {email && (
+              <p {...stylex.props(styles.signedInBar)}>{t('e2ee.team.signedInAs', { email })}</p>
+            )}
             {message === 'e2ee.team.waitingKey' ? (
-              <Card.Root>
-                <Card.Header>
-                  <Card.Title as="h2">{t(message)}</Card.Title>
-                  <Card.Description>{t('e2ee.team.waitingKeyGuide')}</Card.Description>
-                </Card.Header>
-                <div {...stylex.props(styles.stack)}>
-                  {error ? (
-                    <p role="status">{t(error)}</p>
-                  ) : (
-                    slowWait && <p role="status">{t('e2ee.team.waitingKeySlow')}</p>
-                  )}
-                  <div {...stylex.props(styles.actions)}>
-                    <Button disabled={checkingKey} onClick={() => wake.current?.(true)}>
-                      {checkingKey && <Spinner size="small" />}
-                      {t('e2ee.team.checkKeyAgain')}
-                    </Button>
-                  </div>
+              <div {...stylex.props(styles.waitingPanel)}>
+                <h2 {...stylex.props(styles.waitingTitle)}>{t(message)}</h2>
+                <p {...stylex.props(styles.muted)}>{t('e2ee.team.waitingKeyGuide')}</p>
+                {error ? (
+                  <p role="status" {...stylex.props(styles.muted)}>
+                    {t(error)}
+                  </p>
+                ) : (
+                  slowWait && (
+                    <p role="status" {...stylex.props(styles.muted)}>
+                      {t('e2ee.team.waitingKeySlow')}
+                    </p>
+                  )
+                )}
+                <div {...stylex.props(styles.actions)}>
+                  <Button disabled={checkingKey} onClick={() => wake.current?.(true)}>
+                    {checkingKey && <Spinner size="small" />}
+                    {t('e2ee.team.checkKeyAgain')}
+                  </Button>
                 </div>
-              </Card.Root>
+              </div>
             ) : (
-              error && <p role="status">{t(error)}</p>
+              error && (
+                <p role="status" {...stylex.props(styles.muted)}>
+                  {t(error)}
+                </p>
+              )
             )}
             <div {...stylex.props(styles.actions)}>
               {previewFailed && previewFailure !== 'e2ee.team.unavailable' && onRetryPreview && (

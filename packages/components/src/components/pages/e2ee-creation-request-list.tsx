@@ -9,36 +9,47 @@ import type { PendingE2eeWorkspace } from '@/lib/e2ee-workspace-storage';
 
 const styles = stylex.create({
   root: { display: 'flex', flexDirection: 'column', gap: space[2], width: '100%' },
-  heading: { margin: 0, color: colors.secondaryLabel, fontSize: text.footnoteSize },
+  heading: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    fontWeight: 500,
+  },
   list: {
     display: 'flex',
     flexDirection: 'column',
     margin: 0,
     padding: 0,
     listStyle: 'none',
-    borderRadius: radius.large,
-    backgroundColor: colors.secondaryBackground,
+    borderRadius: radius.medium,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    backgroundColor: colors.elevatedBackground,
     overflow: 'hidden',
   },
   row: {
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
-    paddingBlock: space[1.5],
-    paddingInline: space[2],
-    borderTopWidth: { default: 1, ':first-child': 0 },
+    paddingBlock: space[2],
+    paddingInline: space[3],
+    borderTopWidth: { default: '1px', ':first-child': 0 },
     borderTopStyle: 'solid',
     borderTopColor: colors.separator,
   },
   rowSelected: {
-    backgroundColor: colors.elevatedBackground,
+    backgroundColor: colors.secondaryBackground,
   },
   selectedBadge: {
     flexShrink: 0,
     fontSize: text.captionSize,
     fontWeight: 500,
-    color: colors.secondaryLabel,
-    backgroundColor: colors.secondaryBackground,
+    color: colors.label,
+    backgroundColor: colors.elevatedBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
     borderRadius: radius.full,
     paddingInline: space[2],
     paddingBlock: '2px',
@@ -52,9 +63,21 @@ const styles = stylex.create({
     color: colors.label,
   },
   // Aligns plain archived text with the small ghost button text in active rows.
-  muted: { color: colors.secondaryLabel, paddingInline: '10px' },
+  muted: { color: colors.secondaryLabel, paddingInline: '6px' },
   help: { margin: 0, color: colors.secondaryLabel, fontSize: text.footnoteSize, lineHeight: 1.5 },
-  rowSelect: { flex: 1, minWidth: 0, overflow: 'hidden' },
+  rowSelect: { flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex' },
+  rowSelectButton: {
+    maxWidth: '100%',
+    justifyContent: 'flex-start',
+    paddingInline: '6px',
+    marginInlineStart: '-6px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  rowSelectActive: {
+    color: colors.label,
+    fontWeight: 600,
+  },
 });
 
 const requestLabel = (request: PendingE2eeWorkspace) => `${request.name} · ${request.slug}`;
@@ -119,6 +142,7 @@ export function E2eeCreationRequestList(props: {
                       size="small"
                       aria-pressed={selected}
                       disabled={busy}
+                      xstyle={[styles.rowSelectButton, selected && styles.rowSelectActive]}
                       onClick={() => props.onSelectRequest(request.requestId)}
                     >
                       {requestLabel(request)}

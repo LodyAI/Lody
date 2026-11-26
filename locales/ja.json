@@ -7209,5 +7209,7 @@
   "e2ee.team.mobileBrowserUnsupported": "モバイルブラウザからは Lody Desktop を直接開けません。Lody Desktop がインストールされたパソコンでこの招待リンクを開いてください。",
   "e2ee.team.checkStatus": "ステータスを確認",
   "e2ee.team.signedInAs": "{{email}} としてログイン中",
-  "e2ee.team.wrongEmailFor": "この招待は {{invited}} 宛てです。続行するにはそのメールアドレスでログインしてください。"
+  "e2ee.team.wrongEmailFor": "この招待は {{invited}} 宛てです。続行するにはそのメールアドレスでログインしてください。",
+  "e2ee.auto.tab.qr": "QR をスキャン",
+  "e2ee.auto.tab.code": "6 桁のコードを入力"
 }

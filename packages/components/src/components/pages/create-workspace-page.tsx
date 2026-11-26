@@ -35,7 +35,8 @@ const layoutStyles = stylex.create({
     flexDirection: 'column',
     alignItems: 'center',
     backgroundColor: colors.background,
-    padding: space[4],
+    paddingBlock: space[3],
+    paddingInline: space[4],
   },
   content: {
     width: '100%',
@@ -126,7 +127,7 @@ export function CreateWorkspacePage({
         <Card.Root>
           <Card.Header {...stylex.props(surface.center)}>
             <div {...stylex.props(styles.hero)}>
-              <Building2 {...stylex.props(surface.heroIcon)} />
+              <Building2 size={18} strokeWidth={1.75} aria-hidden="true" />
             </div>
             <Card.Title {...stylex.props(surface.authTitle)}>
               {paidRequired
@@ -340,29 +341,33 @@ const styles = stylex.create({
   formStack: {
     ':is(*) > :where(:not(:last-child))': {
       'margin-block-start': 0,
-      'margin-block-end': 'calc(var(--spacing) * 4)',
+      'margin-block-end': 'calc(var(--spacing) * 3)',
     },
   },
   fieldStack: {
     ':is(*) > :where(:not(:last-child))': {
       'margin-block-start': 0,
-      'margin-block-end': 'calc(var(--spacing) * 2)',
+      'margin-block-end': 'calc(var(--spacing) * 1.5)',
     },
   },
   fieldError: { borderColor: themeColors.destructive },
-  back: { marginBottom: themeSpace[3], marginLeft: 'calc(var(--spacing) * -2)' },
+  back: { marginBottom: themeSpace[2], marginLeft: 'calc(var(--spacing) * -2)' },
   hero: {
     marginInline: 'auto',
-    marginBottom: themeSpace[4],
+    marginBottom: themeSpace[2.5],
     display: 'flex',
-    height: themeSpace[12],
-    width: themeSpace[12],
+    height: themeSpace[10],
+    width: themeSpace[10],
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: themeRadius.full,
-    backgroundColor: 'hsl(var(--primary) / 0.1)',
+    borderRadius: themeRadius.lg,
+    backgroundColor: colors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    color: colors.label,
   },
-  description: { marginTop: themeSpace[2], whiteSpace: 'pre-line' },
+  description: { marginTop: themeSpace[1], whiteSpace: 'pre-line' },
   between: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   row: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
   reset: {
