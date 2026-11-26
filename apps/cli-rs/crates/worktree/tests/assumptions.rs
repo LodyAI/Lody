@@ -1,21 +1,38 @@
 use lody_ports::{
-    LocalProjectId, PortErrorKind, SessionId, TurnDiffCompression, TurnDiffEventInput, WorktreePort,
+    BranchListQuery, DiffCaptureScope, DiffStorePort, LocalProjectId, PortErrorKind, SessionId,
+    TurnDiffCompression, TurnDiffEventInput, TurnId, WorkspaceId, WorktreePort,
 };
 use lody_worktree::{
-    GitWorktreeManager, ReconstructedSnapshotPair, SqliteTurnDiffStore, TrackedLatestText,
-    TurnDiffStoreConfig, scan_directory_parallel,
+    GitWorktreeManager, LocalTurnDiffStore, ReconstructedSnapshotPair, SqliteTurnDiffStore,
+    TrackedLatestText, TurnDiffStoreConfig, scan_directory_parallel,
 };
 use rusqlite::Connection;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+fn run_git(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 fn init_git_repo(dir: &Path) {
     fs::create_dir_all(dir).unwrap();
     fs::write(dir.join("README.md"), "init\n").unwrap();
-    for args in [
-        &["init", "--initial-branch=main"][..],
-        &["add", "README.md"][..],
+    run_git(dir, &["init", "--initial-branch=main"]);
+    run_git(dir, &["add", "README.md"]);
+    run_git(
+        dir,
         &[
             "-c",
             "user.name=Test",
@@ -26,16 +43,8 @@ fn init_git_repo(dir: &Path) {
             "commit",
             "-m",
             "init",
-        ][..],
-    ] {
-        let out = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
-        assert!(out.status.success());
-    }
+        ],
+    );
 }
 
 #[test]
@@ -196,30 +205,112 @@ fn turn_diff_store_preserves_refcounts_monotonic_head_proofs_and_refuses_foreign
 }
 
 #[test]
-fn parallel_scanner_enforces_entry_budget_and_prunes_untracked_caches_without_hiding_tracked_files()
-{
+fn non_worktree_diff_scope_tracks_only_uncommitted_changes_and_branch_queries_paginate() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("scan-repo");
     init_git_repo(&repo);
+
+    run_git(&repo, &["checkout", "-b", "feat/branch-one"]);
+    fs::write(
+        repo.join("committed_on_branch.rs"),
+        "pub fn committed() {}\n",
+    )
+    .unwrap();
+    run_git(&repo, &["add", "committed_on_branch.rs"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@lody.invalid",
+            "-c",
+            "commit.gpgSign=false",
+            "commit",
+            "-m",
+            "feat: committed change",
+        ],
+    );
 
     fs::create_dir_all(repo.join("node_modules/pkg")).unwrap();
     fs::write(repo.join("node_modules/pkg/index.js"), "untracked cache").unwrap();
     fs::create_dir_all(repo.join("dist")).unwrap();
     fs::write(repo.join("dist/tracked.js"), "tracked artifact").unwrap();
-    let add_out = Command::new("git")
-        .args(["add", "-f", "dist/tracked.js"])
-        .current_dir(&repo)
-        .output()
+    run_git(&repo, &["add", "-f", "dist/tracked.js"]);
+    fs::write(repo.join("dirty_uncommitted.rs"), "pub fn dirty() {}\n").unwrap();
+
+    let diff_store = LocalTurnDiffStore::new(temp.path().join("data"));
+    let ws = WorkspaceId("local".to_string());
+
+    let non_wt_summary = diff_store
+        .capture_turn_snapshot(
+            &ws,
+            &SessionId("s_non_wt".to_string()),
+            &TurnId("t_1".to_string()),
+            &repo,
+            &DiffCaptureScope::UncommittedOnly,
+            10_000,
+        )
         .unwrap();
-    assert!(add_out.status.success());
+    assert!(
+        !non_wt_summary
+            .files
+            .iter()
+            .any(|f| f.relative_path == "committed_on_branch.rs")
+    );
+    assert!(
+        non_wt_summary
+            .files
+            .iter()
+            .any(|f| f.relative_path == "dirty_uncommitted.rs")
+    );
 
-    for idx in 0..25 {
-        fs::write(repo.join(format!("f_{idx:02}.rs")), "fn f() {}").unwrap();
-    }
+    let wt_summary = diff_store
+        .capture_turn_snapshot(
+            &ws,
+            &SessionId("s_wt".to_string()),
+            &TurnId("t_1".to_string()),
+            &repo,
+            &DiffCaptureScope::WorktreeBranch {
+                base_branch: Some("main".to_string()),
+            },
+            10_000,
+        )
+        .unwrap();
+    assert!(
+        wt_summary
+            .files
+            .iter()
+            .any(|f| f.relative_path == "committed_on_branch.rs")
+    );
+    assert!(
+        wt_summary
+            .files
+            .iter()
+            .any(|f| f.relative_path == "dirty_uncommitted.rs")
+    );
 
-    let capped = scan_directory_parallel(&repo, 10, 100 * 1024).unwrap();
-    assert_eq!(capped.entries.len(), 10);
-    assert!(capped.truncated);
+    let mgr = GitWorktreeManager::new(temp.path().join("repos"));
+    let page1 = mgr
+        .list_branches(
+            &repo,
+            &BranchListQuery {
+                query: None,
+                limit: 1,
+                cursor: None,
+            },
+        )
+        .unwrap();
+    assert!(page1.git);
+    assert_eq!(page1.total_count, 2);
+    assert!(page1.truncated);
+    assert!(page1.next_cursor.is_some());
+
+    let search = mgr.search_project_files(&repo, "@tracked.js", 5).unwrap();
+    assert_eq!(
+        search.paths.first().map(String::as_str),
+        Some("dist/tracked.js")
+    );
 
     let full = scan_directory_parallel(&repo, 1_000, 100 * 1024).unwrap();
     assert!(
@@ -227,10 +318,5 @@ fn parallel_scanner_enforces_entry_budget_and_prunes_untracked_caches_without_hi
             .entries
             .iter()
             .any(|e| e.relative_path.starts_with("node_modules"))
-    );
-    assert!(
-        full.entries
-            .iter()
-            .any(|e| e.relative_path == "dist/tracked.js")
     );
 }

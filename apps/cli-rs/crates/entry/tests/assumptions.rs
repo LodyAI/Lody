@@ -84,6 +84,19 @@ fn live_daemon_enforces_mcp_http_guards_delegates_child_and_caps_terminal_socket
     let home_dir = sandbox.path().join("h");
     fs::create_dir_all(&data_dir).unwrap();
     fs::create_dir_all(&home_dir).unwrap();
+
+    let restore_out = Command::new(&lody_bin)
+        .args(["machine", "restore-id", "machine-e2e-fixed", "--json"])
+        .env("LODY_DATA_DIR", &data_dir)
+        .env("HOME", &home_dir)
+        .env("LODY_PLATFORM", "local")
+        .output()
+        .expect("run machine restore-id");
+    assert!(restore_out.status.success());
+    let restore_json: Value = serde_json::from_slice(&restore_out.stdout).unwrap();
+    assert_eq!(restore_json["ok"], true);
+    assert_eq!(restore_json["targetMachineId"], "machine-e2e-fixed");
+
     let event_log = sandbox.path().join("acp-events.jsonl");
 
     let child = Command::new(&lody_bin)
@@ -109,6 +122,22 @@ fn live_daemon_enforces_mcp_http_guards_delegates_child_and_caps_terminal_socket
         assert!(Instant::now() < deadline, "daemon did not become ready");
         std::thread::yield_now();
     };
+
+    let (probe_status, probe_body) = send_unix_http(
+        Path::new(&meta.socket_path),
+        "GET",
+        "/state",
+        meta.token.as_deref(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(probe_status, 200);
+    let probe_json: Value = serde_json::from_str(&probe_body).unwrap();
+    assert_eq!(probe_json["machineId"], "machine-e2e-fixed");
+    assert_eq!(
+        probe_json["protocolCapabilities"]["localProjectFileSearch"],
+        true
+    );
 
     let term_sock = resolve_terminal_socket_path(&data_dir, "lody-oss").unwrap();
     {

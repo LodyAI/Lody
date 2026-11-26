@@ -6,8 +6,9 @@ use crate::turn::{
     PendingPermissionRequest, RunningTurnState, SteerFlightState,
 };
 use crate::types::{
-    DelegatedReceipt, FrozenTurnInvocation, Generation, RetainedTurn, SteerOutcome,
-    TurnTerminalReason, WarmAgentHandle,
+    DelegatedReceipt, FrozenTurnInvocation, Generation, LATE_STREAM_ACTIVITY_TTL_MS,
+    NativeSessionActivity, PresencePublishReason, RetainedTurn, SteerOutcome, TurnTerminalReason,
+    WarmAgentHandle,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -47,6 +48,8 @@ pub struct SessionState {
     pub default_adapter_id: String,
     pub default_mcp_selection_digest: String,
     pub next_generation: Generation,
+    pub last_observed_clock_ms: u64,
+    pub native_activity: NativeSessionActivity,
     pub durable_user_turn_ids: BTreeSet<String>,
     pub inbox: InboxState,
     pub goal: Option<GoalControlState>,
@@ -63,6 +66,8 @@ impl SessionState {
             default_adapter_id: "default".to_string(),
             default_mcp_selection_digest: String::new(),
             next_generation: Generation(1),
+            last_observed_clock_ms: 0,
+            native_activity: NativeSessionActivity::Unsupported,
             durable_user_turn_ids: BTreeSet::new(),
             inbox: InboxState::default(),
             goal: None,
@@ -72,6 +77,28 @@ impl SessionState {
                 warm_agent: None,
             },
         }
+    }
+
+    pub fn has_live_out_of_turn_work(&self, now_ms: u64) -> bool {
+        let SessionPhase::Idle {
+            retained_turn,
+            warm_agent: Some(_),
+        } = &self.phase
+        else {
+            return false;
+        };
+        match self.native_activity {
+            NativeSessionActivity::Running | NativeSessionActivity::Background => true,
+            NativeSessionActivity::Idle => false,
+            NativeSessionActivity::Unsupported => retained_turn
+                .as_ref()
+                .and_then(|r| r.late_activity_until_ms)
+                .is_some_and(|until| now_ms < until),
+        }
+    }
+
+    pub fn is_gc_protected(&self, now_ms: u64) -> bool {
+        !matches!(self.phase, SessionPhase::Idle { .. }) || self.has_live_out_of_turn_work(now_ms)
     }
 
     fn allocate_generation(&mut self) -> Generation {
@@ -88,6 +115,9 @@ pub enum KernelEvent {
     },
     EnqueueDelegationReceipt {
         receipt: DelegatedReceipt,
+    },
+    ReconcileEndedInboxClaim {
+        turn_id: String,
     },
     UserTurnBecameDurable {
         turn_id: String,
@@ -106,6 +136,14 @@ pub enum KernelEvent {
     AgentOutputChunk {
         generation: Generation,
         text: String,
+        observed_at_ms: u64,
+    },
+    AgentNativeActivityUpdated {
+        generation: Generation,
+        activity: NativeSessionActivity,
+    },
+    AdvanceClock {
+        now_ms: u64,
     },
     AgentToolStatus {
         generation: Generation,
@@ -187,6 +225,10 @@ pub enum KernelAction {
     DetachAgentBackgroundCleanup {
         agent_instance_id: String,
     },
+    PublishRunningPresence {
+        reason: PresencePublishReason,
+    },
+    ClearRunningPresence,
     StartAgentPrompt {
         turn_id: String,
         prompt_text: String,
@@ -281,6 +323,7 @@ fn begin_invocation_from_idle(
             });
         }
         Some(incompatible) => {
+            state.native_activity = NativeSessionActivity::Unsupported;
             actions.push(KernelAction::RetireAgent {
                 agent_instance_id: incompatible.agent_instance_id,
             });
@@ -299,6 +342,7 @@ fn begin_invocation_from_idle(
             });
         }
         None => {
+            state.native_activity = NativeSessionActivity::Unsupported;
             state.phase = SessionPhase::Preparing {
                 invocation: invocation.clone(),
                 generation,
@@ -328,6 +372,12 @@ fn take_phase(phase: &mut SessionPhase) -> SessionPhase {
 
 fn maybe_dispatch_when_idle(state: &mut SessionState, actions: &mut Vec<KernelAction>) {
     if !matches!(state.phase, SessionPhase::Idle { .. }) {
+        return;
+    }
+
+    if state.has_live_out_of_turn_work(state.last_observed_clock_ms)
+        && !state.inbox.has_runnable_human_entry()
+    {
         return;
     }
 
@@ -416,6 +466,15 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 maybe_dispatch_when_idle(&mut state, &mut actions);
             }
         }
+        KernelEvent::ReconcileEndedInboxClaim { turn_id } => {
+            if state.inbox.settle_ended_claim(&turn_id) {
+                actions.push(KernelAction::FinalizeTurn {
+                    turn_id,
+                    reason: TurnTerminalReason::StartupInterruptedUnknown,
+                });
+                maybe_dispatch_when_idle(&mut state, &mut actions);
+            }
+        }
         KernelEvent::UserTurnBecameDurable { turn_id } => {
             state.durable_user_turn_ids.insert(turn_id.clone());
             match &mut state.phase {
@@ -441,9 +500,19 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 stale_acp_retries_used,
                 ..
             } if expected_gen == generation => {
+                state.native_activity = if agent.advertises_session_activity {
+                    NativeSessionActivity::Idle
+                } else {
+                    NativeSessionActivity::Unsupported
+                };
                 state.inbox.mark_submitted(&invocation.turn_id);
                 let prompt_text = invocation.prompt_text.clone();
                 let turn_id = invocation.turn_id.clone();
+                let presence_reason = if stale_acp_retries_used > 0 {
+                    PresencePublishReason::StaleAcpRecovery
+                } else {
+                    PresencePublishReason::TurnStarted
+                };
                 state.phase = SessionPhase::Running(Box::new(RunningTurnState::new(
                     invocation,
                     agent,
@@ -451,6 +520,9 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     user_turn_durable,
                     stale_acp_retries_used,
                 )));
+                actions.push(KernelAction::PublishRunningPresence {
+                    reason: presence_reason,
+                });
                 actions.push(KernelAction::StartAgentPrompt {
                     turn_id,
                     prompt_text,
@@ -467,6 +539,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     prior_warm_agent,
                     ..
                 } if expected_gen == generation => {
+                    state.native_activity = NativeSessionActivity::Unsupported;
                     if let Some(old) = prior_warm_agent {
                         actions.push(KernelAction::DetachAgentBackgroundCleanup {
                             agent_instance_id: old.agent_instance_id,
@@ -478,6 +551,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                         turn_id: invocation.turn_id,
                         reason,
                     });
+                    actions.push(KernelAction::ClearRunningPresence);
                     maybe_dispatch_when_idle(&mut state, &mut actions);
                 }
                 other => state.phase = other,
@@ -494,6 +568,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                         stale_acp_retries_used,
                         ..
                     } = *running;
+                    state.native_activity = NativeSessionActivity::Unsupported;
                     actions.push(KernelAction::DetachAgentBackgroundCleanup {
                         agent_instance_id: agent.agent_instance_id.clone(),
                     });
@@ -536,33 +611,113 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 other => state.phase = other,
             }
         }
-        KernelEvent::AgentOutputChunk { generation, text } => match &mut state.phase {
-            SessionPhase::Running(running) if running.generation == generation => {
-                if !text.is_empty() {
-                    running.produced_visible_output = true;
+        KernelEvent::AgentOutputChunk {
+            generation,
+            text,
+            observed_at_ms,
+        } => {
+            state.last_observed_clock_ms = state.last_observed_clock_ms.max(observed_at_ms);
+            match &mut state.phase {
+                SessionPhase::Running(running) if running.generation == generation => {
+                    if !text.is_empty() {
+                        running.produced_visible_output = true;
+                    }
+                    if running.user_turn_durable {
+                        actions.push(KernelAction::AppendAssistantOutput {
+                            turn_id: running.invocation.turn_id.clone(),
+                            text,
+                        });
+                    } else {
+                        running
+                            .buffered_outputs
+                            .push(BufferedTurnOutput::TextChunk { text });
+                    }
                 }
-                if running.user_turn_durable {
-                    actions.push(KernelAction::AppendAssistantOutput {
-                        turn_id: running.invocation.turn_id.clone(),
-                        text,
-                    });
-                } else {
-                    running
-                        .buffered_outputs
-                        .push(BufferedTurnOutput::TextChunk { text });
+                SessionPhase::Idle {
+                    retained_turn: Some(retained),
+                    warm_agent,
+                } if retained.generation == generation => {
+                    let non_empty = !text.is_empty();
+                    let turn_id = retained.invocation.turn_id.clone();
+                    if non_empty
+                        && warm_agent.is_some()
+                        && state.native_activity == NativeSessionActivity::Unsupported
+                    {
+                        retained.late_activity_until_ms = Some(
+                            state
+                                .last_observed_clock_ms
+                                .saturating_add(LATE_STREAM_ACTIVITY_TTL_MS),
+                        );
+                        actions.push(KernelAction::PublishRunningPresence {
+                            reason: PresencePublishReason::LateStreamActivity,
+                        });
+                    }
+                    actions.push(KernelAction::AppendAssistantOutput { turn_id, text });
+                }
+                _ => {}
+            }
+        }
+        KernelEvent::AgentNativeActivityUpdated {
+            generation,
+            activity,
+        } => {
+            let matches_gen = match &state.phase {
+                SessionPhase::Running(r) => r.generation == generation,
+                SessionPhase::Settling { generation: g, .. } => *g == generation,
+                SessionPhase::Idle {
+                    retained_turn: Some(r),
+                    warm_agent: Some(_),
+                } => r.generation == generation,
+                SessionPhase::Idle {
+                    warm_agent: Some(_),
+                    ..
+                } => true,
+                _ => false,
+            };
+            if matches_gen {
+                state.native_activity = activity;
+                if let SessionPhase::Idle { retained_turn, .. } = &mut state.phase {
+                    match activity {
+                        NativeSessionActivity::Running | NativeSessionActivity::Background => {
+                            if let Some(r) = retained_turn {
+                                r.late_activity_until_ms = None;
+                            }
+                            actions.push(KernelAction::PublishRunningPresence {
+                                reason: PresencePublishReason::NativeWorkRunning,
+                            });
+                        }
+                        NativeSessionActivity::Idle => {
+                            if let Some(r) = retained_turn {
+                                r.late_activity_until_ms = None;
+                            }
+                            actions.push(KernelAction::ClearRunningPresence);
+                            maybe_dispatch_when_idle(&mut state, &mut actions);
+                        }
+                        NativeSessionActivity::Unsupported => {}
+                    }
                 }
             }
-            SessionPhase::Idle {
+        }
+        KernelEvent::AdvanceClock { now_ms } => {
+            state.last_observed_clock_ms = state.last_observed_clock_ms.max(now_ms);
+            let mut expired = false;
+            if let SessionPhase::Idle {
                 retained_turn: Some(retained),
                 ..
-            } if retained.generation == generation => {
-                actions.push(KernelAction::AppendAssistantOutput {
-                    turn_id: retained.invocation.turn_id.clone(),
-                    text,
-                });
+            } = &mut state.phase
+                && let Some(until) = retained.late_activity_until_ms
+                && state.last_observed_clock_ms >= until
+            {
+                retained.late_activity_until_ms = None;
+                expired = true;
             }
-            _ => {}
-        },
+            if expired {
+                if !state.has_live_out_of_turn_work(state.last_observed_clock_ms) {
+                    actions.push(KernelAction::ClearRunningPresence);
+                }
+                maybe_dispatch_when_idle(&mut state, &mut actions);
+            }
+        }
         KernelEvent::AgentToolStatus {
             generation,
             tool_call_id,
@@ -736,6 +891,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     steer_flight,
                     ..
                 } = *running;
+                state.native_activity = NativeSessionActivity::Unsupported;
                 for req_id in pending_permissions.into_keys() {
                     actions.push(KernelAction::CancelPendingPermission {
                         turn_id: invocation.turn_id.clone(),
@@ -766,7 +922,26 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
         },
         KernelEvent::CancelRequested { pause_inbox } => {
             state.inbox.paused |= pause_inbox;
+            if matches!(
+                state.native_activity,
+                NativeSessionActivity::Running | NativeSessionActivity::Background
+            ) {
+                state.native_activity = NativeSessionActivity::Idle;
+            }
             match take_phase(&mut state.phase) {
+                SessionPhase::Idle {
+                    mut retained_turn,
+                    warm_agent,
+                } => {
+                    if let Some(r) = &mut retained_turn {
+                        r.late_activity_until_ms = None;
+                    }
+                    actions.push(KernelAction::ClearRunningPresence);
+                    state.phase = SessionPhase::Idle {
+                        retained_turn,
+                        warm_agent,
+                    };
+                }
                 SessionPhase::Preparing {
                     invocation,
                     generation,
@@ -784,6 +959,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                         turn_id: invocation.turn_id,
                         reason: TurnTerminalReason::Canceled,
                     });
+                    actions.push(KernelAction::ClearRunningPresence);
                     maybe_dispatch_when_idle(&mut state, &mut actions);
                 }
                 SessionPhase::Running(running) => {
@@ -834,14 +1010,26 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     matches!(reason, TurnTerminalReason::Completed).then_some(RetainedTurn {
                         invocation,
                         generation,
+                        late_activity_until_ms: None,
                     });
-                let warm_agent =
-                    (!matches!(reason, TurnTerminalReason::AgentFailed { .. })).then_some(agent);
+                let warm_agent = if matches!(reason, TurnTerminalReason::AgentFailed { .. }) {
+                    state.native_activity = NativeSessionActivity::Unsupported;
+                    None
+                } else {
+                    Some(agent)
+                };
                 actions.push(KernelAction::FinalizeTurn { turn_id, reason });
                 state.phase = SessionPhase::Idle {
                     retained_turn,
                     warm_agent,
                 };
+                if state.has_live_out_of_turn_work(state.last_observed_clock_ms) {
+                    actions.push(KernelAction::PublishRunningPresence {
+                        reason: PresencePublishReason::NativeWorkRunning,
+                    });
+                } else {
+                    actions.push(KernelAction::ClearRunningPresence);
+                }
                 maybe_dispatch_when_idle(&mut state, &mut actions);
             }
             other => state.phase = other,
@@ -853,6 +1041,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                 generation: expected_gen,
                 reason,
             } if expected_gen == generation => {
+                state.native_activity = NativeSessionActivity::Unsupported;
                 state.inbox.settle_and_retire(&invocation.turn_id);
                 actions.push(KernelAction::DetachAgentBackgroundCleanup {
                     agent_instance_id: agent.agent_instance_id,
@@ -861,6 +1050,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     turn_id: invocation.turn_id,
                     reason,
                 });
+                actions.push(KernelAction::ClearRunningPresence);
                 maybe_dispatch_when_idle(&mut state, &mut actions);
             }
             other => state.phase = other,
@@ -973,6 +1163,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
             }
         }
         KernelEvent::RecoverAfterCrash => {
+            state.native_activity = NativeSessionActivity::Unsupported;
             let retired_ids = state.inbox.recover_after_crash();
             for turn_id in retired_ids {
                 actions.push(KernelAction::FinalizeTurn {
@@ -980,6 +1171,7 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
                     reason: TurnTerminalReason::StartupInterruptedUnknown,
                 });
             }
+            actions.push(KernelAction::ClearRunningPresence);
             state.phase = SessionPhase::Idle {
                 retained_turn: None,
                 warm_agent: None,

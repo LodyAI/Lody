@@ -12,8 +12,9 @@ pub use turn::{
     PendingPermissionRequest, RunningTurnState, SteerFlightState,
 };
 pub use types::{
-    DelegatedReceipt, FrozenTurnInvocation, Generation, MAX_BATCHED_RECEIPTS_PER_WAKE,
-    MAX_CHILD_DELEGATION_DEPTH, MAX_GOAL_CONTINUATION_TURNS, MAX_STALE_ACP_RETRIES_PER_TURN,
-    RetainedTurn, SteerOutcome, SubmissionFence, TurnSourceKind, TurnTerminalReason,
-    WarmAgentHandle,
+    DelegatedReceipt, FailureClassification, FrozenTurnInvocation, Generation,
+    LATE_STREAM_ACTIVITY_TTL_MS, MAX_BATCHED_RECEIPTS_PER_WAKE, MAX_CHILD_DELEGATION_DEPTH,
+    MAX_GOAL_CONTINUATION_TURNS, MAX_STALE_ACP_RETRIES_PER_TURN, NativeSessionActivity,
+    PresencePublishReason, RetainedTurn, SteerOutcome, SubmissionFence, TurnSourceKind,
+    TurnTerminalReason, WarmAgentHandle, classify_turn_failure,
 };

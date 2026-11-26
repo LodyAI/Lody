@@ -7,11 +7,17 @@ use std::path::{Path, PathBuf};
 pub mod keys {
     pub const HOME: &str = "HOME";
     pub const USERPROFILE: &str = "USERPROFILE";
+    pub const USER: &str = "USER";
+    pub const USERNAME: &str = "USERNAME";
+    pub const XDG_STATE_HOME: &str = "XDG_STATE_HOME";
+    pub const LOCALAPPDATA: &str = "LOCALAPPDATA";
     pub const SHELL: &str = "SHELL";
     pub const COMSPEC: &str = "ComSpec";
     pub const COLORTERM: &str = "COLORTERM";
     pub const TERM: &str = "TERM";
     pub const FORCE_COLOR: &str = "FORCE_COLOR";
+    pub const NO_COLOR: &str = "NO_COLOR";
+    pub const ELECTRON_RUN_AS_NODE: &str = "ELECTRON_RUN_AS_NODE";
     pub const LODY_DATA_DIR: &str = "LODY_DATA_DIR";
     pub const LODY_LOCKS_DIR: &str = "LODY_LOCKS_DIR";
     pub const LODY_PLATFORM: &str = "LODY_PLATFORM";
@@ -20,22 +26,31 @@ pub mod keys {
     pub const LODY_LOG_TRACE: &str = "LODY_LOG_TRACE";
     pub const LODY_SESSION_ID: &str = "LODY_SESSION_ID";
     pub const LODY_WORKSPACE_SESSION_ID: &str = "LODY_WORKSPACE_SESSION_ID";
+    pub const LODY_AUTH_URL: &str = "LODY_AUTH_URL";
+    pub const LODY_AUTH_SITE_URL: &str = "LODY_AUTH_SITE_URL";
+    pub const LODY_SERVER_URL: &str = "LODY_SERVER_URL";
+    pub const LODY_MCP_HTTP_DISABLED: &str = "LODY_MCP_HTTP_DISABLED";
+    pub const LODY_MCP_SOCKET_PATH: &str = "LODY_MCP_SOCKET_PATH";
+    pub const LODY_MAX_CONCURRENT_ACP_SESSION_STARTS: &str =
+        "LODY_MAX_CONCURRENT_ACP_SESSION_STARTS";
     pub const HTTPS_PROXY: &str = "HTTPS_PROXY";
     pub const HTTPS_PROXY_LOWER: &str = "https_proxy";
     pub const HTTP_PROXY: &str = "HTTP_PROXY";
     pub const HTTP_PROXY_LOWER: &str = "http_proxy";
+    pub const ALL_PROXY: &str = "ALL_PROXY";
+    pub const ALL_PROXY_LOWER: &str = "all_proxy";
     pub const NO_PROXY: &str = "NO_PROXY";
     pub const NO_PROXY_LOWER: &str = "no_proxy";
-    pub const NO_COLOR: &str = "NO_COLOR";
     pub const LODY_CONFORMANCE_BIN: &str = "LODY_CONFORMANCE_BIN";
     pub const LODY_CONFORMANCE_BASELINE_BIN: &str = "LODY_CONFORMANCE_BASELINE_BIN";
     pub const LODY_CONFORMANCE_CANDIDATE_BIN: &str = "LODY_CONFORMANCE_CANDIDATE_BIN";
 }
 
 pub const LOOPBACK_NO_PROXY_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
+pub const DEFAULT_MAX_CONCURRENT_ACP_SESSION_STARTS: usize = 2;
 
-const TERMINAL_ENV_BLOCKLIST: [&str; 12] = [
-    "ELECTRON_RUN_AS_NODE",
+const CHILD_CREDENTIAL_AND_BOOTSTRAP_BLOCKLIST: [&str; 12] = [
+    keys::ELECTRON_RUN_AS_NODE,
     "LODY_CLI_TOKEN",
     "LODY_AGENT_SESSION_ID",
     "LODY_ELECTRON_BOOTSTRAP",
@@ -87,6 +102,16 @@ pub fn apply_loopback_no_proxy(env: &mut BTreeMap<String, String>) {
     env.insert(keys::NO_PROXY_LOWER.to_string(), merged);
 }
 
+fn paths_match_executable(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallationPlatform {
     Local,
@@ -125,10 +150,16 @@ pub struct HostEnv {
     pub platform: InstallationPlatform,
     pub home_dir: Option<PathBuf>,
     pub data_dir: PathBuf,
+    pub is_default_data_dir: bool,
+    pub state_anchor_dir: Option<PathBuf>,
+    pub user_identity: String,
     pub locks_dir_override: Option<PathBuf>,
     pub runtime_base_url_override: Option<String>,
     pub log_level: Option<String>,
     pub log_trace: bool,
+    pub mcp_http_disabled: bool,
+    pub max_concurrent_acp_starts: usize,
+    pub electron_run_as_node: Option<String>,
     pub https_proxy: Option<String>,
     pub no_proxy: Vec<String>,
     inherited_env: BTreeMap<String, String>,
@@ -157,7 +188,9 @@ impl HostEnv {
             .or_else(|| trimmed(keys::USERPROFILE))
             .map(PathBuf::from);
 
-        let data_dir = match trimmed(keys::LODY_DATA_DIR) {
+        let explicit_data_dir = trimmed(keys::LODY_DATA_DIR);
+        let is_default_data_dir = explicit_data_dir.is_none();
+        let data_dir = match explicit_data_dir {
             Some(explicit) => PathBuf::from(explicit),
             None => match &home_dir {
                 Some(home) => home.join(platform.data_directory_name()),
@@ -165,15 +198,44 @@ impl HostEnv {
             },
         };
 
+        let state_anchor_dir = if cfg!(windows) {
+            trimmed(keys::LOCALAPPDATA)
+                .map(PathBuf::from)
+                .or_else(|| home_dir.as_ref().map(|h| h.join("AppData").join("Local")))
+                .map(|base| base.join(platform.namespace()))
+        } else {
+            trimmed(keys::XDG_STATE_HOME)
+                .map(PathBuf::from)
+                .or_else(|| home_dir.as_ref().map(|h| h.join(".local").join("state")))
+                .map(|base| base.join(platform.namespace()))
+        };
+
+        let user_identity = trimmed(keys::USER)
+            .or_else(|| trimmed(keys::USERNAME))
+            .or_else(|| home_dir.as_ref().map(|h| h.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "local".to_string())
+            .trim()
+            .to_ascii_lowercase();
+
         let locks_dir_override = trimmed(keys::LODY_LOCKS_DIR).map(PathBuf::from);
         let runtime_base_url_override = trimmed(keys::LODY_RUNTIME_BASE_URL);
         let log_level = trimmed(keys::LODY_LOG_LEVEL);
         let log_trace = trimmed(keys::LODY_LOG_TRACE)
             .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"));
+        let mcp_http_disabled = trimmed(keys::LODY_MCP_HTTP_DISABLED)
+            .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"));
+        let max_concurrent_acp_starts = trimmed(keys::LODY_MAX_CONCURRENT_ACP_SESSION_STARTS)
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n >= 1)
+            .unwrap_or(DEFAULT_MAX_CONCURRENT_ACP_SESSION_STARTS);
+        let electron_run_as_node = trimmed(keys::ELECTRON_RUN_AS_NODE);
+
         let https_proxy = trimmed(keys::HTTPS_PROXY)
             .or_else(|| trimmed(keys::HTTPS_PROXY_LOWER))
             .or_else(|| trimmed(keys::HTTP_PROXY))
-            .or_else(|| trimmed(keys::HTTP_PROXY_LOWER));
+            .or_else(|| trimmed(keys::HTTP_PROXY_LOWER))
+            .or_else(|| trimmed(keys::ALL_PROXY))
+            .or_else(|| trimmed(keys::ALL_PROXY_LOWER));
 
         let merged_no_proxy = merge_loopback_no_proxy(
             trimmed(keys::NO_PROXY).as_deref(),
@@ -190,9 +252,18 @@ impl HostEnv {
         for key in [
             keys::HOME,
             keys::USERPROFILE,
+            keys::USER,
+            keys::USERNAME,
             keys::SHELL,
             keys::COMSPEC,
             keys::COLORTERM,
+            keys::ELECTRON_RUN_AS_NODE,
+            keys::HTTPS_PROXY,
+            keys::HTTPS_PROXY_LOWER,
+            keys::HTTP_PROXY,
+            keys::HTTP_PROXY_LOWER,
+            keys::ALL_PROXY,
+            keys::ALL_PROXY_LOWER,
             keys::NO_PROXY,
             keys::NO_PROXY_LOWER,
         ] {
@@ -205,10 +276,16 @@ impl HostEnv {
             platform,
             home_dir,
             data_dir,
+            is_default_data_dir,
+            state_anchor_dir,
+            user_identity,
             locks_dir_override,
             runtime_base_url_override,
             log_level,
             log_trace,
+            mcp_http_disabled,
+            max_concurrent_acp_starts,
+            electron_run_as_node,
             https_proxy,
             no_proxy,
             inherited_env,
@@ -219,6 +296,18 @@ impl HostEnv {
         self.locks_dir_override
             .clone()
             .unwrap_or_else(|| effective_data_dir.join("locks"))
+    }
+
+    pub fn os_platform_tag() -> &'static str {
+        if cfg!(target_os = "macos") {
+            "darwin"
+        } else if cfg!(target_os = "windows") {
+            "win32"
+        } else if cfg!(target_os = "linux") {
+            "linux"
+        } else {
+            "other"
+        }
     }
 
     pub fn shell_command(&self) -> (String, Vec<String>) {
@@ -243,17 +332,39 @@ impl HostEnv {
         }
     }
 
-    pub fn agent_spawn_env(&self) -> BTreeMap<String, String> {
+    pub fn agent_spawn_env(
+        &self,
+        command: &Path,
+        current_exe: Option<&Path>,
+    ) -> BTreeMap<String, String> {
         let mut env = self.inherited_env.clone();
+        for blocked in CHILD_CREDENTIAL_AND_BOOTSTRAP_BLOCKLIST {
+            env.remove(blocked);
+        }
+        if let (Some(exe), Some(flag)) = (current_exe, &self.electron_run_as_node)
+            && paths_match_executable(command, exe)
+        {
+            env.insert(keys::ELECTRON_RUN_AS_NODE.to_string(), flag.clone());
+        }
+        apply_loopback_no_proxy(&mut env);
+        env
+    }
+
+    pub fn automation_command_env(&self) -> BTreeMap<String, String> {
+        let mut env = self.inherited_env.clone();
+        for blocked in CHILD_CREDENTIAL_AND_BOOTSTRAP_BLOCKLIST {
+            env.remove(blocked);
+        }
         apply_loopback_no_proxy(&mut env);
         env
     }
 
     pub fn sanitized_terminal_env(&self, session_id: &str) -> BTreeMap<String, String> {
         let mut env = self.inherited_env.clone();
-        for blocked in TERMINAL_ENV_BLOCKLIST {
+        for blocked in CHILD_CREDENTIAL_AND_BOOTSTRAP_BLOCKLIST {
             env.remove(blocked);
         }
+        apply_loopback_no_proxy(&mut env);
         env.insert(keys::TERM.to_string(), "xterm-256color".to_string());
         let colorterm = env
             .get(keys::COLORTERM)

@@ -4,15 +4,15 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use lody_app::McpHttpEndpointConfig;
 use lody_kernel::{
     ChildRejectReason, DelegatedReceipt, FrozenTurnInvocation, Generation, KernelAction,
-    KernelEvent, SessionPhase, SessionState, SteerOutcome, TurnSourceKind, TurnTerminalReason,
-    WarmAgentHandle, step,
+    KernelEvent, NativeSessionActivity, SessionPhase, SessionState, SteerOutcome, TurnSourceKind,
+    TurnTerminalReason, WarmAgentHandle, step,
 };
 use lody_ports::{
-    AcpEventSink, AcpInboundEvent, AcpSessionPort, AcpSpawnSpec, AdmittedTurnInput,
-    CustomCommandSpec, DelegatedResultRecord, HistoryBlock, HistoryTurnRecord, InboxCategory,
-    LocalProjectId, McpHttpHeader, McpServerMount, PermissionDecision, PortError, PortErrorKind,
-    PortResult, SessionId, SteerVerdict, SubmissionStage, TurnId, TurnTerminalOutcome, UserId,
-    WorkspaceId, WorktreeLease,
+    AcpEventSink, AcpInboundEvent, AcpNativeActivity, AcpSessionPort, AcpSpawnSpec,
+    AdmittedTurnInput, CustomCommandSpec, DelegatedResultRecord, DiffCaptureScope, HistoryBlock,
+    HistoryTurnRecord, InboxCategory, LocalProjectId, McpHttpHeader, McpServerMount,
+    PermissionDecision, PortError, PortErrorKind, PortResult, SessionId, SteerVerdict,
+    SubmissionStage, TurnId, TurnTerminalOutcome, UserId, WorkspaceId, WorktreeLease,
 };
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -25,6 +25,7 @@ use tokio::time::MissedTickBehavior;
 
 const STREAM_FLUSH_BYTES: usize = 4096;
 const STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(150);
+const PRESENCE_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 const SUMMARY_PREVIEW_MAX_CHARS: usize = 1000;
 
 #[derive(Clone)]
@@ -65,6 +66,10 @@ pub enum ControlCommand {
     InspectPhase {
         reply: oneshot::Sender<SessionPhase>,
     },
+    InspectStatus {
+        now_ms: u64,
+        reply: oneshot::Sender<(SessionPhase, bool)>,
+    },
     InspectWorkdir {
         reply: oneshot::Sender<Option<PathBuf>>,
     },
@@ -80,6 +85,7 @@ enum ActorEvent {
         generation: Generation,
         adapter_id: String,
         mcp_selection_digest: String,
+        spawn_spec: AcpSpawnSpec,
         active_generation: Arc<AtomicU64>,
         result: PortResult<Box<dyn AcpSessionPort>>,
     },
@@ -189,6 +195,16 @@ impl SessionHandle {
             .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor dropped reply"))
     }
 
+    pub async fn inspect_status(&self, now_ms: u64) -> PortResult<(SessionPhase, bool)> {
+        let (tx, rx) = oneshot::channel();
+        self.control_tx
+            .send(ControlCommand::InspectStatus { now_ms, reply: tx })
+            .await
+            .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor closed"))?;
+        rx.await
+            .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor dropped reply"))
+    }
+
     pub async fn inspect_workdir(&self) -> PortResult<Option<PathBuf>> {
         let (tx, rx) = oneshot::channel();
         self.control_tx
@@ -221,9 +237,11 @@ impl AcpEventSink for ActorAcpSink {
     fn on_acp_event(&self, event: AcpInboundEvent) {
         let generation = Generation(self.active_generation.load(Ordering::SeqCst));
         let mapped = match event {
-            AcpInboundEvent::MessageChunk { text } => {
-                Some(KernelEvent::AgentOutputChunk { generation, text })
-            }
+            AcpInboundEvent::MessageChunk { text } => Some(KernelEvent::AgentOutputChunk {
+                generation,
+                text,
+                observed_at_ms: current_epoch_ms_u64(),
+            }),
             AcpInboundEvent::ToolStatus {
                 tool_call_id,
                 title,
@@ -243,6 +261,17 @@ impl AcpEventSink for ActorAcpSink {
                 request_id,
                 tool_call_id,
             }),
+            AcpInboundEvent::SessionActivity { activity } => {
+                let mapped_act = match activity {
+                    AcpNativeActivity::Idle => NativeSessionActivity::Idle,
+                    AcpNativeActivity::Running => NativeSessionActivity::Running,
+                    AcpNativeActivity::Background => NativeSessionActivity::Background,
+                };
+                Some(KernelEvent::AgentNativeActivityUpdated {
+                    generation,
+                    activity: mapped_act,
+                })
+            }
             AcpInboundEvent::PromptFinished { stop_reason } => (stop_reason != "cancelled")
                 .then_some(KernelEvent::AgentPromptFinished { generation }),
             AcpInboundEvent::ProcessExited {
@@ -291,6 +320,7 @@ struct SessionActor {
     acp_start_semaphore: Arc<Semaphore>,
     state: SessionState,
     live_agent: Option<LiveAgentSlot>,
+    last_acp_archive_target: Option<(AcpSpawnSpec, String)>,
     prepare_abort: Option<AbortHandle>,
     worktree_lease: Option<WorktreeLease>,
     active_turn: Option<ActiveTurnBuffer>,
@@ -321,6 +351,7 @@ pub fn spawn_session_actor(
         acp_start_semaphore,
         state,
         live_agent: None,
+        last_acp_archive_target: None,
         prepare_abort: None,
         worktree_lease: None,
         active_turn: None,
@@ -335,6 +366,14 @@ pub fn spawn_session_actor(
         control_tx,
         event_tx,
     }
+}
+
+fn current_epoch_ms_u64() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| u64::try_from(d.as_millis()).ok())
+        .unwrap_or(0)
 }
 
 fn current_epoch_ms_i64() -> i64 {
@@ -424,13 +463,28 @@ impl SessionActor {
         }
     }
 
+    fn has_pending_late_activity_timer(&self) -> bool {
+        matches!(
+            &self.state.phase,
+            SessionPhase::Idle {
+                retained_turn: Some(retained),
+                ..
+            } if retained.late_activity_until_ms.is_some()
+        )
+    }
+
     async fn run(mut self) {
         let mut flush_interval = tokio::time::interval(STREAM_FLUSH_INTERVAL);
         flush_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let _ = flush_interval.tick().await;
 
+        let mut presence_interval = tokio::time::interval(PRESENCE_RECONCILE_INTERVAL);
+        presence_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let _ = presence_interval.tick().await;
+
         loop {
             let dirty = self.has_dirty_turn();
+            let late_timer = self.has_pending_late_activity_timer();
             tokio::select! {
                 biased;
                 ctrl = self.control_rx.recv() => {
@@ -452,6 +506,13 @@ impl SessionActor {
                 _ = flush_interval.tick(), if dirty => {
                     let _ = self.flush_active_turn();
                 }
+                _ = presence_interval.tick(), if late_timer => {
+                    self.process_event_loop(KernelEvent::AdvanceClock {
+                        now_ms: current_epoch_ms_u64(),
+                    })
+                    .await;
+                    self.maybe_claim_from_durable_inbox().await;
+                }
             }
         }
         let _ = self.flush_active_turn();
@@ -471,6 +532,7 @@ impl SessionActor {
                 generation,
                 adapter_id,
                 mcp_selection_digest,
+                spawn_spec,
                 active_generation,
                 result,
             } => {
@@ -489,11 +551,15 @@ impl SessionActor {
                     Ok(port) => {
                         self.next_agent_seq += 1;
                         let instance_id = format!("agent-{}", self.next_agent_seq);
+                        let advertises_session_activity = port.advertises_session_activity();
+                        let native_sid = port.acp_session_id().to_string();
+                        self.last_acp_archive_target = Some((spawn_spec, native_sid));
                         let handle = WarmAgentHandle {
                             agent_instance_id: instance_id.clone(),
                             adapter_id,
                             mcp_selection_digest,
                             owner_user_id: self.state.default_requester_user_id.clone(),
+                            advertises_session_activity,
                         };
                         self.live_agent = Some(LiveAgentSlot {
                             instance_id,
@@ -520,6 +586,17 @@ impl SessionActor {
     }
 
     async fn maybe_claim_from_durable_inbox(&mut self) {
+        if let Ok(ended_claims) = self
+            .deps
+            .inbox
+            .find_ended_active_claims(&self.opts.workspace_id, &self.opts.session_id)
+        {
+            for tid in ended_claims {
+                self.process_event_loop(KernelEvent::ReconcileEndedInboxClaim { turn_id: tid.0 })
+                    .await;
+            }
+        }
+
         if !matches!(self.state.phase, SessionPhase::Idle { .. }) || self.has_dirty_turn() {
             return;
         }
@@ -668,12 +745,26 @@ impl SessionActor {
                     .await;
                 let _ = self.flush_active_turn();
                 self.cleanup_resources();
+                if let Some((spec, native_sid)) = self.last_acp_archive_target.take() {
+                    let deps_for_arch = Arc::clone(&self.deps);
+                    let _ = tokio::task::spawn_blocking(move || {
+                        deps_for_arch
+                            .acp
+                            .set_session_archived(&spec, &native_sid, true)
+                    })
+                    .await;
+                }
                 let res = self.release_worktree_if_held();
                 let _ = reply.send(res);
                 true
             }
             ControlCommand::InspectPhase { reply } => {
                 let _ = reply.send(self.state.phase.clone());
+                false
+            }
+            ControlCommand::InspectStatus { now_ms, reply } => {
+                let live_out_of_turn = self.state.has_live_out_of_turn_work(now_ms);
+                let _ = reply.send((self.state.phase.clone(), live_out_of_turn));
                 false
             }
             ControlCommand::InspectWorkdir { reply } => {
@@ -932,15 +1023,17 @@ impl SessionActor {
                     Some(custom) => (custom.command.clone(), custom.args.clone()),
                     None => (PathBuf::from(&adapter_id), Vec::new()),
                 };
+                let env = (self.deps.agent_env_builder)(&command);
                 let mcp_mounts = self.build_mcp_mounts(&cwd);
                 let spec = AcpSpawnSpec {
                     adapter_id: adapter_id.clone(),
                     command,
                     args,
                     cwd,
-                    env: self.deps.agent_base_env.clone(),
+                    env,
                     mcp_mounts,
                 };
+                let spec_for_launch = spec.clone();
                 let active_generation = Arc::new(AtomicU64::new(generation.0));
                 let sink = Arc::new(ActorAcpSink {
                     event_tx: self.event_tx.clone(),
@@ -953,7 +1046,7 @@ impl SessionActor {
                     let permit = sem.acquire_owned().await;
                     let result = tokio::task::spawn_blocking(move || {
                         let _held_permit = permit;
-                        deps.acp.launch_session(&spec, sink)
+                        deps.acp.launch_session(&spec_for_launch, sink)
                     })
                     .await
                     .unwrap_or_else(|e| {
@@ -964,6 +1057,7 @@ impl SessionActor {
                             generation,
                             adapter_id,
                             mcp_selection_digest,
+                            spawn_spec: spec,
                             active_generation,
                             result,
                         })
@@ -976,14 +1070,18 @@ impl SessionActor {
                 generation,
                 ..
             } => {
-                if let Some(slot) = &self.live_agent {
+                let advertises_session_activity = if let Some(slot) = &self.live_agent {
                     slot.active_generation.store(generation.0, Ordering::SeqCst);
-                }
+                    slot.port.advertises_session_activity()
+                } else {
+                    false
+                };
                 let handle = WarmAgentHandle {
                     agent_instance_id,
                     adapter_id: self.state.default_adapter_id.clone(),
                     mcp_selection_digest: self.state.default_mcp_selection_digest.clone(),
                     owner_user_id: self.state.default_requester_user_id.clone(),
+                    advertises_session_activity,
                 };
                 follow_ups.push_back(KernelEvent::AgentPrepared {
                     generation,
@@ -1118,6 +1216,11 @@ impl SessionActor {
                 let workspace_id = self.opts.workspace_id.clone();
                 let session_id = self.opts.session_id.clone();
                 let workdir = self.current_workdir();
+                let scope = if self.worktree_lease.is_some() {
+                    DiffCaptureScope::WorktreeBranch { base_branch: None }
+                } else {
+                    DiffCaptureScope::UncommittedOnly
+                };
                 let timeout_dur = self.opts.settling_timeout;
                 let now_ms = current_epoch_ms_i64();
                 let res = tokio::time::timeout(timeout_dur, async move {
@@ -1128,6 +1231,7 @@ impl SessionActor {
                                 &session_id,
                                 &TurnId(turn_id),
                                 &dir,
+                                &scope,
                                 now_ms,
                             )
                         })
@@ -1164,7 +1268,9 @@ impl SessionActor {
                     self.notify_parent_if_delegated(outcome, &reason);
                 }
             }
-            KernelAction::CancelPendingPermission { .. }
+            KernelAction::PublishRunningPresence { .. }
+            | KernelAction::ClearRunningPresence
+            | KernelAction::CancelPendingPermission { .. }
             | KernelAction::SendAgentSteer { .. }
             | KernelAction::SteerRejected { .. }
             | KernelAction::InputRejected { .. }

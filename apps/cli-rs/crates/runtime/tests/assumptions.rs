@@ -4,12 +4,13 @@ use lody_app::{
 use lody_kernel::{Generation, KernelEvent, SessionPhase};
 use lody_ports::{
     AcpEventSink, AcpLauncherPort, AcpSessionPort, AcpSpawnSpec, AdmissionVerdict,
-    AdmittedTurnInput, ArtifactRegistryPort, DiffStorePort, EnginePort, EpochKeyMaterial,
-    HistoryPort, HistoryTurnRecord, InboxStorePort, InstalledArtifact, LocalProjectId,
-    LocalProjectRecord, ManagedArtifactSource, PermissionDecision, PortError, PortErrorKind,
-    PortResult, ProjectStorePort, QueuedDraftItem, SessionMetaSnapshot, SteerVerdict,
-    StorageLeaseMode, SubmissionStage, TurnDiffSummary, TurnTerminalOutcome, WorkspaceSecurityMode,
-    WorktreeLease, WorktreePort,
+    AdmittedTurnInput, ArtifactRegistryPort, DiffCaptureScope, DiffStorePort, EnginePort,
+    EpochKeyMaterial, HistoryPort, HistoryTurnRecord, InboxStorePort, InstalledArtifact,
+    LocalProjectId, LocalProjectRecord, ManagedArtifactSource, PermissionDecision, PortError,
+    PortErrorKind, PortResult, ProjectStorePort, QueuedDraftItem, SessionMetaSnapshot,
+    StaticMachineIdentity, SteerVerdict, StorageLeaseMode, SubmissionStage, TurnDiffSummary,
+    TurnTerminalOutcome, UnavailableScheduleStore, WorkspaceSecurityMode, WorktreeLease,
+    WorktreePort,
 };
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
 use std::collections::{BTreeSet, HashMap, VecDeque};
@@ -203,6 +204,7 @@ impl DiffStorePort for NoopDiff {
         sid: &SessionId,
         tid: &TurnId,
         _: &Path,
+        _: &DiffCaptureScope,
         _: i64,
     ) -> PortResult<TurnDiffSummary> {
         Ok(TurnDiffSummary {
@@ -306,7 +308,7 @@ impl ProjectStorePort for NoopProjects {
             project_id: LocalProjectId("p1".to_string()),
             name: name.to_string(),
             root_path: root.to_path_buf(),
-            default_branch: None,
+            git_summary: None,
         })
     }
     fn get_project(&self, _: &LocalProjectId) -> PortResult<Option<LocalProjectRecord>> {
@@ -321,12 +323,14 @@ fn build_test_runtime(
     cancel_calls: Arc<AtomicUsize>,
     history: Arc<MemoryHistory>,
 ) -> DaemonRuntime {
+    let mid = lody_app::MachineId("m_test".to_string());
     DaemonRuntime::with_settling_timeout(
         DaemonDependencies {
-            machine_id: lody_app::MachineId("m_test".to_string()),
+            machine_id: mid.clone(),
+            identity: Arc::new(StaticMachineIdentity(mid)),
             default_cwd: std::path::PathBuf::from("."),
             shell_command: ("/bin/sh".to_string(), Vec::new()),
-            agent_base_env: std::collections::BTreeMap::new(),
+            agent_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
             terminal_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
             storage_lease_mode: StorageLeaseMode::OnlineHost,
             storage_lease: None,
@@ -334,6 +338,7 @@ fn build_test_runtime(
             history,
             inbox: Arc::new(MemoryInbox::default()),
             projects: Arc::new(NoopProjects),
+            schedules: Arc::new(UnavailableScheduleStore),
             diff_store: Arc::new(NoopDiff),
             artifacts: Arc::new(NoopArtifacts(ManagedArtifactSource::Disabled)),
             acp: Arc::new(FakeAcpLauncher { cancel_calls }),
@@ -421,6 +426,7 @@ async fn control_cancel_preempts_backlog_coalesces_writes_and_isolates_sibling_f
         let _ = handle.try_send_event(KernelEvent::AgentOutputChunk {
             generation: Generation(1),
             text: format!("c{i};"),
+            observed_at_ms: 1000,
         });
     }
 
@@ -667,6 +673,7 @@ async fn child_delegation_rejects_when_stopped_or_over_depth_and_delivers_receip
         .send_event(KernelEvent::AgentOutputChunk {
             generation: Generation(1),
             text: "parent done".to_string(),
+            observed_at_ms: 1000,
         })
         .await
         .unwrap();
@@ -684,6 +691,7 @@ async fn child_delegation_rejects_when_stopped_or_over_depth_and_delivers_receip
         .send_event(KernelEvent::AgentOutputChunk {
             generation: Generation(1),
             text: "child summary output".to_string(),
+            observed_at_ms: 1000,
         })
         .await
         .unwrap();

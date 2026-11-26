@@ -69,6 +69,30 @@ pub enum SteerVerdict {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpNativeActivity {
+    Idle,
+    Running,
+    Background,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AcpSessionArchiveMode {
+    Native,
+    TitleMarker,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AcpSessionArchiveOutcome {
+    Native,
+    TitleMarker,
+    Unsupported,
+    Superseded,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PermissionDecision {
     pub request_id: String,
@@ -92,6 +116,9 @@ pub enum AcpInboundEvent {
         tool_call_id: String,
         title: String,
     },
+    SessionActivity {
+        activity: AcpNativeActivity,
+    },
     PromptFinished {
         stop_reason: String,
     },
@@ -107,6 +134,9 @@ pub trait AcpEventSink: Send + Sync {
 
 pub trait AcpSessionPort: Send + Sync {
     fn acp_session_id(&self) -> &str;
+    fn advertises_session_activity(&self) -> bool {
+        false
+    }
     fn send_prompt(&self, prompt_text: &str) -> PortResult<()>;
     fn steer(&self, prompt_text: &str) -> PortResult<SteerVerdict>;
     fn reply_permission(&self, decision: &PermissionDecision) -> PortResult<()>;
@@ -121,6 +151,14 @@ pub trait AcpLauncherPort: Send + Sync {
         spec: &AcpSpawnSpec,
         sink: Arc<dyn AcpEventSink>,
     ) -> PortResult<Box<dyn AcpSessionPort>>;
+    fn set_session_archived(
+        &self,
+        _spec: &AcpSpawnSpec,
+        _native_session_id: &str,
+        _archived: bool,
+    ) -> PortResult<AcpSessionArchiveOutcome> {
+        Ok(AcpSessionArchiveOutcome::Unsupported)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,6 +167,54 @@ pub struct WorktreeLease {
     pub project_id: LocalProjectId,
     pub branch_name: String,
     pub worktree_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalProjectGitSummary {
+    pub git: bool,
+    pub current_branch: Option<String>,
+    pub default_branch: Option<String>,
+    pub github_repo_full_name: Option<String>,
+}
+
+impl LocalProjectGitSummary {
+    pub fn non_git() -> Self {
+        Self {
+            git: false,
+            current_branch: None,
+            default_branch: None,
+            github_repo_full_name: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchListQuery {
+    pub query: Option<String>,
+    pub limit: usize,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchListPage {
+    pub git: bool,
+    pub current_branch: Option<String>,
+    pub default_branch: Option<String>,
+    pub pinned_branches: Vec<String>,
+    pub branches: Vec<String>,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub total_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileSearchResult {
+    pub paths: Vec<String>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +240,32 @@ pub trait WorktreePort: Send + Sync {
         base_branch: Option<&str>,
     ) -> PortResult<WorktreeLease>;
     fn release_worktree(&self, lease: &WorktreeLease) -> PortResult<()>;
+    fn inspect_git_summary(&self, _root: &Path) -> LocalProjectGitSummary {
+        LocalProjectGitSummary::non_git()
+    }
+    fn list_branches(&self, _root: &Path, _query: &BranchListQuery) -> PortResult<BranchListPage> {
+        Ok(BranchListPage {
+            git: false,
+            current_branch: None,
+            default_branch: None,
+            pinned_branches: Vec::new(),
+            branches: Vec::new(),
+            truncated: false,
+            next_cursor: None,
+            total_count: 0,
+        })
+    }
+    fn search_project_files(
+        &self,
+        _root: &Path,
+        _query: &str,
+        _limit: usize,
+    ) -> PortResult<FileSearchResult> {
+        Ok(FileSearchResult {
+            paths: Vec::new(),
+            truncated: false,
+        })
+    }
     fn scan_project_files(&self, _root: &Path) -> PortResult<ScannedFileIndex> {
         Ok(ScannedFileIndex {
             entries: Vec::new(),

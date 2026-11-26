@@ -6,12 +6,12 @@ pub mod terminal;
 
 use clap::{Parser, Subcommand};
 pub use ipc::{
-    DaemonRunMetadata, ensure_machine_id, format_history_json, probe_live_daemon, send_unix_http,
-    serve_local_daemon,
+    DaemonRunMetadata, format_history_json, probe_live_daemon, query_live_daemon_machine_id,
+    send_unix_http, serve_local_daemon,
 };
 use lody_app::{
-    AppCommand, AppQuery, AppResponse, ApplicationService, PortError, PortErrorKind, PortResult,
-    SessionId, TurnId, VerifiedPrincipal, WorkspaceId,
+    AppCommand, AppQuery, AppResponse, ApplicationService, MachineIdentityRestoreOutcome,
+    PortError, PortErrorKind, PortResult, SessionId, TurnId, VerifiedPrincipal, WorkspaceId,
 };
 pub use mcp_http::{
     MCP_HTTP_MACHINE_ID_HEADER, MCP_HTTP_SESSION_ID_HEADER, MCP_HTTP_WORKDIR_B64_HEADER,
@@ -43,6 +43,10 @@ enum CliCommand {
         #[command(subcommand)]
         action: Option<DaemonSubcommand>,
     },
+    Machine {
+        #[command(subcommand)]
+        action: MachineSubcommand,
+    },
     Project {
         #[command(subcommand)]
         action: ProjectSubcommand,
@@ -65,6 +69,16 @@ enum DaemonSubcommand {
     Runner,
     Stop,
     Status,
+}
+
+#[derive(Debug, Subcommand)]
+enum MachineSubcommand {
+    #[command(name = "restore-id")]
+    RestoreId {
+        machine_id: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -120,6 +134,10 @@ pub enum DispatchPlan {
 pub enum OneShotAction {
     Status,
     McpStdio,
+    MachineRestoreId {
+        machine_id: String,
+        json: bool,
+    },
     ProjectAdd {
         path: PathBuf,
         json: bool,
@@ -173,6 +191,14 @@ pub fn parse_cli_args(args: &[String]) -> Result<DispatchPlan, String> {
                 Ok(DispatchPlan::OneShot(OneShotAction::Status))
             }
         },
+        Some(CliCommand::Machine { action }) => match action {
+            MachineSubcommand::RestoreId { machine_id, json } => {
+                Ok(DispatchPlan::OneShot(OneShotAction::MachineRestoreId {
+                    machine_id,
+                    json,
+                }))
+            }
+        },
         Some(CliCommand::Project { action }) => match action {
             ProjectSubcommand::Add { path, json } => {
                 Ok(DispatchPlan::OneShot(OneShotAction::ProjectAdd {
@@ -216,6 +242,79 @@ pub fn parse_cli_args(args: &[String]) -> Result<DispatchPlan, String> {
                 }))
             }
         },
+    }
+}
+
+pub fn format_restore_machine_id_output(
+    outcome: &MachineIdentityRestoreOutcome,
+    json_mode: bool,
+) -> Result<String, String> {
+    if json_mode {
+        return serde_json::to_string_pretty(&json!({
+            "ok": true,
+            "changed": outcome.changed,
+            "targetMachineId": outcome.target_machine_id.0,
+            "previousMachineId": outcome.previous_machine_id.as_ref().map(|m| &m.0),
+            "previousCredentialMachineId": outcome.previous_credential_machine_id.as_ref().map(|m| &m.0),
+            "credentialsUpdated": outcome.credentials_updated,
+            "anchorUpdated": outcome.anchor_updated,
+            "backupDir": outcome.backup_dir,
+        }))
+        .map_err(|e| e.to_string());
+    }
+
+    if !outcome.changed {
+        return Ok(format!(
+            "Local machine ID is already {}. No changes were made.",
+            outcome.target_machine_id.0
+        ));
+    }
+
+    let mut lines = vec![format!(
+        "Restored local machine ID to {}",
+        outcome.target_machine_id.0
+    )];
+    if let Some(prev) = &outcome.previous_machine_id
+        && prev != &outcome.target_machine_id
+    {
+        lines.push(format!("  Previous machine-id: {}", prev.0));
+    }
+    if let Some(prev_cred) = &outcome.previous_credential_machine_id
+        && prev_cred != &outcome.target_machine_id
+    {
+        lines.push(format!("  Previous credentials machineId: {}", prev_cred.0));
+    }
+    lines.push(format!(
+        "  credentials.json updated: {}",
+        if outcome.credentials_updated {
+            "yes"
+        } else {
+            "no (not present)"
+        }
+    ));
+    lines.push(format!(
+        "  backup anchor updated: {}",
+        if outcome.anchor_updated { "yes" } else { "no" }
+    ));
+    if let Some(dir) = &outcome.backup_dir {
+        lines.push(format!("  Backup saved to: {}", dir.display()));
+    }
+    lines.push(
+        "Restart Lody (desktop app or `lody daemon start`) to reconnect with the restored identity."
+            .to_string(),
+    );
+    Ok(lines.join("\n"))
+}
+
+pub fn format_restore_machine_id_error(message: &str, json_mode: bool) -> String {
+    if json_mode {
+        serde_json::to_string_pretty(&json!({
+            "ok": false,
+            "error": message,
+        }))
+        .unwrap_or_else(|_| "{\"ok\":false}".to_string())
+    } else {
+        message.to_string()
     }
 }
 
@@ -268,13 +367,18 @@ pub fn try_execute_via_live_daemon(
     data_dir: &Path,
     action: &OneShotAction,
 ) -> Option<Result<String, String>> {
+    if matches!(action, OneShotAction::MachineRestoreId { .. }) {
+        return None;
+    }
+
     let meta = probe_live_daemon(data_dir)?;
     let control = Path::new(&meta.control_socket_path);
     let tok = meta.token.as_deref();
 
     match action {
         OneShotAction::ProjectAdd { path, .. } => {
-            let machine_id = ensure_machine_id(data_dir).unwrap_or_else(|_| "local".to_string());
+            let machine_id =
+                query_live_daemon_machine_id(&meta).unwrap_or_else(|| "local".to_string());
             let res = send_unix_http(
                 control,
                 "POST",
@@ -289,7 +393,8 @@ pub fn try_execute_via_live_daemon(
             Some(res.map(|(_, body)| body).map_err(|e| e.to_string()))
         }
         OneShotAction::ProjectList { .. } => {
-            let machine_id = ensure_machine_id(data_dir).unwrap_or_else(|_| "local".to_string());
+            let machine_id =
+                query_live_daemon_machine_id(&meta).unwrap_or_else(|| "local".to_string());
             let res = send_unix_http(
                 control,
                 "POST",
@@ -397,6 +502,24 @@ pub fn execute_offline_oneshot(
         OneShotAction::Status | OneShotAction::McpStdio => {
             let resp = service.query(&caller, AppQuery::DaemonStatus)?;
             Ok(format!("{resp:?}"))
+        }
+        OneShotAction::MachineRestoreId { machine_id, json } => {
+            let resp = service.execute(
+                &caller,
+                AppCommand::RestoreMachineId {
+                    target_machine_id: machine_id,
+                    active_host_pid: None,
+                },
+            )?;
+            if let AppResponse::MachineIdRestored(outcome) = resp {
+                format_restore_machine_id_output(&outcome, json)
+                    .map_err(|e| PortError::new(PortErrorKind::Internal, e))
+            } else {
+                Err(PortError::new(
+                    PortErrorKind::Internal,
+                    "unexpected response",
+                ))
+            }
         }
         OneShotAction::ProjectAdd { path, .. } => {
             let name = path

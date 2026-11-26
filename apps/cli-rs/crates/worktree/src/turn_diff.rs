@@ -6,8 +6,8 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use lody_ports::{
-    DiffFileEntry, DiffStorePort, PortError, PortErrorKind, PortResult, SessionId,
-    TurnDiffCompression, TurnDiffEventInput, TurnDiffSummary, TurnId, WorkspaceId,
+    DiffCaptureScope, DiffFileEntry, DiffStorePort, PortError, PortErrorKind, PortResult,
+    SessionId, TurnDiffCompression, TurnDiffEventInput, TurnDiffSummary, TurnId, WorkspaceId,
 };
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
@@ -1604,8 +1604,8 @@ fn read_utf8_if_text(path: &Path) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-fn read_git_head_file(workdir: &Path, rel_path: &str) -> Option<String> {
-    let spec = format!("HEAD:{rel_path}");
+fn read_git_revision_file(workdir: &Path, rev: &str, rel_path: &str) -> Option<String> {
+    let spec = format!("{rev}:{rel_path}");
     let out = Command::new("git")
         .args(["show", &spec])
         .current_dir(workdir)
@@ -1619,7 +1619,37 @@ fn read_git_head_file(workdir: &Path, rel_path: &str) -> Option<String> {
     String::from_utf8(out.stdout).ok()
 }
 
-fn collect_candidate_changed_paths(workdir: &Path) -> Vec<String> {
+fn resolve_worktree_merge_base(workdir: &Path, explicit_base: Option<&str>) -> Option<String> {
+    let candidates: Vec<&str> = match explicit_base {
+        Some(b) if !b.trim().is_empty() => vec![b.trim()],
+        _ => vec!["origin/HEAD", "main", "master"],
+    };
+    for base in candidates {
+        let Ok(out) = Command::new("git")
+            .args(["merge-base", base, "HEAD"])
+            .current_dir(workdir)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+        else {
+            continue;
+        };
+        if out.status.success()
+            && let Ok(text) = String::from_utf8(out.stdout)
+        {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn collect_candidate_changed_paths(
+    workdir: &Path,
+    scope: &DiffCaptureScope,
+) -> (Vec<String>, String) {
     if let Ok(out) = Command::new("git")
         .args(["status", "--porcelain", "-z", "--untracked-files=all"])
         .current_dir(workdir)
@@ -1643,10 +1673,40 @@ fn collect_candidate_changed_paths(workdir: &Path) -> Vec<String> {
                 let _ = iter.next();
             }
         }
-        return paths.into_iter().collect();
+
+        let baseline_rev = match scope {
+            DiffCaptureScope::UncommittedOnly => "HEAD".to_string(),
+            DiffCaptureScope::WorktreeBranch { base_branch } => {
+                if let Some(merge_base) =
+                    resolve_worktree_merge_base(workdir, base_branch.as_deref())
+                {
+                    let range = format!("{merge_base}..HEAD");
+                    if let Ok(diff_out) = Command::new("git")
+                        .args(["diff", "--name-only", "-z", &range])
+                        .current_dir(workdir)
+                        .stdin(Stdio::null())
+                        .stderr(Stdio::null())
+                        .output()
+                        && diff_out.status.success()
+                    {
+                        for raw in diff_out.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()) {
+                            let p = String::from_utf8_lossy(raw).into_owned();
+                            if !p.contains('\u{FFFD}') && !p.is_empty() {
+                                paths.insert(p);
+                            }
+                        }
+                    }
+                    merge_base
+                } else {
+                    "HEAD".to_string()
+                }
+            }
+        };
+
+        return (paths.into_iter().collect(), baseline_rev);
     }
 
-    scan_directory_parallel(
+    let fallback = scan_directory_parallel(
         workdir,
         CODE_COLLAB_MAX_INDEX_ENTRIES,
         CODE_COLLAB_MAX_INDEX_BYTES,
@@ -1658,7 +1718,8 @@ fn collect_candidate_changed_paths(workdir: &Path) -> Vec<String> {
             .map(|e| e.relative_path)
             .collect()
     })
-    .unwrap_or_default()
+    .unwrap_or_default();
+    (fallback, "HEAD".to_string())
 }
 
 pub struct LocalTurnDiffStore {
@@ -1713,6 +1774,7 @@ impl DiffStorePort for LocalTurnDiffStore {
         session_id: &SessionId,
         turn_id: &TurnId,
         workdir: &Path,
+        scope: &DiffCaptureScope,
         now_ms: i64,
     ) -> PortResult<TurnDiffSummary> {
         if !workdir.exists() {
@@ -1723,7 +1785,7 @@ impl DiffStorePort for LocalTurnDiffStore {
             });
         }
 
-        let candidates = collect_candidate_changed_paths(workdir);
+        let (candidates, baseline_rev) = collect_candidate_changed_paths(workdir, scope);
         if candidates.is_empty() {
             return Ok(TurnDiffSummary {
                 session_id: session_id.clone(),
@@ -1750,7 +1812,9 @@ impl DiffStorePort for LocalTurnDiffStore {
             let old_text = match store.get_latest_text(&session_id.0, &rel_path, None)? {
                 TrackedLatestText::Tracked { text } => text,
                 TrackedLatestText::TooLarge { .. } => continue,
-                TrackedLatestText::Untracked => read_git_head_file(workdir, &rel_path),
+                TrackedLatestText::Untracked => {
+                    read_git_revision_file(workdir, &baseline_rev, &rel_path)
+                }
             };
 
             if old_text == new_text {

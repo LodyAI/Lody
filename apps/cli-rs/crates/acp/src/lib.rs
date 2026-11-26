@@ -3,9 +3,10 @@
 pub mod pty;
 
 use lody_ports::{
-    AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpSessionPort, AcpSpawnSpec,
-    ArtifactRegistryPort, InstalledArtifact, ManagedArtifactSource, PermissionDecision, PortError,
-    PortErrorKind, PortResult, SteerVerdict,
+    AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpNativeActivity, AcpSessionArchiveMode,
+    AcpSessionArchiveOutcome, AcpSessionPort, AcpSpawnSpec, ArtifactRegistryPort,
+    InstalledArtifact, ManagedArtifactSource, PermissionDecision, PortError, PortErrorKind,
+    PortResult, SteerVerdict,
 };
 pub use pty::PortablePtyManager;
 use serde::Deserialize;
@@ -42,6 +43,7 @@ fn sha256_bytes_hex(bytes: &[u8]) -> String {
 pub struct ManagedArtifactInstaller {
     source: ManagedArtifactSource,
     install_root: PathBuf,
+    proxy_url: Option<String>,
 }
 
 impl ManagedArtifactInstaller {
@@ -56,7 +58,13 @@ impl ManagedArtifactInstaller {
         Self {
             source,
             install_root: install_root.into(),
+            proxy_url: None,
         }
+    }
+
+    pub fn with_proxy_url(mut self, proxy_url: Option<String>) -> Self {
+        self.proxy_url = proxy_url;
+        self
     }
 
     fn verify_existing_file(path: &Path, expected_sha256: &str) -> PortResult<bool> {
@@ -87,6 +95,7 @@ impl ManagedArtifactInstaller {
         let trimmed = base_url.trim_end_matches('/');
         let manifest_url = format!("{trimmed}/{artifact_id}/{version}/manifest.json");
         let install_dir = self.install_root.join(artifact_id).join(version);
+        let proxy_url = self.proxy_url.clone();
 
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -94,8 +103,13 @@ impl ManagedArtifactInstaller {
             .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
 
         rt.block_on(async move {
-            let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(30))
+            let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(30));
+            if let Some(proxy_raw) = proxy_url
+                && let Ok(proxy) = reqwest::Proxy::all(&proxy_raw)
+            {
+                builder = builder.proxy(proxy);
+            }
+            let client = builder
                 .build()
                 .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
 
@@ -216,6 +230,40 @@ impl ArtifactRegistryPort for ManagedArtifactInstaller {
     }
 }
 
+struct NoopAcpEventSink;
+impl AcpEventSink for NoopAcpEventSink {
+    fn on_acp_event(&self, _event: AcpInboundEvent) {}
+}
+
+fn parse_lody_extension_capabilities(init_res: &Value) -> (bool, Option<AcpSessionArchiveMode>) {
+    let Some(lody) = init_res
+        .get("agentCapabilities")
+        .and_then(|c| c.get("_meta"))
+        .and_then(|m| m.get("lody"))
+    else {
+        return (false, None);
+    };
+
+    let session_activity = lody
+        .get("sessionActivity")
+        .and_then(|v| v.get("version"))
+        .and_then(Value::as_u64)
+        == Some(1);
+
+    let archive_mode = lody.get("sessionArchive").and_then(|sa| {
+        if sa.get("version").and_then(Value::as_u64) != Some(1) {
+            return None;
+        }
+        match sa.get("mode").and_then(Value::as_str)? {
+            "native" => Some(AcpSessionArchiveMode::Native),
+            "title-marker" => Some(AcpSessionArchiveMode::TitleMarker),
+            _ => None,
+        }
+    });
+
+    (session_activity, archive_mode)
+}
+
 pub struct StdioAcpLauncher {
     max_concurrent_starts: usize,
     handshake_timeout: Duration,
@@ -232,7 +280,7 @@ impl StdioAcpLauncher {
 
 impl Default for StdioAcpLauncher {
     fn default() -> Self {
-        Self::new(4)
+        Self::new(2)
     }
 }
 
@@ -248,6 +296,64 @@ impl AcpLauncherPort for StdioAcpLauncher {
     ) -> PortResult<Box<dyn AcpSessionPort>> {
         let session = StdioAcpSession::spawn(spec, sink, self.handshake_timeout)?;
         Ok(Box::new(session))
+    }
+
+    fn set_session_archived(
+        &self,
+        spec: &AcpSpawnSpec,
+        native_session_id: &str,
+        archived: bool,
+    ) -> PortResult<AcpSessionArchiveOutcome> {
+        let temp_dir = tempfile::Builder::new()
+            .prefix("lody-session-archive-")
+            .tempdir()
+            .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+
+        let isolated_spec = AcpSpawnSpec {
+            adapter_id: spec.adapter_id.clone(),
+            command: spec.command.clone(),
+            args: spec.args.clone(),
+            cwd: temp_dir.path().to_path_buf(),
+            env: spec.env.clone(),
+            mcp_mounts: Vec::new(),
+        };
+
+        let shared = spawn_acp_process(&isolated_spec, Arc::new(NoopAcpEventSink))?;
+        let outcome = (|| -> PortResult<AcpSessionArchiveOutcome> {
+            let init_res = shared.call_blocking(
+                "initialize",
+                json!({
+                    "protocolVersion": 1,
+                    "clientCapabilities": {
+                        "terminal": false,
+                        "fs": { "readTextFile": false, "writeTextFile": false }
+                    },
+                    "clientInfo": { "name": "lody", "version": "0.1.0" }
+                }),
+                self.handshake_timeout,
+            )?;
+            let (_, archive_mode) = parse_lody_extension_capabilities(&init_res);
+            let Some(mode) = archive_mode else {
+                return Ok(AcpSessionArchiveOutcome::Unsupported);
+            };
+            let method = if archived {
+                "_lody/session/archive"
+            } else {
+                "_lody/session/unarchive"
+            };
+            let _ = shared.call_blocking(
+                method,
+                json!({ "sessionId": native_session_id }),
+                self.handshake_timeout,
+            )?;
+            Ok(match mode {
+                AcpSessionArchiveMode::Native => AcpSessionArchiveOutcome::Native,
+                AcpSessionArchiveMode::TitleMarker => AcpSessionArchiveOutcome::TitleMarker,
+            })
+        })();
+
+        shared.terminate_child();
+        outcome
     }
 }
 
@@ -336,8 +442,72 @@ impl SharedProcessState {
     }
 }
 
+fn spawn_acp_process(
+    spec: &AcpSpawnSpec,
+    sink: Arc<dyn AcpEventSink>,
+) -> PortResult<Arc<SharedProcessState>> {
+    let mut cmd = Command::new(&spec.command);
+    cmd.args(&spec.args)
+        .current_dir(&spec.cwd)
+        .envs(&spec.env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        PortError::new(
+            PortErrorKind::Unavailable,
+            format!("failed spawning acp {:?}: {e}", spec.command),
+        )
+    })?;
+
+    let pid = child.id();
+    let stdin = match child.stdin.take() {
+        Some(s) => s,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(PortError::new(PortErrorKind::Internal, "missing acp stdin"));
+        }
+    };
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(PortError::new(
+                PortErrorKind::Internal,
+                "missing acp stdout",
+            ));
+        }
+    };
+
+    let shared = Arc::new(SharedProcessState {
+        pid,
+        stdin: Mutex::new(Some(stdin)),
+        child: Mutex::new(child),
+        pending_rpc: Mutex::new(HashMap::new()),
+        pending_permissions: Mutex::new(HashMap::new()),
+        active_prompt_id: AtomicU64::new(0),
+        prompt_in_flight: AtomicBool::new(false),
+        terminated: AtomicBool::new(false),
+        next_rpc_id: AtomicU64::new(1),
+    });
+
+    let reader_shared = Arc::clone(&shared);
+    thread::spawn(move || run_stdout_reader(stdout, reader_shared, sink));
+    Ok(shared)
+}
+
 pub struct StdioAcpSession {
     acp_session_id: String,
+    advertises_session_activity: bool,
     shared: Arc<SharedProcessState>,
 }
 
@@ -347,65 +517,10 @@ impl StdioAcpSession {
         sink: Arc<dyn AcpEventSink>,
         handshake_timeout: Duration,
     ) -> PortResult<Self> {
-        let mut cmd = Command::new(&spec.command);
-        cmd.args(&spec.args)
-            .current_dir(&spec.cwd)
-            .envs(&spec.env)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+        let shared = spawn_acp_process(spec, sink)?;
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            cmd.process_group(0);
-        }
-
-        let mut child = cmd.spawn().map_err(|e| {
-            PortError::new(
-                PortErrorKind::Unavailable,
-                format!("failed spawning acp {:?}: {e}", spec.command),
-            )
-        })?;
-
-        let pid = child.id();
-        let stdin = match child.stdin.take() {
-            Some(s) => s,
-            None => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(PortError::new(PortErrorKind::Internal, "missing acp stdin"));
-            }
-        };
-        let stdout = match child.stdout.take() {
-            Some(s) => s,
-            None => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(PortError::new(
-                    PortErrorKind::Internal,
-                    "missing acp stdout",
-                ));
-            }
-        };
-
-        let shared = Arc::new(SharedProcessState {
-            pid,
-            stdin: Mutex::new(Some(stdin)),
-            child: Mutex::new(child),
-            pending_rpc: Mutex::new(HashMap::new()),
-            pending_permissions: Mutex::new(HashMap::new()),
-            active_prompt_id: AtomicU64::new(0),
-            prompt_in_flight: AtomicBool::new(false),
-            terminated: AtomicBool::new(false),
-            next_rpc_id: AtomicU64::new(1),
-        });
-
-        let reader_shared = Arc::clone(&shared);
-        thread::spawn(move || run_stdout_reader(stdout, reader_shared, sink));
-
-        let handshake = (|| -> PortResult<String> {
-            let _ = shared.call_blocking(
+        let handshake = (|| -> PortResult<(String, bool)> {
+            let init_res = shared.call_blocking(
                 "initialize",
                 json!({
                     "protocolVersion": 1,
@@ -413,6 +528,7 @@ impl StdioAcpSession {
                 }),
                 handshake_timeout,
             )?;
+            let (advertises_activity, _) = parse_lody_extension_capabilities(&init_res);
 
             let mcp_servers: Vec<Value> = spec
                 .mcp_mounts
@@ -441,7 +557,7 @@ impl StdioAcpSession {
                 handshake_timeout,
             )?;
 
-            new_res
+            let sid = new_res
                 .get("sessionId")
                 .and_then(Value::as_str)
                 .ok_or_else(|| {
@@ -450,12 +566,14 @@ impl StdioAcpSession {
                         format!("missing sessionId in session/new response: {new_res}"),
                     )
                 })
-                .map(ToOwned::to_owned)
+                .map(ToOwned::to_owned)?;
+            Ok((sid, advertises_activity))
         })();
 
         match handshake {
-            Ok(acp_session_id) => Ok(Self {
+            Ok((acp_session_id, advertises_session_activity)) => Ok(Self {
                 acp_session_id,
+                advertises_session_activity,
                 shared,
             }),
             Err(err) => {
@@ -475,6 +593,10 @@ impl Drop for StdioAcpSession {
 impl AcpSessionPort for StdioAcpSession {
     fn acp_session_id(&self) -> &str {
         &self.acp_session_id
+    }
+
+    fn advertises_session_activity(&self) -> bool {
+        self.advertises_session_activity
     }
 
     fn send_prompt(&self, prompt_text: &str) -> PortResult<()> {
@@ -541,6 +663,15 @@ impl AcpSessionPort for StdioAcpSession {
     }
 }
 
+fn parse_activity_state(raw: &str) -> Option<AcpNativeActivity> {
+    match raw {
+        "idle" => Some(AcpNativeActivity::Idle),
+        "running" | "working" => Some(AcpNativeActivity::Running),
+        "background" => Some(AcpNativeActivity::Background),
+        _ => None,
+    }
+}
+
 fn run_stdout_reader(
     stdout: std::process::ChildStdout,
     shared: Arc<SharedProcessState>,
@@ -603,6 +734,13 @@ fn run_stdout_reader(
             "session/update" => {
                 if let Some(update) = params.get("update") {
                     dispatch_session_update(update, sink.as_ref());
+                }
+            }
+            "_lody/session/activity" => {
+                if let Some(state_str) = params.get("state").and_then(Value::as_str)
+                    && let Some(activity) = parse_activity_state(state_str)
+                {
+                    sink.on_acp_event(AcpInboundEvent::SessionActivity { activity });
                 }
             }
             "session/request_permission" => {
@@ -692,6 +830,13 @@ fn dispatch_session_update(update: &Value, sink: &dyn AcpEventSink) {
                 title,
                 status,
             });
+        }
+        "session_activity" => {
+            if let Some(state_str) = update.get("state").and_then(Value::as_str)
+                && let Some(activity) = parse_activity_state(state_str)
+            {
+                sink.on_acp_event(AcpInboundEvent::SessionActivity { activity });
+            }
         }
         _ => {}
     }

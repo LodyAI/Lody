@@ -1,7 +1,15 @@
 #![forbid(unsafe_code)]
 
+pub mod identity;
 pub mod lease;
+pub mod schedule;
 
+pub use identity::{
+    HardwareProbeFn, HardwareProbeResult, LocalMachineIdentityStore, MachineIdentityConfig,
+    compute_host_fingerprint_hash, derive_deterministic_machine_id, generate_random_uuid_v4,
+    hmac_sha256, normalize_hardware_id, parse_macos_platform_uuid, parse_windows_machine_guid,
+    resolve_linux_machine_id,
+};
 pub use lease::FileStorageLease;
 use lody_ports::{
     AdmissionVerdict, AdmittedTurnInput, CustomCommandSpec, DelegatedResultRecord, InboxCategory,
@@ -9,6 +17,7 @@ use lody_ports::{
     UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+pub use schedule::SqliteScheduleStore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
@@ -167,7 +176,7 @@ impl SqliteStore {
 
 pub type SqliteInboxStore = SqliteStore;
 
-fn map_sql_err(err: rusqlite::Error) -> PortError {
+pub(crate) fn map_sql_err(err: rusqlite::Error) -> PortError {
     PortError::new(PortErrorKind::Internal, err.to_string())
 }
 
@@ -285,6 +294,21 @@ impl InboxStorePort for SqliteStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sql_err)?;
 
+        tx.execute(
+            "UPDATE inbox_batches
+             SET state = 'settled'
+             WHERE workspace_id = ?1 AND session_id = ?2 AND state = 'prepared'
+               AND EXISTS (
+                 SELECT 1 FROM inbox_inputs i
+                 WHERE i.workspace_id = inbox_batches.workspace_id
+                   AND i.session_id = inbox_batches.session_id
+                   AND i.input_id = inbox_batches.input_id
+                   AND (i.canceled != 0 OR i.finished != 0)
+               )",
+            params![&workspace_id.0, &session_id.0],
+        )
+        .map_err(map_sql_err)?;
+
         let paused: i64 = tx
             .query_row(
                 "SELECT COALESCE(MAX(paused), 0) FROM inbox_sessions
@@ -297,6 +321,7 @@ impl InboxStorePort for SqliteStore {
             .unwrap_or(0);
 
         if paused != 0 {
+            tx.commit().map_err(map_sql_err)?;
             return Ok(None);
         }
 
@@ -319,6 +344,7 @@ impl InboxStorePort for SqliteStore {
             .map_err(map_sql_err)?;
 
         let Some((batch_id, turn_id, kind_raw, requester, cfg_json)) = row else {
+            tx.commit().map_err(map_sql_err)?;
             return Ok(None);
         };
 
@@ -391,6 +417,74 @@ impl InboxStorePort for SqliteStore {
         )
         .map_err(map_sql_err)?;
         Ok(())
+    }
+
+    fn is_input_ended(
+        &self,
+        workspace_id: &WorkspaceId,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> PortResult<bool> {
+        let conn = self.conn.lock().expect("sqlite lock");
+        let ended: Option<i64> = conn
+            .query_row(
+                "SELECT (canceled != 0 OR finished != 0)
+                 FROM inbox_inputs
+                 WHERE workspace_id = ?1 AND session_id = ?2 AND input_id = ?3",
+                params![&workspace_id.0, &session_id.0, &turn_id.0],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        Ok(ended.unwrap_or(0) != 0)
+    }
+
+    fn find_ended_active_claims(
+        &self,
+        workspace_id: &WorkspaceId,
+        session_id: &SessionId,
+    ) -> PortResult<Vec<TurnId>> {
+        let mut conn = self.conn.lock().expect("sqlite lock");
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(map_sql_err)?;
+        let mut out = Vec::new();
+        {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT b.input_id
+                     FROM inbox_batches b
+                     JOIN inbox_inputs i
+                       ON i.workspace_id = b.workspace_id
+                      AND i.session_id = b.session_id
+                      AND i.input_id = b.input_id
+                     WHERE b.workspace_id = ?1
+                       AND b.session_id = ?2
+                       AND b.state IN ('prepared', 'submitting', 'submitted')
+                       AND (i.canceled != 0 OR i.finished != 0)",
+                )
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![&workspace_id.0, &session_id.0], |r| {
+                    r.get::<_, String>(0)
+                })
+                .map_err(map_sql_err)?;
+            for item in rows {
+                out.push(TurnId(item.map_err(map_sql_err)?));
+            }
+        }
+        if !out.is_empty() {
+            for tid in &out {
+                tx.execute(
+                    "UPDATE inbox_batches SET state = 'settled'
+                     WHERE workspace_id = ?1 AND session_id = ?2 AND input_id = ?3",
+                    params![&workspace_id.0, &session_id.0, &tid.0],
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
+        tx.commit().map_err(map_sql_err)?;
+        Ok(out)
     }
 
     fn record_delegated_result(&self, record: &DelegatedResultRecord) -> PortResult<bool> {

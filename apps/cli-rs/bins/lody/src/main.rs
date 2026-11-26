@@ -4,16 +4,20 @@ use lody_acp::{ManagedArtifactInstaller, PortablePtyManager, StdioAcpLauncher};
 use lody_app::ApplicationService;
 use lody_engine::{FlockProjectStore, RepoEngineClient, RoostHistoryStore};
 use lody_entry::{
-    DispatchPlan, ensure_machine_id, execute_offline_oneshot, parse_cli_args, probe_live_daemon,
-    serve_local_daemon, start_daemon_detached, stop_running_daemon, try_execute_via_live_daemon,
+    DispatchPlan, OneShotAction, execute_offline_oneshot, format_restore_machine_id_error,
+    format_restore_machine_id_output, parse_cli_args, probe_live_daemon, serve_local_daemon,
+    start_daemon_detached, stop_running_daemon, try_execute_via_live_daemon,
 };
 use lody_env::HostEnv;
 use lody_ports::{
-    BackendPort, MachineId, ManagedArtifactSource, PortErrorKind, PortResult, StorageLeaseMode,
-    StorageLeasePort,
+    BackendPort, MachineIdentityPort, ManagedArtifactSource, PortErrorKind, PortResult,
+    ScheduleStorePort, StorageLeaseMode, StorageLeasePort,
 };
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
-use lody_sqlite::{FileStorageLease, SqliteDataLayout, SqliteStore};
+use lody_sqlite::{
+    FileStorageLease, LocalMachineIdentityStore, MachineIdentityConfig, SqliteDataLayout,
+    SqliteScheduleStore, SqliteStore,
+};
 use lody_worktree::{GitWorktreeManager, LocalTurnDiffStore};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -65,6 +69,21 @@ fn resolve_artifact_source(
     }
 }
 
+fn build_identity_store(
+    host_env: &HostEnv,
+    effective_data_dir: &std::path::Path,
+    has_isolated_backend_profile: bool,
+) -> Arc<LocalMachineIdentityStore> {
+    Arc::new(LocalMachineIdentityStore::new(MachineIdentityConfig {
+        data_dir: effective_data_dir.to_path_buf(),
+        is_default_data_dir: host_env.is_default_data_dir && !has_isolated_backend_profile,
+        namespace: host_env.platform.namespace().to_string(),
+        user_identity: host_env.user_identity.clone(),
+        state_anchor_dir: host_env.state_anchor_dir.clone(),
+        platform: HostEnv::os_platform_tag(),
+    }))
+}
+
 fn compose_runtime(
     host_env: &HostEnv,
     effective_data_dir: PathBuf,
@@ -82,9 +101,9 @@ fn compose_runtime(
         wait_timeout,
     )?) as Arc<dyn StorageLeasePort>;
 
-    let machine_id = ensure_machine_id(&effective_data_dir).map_err(|e| {
-        lody_ports::PortError::new(lody_ports::PortErrorKind::Unavailable, e.to_string())
-    })?;
+    let identity_store = build_identity_store(host_env, &effective_data_dir, backend.is_some());
+    let machine_id = identity_store.get_or_create_machine_id()?;
+
     let artifact_source = resolve_artifact_source(host_env, backend.as_ref());
     let repos_root = effective_data_dir.join("repos");
     let runtimes_root = effective_data_dir.join("runtimes");
@@ -93,20 +112,24 @@ fn compose_runtime(
         .clone()
         .unwrap_or_else(|| effective_data_dir.clone());
     let shell_command = host_env.shell_command();
-    let agent_base_env = host_env.agent_spawn_env();
+    let current_exe = std::env::current_exe().ok();
+    let env_for_agents = host_env.clone();
     let env_for_terminals = host_env.clone();
 
     let diff_store = Arc::new(LocalTurnDiffStore::new(&effective_data_dir));
-    let sqlite = Arc::new(SqliteStore::open(SqliteDataLayout::with_machine_id(
-        effective_data_dir,
-        machine_id.clone(),
-    ))?);
+    let layout = SqliteDataLayout::with_machine_id(&effective_data_dir, machine_id.0.clone());
+    let schedules =
+        Arc::new(SqliteScheduleStore::open(&layout.schedules_db())?) as Arc<dyn ScheduleStorePort>;
+    let sqlite = Arc::new(SqliteStore::open(layout)?);
 
     Ok(DaemonRuntime::new(DaemonDependencies {
-        machine_id: MachineId(machine_id),
+        machine_id,
+        identity: identity_store as Arc<dyn MachineIdentityPort>,
         default_cwd,
         shell_command,
-        agent_base_env,
+        agent_env_builder: Arc::new(move |cmd| {
+            env_for_agents.agent_spawn_env(cmd, current_exe.as_deref())
+        }),
         terminal_env_builder: Arc::new(move |sid| env_for_terminals.sanitized_terminal_env(sid)),
         storage_lease_mode: lease_mode,
         storage_lease: Some(storage_lease),
@@ -114,12 +137,13 @@ fn compose_runtime(
         history: Arc::new(RoostHistoryStore),
         inbox: sqlite as Arc<dyn lody_ports::InboxStorePort>,
         projects: Arc::new(FlockProjectStore),
+        schedules,
         diff_store,
-        artifacts: Arc::new(ManagedArtifactInstaller::with_install_root(
-            artifact_source,
-            runtimes_root,
-        )),
-        acp: Arc::new(StdioAcpLauncher::default()),
+        artifacts: Arc::new(
+            ManagedArtifactInstaller::with_install_root(artifact_source, runtimes_root)
+                .with_proxy_url(host_env.https_proxy.clone()),
+        ),
+        acp: Arc::new(StdioAcpLauncher::new(host_env.max_concurrent_acp_starts)),
         pty: Arc::new(PortablePtyManager::new()),
         worktree: Arc::new(GitWorktreeManager::new(repos_root)),
         backend,
@@ -204,6 +228,7 @@ fn main() -> ExitCode {
                     &home_dir,
                     host_env.platform.namespace(),
                     env!("CARGO_PKG_VERSION"),
+                    !host_env.mcp_http_disabled,
                     svc,
                 )
                 .await;
@@ -215,6 +240,32 @@ fn main() -> ExitCode {
                     }
                 }
             })
+        }
+        DispatchPlan::OneShot(OneShotAction::MachineRestoreId { machine_id, json }) => {
+            let active_host_pid = probe_live_daemon(&effective_data_dir).map(|m| m.pid);
+            let identity_store =
+                build_identity_store(&host_env, &effective_data_dir, backend.is_some());
+            match identity_store.restore_local_machine_id(&machine_id, active_host_pid) {
+                Ok(outcome) => match format_restore_machine_id_output(&outcome, json) {
+                    Ok(rendered) => {
+                        println!("{rendered}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(err) => {
+                        eprintln!("{err}");
+                        ExitCode::FAILURE
+                    }
+                },
+                Err(err) => {
+                    let rendered = format_restore_machine_id_error(&err.message, json);
+                    if json {
+                        println!("{rendered}");
+                    } else {
+                        eprintln!("{rendered}");
+                    }
+                    ExitCode::FAILURE
+                }
+            }
         }
         DispatchPlan::OneShot(action) => {
             if let Some(live_result) = try_execute_via_live_daemon(&effective_data_dir, &action) {

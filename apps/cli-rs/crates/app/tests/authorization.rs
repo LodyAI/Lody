@@ -51,4 +51,11 @@ fn remote_principal_cannot_register_local_projects_or_mutate_backend_profile() {
     };
     let err = enforce_command_policy(&remote_caller, &register, None).unwrap_err();
     assert_eq!(err.kind, PortErrorKind::Forbidden);
+
+    let restore_id = AppCommand::RestoreMachineId {
+        target_machine_id: "m_hijack".to_string(),
+        active_host_pid: None,
+    };
+    let restore_err = enforce_command_policy(&remote_caller, &restore_id, None).unwrap_err();
+    assert_eq!(restore_err.kind, PortErrorKind::Forbidden);
 }

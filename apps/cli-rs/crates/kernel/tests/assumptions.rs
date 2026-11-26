@@ -1,8 +1,9 @@
 use lody_kernel::{
-    ChildRejectReason, DelegatedReceipt, FrozenTurnInvocation, Generation, GoalControlState,
-    InboxAdmitOutcome, KernelAction, KernelEvent, MAX_BATCHED_RECEIPTS_PER_WAKE,
-    MAX_CHILD_DELEGATION_DEPTH, MAX_GOAL_CONTINUATION_TURNS, SessionPhase, SessionState,
-    SteerOutcome, TurnSourceKind, TurnTerminalReason, WarmAgentHandle, step,
+    ChildRejectReason, DelegatedReceipt, FailureClassification, FrozenTurnInvocation, Generation,
+    GoalControlState, InboxAdmitOutcome, KernelAction, KernelEvent, LATE_STREAM_ACTIVITY_TTL_MS,
+    MAX_BATCHED_RECEIPTS_PER_WAKE, MAX_CHILD_DELEGATION_DEPTH, MAX_GOAL_CONTINUATION_TURNS,
+    NativeSessionActivity, PresencePublishReason, SessionPhase, SessionState, SteerOutcome,
+    TurnSourceKind, TurnTerminalReason, WarmAgentHandle, classify_turn_failure, step,
 };
 
 fn human_turn(id: &str, prompt: &str) -> FrozenTurnInvocation {
@@ -35,6 +36,7 @@ fn agent_handle(id: &str) -> WarmAgentHandle {
         adapter_id: "codex".to_string(),
         mcp_selection_digest: "mcp_v1".to_string(),
         owner_user_id: "u_1".to_string(),
+        advertises_session_activity: false,
     }
 }
 
@@ -134,12 +136,17 @@ fn assumed_bounds_cap_child_depth_goal_turns_receipt_batch_and_stale_retries() {
             ..
         }
     )));
-    let (s4, _) = step(
+    let (s4, recovery_prepare_actions) = step(
         s3,
         KernelEvent::AgentPrepared {
             generation: Generation(2),
             agent: agent_handle("a2"),
         },
+    );
+    assert!(
+        recovery_prepare_actions.contains(&KernelAction::PublishRunningPresence {
+            reason: PresencePublishReason::StaleAcpRecovery,
+        })
     );
     let (s5, second_disconnect_actions) = step(
         s4,
@@ -351,6 +358,7 @@ fn network_independent_history_gate_and_stuck_settling_never_block_local_progres
         KernelEvent::AgentOutputChunk {
             generation: Generation(1),
             text: "part-1".to_string(),
+            observed_at_ms: 100,
         },
     );
     assert!(pre_durable_actions.is_empty());
@@ -396,4 +404,117 @@ fn network_independent_history_gate_and_stuck_settling_never_block_local_progres
         &s7.phase,
         SessionPhase::Preparing { invocation, .. } if invocation.turn_id == "t2"
     ));
+}
+
+#[test]
+fn late_stream_lease_expires_at_ttl_wakes_blocked_automation_and_silent_turn_ignores_banner_text() {
+    assert_eq!(
+        classify_turn_failure(
+            Some("agent_no_output"),
+            Some("Agent produced no output before context window check")
+        ),
+        FailureClassification::SilentNoOutput
+    );
+    assert_eq!(
+        classify_turn_failure(Some("model_error"), Some("Prompt is too long for model")),
+        FailureClassification::ContextOverflow
+    );
+
+    let mut s = SessionState::new("s_late", false, 0);
+    s.durable_user_turn_ids.insert("t1".to_string());
+    let (s, _) = step(
+        s,
+        KernelEvent::SubmitInput {
+            invocation: human_turn("t1", "hello"),
+        },
+    );
+    let (s, _) = step(
+        s,
+        KernelEvent::AgentPrepared {
+            generation: Generation(1),
+            agent: agent_handle("a1"),
+        },
+    );
+    let (s, _) = step(
+        s,
+        KernelEvent::AgentOutputChunk {
+            generation: Generation(1),
+            text: "initial".to_string(),
+            observed_at_ms: 1_000,
+        },
+    );
+    let (s, _) = step(
+        s,
+        KernelEvent::AgentPromptFinished {
+            generation: Generation(1),
+        },
+    );
+    let (s, _) = step(
+        s,
+        KernelEvent::SettlingCompleted {
+            generation: Generation(1),
+        },
+    );
+    assert!(!s.is_gc_protected(1_500));
+
+    let (s, late_actions) = step(
+        s,
+        KernelEvent::AgentOutputChunk {
+            generation: Generation(1),
+            text: "post-end-turn chunk".to_string(),
+            observed_at_ms: 2_000,
+        },
+    );
+    assert!(
+        late_actions.contains(&KernelAction::PublishRunningPresence {
+            reason: PresencePublishReason::LateStreamActivity,
+        })
+    );
+    assert!(s.is_gc_protected(2_000 + LATE_STREAM_ACTIVITY_TTL_MS - 1));
+
+    let (s, queued_auto_actions) = step(
+        s,
+        KernelEvent::SubmitInput {
+            invocation: automation_turn("t_auto_blocked"),
+        },
+    );
+    assert!(queued_auto_actions.is_empty());
+
+    let (s, wake_actions) = step(
+        s,
+        KernelEvent::AdvanceClock {
+            now_ms: 2_000 + LATE_STREAM_ACTIVITY_TTL_MS,
+        },
+    );
+    assert!(wake_actions.contains(&KernelAction::ClearRunningPresence));
+    assert!(wake_actions.iter().any(|a| matches!(
+        a,
+        KernelAction::ReuseWarmAgent { turn_id, .. } if turn_id == "t_auto_blocked"
+    )));
+    assert!(s.is_gc_protected(2_000 + LATE_STREAM_ACTIVITY_TTL_MS));
+
+    let (s_reconciled, ended_actions) = step(
+        SessionState::new("s_ended", false, 0),
+        KernelEvent::ReconcileEndedInboxClaim {
+            turn_id: "t_orphaned_claim".to_string(),
+        },
+    );
+    assert!(ended_actions.contains(&KernelAction::FinalizeTurn {
+        turn_id: "t_orphaned_claim".to_string(),
+        reason: TurnTerminalReason::StartupInterruptedUnknown,
+    }));
+    let (_, retry_orphaned) = step(
+        s_reconciled,
+        KernelEvent::SubmitInput {
+            invocation: human_turn("t_orphaned_claim", "replay"),
+        },
+    );
+    assert_eq!(
+        retry_orphaned,
+        vec![KernelAction::InputRejected {
+            turn_id: "t_orphaned_claim".to_string(),
+            outcome: InboxAdmitOutcome::RejectedRetiredId,
+        }]
+    );
+    let _ = NativeSessionActivity::Idle;
 }

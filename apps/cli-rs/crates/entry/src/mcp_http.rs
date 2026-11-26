@@ -8,7 +8,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use lody_app::{
     AppCommand, AppQuery, AppResponse, ApplicationService, McpHttpEndpointConfig, PortError,
-    PortErrorKind, PortResult, SessionId, TurnId, VerifiedPrincipal, WorkspaceId,
+    PortErrorKind, PortResult, ScheduleEditPatch, SessionId, TurnId, VerifiedPrincipal,
+    WorkspaceId,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -322,7 +323,21 @@ fn builtin_mcp_tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "enum": ["projects", "machines"] }
+                    "action": { "type": "string", "enum": ["projects", "machines", "schedules"] },
+                    "arguments": { "type": "object" }
+                },
+                "required": ["action"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "lody_schedule",
+            "description": "Propose scheduled work or a change to an owned Schedule for user confirmation, or pause an owned Schedule.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["propose", "propose_edit", "pause"] },
+                    "arguments": { "type": "object" }
                 },
                 "required": ["action"],
                 "additionalProperties": false
@@ -581,6 +596,78 @@ async fn execute_tool_call(
                     false,
                 );
             }
+            if action == "schedules" {
+                let sub = args.get("arguments").cloned().unwrap_or_else(|| json!({}));
+                if let Some(schedule_id) = sub.get("scheduleId").and_then(Value::as_str) {
+                    if sub.get("query").is_some()
+                        || sub.get("limit").is_some()
+                        || sub.get("offset").is_some()
+                    {
+                        return mcp_tool_result(
+                            &json!({ "ok": false, "error": "scheduleId cannot be combined with query, limit, or offset" }),
+                            true,
+                        );
+                    }
+                    let q = AppQuery::GetSchedule {
+                        workspace_id: ctx.workspace_id.clone(),
+                        schedule_id: schedule_id.to_string(),
+                    };
+                    return match tokio::task::spawn_blocking(move || service.query(&caller, q))
+                        .await
+                    {
+                        Ok(Ok(AppResponse::ScheduleRead {
+                            schedule: Some(rec),
+                        })) => mcp_tool_result(
+                            &json!({
+                                "schedule": rec,
+                                "truncated": { "promptCharsOmitted": 0 }
+                            }),
+                            false,
+                        ),
+                        Ok(Ok(AppResponse::ScheduleRead { schedule: None })) => mcp_tool_result(
+                            &json!({ "ok": false, "error": "Schedule not found" }),
+                            true,
+                        ),
+                        Ok(Ok(_)) => {
+                            mcp_tool_result(&json!({ "error": "unexpected response" }), true)
+                        }
+                        Ok(Err(err)) => {
+                            mcp_tool_result(&json!({ "ok": false, "error": err.message }), true)
+                        }
+                        Err(err) => mcp_tool_result(&json!({ "error": err.to_string() }), true),
+                    };
+                }
+                let filter_query = sub
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                let limit = sub
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .and_then(|v| usize::try_from(v).ok())
+                    .unwrap_or(30);
+                let offset = sub
+                    .get("offset")
+                    .and_then(Value::as_u64)
+                    .and_then(|v| usize::try_from(v).ok())
+                    .unwrap_or(0);
+                let q = AppQuery::ListSchedules {
+                    workspace_id: ctx.workspace_id.clone(),
+                    filter_query,
+                    limit,
+                    offset,
+                };
+                return match tokio::task::spawn_blocking(move || service.query(&caller, q)).await {
+                    Ok(Ok(AppResponse::SchedulesListed { schedules })) => {
+                        mcp_tool_result(&json!({ "schedules": schedules }), false)
+                    }
+                    Ok(Ok(_)) => mcp_tool_result(&json!({ "error": "unexpected response" }), true),
+                    Ok(Err(err)) => {
+                        mcp_tool_result(&json!({ "ok": false, "error": err.message }), true)
+                    }
+                    Err(err) => mcp_tool_result(&json!({ "error": err.to_string() }), true),
+                };
+            }
             match tokio::task::spawn_blocking(move || {
                 service.query(&caller, AppQuery::ListProjects)
             })
@@ -591,6 +678,125 @@ async fn execute_tool_call(
                 }
                 Ok(Ok(_)) => mcp_tool_result(&json!({ "error": "unexpected response" }), true),
                 Ok(Err(err)) => mcp_tool_result(&json!({ "error": err.message }), true),
+                Err(err) => mcp_tool_result(&json!({ "error": err.to_string() }), true),
+            }
+        }
+        "lody_schedule" => {
+            let action = args.get("action").and_then(Value::as_str).unwrap_or("");
+            let sub = args.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let cmd = match action {
+                "propose" => {
+                    let Some(request_id) = sub.get("requestId").and_then(Value::as_str) else {
+                        return mcp_tool_result(
+                            &json!({ "ok": false, "error": "requestId is required" }),
+                            true,
+                        );
+                    };
+                    let Some(title) = sub.get("title").and_then(Value::as_str) else {
+                        return mcp_tool_result(
+                            &json!({ "ok": false, "error": "title is required" }),
+                            true,
+                        );
+                    };
+                    let Some(prompt_text) = sub.get("prompt").and_then(Value::as_str) else {
+                        return mcp_tool_result(
+                            &json!({ "ok": false, "error": "prompt is required" }),
+                            true,
+                        );
+                    };
+                    let cron_expr = match sub.get("rule") {
+                        Some(Value::String(s)) => s.clone(),
+                        Some(other) => other.to_string(),
+                        None => {
+                            return mcp_tool_result(
+                                &json!({ "ok": false, "error": "rule is required" }),
+                                true,
+                            );
+                        }
+                    };
+                    AppCommand::ProposeSchedule {
+                        workspace_id: ctx.workspace_id.clone(),
+                        request_id: request_id.to_string(),
+                        title: title.to_string(),
+                        prompt_text: prompt_text.to_string(),
+                        cron_expr,
+                    }
+                }
+                "propose_edit" => {
+                    let Some(schedule_id) = sub.get("scheduleId").and_then(Value::as_str) else {
+                        return mcp_tool_result(
+                            &json!({ "ok": false, "error": "scheduleId is required" }),
+                            true,
+                        );
+                    };
+                    let Some(request_id) = sub.get("requestId").and_then(Value::as_str) else {
+                        return mcp_tool_result(
+                            &json!({ "ok": false, "error": "requestId is required" }),
+                            true,
+                        );
+                    };
+                    let cron_expr = sub.get("rule").map(|r| match r {
+                        Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    });
+                    AppCommand::ProposeScheduleEdit {
+                        workspace_id: ctx.workspace_id.clone(),
+                        schedule_id: schedule_id.to_string(),
+                        request_id: request_id.to_string(),
+                        patch: ScheduleEditPatch {
+                            title: sub
+                                .get("title")
+                                .and_then(Value::as_str)
+                                .map(ToOwned::to_owned),
+                            prompt_text: sub
+                                .get("prompt")
+                                .and_then(Value::as_str)
+                                .map(ToOwned::to_owned),
+                            cron_expr,
+                        },
+                    }
+                }
+                "pause" => {
+                    let Some(schedule_id) = sub.get("scheduleId").and_then(Value::as_str) else {
+                        return mcp_tool_result(
+                            &json!({ "ok": false, "error": "scheduleId is required" }),
+                            true,
+                        );
+                    };
+                    let Some(request_id) = sub.get("requestId").and_then(Value::as_str) else {
+                        return mcp_tool_result(
+                            &json!({ "ok": false, "error": "requestId is required" }),
+                            true,
+                        );
+                    };
+                    AppCommand::PauseSchedule {
+                        workspace_id: ctx.workspace_id.clone(),
+                        schedule_id: schedule_id.to_string(),
+                        request_id: request_id.to_string(),
+                    }
+                }
+                other => {
+                    return mcp_tool_result(
+                        &json!({ "ok": false, "error": format!("unknown schedule action '{other}'") }),
+                        true,
+                    );
+                }
+            };
+            match tokio::task::spawn_blocking(move || service.execute(&caller, cmd)).await {
+                Ok(Ok(AppResponse::ScheduleProposed(out))) => {
+                    mcp_tool_result(&json!({ "ok": true, "proposal": out }), false)
+                }
+                Ok(Ok(AppResponse::SchedulePaused {
+                    schedule_id,
+                    changed,
+                })) => mcp_tool_result(
+                    &json!({ "ok": true, "scheduleId": schedule_id, "changed": changed }),
+                    false,
+                ),
+                Ok(Ok(_)) => mcp_tool_result(&json!({ "error": "unexpected response" }), true),
+                Ok(Err(err)) => {
+                    mcp_tool_result(&json!({ "ok": false, "error": err.message }), true)
+                }
                 Err(err) => mcp_tool_result(&json!({ "error": err.to_string() }), true),
             }
         }

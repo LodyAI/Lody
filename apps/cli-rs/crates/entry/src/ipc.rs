@@ -4,9 +4,9 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lody_app::{
-    AppCommand, AppQuery, AppResponse, ApplicationService, CustomCommandSpec, HistoryBlock,
-    HistoryTurnRecord, LocalProjectId, PermissionDecision, PortResult, SessionId, TurnId,
-    TurnTerminalOutcome, UserId, VerifiedPrincipal, WorkspaceId,
+    AppCommand, AppQuery, AppResponse, ApplicationService, BranchListQuery, CustomCommandSpec,
+    HistoryBlock, HistoryTurnRecord, LocalProjectId, PermissionDecision, PortError, PortErrorKind,
+    PortResult, SessionId, TurnId, TurnTerminalOutcome, UserId, VerifiedPrincipal, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -43,19 +43,6 @@ impl DaemonRunMetadata {
     pub fn read(data_dir: &Path) -> Option<Self> {
         let raw = fs::read_to_string(Self::file_path(data_dir)).ok()?;
         serde_json::from_str(&raw).ok()
-    }
-}
-
-pub fn ensure_machine_id(data_dir: &Path) -> io::Result<String> {
-    fs::create_dir_all(data_dir)?;
-    let machine_id_path = data_dir.join("machine-id");
-    match fs::read_to_string(&machine_id_path) {
-        Ok(existing) if !existing.trim().is_empty() => Ok(existing.trim().to_string()),
-        _ => {
-            let generated = format!("machine-{:x}", hash_path(data_dir));
-            fs::write(&machine_id_path, &generated)?;
-            Ok(generated)
-        }
     }
 }
 
@@ -242,6 +229,10 @@ async fn handle_healthz(State(st): State<Arc<ServerState>>) -> Json<Value> {
         "pid": std::process::id(),
         "cliVersion": st.version,
         "homeDir": st.home_dir,
+        "protocolCapabilities": {
+            "localProjectFileSearch": true,
+            "localProjectBranchPagination": true,
+        }
     }))
 }
 
@@ -254,6 +245,10 @@ async fn handle_probe_state(State(st): State<Arc<ServerState>>) -> Json<Value> {
         "pid": std::process::id(),
         "updatedAtMs": current_epoch_ms(),
         "issues": [],
+        "protocolCapabilities": {
+            "localProjectFileSearch": true,
+            "localProjectBranchPagination": true,
+        }
     }))
 }
 
@@ -278,6 +273,7 @@ async fn handle_project_control(
     };
     let kind = payload.get("type").and_then(Value::as_str).unwrap_or("");
     let service = Arc::clone(&st.service);
+
     match kind {
         "local-project/add" | "project/add" => {
             let root_str = payload
@@ -312,6 +308,164 @@ async fn handle_project_control(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "unexpected response".to_string(),
                 ))
+            }
+        }
+        "local-project/list-branches" => {
+            let workspace_id = WorkspaceId(
+                payload
+                    .get("workspaceId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("local")
+                    .to_string(),
+            );
+            let local_project_id = payload
+                .get("localProjectId")
+                .and_then(Value::as_str)
+                .map(|s| LocalProjectId(s.to_string()));
+            let root_path = payload
+                .get("rootPath")
+                .and_then(Value::as_str)
+                .map(PathBuf::from);
+            let limit = payload
+                .get("limit")
+                .and_then(Value::as_u64)
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(50);
+            let branch_query = BranchListQuery {
+                query: payload
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+                limit,
+                cursor: payload
+                    .get("cursor")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+            };
+            let q = AppQuery::ListProjectBranches {
+                workspace_id,
+                local_project_id,
+                root_path,
+                branch_query,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectBranchesListed(page)) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/list-branches",
+                    "result": page,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(Json(json!({
+                    "ok": false,
+                    "type": "local-project/list-branches",
+                    "error": format!("{:?}", err.kind),
+                    "message": err.message,
+                }))),
+            }
+        }
+        "local-project/search-files" => {
+            let workspace_id = WorkspaceId(
+                payload
+                    .get("workspaceId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("local")
+                    .to_string(),
+            );
+            let local_project_id = payload
+                .get("localProjectId")
+                .and_then(Value::as_str)
+                .map(|s| LocalProjectId(s.to_string()));
+            let root_path = payload
+                .get("rootPath")
+                .and_then(Value::as_str)
+                .map(PathBuf::from);
+            let search_query = payload
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let limit = payload
+                .get("limit")
+                .and_then(Value::as_u64)
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(50);
+            let q = AppQuery::SearchProjectFiles {
+                workspace_id,
+                local_project_id,
+                root_path,
+                search_query,
+                limit,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectFilesSearched(res)) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/search-files",
+                    "result": res,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(Json(json!({
+                    "ok": false,
+                    "type": "local-project/search-files",
+                    "error": format!("{:?}", err.kind),
+                    "message": err.message,
+                }))),
+            }
+        }
+        "local-project/git-state" => {
+            let root_path = payload
+                .get("rootPath")
+                .and_then(Value::as_str)
+                .map(PathBuf::from)
+                .ok_or_else(|| (StatusCode::BAD_REQUEST, "missing rootPath".to_string()))?;
+            let q = AppQuery::InspectProjectGitSummary { root_path };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+                .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+            match resp {
+                AppResponse::ProjectGitSummary(summary) => {
+                    let result = if summary.git {
+                        let mut branches = Vec::new();
+                        if let Some(ref cur) = summary.current_branch {
+                            branches.push(cur.clone());
+                        }
+                        if let Some(ref def) = summary.default_branch
+                            && !branches.contains(def)
+                        {
+                            branches.push(def.clone());
+                        }
+                        json!({
+                            "git": true,
+                            "branches": branches,
+                            "currentBranch": summary.current_branch,
+                            "defaultBranch": summary.default_branch,
+                            "githubRepoFullName": summary.github_repo_full_name,
+                        })
+                    } else {
+                        json!({ "git": false })
+                    };
+                    Ok(Json(json!({
+                        "ok": true,
+                        "type": "local-project/git-state",
+                        "result": result,
+                    })))
+                }
+                _ => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
             }
         }
         _ => {
@@ -608,45 +762,61 @@ pub async fn serve_local_daemon(
     home_dir: &Path,
     namespace: &str,
     version: &str,
+    enable_mcp_http: bool,
     service: Arc<dyn ApplicationService>,
 ) -> PortResult<()> {
     use std::os::unix::fs::PermissionsExt;
     use tokio::net::UnixListener;
 
     if probe_live_daemon(data_dir).is_some() {
-        return Err(lody_app::PortError::new(
-            lody_app::PortErrorKind::Conflict,
+        return Err(PortError::new(
+            PortErrorKind::Conflict,
             "a live lody daemon already owns this data directory",
         ));
     }
 
     let my_pid = std::process::id();
-    let machine_id = ensure_machine_id(data_dir).map_err(|e| {
-        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
-    })?;
-    let (probe_path, control_path) = resolve_socket_paths(data_dir).map_err(|e| {
-        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
-    })?;
+    let host_caller = VerifiedPrincipal::LocalHost {
+        caller_pid: Some(my_pid),
+        account_id: None,
+    };
+    let svc_for_id = Arc::clone(&service);
+    let machine_id = match tokio::task::spawn_blocking(move || {
+        svc_for_id.query(&host_caller, AppQuery::MachineIdentity)
+    })
+    .await
+    .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))??
+    {
+        AppResponse::MachineIdentity { machine_id } => machine_id.0,
+        _ => "local".to_string(),
+    };
+
+    let (probe_path, control_path) = resolve_socket_paths(data_dir)
+        .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
     let _ = fs::remove_file(&probe_path);
     let _ = fs::remove_file(&control_path);
 
-    let probe_listener = UnixListener::bind(&probe_path).map_err(|e| {
-        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
-    })?;
-    let control_listener = UnixListener::bind(&control_path).map_err(|e| {
-        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
-    })?;
+    let probe_listener = UnixListener::bind(&probe_path)
+        .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+    let control_listener = UnixListener::bind(&control_path)
+        .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
     let _ = fs::set_permissions(&probe_path, fs::Permissions::from_mode(0o600));
     let _ = fs::set_permissions(&control_path, fs::Permissions::from_mode(0o600));
 
     let shutdown = Arc::new(Notify::new());
-    let (_mcp_ep, mcp_task) = crate::mcp_http::start_mcp_http_server(
-        Arc::clone(&service),
-        &machine_id,
-        version,
-        Arc::clone(&shutdown),
-    )
-    .await?;
+    let mcp_task = if enable_mcp_http {
+        let (_mcp_ep, task) = crate::mcp_http::start_mcp_http_server(
+            Arc::clone(&service),
+            &machine_id,
+            version,
+            Arc::clone(&shutdown),
+        )
+        .await?;
+        Some(task)
+    } else {
+        None
+    };
+
     let (_term_sock, term_task) = crate::terminal::start_local_terminal_server(
         data_dir,
         namespace,
@@ -667,14 +837,12 @@ pub async fn serve_local_daemon(
     let run_file = DaemonRunMetadata::file_path(data_dir);
     let tmp_file = run_file.with_extension("json.tmp");
     let raw_meta = serde_json::to_vec_pretty(&meta)
-        .map_err(|e| lody_app::PortError::new(lody_app::PortErrorKind::Internal, e.to_string()))?;
-    fs::write(&tmp_file, raw_meta).map_err(|e| {
-        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
-    })?;
+        .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+    fs::write(&tmp_file, raw_meta)
+        .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
     let _ = fs::set_permissions(&tmp_file, fs::Permissions::from_mode(0o600));
-    fs::rename(&tmp_file, &run_file).map_err(|e| {
-        lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
-    })?;
+    fs::rename(&tmp_file, &run_file)
+        .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
 
     let shared = Arc::new(ServerState {
         service,
@@ -714,7 +882,10 @@ pub async fn serve_local_daemon(
             control_shutdown.notified().await;
         });
 
-    let _ = tokio::join!(probe_srv, control_srv, mcp_task, term_task);
+    let _ = tokio::join!(probe_srv, control_srv, term_task);
+    if let Some(task) = mcp_task {
+        let _ = task.await;
+    }
 
     let svc_for_drain = Arc::clone(&shared.service);
     let _ = tokio::task::spawn_blocking(move || svc_for_drain.drain_for_shutdown()).await;
@@ -733,10 +904,11 @@ pub async fn serve_local_daemon(
     _home_dir: &Path,
     _namespace: &str,
     _version: &str,
+    _enable_mcp_http: bool,
     _service: Arc<dyn ApplicationService>,
 ) -> PortResult<()> {
-    Err(lody_app::PortError::new(
-        lody_app::PortErrorKind::Unavailable,
+    Err(PortError::new(
+        PortErrorKind::Unavailable,
         "local daemon server currently requires Unix domain sockets",
     ))
 }
@@ -864,4 +1036,23 @@ pub fn probe_live_daemon(data_dir: &Path) -> Option<DaemonRunMetadata> {
     )
     .ok()?;
     (status == 200).then_some(meta)
+}
+
+pub fn query_live_daemon_machine_id(meta: &DaemonRunMetadata) -> Option<String> {
+    let (status, body) = send_unix_http(
+        Path::new(&meta.socket_path),
+        "GET",
+        "/state",
+        meta.token.as_deref(),
+        None,
+    )
+    .ok()?;
+    if status != 200 {
+        return None;
+    }
+    let parsed: Value = serde_json::from_str(&body).ok()?;
+    parsed
+        .get("machineId")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
 }

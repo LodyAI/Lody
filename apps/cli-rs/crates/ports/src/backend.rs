@@ -1,12 +1,14 @@
 #![forbid(unsafe_code)]
 
-use crate::error::PortResult;
+use crate::error::{PortError, PortErrorKind, PortResult};
 use crate::identity::{
     CapabilitySet, LocalProjectId, MachineId, ProfileId, SessionId, UserId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+pub const CANONICAL_LODY_CLOUD_ORIGIN: &str = "https://lody.ai";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -31,6 +33,8 @@ pub struct WellKnownDiscoveryDocument {
     pub instance_id: String,
     pub control_api_url: String,
     pub auth_issuer_url: String,
+    #[serde(default)]
+    pub site_origin: Option<String>,
     pub auth_methods: Vec<AuthMethodDescriptor>,
     pub streams_sync_url: Option<String>,
     pub blob_service_url: Option<String>,
@@ -48,6 +52,41 @@ pub struct BackendNetworkPolicy {
     pub connect_timeout_ms: Option<u64>,
 }
 
+fn normalize_url_origin(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    let Some(scheme_sep) = trimmed.find("://") else {
+        return trimmed.to_ascii_lowercase();
+    };
+    let scheme = &trimmed[..scheme_sep].to_ascii_lowercase();
+    let after_scheme = &trimmed[scheme_sep + 3..];
+    let host_port = after_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(after_scheme)
+        .to_ascii_lowercase();
+    format!("{scheme}://{host_port}")
+}
+
+pub fn derive_recovery_service_locator(server_origin: &str, site_origin: Option<&str>) -> String {
+    let candidate = site_origin
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(server_origin);
+    let normalized = normalize_url_origin(candidate);
+    let host = normalized
+        .split("://")
+        .nth(1)
+        .unwrap_or(&normalized)
+        .split(':')
+        .next()
+        .unwrap_or("");
+    if host == "lody.ai" || host.ends_with(".lody.ai") {
+        CANONICAL_LODY_CLOUD_ORIGIN.to_string()
+    } else {
+        normalized
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackendProfile {
     pub profile_id: ProfileId,
@@ -59,6 +98,24 @@ pub struct BackendProfile {
 impl BackendProfile {
     pub fn isolated_data_dir(&self, base_data_dir: &Path) -> PathBuf {
         base_data_dir.join("profiles").join(&self.profile_id.0)
+    }
+
+    pub fn recovery_service_locator(&self) -> String {
+        derive_recovery_service_locator(&self.server_origin, self.discovery.site_origin.as_deref())
+    }
+
+    pub fn verify_recovery_vault_locator(&self, vault_locator: &str) -> PortResult<()> {
+        let expected = self.recovery_service_locator();
+        let actual = normalize_url_origin(vault_locator);
+        if actual != expected {
+            return Err(PortError::new(
+                PortErrorKind::Forbidden,
+                format!(
+                    "e2ee_recovery_authentication: locator-mismatch (expected {expected}, got {actual})"
+                ),
+            ));
+        }
+        Ok(())
     }
 }
 

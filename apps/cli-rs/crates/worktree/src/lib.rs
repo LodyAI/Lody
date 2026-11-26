@@ -1,15 +1,21 @@
 #![forbid(unsafe_code)]
 
+pub mod git_meta;
 pub mod scan;
 pub mod turn_diff;
 
+pub use git_meta::{
+    inspect_git_summary, list_branches, parse_github_repo_full_name, rank_project_file_paths,
+    score_local_project_file_path, search_project_files,
+};
 use lody_ports::{
-    LocalProjectId, PortError, PortErrorKind, PortResult, ScannedFileIndex, SessionId,
-    WorktreeLease, WorktreePort,
+    BranchListPage, BranchListQuery, FileSearchResult, LocalProjectGitSummary, LocalProjectId,
+    PortError, PortErrorKind, PortResult, ScannedFileIndex, SessionId, WorktreeLease, WorktreePort,
 };
 pub use scan::{
     CODE_COLLAB_IGNORED_DIRECTORY_NAMES, CODE_COLLAB_MAX_INDEX_BYTES,
-    CODE_COLLAB_MAX_INDEX_ENTRIES, is_ignored_directory_name, scan_directory_parallel,
+    CODE_COLLAB_MAX_INDEX_ENTRIES, collect_project_file_paths, is_ignored_directory_name,
+    scan_directory_parallel,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -175,6 +181,23 @@ impl WorktreePort for GitWorktreeManager {
             let _ = fs::remove_dir_all(&lease.worktree_path);
         }
         Ok(())
+    }
+
+    fn inspect_git_summary(&self, root: &Path) -> LocalProjectGitSummary {
+        inspect_git_summary(root)
+    }
+
+    fn list_branches(&self, root: &Path, query: &BranchListQuery) -> PortResult<BranchListPage> {
+        list_branches(root, query)
+    }
+
+    fn search_project_files(
+        &self,
+        root: &Path,
+        query: &str,
+        limit: usize,
+    ) -> PortResult<FileSearchResult> {
+        search_project_files(root, query, limit)
     }
 
     fn scan_project_files(&self, root: &Path) -> PortResult<ScannedFileIndex> {

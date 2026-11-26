@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
 
-use crate::error::PortResult;
-use crate::execution::CustomCommandSpec;
+use crate::error::{PortError, PortErrorKind, PortResult};
+use crate::execution::{CustomCommandSpec, LocalProjectGitSummary};
 use crate::identity::{LocalProjectId, SessionId, TurnId, UserId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+pub const MAX_SCHEDULE_PROMPT_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -76,7 +78,7 @@ pub struct LocalProjectRecord {
     pub project_id: LocalProjectId,
     pub name: String,
     pub root_path: PathBuf,
-    pub default_branch: Option<String>,
+    pub git_summary: Option<LocalProjectGitSummary>,
 }
 
 pub trait ProjectStorePort: Send + Sync {
@@ -110,6 +112,21 @@ pub trait InboxStorePort: Send + Sync {
         session_id: &SessionId,
         paused: bool,
     ) -> PortResult<()>;
+    fn is_input_ended(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _session_id: &SessionId,
+        _turn_id: &TurnId,
+    ) -> PortResult<bool> {
+        Ok(false)
+    }
+    fn find_ended_active_claims(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _session_id: &SessionId,
+    ) -> PortResult<Vec<TurnId>> {
+        Ok(Vec::new())
+    }
     fn record_delegated_result(&self, _record: &DelegatedResultRecord) -> PortResult<bool> {
         Ok(true)
     }
@@ -123,6 +140,13 @@ pub trait InboxStorePort: Send + Sync {
 pub enum TurnDiffCompression {
     Gzip,
     Zstd,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "scope", rename_all = "snake_case")]
+pub enum DiffCaptureScope {
+    WorktreeBranch { base_branch: Option<String> },
+    UncommittedOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,6 +182,7 @@ pub trait DiffStorePort: Send + Sync {
         session_id: &SessionId,
         turn_id: &TurnId,
         workdir: &std::path::Path,
+        scope: &DiffCaptureScope,
         now_ms: i64,
     ) -> PortResult<TurnDiffSummary>;
     fn read_turn_diff(
@@ -173,19 +198,153 @@ pub trait DiffStorePort: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScheduleRecord {
     pub schedule_id: String,
     pub workspace_id: WorkspaceId,
     pub session_id: Option<SessionId>,
     pub author_user_id: UserId,
+    pub title: String,
     pub cron_expr: String,
     pub prompt_text: String,
     pub enabled: bool,
+    pub content_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleEditPatch {
+    pub title: Option<String>,
+    pub prompt_text: Option<String>,
+    pub cron_expr: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleProposalOutcome {
+    pub proposal_id: String,
+    pub schedule_id: Option<String>,
+    pub request_id: String,
+    pub base_revision: Option<u64>,
+    pub status: String,
 }
 
 pub trait ScheduleStorePort: Send + Sync {
-    fn list_schedules(&self, workspace_id: &WorkspaceId) -> PortResult<Vec<ScheduleRecord>>;
+    fn list_schedules(
+        &self,
+        workspace_id: &WorkspaceId,
+        query: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> PortResult<Vec<ScheduleRecord>>;
+    fn get_schedule(
+        &self,
+        workspace_id: &WorkspaceId,
+        schedule_id: &str,
+    ) -> PortResult<Option<ScheduleRecord>>;
     fn upsert_schedule(&self, record: &ScheduleRecord) -> PortResult<()>;
+    fn propose_schedule(
+        &self,
+        workspace_id: &WorkspaceId,
+        author: &UserId,
+        request_id: &str,
+        title: &str,
+        prompt_text: &str,
+        cron_expr: &str,
+    ) -> PortResult<ScheduleProposalOutcome>;
+    fn propose_schedule_edit(
+        &self,
+        workspace_id: &WorkspaceId,
+        author: &UserId,
+        schedule_id: &str,
+        request_id: &str,
+        patch: &ScheduleEditPatch,
+    ) -> PortResult<ScheduleProposalOutcome>;
+    fn pause_schedule(
+        &self,
+        workspace_id: &WorkspaceId,
+        author: &UserId,
+        schedule_id: &str,
+        request_id: &str,
+    ) -> PortResult<bool>;
+}
+
+#[derive(Default)]
+pub struct UnavailableScheduleStore;
+
+impl ScheduleStorePort for UnavailableScheduleStore {
+    fn list_schedules(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _query: Option<&str>,
+        _limit: usize,
+        _offset: usize,
+    ) -> PortResult<Vec<ScheduleRecord>> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule store unavailable",
+        ))
+    }
+
+    fn get_schedule(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _schedule_id: &str,
+    ) -> PortResult<Option<ScheduleRecord>> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule store unavailable",
+        ))
+    }
+
+    fn upsert_schedule(&self, _record: &ScheduleRecord) -> PortResult<()> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule store unavailable",
+        ))
+    }
+
+    fn propose_schedule(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _author: &UserId,
+        _request_id: &str,
+        _title: &str,
+        _prompt_text: &str,
+        _cron_expr: &str,
+    ) -> PortResult<ScheduleProposalOutcome> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule store unavailable",
+        ))
+    }
+
+    fn propose_schedule_edit(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _author: &UserId,
+        _schedule_id: &str,
+        _request_id: &str,
+        _patch: &ScheduleEditPatch,
+    ) -> PortResult<ScheduleProposalOutcome> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule store unavailable",
+        ))
+    }
+
+    fn pause_schedule(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _author: &UserId,
+        _schedule_id: &str,
+        _request_id: &str,
+    ) -> PortResult<bool> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "schedule store unavailable",
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

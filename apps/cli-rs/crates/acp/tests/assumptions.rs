@@ -1,8 +1,8 @@
 use lody_acp::{ManagedArtifactInstaller, PortablePtyManager, StdioAcpLauncher};
 use lody_ports::{
-    AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpSpawnSpec, ArtifactRegistryPort,
-    ManagedArtifactSource, PortErrorKind, PtyPort, SessionId, TERMINAL_MAX_PER_SESSION,
-    TerminalOpenSpec,
+    AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpSessionArchiveOutcome, AcpSpawnSpec,
+    ArtifactRegistryPort, ManagedArtifactSource, PortErrorKind, PtyPort, SessionId,
+    TERMINAL_MAX_PER_SESSION, TerminalOpenSpec,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -22,14 +22,12 @@ fn scripted_acp_binary() -> PathBuf {
         "lody-scripted-acp"
     };
     let bin_path = workspace_dir.join("target").join("debug").join(bin_name);
-    if !bin_path.exists() {
-        let status = Command::new(env!("CARGO"))
-            .current_dir(&workspace_dir)
-            .args(["build", "-p", "lody-scripted-acp"])
-            .status()
-            .expect("build lody-scripted-acp");
-        assert!(status.success());
-    }
+    let status = Command::new(env!("CARGO"))
+        .current_dir(&workspace_dir)
+        .args(["build", "-p", "lody-scripted-acp"])
+        .status()
+        .expect("build lody-scripted-acp");
+    assert!(status.success());
     bin_path
 }
 
@@ -81,6 +79,11 @@ fn explicit_termination_suppresses_spurious_crash_while_unexpected_exit_surfaces
         }
     }
     assert!(saw_in_flight_crash);
+
+    let archive_outcome = launcher
+        .set_session_archived(&spec, "native-sess-1", true)
+        .expect("negotiate native sessionArchive without session/new");
+    assert_eq!(archive_outcome, AcpSessionArchiveOutcome::Native);
 }
 
 #[test]

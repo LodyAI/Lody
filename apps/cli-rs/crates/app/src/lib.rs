@@ -1,13 +1,16 @@
 #![forbid(unsafe_code)]
 
 pub use lody_ports::{
-    BackendProfile, CapabilitySet, CustomCommandSpec, DiffFileEntry, EntitlementStatus,
-    HistoryBlock, HistoryTurnRecord, LocalProjectId, LocalProjectRecord, MachineId, McpHttpHeader,
-    PermissionDecision, PlatformCapability, PortError, PortErrorKind, PortResult, ProfileId,
-    ScannedFileEntry, ScannedFileIndex, SessionId, SessionMetaSnapshot, SteerVerdict,
-    StorageLeaseMode, TERMINAL_MAX_PER_SESSION, TerminalAttachReplay, TerminalEventSink,
-    TerminalOpenOutcome, TerminalOutboundEvent, TerminalSnapshot, TurnDiffSummary, TurnId,
-    TurnTerminalOutcome, UserId, VerifiedPrincipal, WorkspaceId, WorkspaceSecurityMode,
+    AnchorSyncStatus, BackendProfile, BranchListPage, BranchListQuery, CapabilitySet,
+    CustomCommandSpec, DiffCaptureScope, DiffFileEntry, EntitlementStatus, FileSearchResult,
+    HistoryBlock, HistoryTurnRecord, LocalProjectGitSummary, LocalProjectId, LocalProjectRecord,
+    MachineId, MachineIdentityRestoreOutcome, McpHttpHeader, PermissionDecision,
+    PlatformCapability, PortError, PortErrorKind, PortResult, ProfileId, ScannedFileEntry,
+    ScannedFileIndex, ScheduleEditPatch, ScheduleProposalOutcome, ScheduleRecord, SessionId,
+    SessionMetaSnapshot, SteerVerdict, StorageLeaseMode, TERMINAL_MAX_PER_SESSION,
+    TerminalAttachReplay, TerminalEventSink, TerminalOpenOutcome, TerminalOutboundEvent,
+    TerminalSnapshot, TurnDiffSummary, TurnId, TurnTerminalOutcome, UserId, VerifiedPrincipal,
+    WorkspaceId, WorkspaceSecurityMode,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -34,6 +37,10 @@ pub enum AppCommand {
         profile: Box<BackendProfile>,
     },
     ClearBackendProfile,
+    RestoreMachineId {
+        target_machine_id: String,
+        active_host_pid: Option<u32>,
+    },
     AttachWorkspace {
         workspace_id: WorkspaceId,
         security_mode: Option<WorkspaceSecurityMode>,
@@ -93,6 +100,24 @@ pub enum AppCommand {
         workspace_id: WorkspaceId,
         session_id: SessionId,
     },
+    ProposeSchedule {
+        workspace_id: WorkspaceId,
+        request_id: String,
+        title: String,
+        prompt_text: String,
+        cron_expr: String,
+    },
+    ProposeScheduleEdit {
+        workspace_id: WorkspaceId,
+        schedule_id: String,
+        request_id: String,
+        patch: ScheduleEditPatch,
+    },
+    PauseSchedule {
+        workspace_id: WorkspaceId,
+        schedule_id: String,
+        request_id: String,
+    },
     TerminalOpen {
         session_id: SessionId,
         cols: u16,
@@ -131,9 +156,13 @@ impl AppCommand {
             | Self::CancelSession { workspace_id, .. }
             | Self::ReplyPermission { workspace_id, .. }
             | Self::DelegateChildSession { workspace_id, .. }
-            | Self::ArchiveSession { workspace_id, .. } => Some(workspace_id),
+            | Self::ArchiveSession { workspace_id, .. }
+            | Self::ProposeSchedule { workspace_id, .. }
+            | Self::ProposeScheduleEdit { workspace_id, .. }
+            | Self::PauseSchedule { workspace_id, .. } => Some(workspace_id),
             Self::ConfigureBackendProfile { .. }
             | Self::ClearBackendProfile
+            | Self::RestoreMachineId { .. }
             | Self::RegisterProject { .. }
             | Self::TerminalOpen { .. }
             | Self::TerminalAttach { .. }
@@ -149,6 +178,7 @@ impl AppCommand {
             self,
             Self::ConfigureBackendProfile { .. }
                 | Self::ClearBackendProfile
+                | Self::RestoreMachineId { .. }
                 | Self::AttachWorkspace { .. }
                 | Self::DetachWorkspace { .. }
                 | Self::RegisterProject { .. }
@@ -169,6 +199,8 @@ impl AppCommand {
                     | Self::SendChat { .. }
                     | Self::SteerTurn { .. }
                     | Self::DelegateChildSession { .. }
+                    | Self::ProposeSchedule { .. }
+                    | Self::ProposeScheduleEdit { .. }
             )
     }
 }
@@ -177,8 +209,25 @@ impl AppCommand {
 #[serde(tag = "query", rename_all = "snake_case")]
 pub enum AppQuery {
     DaemonStatus,
+    MachineIdentity,
     ListAttachedWorkspaces,
     ListProjects,
+    InspectProjectGitSummary {
+        root_path: PathBuf,
+    },
+    ListProjectBranches {
+        workspace_id: WorkspaceId,
+        local_project_id: Option<LocalProjectId>,
+        root_path: Option<PathBuf>,
+        branch_query: BranchListQuery,
+    },
+    SearchProjectFiles {
+        workspace_id: WorkspaceId,
+        local_project_id: Option<LocalProjectId>,
+        root_path: Option<PathBuf>,
+        search_query: String,
+        limit: usize,
+    },
     ListSessions {
         workspace_id: WorkspaceId,
     },
@@ -198,6 +247,16 @@ pub enum AppQuery {
     ScanProjectFiles {
         root_path: PathBuf,
     },
+    ListSchedules {
+        workspace_id: WorkspaceId,
+        filter_query: Option<String>,
+        limit: usize,
+        offset: usize,
+    },
+    GetSchedule {
+        workspace_id: WorkspaceId,
+        schedule_id: String,
+    },
     ListTerminals {
         session_id: SessionId,
     },
@@ -205,6 +264,7 @@ pub enum AppQuery {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonStatusView {
+    pub machine_id: MachineId,
     pub connected: bool,
     pub active_profile_id: ProfileId,
     pub server_origin: Option<String>,
@@ -223,6 +283,10 @@ pub struct AttachedWorkspaceView {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AppResponse {
     DaemonStatus(DaemonStatusView),
+    MachineIdentity {
+        machine_id: MachineId,
+    },
+    MachineIdRestored(MachineIdentityRestoreOutcome),
     ProfileConfigured {
         profile_id: ProfileId,
     },
@@ -239,6 +303,9 @@ pub enum AppResponse {
     ProjectsListed {
         projects: Vec<LocalProjectRecord>,
     },
+    ProjectGitSummary(LocalProjectGitSummary),
+    ProjectBranchesListed(BranchListPage),
+    ProjectFilesSearched(FileSearchResult),
     SessionAccepted {
         session_id: SessionId,
         turn_id: TurnId,
@@ -272,6 +339,17 @@ pub enum AppResponse {
     ProjectFilesScanned {
         index: ScannedFileIndex,
     },
+    SchedulesListed {
+        schedules: Vec<ScheduleRecord>,
+    },
+    ScheduleRead {
+        schedule: Option<ScheduleRecord>,
+    },
+    ScheduleProposed(ScheduleProposalOutcome),
+    SchedulePaused {
+        schedule_id: String,
+        changed: bool,
+    },
     TerminalsListed {
         session_id: SessionId,
         terminals: Vec<TerminalSnapshot>,
@@ -289,7 +367,7 @@ pub fn enforce_command_policy(
     if cmd.requires_local_host_authority() && caller.is_remote() {
         return Err(PortError::new(
             PortErrorKind::Forbidden,
-            "host configuration, workspace mount control, local terminals, and local project registration require local host authority",
+            "host configuration, machine identity restore, workspace mount control, local terminals, and local project registration require local host authority",
         ));
     }
 

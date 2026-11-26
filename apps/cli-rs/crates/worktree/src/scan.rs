@@ -1,6 +1,6 @@
 use ignore::{WalkBuilder, WalkState};
 use lody_ports::{PortError, PortErrorKind, PortResult, ScannedFileEntry, ScannedFileIndex};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -63,6 +63,84 @@ fn collect_git_tracked_files(root: &Path) -> Vec<String> {
             }
         })
         .collect()
+}
+
+pub fn collect_project_file_paths(
+    root: &Path,
+    max_files: usize,
+) -> PortResult<(Vec<String>, bool)> {
+    if !root.exists() {
+        return Err(PortError::new(
+            PortErrorKind::NotFound,
+            format!("scan root does not exist: {:?}", root),
+        ));
+    }
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+
+    let collected: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+    let root_for_filter = canonical_root.clone();
+
+    let mut builder = WalkBuilder::new(&canonical_root);
+    builder
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .parents(true)
+        .filter_entry(move |entry| {
+            if entry.path() == root_for_filter {
+                return true;
+            }
+            let file_name = entry.file_name().to_string_lossy();
+            if file_name.contains('\u{FFFD}') {
+                return false;
+            }
+            if entry.file_type().is_some_and(|ft| ft.is_dir())
+                && is_ignored_directory_name(&file_name)
+            {
+                return false;
+            }
+            true
+        });
+
+    let root_ref = &canonical_root;
+    let collected_ref = &collected;
+    builder.build_parallel().run(|| {
+        Box::new(move |entry_res| {
+            let Ok(entry) = entry_res else {
+                return WalkState::Continue;
+            };
+            let path = entry.path();
+            if path == root_ref || entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                return WalkState::Continue;
+            }
+            let Ok(rel) = path.strip_prefix(root_ref) else {
+                return WalkState::Continue;
+            };
+            let rel_lossy = rel.to_string_lossy();
+            if rel_lossy.contains('\u{FFFD}') {
+                return WalkState::Skip;
+            }
+            if let Some(normalized) = normalize_relative_path(&rel_lossy)
+                && let Ok(mut guard) = collected_ref.lock()
+            {
+                guard.insert(normalized);
+            }
+            WalkState::Continue
+        })
+    });
+
+    let mut set = collected
+        .into_inner()
+        .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+    for tracked in collect_git_tracked_files(&canonical_root) {
+        set.insert(tracked);
+    }
+
+    let total = set.len();
+    let files: Vec<String> = set.into_iter().take(max_files).collect();
+    Ok((files, total > max_files))
 }
 
 pub fn scan_directory_parallel(

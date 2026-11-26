@@ -6,6 +6,7 @@ pub const MAX_CHILD_DELEGATION_DEPTH: u8 = 1;
 pub const MAX_BATCHED_RECEIPTS_PER_WAKE: usize = 64;
 pub const MAX_GOAL_CONTINUATION_TURNS: u32 = 32;
 pub const MAX_STALE_ACP_RETRIES_PER_TURN: u8 = 1;
+pub const LATE_STREAM_ACTIVITY_TTL_MS: u64 = 30_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Generation(pub u64);
@@ -65,6 +66,92 @@ pub enum SteerOutcome {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeSessionActivity {
+    Unsupported,
+    Idle,
+    Running,
+    Background,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresencePublishReason {
+    TurnStarted,
+    StaleAcpRecovery,
+    LateStreamActivity,
+    NativeWorkRunning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureClassification {
+    ContextOverflow,
+    UsageLimit,
+    Cancelled,
+    PermissionDenied,
+    AgentCrash,
+    SilentNoOutput,
+    ModelError,
+    Unknown,
+}
+
+pub fn classify_turn_failure(
+    reason_code: Option<&str>,
+    message: Option<&str>,
+) -> FailureClassification {
+    if let Some(code) = reason_code.map(str::trim).filter(|c| !c.is_empty()) {
+        match code {
+            "context_overflow" | "context_length_exceeded" | "prompt_too_long" => {
+                return FailureClassification::ContextOverflow;
+            }
+            "usage_limit" | "rate_limit" | "quota_exceeded" | "insufficient_quota" => {
+                return FailureClassification::UsageLimit;
+            }
+            "cancelled" | "canceled" | "user_cancelled" => {
+                return FailureClassification::Cancelled;
+            }
+            "permission_denied" | "unauthorized" | "forbidden" => {
+                return FailureClassification::PermissionDenied;
+            }
+            "agent_crash" | "agent_disconnected" | "process_exited" => {
+                return FailureClassification::AgentCrash;
+            }
+            "silent_no_output" | "agent_no_output" => {
+                return FailureClassification::SilentNoOutput;
+            }
+            other if other != "model_error" && !other.starts_with("acp_") => {
+                return FailureClassification::Unknown;
+            }
+            _ => {}
+        }
+    }
+
+    let lower = message.unwrap_or("").to_ascii_lowercase();
+    if lower.contains("context length")
+        || lower.contains("context window")
+        || lower.contains("prompt is too long")
+        || lower.contains("maximum context")
+    {
+        return FailureClassification::ContextOverflow;
+    }
+    if lower.contains("rate limit")
+        || lower.contains("usage limit")
+        || lower.contains("quota exceeded")
+        || lower.contains("too many requests")
+    {
+        return FailureClassification::UsageLimit;
+    }
+    if lower.contains("permission denied") || lower.contains("not authorized") {
+        return FailureClassification::PermissionDenied;
+    }
+    if reason_code.is_some_and(|c| !c.trim().is_empty()) {
+        return FailureClassification::ModelError;
+    }
+    FailureClassification::Unknown
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum TurnTerminalReason {
@@ -100,6 +187,7 @@ pub struct WarmAgentHandle {
     pub adapter_id: String,
     pub mcp_selection_digest: String,
     pub owner_user_id: String,
+    pub advertises_session_activity: bool,
 }
 
 impl WarmAgentHandle {
@@ -114,4 +202,5 @@ impl WarmAgentHandle {
 pub struct RetainedTurn {
     pub invocation: FrozenTurnInvocation,
     pub generation: Generation,
+    pub late_activity_until_ms: Option<u64>,
 }

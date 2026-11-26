@@ -164,6 +164,14 @@ impl InboxState {
         self.entries.retain(|e| e.invocation.turn_id != turn_id);
     }
 
+    pub fn settle_ended_claim(&mut self, turn_id: &str) -> bool {
+        let was_unretired = self.retired_turn_ids.insert(turn_id.to_string());
+        self.known_turn_ids.insert(turn_id.to_string());
+        let before = self.entries.len();
+        self.entries.retain(|e| e.invocation.turn_id != turn_id);
+        was_unretired || self.entries.len() < before
+    }
+
     pub fn mark_uncertain_and_retire(&mut self, turn_id: &str) {
         self.retired_turn_ids.insert(turn_id.to_string());
         if let Some(entry) = self

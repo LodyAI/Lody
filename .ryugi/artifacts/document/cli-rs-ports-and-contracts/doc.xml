@@ -58,7 +58,7 @@
         <p><b>已完成</b></p>
       </td>
       <td>
-        <p>零 I/O、零时钟、零克隆原地转移函数 <code>step</code>：统一收件箱去重/暂停/人类抢占自动化、代际隔离、权限挂起、Steer 三态、Goal 上限与单层子会话深度门禁。</p>
+        <p>零 I/O、零时钟、零克隆原地转移函数 <code>step</code>：统一收件箱去重/暂停/中断后残留 Claim 结算/人类抢占自动化、代际隔离、陈旧 ACP 恢复在场重发、有界 30s 迟到流式租约与原生 <code>sessionActivity</code> 仲裁、结构化无输出失败分类、权限挂起、Steer 三态、Goal 上限与单层子会话深度门禁。</p>
       </td>
       <td>
         <p>与旧版 TS 会话历史轨迹做批量回放对拍。</p>
@@ -72,10 +72,10 @@
         <p><b>主干已通</b></p>
       </td>
       <td>
-        <p>单进程单 Fleet 内嵌 <code>FleetWorkspaceTable</code>（多 Workspace 动态挂载、防降级拦截、无锁排空卸载与单工作区擦除）、双通道控制优先 <code>SessionActor</code>、跨会话子任务委派与回执自动唤醒。</p>
+        <p>单进程单 Fleet 内嵌 <code>FleetWorkspaceTable</code>（多 Workspace 动态挂载、防降级拦截、无锁排空卸载与单工作区擦除）、双通道控制优先 <code>SessionActor</code>、1s 迟到流式在场收敛与 GC 保护、跨会话子任务委派与回执自动唤醒。</p>
       </td>
       <td>
-        <p>内嵌 <code>rquickjs</code> 求值与 Schedule 定时调度器。</p>
+        <p>内嵌 <code>rquickjs</code> 求值与 Schedule 定时触发执行器。</p>
       </td>
     </tr>
     <tr>
@@ -86,7 +86,7 @@
         <p><b>主干已通</b></p>
       </td>
       <td>
-        <p><code>clap</code> CLI + <code>axum</code> 本地 Unix Socket（<code>probe</code> &amp; <code>control</code> NDJSON 流）+ 进程内 Streamable HTTP MCP Server（<code>/mcp</code> 令牌/上下文头/Linux 四元组 UID 校验）+ <code>terminal.sock</code> PTY 服务。</p>
+        <p>纯投影层（零直接磁盘身份读写）：<code>clap</code> CLI（含 <code>lody machine restore-id</code>）+ <code>axum</code> 本地 Unix Socket（<code>probe</code> &amp; <code>control</code>，支持 <code>local-project/search-files</code> 与分页 <code>list-branches</code>）+ 进程内 Streamable HTTP MCP Server（<code>/mcp</code> 含 <code>lody_schedule</code> <code>propose/propose_edit/pause</code> 与完整 32 KiB 提示词读取）+ <code>terminal.sock</code> PTY 服务。</p>
       </td>
       <td>
         <p>新 <code>lody-mux.sock</code> 多路复用协议与远端 Machine RPC 网关。</p>
@@ -100,10 +100,10 @@
         <p><b>主干已通</b></p>
       </td>
       <td>
-        <p><code>FileStorageLease</code>（<code>fd-lock</code> 让位锁）与 <code>operations.sqlite3</code> 收件箱/回执；<code>ACP over stdio</code> + <code>portable-pty</code> + 受管制品 SHA-256 下载/离线包校验；Git Worktree + <code>LTD1</code> v2 FastCDC <code>TurnDiffStore</code>（<code>gzip/zstd</code>）+ <code>.gitignore</code> 并行目录扫描。</p>
+        <p><code>FileStorageLease</code> 让位锁、5 级优先级 <code>LocalMachineIdentityStore</code>（含指纹校验备份锚点与离线恢复备份）、<code>operations.sqlite3</code> 与 <code>schedules.sqlite</code>；<code>ACP over stdio</code>（含隔离 <code>_lody/session/archive</code> 协商与 <code>sessionActivity</code>）+ <code>portable-pty</code> + 代理感知 SHA-256 制品安装；Git Worktree + 轻量分支分页/路径打分检索 + 区分 Worktree 与非 Worktree（仅未提交变更）的 <code>LTD1</code> v2 FastCDC <code>TurnDiffStore</code>。</p>
       </td>
       <td>
-        <p><code>schedules.sqlite</code> 与 <code>automations</code> 分库读写。</p>
+        <p><code>automations</code> 与 <code>pr-poller-state</code> 分库读写。</p>
       </td>
     </tr>
     <tr>

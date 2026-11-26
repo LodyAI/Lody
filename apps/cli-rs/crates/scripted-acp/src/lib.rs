@@ -357,7 +357,12 @@ fn process_requests<W: Write>(
                             "protocolVersion": protocol_version,
                             "agentCapabilities": {
                                 "loadSession": true,
-                                "mcpCapabilities": { "http": true }
+                                "mcpCapabilities": { "http": true },
+                                "_meta": {
+                                    "lody": {
+                                        "sessionArchive": { "version": 1, "mode": "native" }
+                                    }
+                                }
                             },
                             "agentInfo": {
                                 "name": "lody-scripted-acp",
@@ -366,6 +371,26 @@ fn process_requests<W: Write>(
                         }
                     }),
                 )?;
+            }
+            "_lody/session/archive" | "_lody/session/unarchive" => {
+                let target_sid = params
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                recorder.record(RecordedAcpEvent {
+                    pid,
+                    event: if method == "_lody/session/archive" {
+                        "session-archive".to_string()
+                    } else {
+                        "session-unarchive".to_string()
+                    },
+                    session_id: target_sid,
+                    mode: Some("native".to_string()),
+                    marker: None,
+                    outcome: Some("ok".to_string()),
+                    stop_reason: None,
+                });
+                send_json(writer, &json!({ "jsonrpc": "2.0", "id": id, "result": {} }))?;
             }
             "session/new" => {
                 *session_seq += 1;
