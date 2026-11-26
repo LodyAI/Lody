@@ -881,7 +881,9 @@ export function RecoveryVaultSection({
     badge:
       mode === 'ready'
         ? hasFile
-          ? { label: t('e2ee.recovery.workspace.saved'), tone: 'success' }
+          ? checkedAt
+            ? { label: t('e2ee.recovery.methodVerified'), tone: 'success' }
+            : { label: t('e2ee.recovery.methodSaved'), tone: 'neutral' }
           : { label: t('e2ee.recovery.workspace.notSet'), tone: 'warning' }
         : undefined,
     helper:
@@ -958,7 +960,7 @@ export function RecoveryVaultSection({
           title: t('e2ee.recovery.passkey'),
           badge:
             mode === 'ready' && hasPasskey === true
-              ? { label: t('e2ee.recovery.workspace.saved'), tone: 'success' }
+              ? { label: t('e2ee.recovery.methodSaved'), tone: 'success' }
               : mode === 'ready' && hasPasskey === false
                 ? { label: t('e2ee.recovery.workspace.notSet'), tone: 'neutral' }
                 : undefined,
@@ -1006,7 +1008,7 @@ export function RecoveryVaultSection({
           badge:
             mode === 'ready'
               ? hasPassword
-                ? { label: t('e2ee.recovery.workspace.saved'), tone: 'success' }
+                ? { label: t('e2ee.recovery.methodSaved'), tone: 'success' }
                 : { label: t('e2ee.recovery.workspace.notSet'), tone: 'neutral' }
               : undefined,
           helper:

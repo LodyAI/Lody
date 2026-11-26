@@ -147,7 +147,7 @@ export function E2eeIdentityRecovery({
       {!restart && (
         <StatusPageActions>
           <Button type="button" size="small" variant="primary" disabled={busy} onClick={onReset}>
-            {t('common.tryAgain')}
+            {t('common.retry')}
           </Button>
           {reset && !permissions && (
             <Button

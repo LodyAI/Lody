@@ -97,6 +97,7 @@ const styles = stylex.create({
     },
   },
   revokeButton: {
+    paddingInline: { default: 0, '@media (min-width: 640px)': space[2] },
     color: {
       default: colors.secondaryLabel,
       ':hover': colors.destructive,
