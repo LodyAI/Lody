@@ -4,10 +4,10 @@ import {
   localStorageFailureKey,
   requestFailureCode,
 } from '../../lib/e2ee-actionable-failure';
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { useCloudQueryState, usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
+import { useCloudQueryState, usePlatform } from '@lody/platform/react';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import { Button } from '@lody/ui/button';
@@ -199,6 +199,9 @@ const KEY_WAIT_INTERVALS_MS = [500, 1000, 2000, 3000];
 const KEY_WAIT_FAST_MS = 120_000;
 /** Surface the explanatory slow-wait hint after 20 s while keeping the 120 s fast cadence. */
 const KEY_WAIT_SLOW_UI_MS = 20_000;
+const LOADING_WORKSPACES = { status: 'loading' as const };
+const NOOP_SUBSCRIBE = () => () => {};
+
 export function E2eeMemberJoinSurface(
   props: Pick<
     Props,
@@ -210,7 +213,12 @@ export function E2eeMemberJoinSurface(
   >
 ) {
   const platform = usePlatform();
-  const workspaces = usePlatformWorkspaces();
+  const workspacesStore = platform.workspaces?.state;
+  const workspaces = useSyncExternalStore(
+    workspacesStore ? (listener) => workspacesStore.subscribe(listener) : NOOP_SUBSCRIBE,
+    () => workspacesStore?.get() ?? LOADING_WORKSPACES,
+    () => LOADING_WORKSPACES
+  );
   const session = useStableSession();
   const {
     data: preview,

@@ -1312,6 +1312,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               refreshNative();
               return;
             }
+            refreshNative();
             encryptedAccess = createE2eeContent({
               runtime: native,
               workspaceId: effectiveWorkspaceId,
