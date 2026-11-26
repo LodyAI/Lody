@@ -504,6 +504,7 @@ describe('recovery vault password & passkey-first workflows', () => {
         }),
       readEntries: (vaultId, entryIds) =>
         Effect.suspend(() => {
+          if (entryIds.length > 8) return Effect.fail({ code: 'invalid-input' });
           batchReads++;
           return Effect.forEach(entryIds, (entryId) => harness.store.readEntry(vaultId, entryId));
         }),

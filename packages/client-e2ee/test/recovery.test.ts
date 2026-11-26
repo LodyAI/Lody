@@ -48,9 +48,11 @@ function fixture() {
         entries.set(args.entry.entryId, args.entry);
         value = { ok: true };
       } else if (path === 'e2eeRecoveryVault:readEntry') value = entries.get(args.entryId) ?? null;
-      else if (path === 'e2eeRecoveryVault:readEntries')
-        value = (args.entryIds as string[]).map((id) => entries.get(id) ?? null);
-      else if (path === 'e2eeRecoveryVault:deleteUnreferenced') {
+      else if (path === 'e2eeRecoveryVault:readEntries') {
+        const ids = args.entryIds as string[];
+        if (ids.length > 8) throw new Error('e2ee_recovery_vault_invalid');
+        value = ids.map((id) => entries.get(id) ?? null);
+      } else if (path === 'e2eeRecoveryVault:deleteUnreferenced') {
         entries.delete(args.entryId);
         value = { ok: true };
       } else if (path === 'e2eeRecoveryVault:readIndex') value = index;
@@ -519,6 +521,6 @@ it('createWithPassword skips redundant reopen, methods batches slot reads, and S
   expect(methods).toEqual({ hasFile: false, hasPassword: true, hasPasskey: false });
   const methodPaths = f.paths.slice(beforeMethods);
   expect(methodPaths.filter((path) => path === 'e2eeRecoveryVault:readEntries')).toHaveLength(1);
-  expect(methodPaths.filter((path) => path === 'e2eeRecoveryVault:readEntry')).toHaveLength(0);
+  expect(methodPaths.filter((path) => path === 'e2eeRecoveryVault:readEntry')).toHaveLength(1);
   expect(methodPaths.filter((path) => path === 'e2eeRecoveryVault:readIndex')).toHaveLength(1);
 }, 30_000);

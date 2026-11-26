@@ -220,11 +220,11 @@ const readVaultMethods = (input: {
     const slotIds = Array.from({ length: MAX_VAULT_PASSWORD_GENERATIONS }, (_, generation) =>
       passwordWrapEntryId(input.vaultId, generation)
     )
-    const entryIds = [input.vaultId, ...slotIds]
-    const [entries, summaryRaw, remoteIndex] = yield* Effect.all([
+    const [fileEntry, slots, summaryRaw, remoteIndex] = yield* Effect.all([
+      input.store.readEntry(input.vaultId, input.vaultId),
       typeof input.store.readEntries === 'function'
-        ? input.store.readEntries(input.vaultId, entryIds)
-        : Effect.forEach(entryIds, (entryId) => input.store.readEntry(input.vaultId, entryId), {
+        ? input.store.readEntries(input.vaultId, slotIds)
+        : Effect.forEach(slotIds, (entryId) => input.store.readEntry(input.vaultId, entryId), {
             concurrency: 4
           }),
       input.local.read(methodsSummaryKey(input.vaultId)),
@@ -232,7 +232,7 @@ const readVaultMethods = (input: {
         ? input.store.readIndex(input.vaultId)
         : Effect.succeed(null)
     ])
-    const hasFile = entries[0] !== null && entries[0] !== undefined
+    const hasFile = fileEntry !== null
     const summary = parseMethodsSummary(summaryRaw)
     const remoteRevision = remoteIndex?.revision ?? -1
     if (summary !== null && summary.revision === remoteRevision) {
@@ -242,7 +242,7 @@ const readVaultMethods = (input: {
         hasPasskey: summary.hasPasskey
       }
     }
-    const hasPassword = entries.slice(1).some((entry) => entry !== null)
+    const hasPassword = slots.some((entry) => entry !== null)
     return {
       hasFile,
       hasPassword,

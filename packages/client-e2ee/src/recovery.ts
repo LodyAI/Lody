@@ -563,16 +563,16 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
           const slotIds = Array.from({ length: MAX_VAULT_PASSWORD_GENERATIONS }, (_, generation) =>
             passwordWrapEntryId(vaultId, generation)
           );
-          const entryIds = [vaultId, ...slotIds];
-          const [rows, index] = yield* Effect.all([
+          const [fileEntry, slots, index] = yield* Effect.all([
+            store.readEntry(vaultId, vaultId),
             store.readEntries
-              ? store.readEntries(vaultId, entryIds)
-              : Effect.forEach(entryIds, (entryId) => store.readEntry(vaultId, entryId), {
+              ? store.readEntries(vaultId, slotIds)
+              : Effect.forEach(slotIds, (entryId) => store.readEntry(vaultId, entryId), {
                   concurrency: 4,
                 }),
             store.readIndex(vaultId),
           ]);
-          const hasFile = rows[0] !== null && rows[0] !== undefined;
+          const hasFile = fileEntry !== null;
           if (
             knownMethods?.vaultId === vaultId &&
             knownMethods.revision === (index?.revision ?? -1)
@@ -584,7 +584,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
             };
           return {
             hasFile,
-            hasPassword: rows.slice(1).some((entry) => entry !== null),
+            hasPassword: slots.some((entry) => entry !== null),
             hasPasskey: null,
           };
         })

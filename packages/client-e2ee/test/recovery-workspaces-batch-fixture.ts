@@ -154,8 +154,11 @@ async function server(path: string, args: Record<string, unknown>) {
     entryReads++;
     return entries.get(String(args.entryId)) ?? null;
   }
-  if (path === 'e2eeRecoveryVault:readEntries')
-    return (args.entryIds as string[]).map((id) => entries.get(String(id)) ?? null);
+  if (path === 'e2eeRecoveryVault:readEntries') {
+    const ids = args.entryIds as string[];
+    if (ids.length > 8) throw new Error('e2ee_recovery_vault_invalid');
+    return ids.map((id) => entries.get(String(id)) ?? null);
+  }
   if (path === 'e2eeRecoveryVault:readIndex') return index;
   if (path === 'e2eeRecoveryVault:compareAndSwapIndex') {
     index = args.next as RecoveryVaultCiphertextDto;
