@@ -91,7 +91,7 @@ jobs:
         with:
           repository: loro-dev/lody
           ref: main
-          path: ${{ runner.temp }}/selfhost-e2e
+          path: .selfhost-e2e
           ssh-key: ${{ secrets.PRIVATE_SOURCE_SSH_KEY }}
           persist-credentials: false
 
@@ -100,7 +100,7 @@ jobs:
         shell: bash
         env:
           CANDIDATE_SHA: ${{ inputs.source-sha }}
-          SELFHOST_DIR: ${{ runner.temp }}/selfhost-e2e
+          SELFHOST_DIR: ${{ github.workspace }}/.selfhost-e2e
           SELFHOST_LOG: ${{ runner.temp }}/selfhost-e2e.log
           LODY_LORO_STREAMS_WS_ENABLED: '1'
           FEISHU_ALERT_WEBHOOK_URL: ${{ secrets.FEISHU_ALERT_WEBHOOK_URL }}
@@ -125,4 +125,4 @@ jobs:
       - name: Cleanup self-host E2E checkout and logs
         if: always() && vars.SELFHOST_E2E_ENABLED == 'true'
         shell: bash
-        run: rm -rf "${{ runner.temp }}/selfhost-e2e" "${{ runner.temp }}/selfhost-e2e.log"
+        run: rm -rf "${{ github.workspace }}/.selfhost-e2e" "${{ runner.temp }}/selfhost-e2e.log"
