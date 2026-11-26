@@ -1159,6 +1159,7 @@ export function E2eeWorkspaceConsole({
         (current?.custodyFailure || current?.failure?.kind === 'local-identity') && (
           <E2eeIdentityRecovery
             key={scope}
+            layout="region"
             workspaceId={workspaceId}
             runtime={port.runtime}
             error={current.custodyFailure ?? current.failure?.code ?? ''}
@@ -1209,6 +1210,7 @@ export function E2eeWorkspaceConsole({
       }
       presentation={presentation}
       initialTab={initialTab}
+      initialMobileView={showPairingCode ? 'detail' : undefined}
       {...(onCheckForUpdates ? { onCheckForUpdates } : {})}
       {...(resolvedRecoveryReady === undefined ? {} : { recoveryReady: resolvedRecoveryReady })}
       memberRole={

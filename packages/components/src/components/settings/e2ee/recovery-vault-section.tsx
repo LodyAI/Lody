@@ -2,11 +2,13 @@ import { recoveryAvailabilityMessage } from '@/lib/e2ee-actionable-failure';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { FileKey2, KeyRound, Lock, MoreHorizontal, type LucideIcon } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Alert } from '@lody/ui/alert';
 import { Badge, type BadgeTone } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
+import { Menu } from '@lody/ui/menu';
 import { Spinner } from '@lody/ui/spinner';
 import { AlertDialog } from '@/ui/dialog';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -14,6 +16,7 @@ import { control, space, text } from '@lody/ui/tokens/scales.stylex';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { CompactRow, CompactSection } from '../compact-layout';
+import { settingsMaterial } from '../material.stylex';
 import {
   useRecoveryPort,
   type RecoveryPasskey,
@@ -53,6 +56,10 @@ const validPasswordInput = (value: string) =>
   [...value.normalize('NFC')].length >= MIN_PASSWORD_CHARS &&
   new TextEncoder().encode(value.normalize('NFC')).byteLength <= 1024;
 
+const flushHeadingTheme = stylex.createTheme(settingsMaterial, {
+  headingInset: '0px',
+});
+
 const styles = stylex.create({
   body: {
     display: 'flex',
@@ -76,11 +83,65 @@ const styles = stylex.create({
     fontSize: text.footnoteSize,
   },
   actions: { display: 'flex', gap: space[2], flexWrap: 'wrap', alignItems: 'center' },
+  methodRow: {
+    display: { default: 'flex', '@media (min-width: 640px)': 'grid' },
+    flexDirection: 'column',
+    gridTemplateColumns: { default: null, '@media (min-width: 640px)': 'minmax(0, 1fr) auto' },
+    alignItems: { default: 'stretch', '@media (min-width: 640px)': 'center' },
+    gap: { default: space[3], '@media (min-width: 640px)': space[4] },
+    paddingInline: space[4],
+    paddingBlock: space[3],
+    minWidth: 0,
+  },
+  methodIdentity: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[3],
+    minWidth: 0,
+  },
+  methodIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '16px',
+    height: '16px',
+    marginTop: '2px',
+    color: colors.secondaryLabel,
+  },
+  methodBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0,
+    flexGrow: 1,
+  },
+  methodHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: space[2],
+    minWidth: 0,
+  },
+  methodTitle: {
+    margin: 0,
+    fontSize: text.bodySize,
+    fontWeight: 500,
+    lineHeight: 1.4,
+    color: colors.label,
+  },
+  methodHelper: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: 1.45,
+    color: colors.secondaryLabel,
+  },
   rowActions: {
     display: 'flex',
     alignItems: 'center',
+    flexShrink: 0,
     gap: space[1.5],
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     justifyContent: { default: 'flex-start', '@media (min-width: 640px)': 'flex-end' },
   },
   workspaceActions: {
@@ -90,10 +151,6 @@ const styles = stylex.create({
     flexWrap: 'wrap',
     minHeight: control.small,
     justifyContent: { default: 'flex-start', '@media (min-width: 640px)': 'flex-end' },
-  },
-  methodHelper: {
-    display: 'block',
-    paddingBlockEnd: space[1],
   },
   stack: { display: 'flex', flexDirection: 'column', gap: space[6] },
   line: { display: 'block' },
@@ -601,32 +658,118 @@ export function RecoveryVaultSection({
     : result?.kind === 'restored'
       ? result.results
       : undefined;
-  const restoreButton = (method: RecoveryUnlockMethod, subordinate = false) => (
-    <Button
-      size="small"
-      variant={
-        restoreLeads && method === restorePrimaryMethod
-          ? 'primary'
-          : subordinate
-            ? 'ghost'
-            : 'secondary'
-      }
-      disabled={busy}
-      onClick={() => {
-        if (method === 'password') {
-          triggerWithUnlock((_m, options) => restore('password', options), 'password');
-          return;
-        }
-        void run(() => restore(method), method);
-      }}
-    >
-      {method === 'file'
+  type MethodAction = {
+    key: string;
+    label: string;
+    variant?: 'primary' | 'secondary';
+    tone?: 'destructive';
+    onClick: () => void;
+  };
+
+  const makeRestoreAction = (method: RecoveryUnlockMethod): MethodAction => ({
+    key: `restore-${method}`,
+    label:
+      method === 'file'
         ? t('e2ee.recovery.restore')
         : method === 'passkey'
           ? t('e2ee.recovery.restorePasskey')
-          : t('e2ee.recovery.restorePassword')}
-    </Button>
-  );
+          : t('e2ee.recovery.restorePassword'),
+    variant: restoreLeads && method === restorePrimaryMethod ? 'primary' : 'secondary',
+    onClick: () => {
+      if (method === 'password') {
+        triggerWithUnlock((_m, options) => restore('password', options), 'password');
+        return;
+      }
+      void run(() => restore(method), method);
+    },
+  });
+
+  const renderMethodRow = ({
+    id,
+    icon: Icon,
+    title,
+    badge,
+    helper,
+    leadActions,
+    secondaryActions,
+    restoreAction,
+  }: {
+    id: RecoveryUnlockMethod;
+    icon: LucideIcon;
+    title: string;
+    badge?: { label: string; tone: BadgeTone };
+    helper: string;
+    leadActions: MethodAction[];
+    secondaryActions: MethodAction[];
+    restoreAction: MethodAction | null;
+  }) => {
+    const ordered =
+      restoreLeads && restoreAction
+        ? [restoreAction, ...leadActions, ...secondaryActions]
+        : [...leadActions, ...secondaryActions, ...(restoreAction ? [restoreAction] : [])];
+    const [visibleAction, ...overflowActions] = ordered;
+    return (
+      <div key={id} data-recovery-method={id} {...stylex.props(styles.methodRow)}>
+        <div {...stylex.props(styles.methodIdentity)}>
+          <span {...stylex.props(styles.methodIcon)} aria-hidden="true">
+            <Icon size={16} />
+          </span>
+          <div {...stylex.props(styles.methodBody)}>
+            <div {...stylex.props(styles.methodHeader)}>
+              <p {...stylex.props(styles.methodTitle)}>{title}</p>
+              {badge && <Badge tone={badge.tone}>{badge.label}</Badge>}
+            </div>
+            <p {...stylex.props(styles.methodHelper)}>{helper}</p>
+          </div>
+        </div>
+        {(visibleAction || overflowActions.length > 0) && (
+          <div {...stylex.props(styles.rowActions)}>
+            {visibleAction && (
+              <Button
+                size="small"
+                variant={visibleAction.variant ?? 'secondary'}
+                tone={visibleAction.tone}
+                disabled={busy}
+                onClick={visibleAction.onClick}
+              >
+                {visibleAction.label}
+              </Button>
+            )}
+            {overflowActions.length > 0 && (
+              <Menu.Root>
+                <Menu.Trigger
+                  render={
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      icon
+                      disabled={busy}
+                      data-testid={`e2ee-recovery-more-${id}`}
+                      aria-label={`${title}: ${t('common.more')}`}
+                    >
+                      <MoreHorizontal size={16} aria-hidden="true" />
+                    </Button>
+                  }
+                />
+                <Menu.Content align="end" width="compact">
+                  {overflowActions.map((item) => (
+                    <Menu.Item
+                      key={item.key}
+                      tone={item.tone}
+                      disabled={busy}
+                      onClick={item.onClick}
+                    >
+                      {item.label}
+                    </Menu.Item>
+                  ))}
+                </Menu.Content>
+              </Menu.Root>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const openPasskeyCreate = () => {
     void port.passkeyDefaultLabel().then(
@@ -662,7 +805,7 @@ export function RecoveryVaultSection({
   // Until the first plan answers, nothing below would be accurate: say it is loading.
   if (mode === 'loading')
     return (
-      <div {...stylex.props(styles.stack)} data-testid="e2ee-recovery" aria-busy>
+      <div {...stylex.props(flushHeadingTheme, styles.stack)} data-testid="e2ee-recovery" aria-busy>
         <CompactSection title={t('e2ee.recovery.methods')} boxed>
           <CompactRow label={t('e2ee.recovery.loading')}>
             <Spinner size="small" />
@@ -673,229 +816,214 @@ export function RecoveryVaultSection({
   // The host has recovery turned off: no action here can work, so offer none.
   if (mode === 'disabled')
     return (
-      <div {...stylex.props(styles.stack)} data-testid="e2ee-recovery">
+      <div {...stylex.props(flushHeadingTheme, styles.stack)} data-testid="e2ee-recovery">
         <Alert.Root data-testid="e2ee-recovery-disabled">
           <Alert.Description>{t('e2ee.recovery.disabled')}</Alert.Description>
         </Alert.Root>
       </div>
     );
 
-  const fileHasLeadAction = Boolean(
-    (create && (mode === 'none' || mode === 'failed')) ||
-    (saveFile && mode === 'ready' && !hasFile) ||
-    (checkFile && ((mode === 'ready' && hasFile) || mode === 'failed'))
-  );
-  const fileRow = (
-    <CompactRow
-      key="file"
-      label={t('e2ee.recovery.file')}
-      helper={
-        <span {...stylex.props(styles.methodHelper)}>
-          {mode === 'ready' || mode === 'replacing'
-            ? mode === 'replacing'
-              ? t('e2ee.recovery.fileReplacing')
-              : !hasFile
-                ? t('e2ee.recovery.fileNotSaved')
-                : checkedAt
-                  ? t('e2ee.recovery.fileSavedChecked', {
-                      date: new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
-                        month: 'short',
-                        day: 'numeric',
-                      }).format(new Date(checkedAt)),
-                    })
-                  : t('e2ee.recovery.fileSaved')
-            : mode === 'none'
-              ? canCreateFile || canCreatePasskey || canCreatePassword
-                ? t('e2ee.recovery.fileNone')
-                : t('e2ee.recovery.createElsewhere')
-              : t('e2ee.recovery.offlineHint')}
-        </span>
-      }
-      alignTop
-    >
-      <div {...stylex.props(styles.rowActions)}>
-        {create && (mode === 'none' || mode === 'failed') && (
-          <Button
-            size="small"
-            variant={mode === 'none' && primaryCreate === 'file' ? 'primary' : 'secondary'}
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const created = await create();
-                if (created.outcome !== 'created') return undefined;
-                // Creation saves and reads the file back, so it counts as a check.
-                markChecked(Date.now());
-                return { kind: 'created', vaultId: created.vaultId, method: 'file' };
-              }, 'file')
-            }
-          >
-            {t('e2ee.recovery.create')}
-          </Button>
-        )}
-        {saveFile && mode === 'ready' && !hasFile && (
-          <Button
-            size="small"
-            variant={unfinished.length === 0 ? 'primary' : 'secondary'}
-            disabled={busy}
-            onClick={() =>
-              triggerWithUnlock(async (unlockMethod, options) => {
-                const saved = await saveFile(unlockMethod ?? 'passkey', options);
-                if (saved.outcome !== 'saved') return undefined;
-                markChecked(Date.now());
-                return { kind: 'notice', key: 'e2ee.recovery.fileSavedNotice' };
-              })
-            }
-          >
-            {t('e2ee.recovery.saveFile')}
-          </Button>
-        )}
-        {checkFile && ((mode === 'ready' && hasFile) || mode === 'failed') && (
-          <Button
-            size="small"
-            // One primary action at a time: setting up uncovered workspaces leads when
-            // there are any; otherwise checking the saved file does.
-            variant={mode === 'ready' && unfinished.length === 0 ? 'primary' : 'secondary'}
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const opened = await checkFile();
-                if (opened.outcome !== 'opened') return undefined;
-                markChecked(Date.now());
-                return { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces };
-              }, 'file')
-            }
-          >
-            {t('e2ee.recovery.check')}
-          </Button>
-        )}
-        {replacement && mode === 'ready' && (
-          <Button size="small" variant="ghost" disabled={busy} onClick={() => setDialog('begin')}>
-            {t('e2ee.recovery.replace')}
-          </Button>
-        )}
-        {canRestore && (mode === 'failed' || hasFile) && restoreButton('file', fileHasLeadAction)}
-      </div>
-    </CompactRow>
-  );
+  const fileLeadActions: MethodAction[] = [];
+  if (saveFile && mode === 'ready' && !hasFile) {
+    fileLeadActions.push({
+      key: 'save-file',
+      label: t('e2ee.recovery.saveFile'),
+      variant: unfinished.length === 0 ? 'primary' : 'secondary',
+      onClick: () =>
+        triggerWithUnlock(async (unlockMethod, options) => {
+          const saved = await saveFile(unlockMethod ?? 'passkey', options);
+          if (saved.outcome !== 'saved') return undefined;
+          markChecked(Date.now());
+          return { kind: 'notice', key: 'e2ee.recovery.fileSavedNotice' };
+        }),
+    });
+  }
+  if (checkFile && ((mode === 'ready' && hasFile) || mode === 'failed')) {
+    fileLeadActions.push({
+      key: 'check-file',
+      label: t('e2ee.recovery.check'),
+      variant: mode === 'ready' && unfinished.length === 0 ? 'primary' : 'secondary',
+      onClick: () =>
+        void run(async () => {
+          const opened = await checkFile();
+          if (opened.outcome !== 'opened') return undefined;
+          markChecked(Date.now());
+          return { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces };
+        }, 'file'),
+    });
+  }
+  if (create && (mode === 'none' || mode === 'failed')) {
+    fileLeadActions.push({
+      key: 'create-file',
+      label: t('e2ee.recovery.create'),
+      variant: mode === 'none' && primaryCreate === 'file' ? 'primary' : 'secondary',
+      onClick: () =>
+        void run(async () => {
+          const created = await create();
+          if (created.outcome !== 'created') return undefined;
+          markChecked(Date.now());
+          return { kind: 'created', vaultId: created.vaultId, method: 'file' };
+        }, 'file'),
+    });
+  }
+  const fileSecondaryActions: MethodAction[] = [];
+  if (replacement && mode === 'ready') {
+    fileSecondaryActions.push({
+      key: 'replace-file',
+      label: t('e2ee.recovery.replace'),
+      onClick: () => setDialog('begin'),
+    });
+  }
+  const fileRow = renderMethodRow({
+    id: 'file',
+    icon: FileKey2,
+    title: t('e2ee.recovery.file'),
+    badge:
+      mode === 'ready'
+        ? hasFile
+          ? { label: t('e2ee.recovery.workspace.saved'), tone: 'success' }
+          : { label: t('e2ee.recovery.workspace.notSet'), tone: 'warning' }
+        : undefined,
+    helper:
+      mode === 'ready' || mode === 'replacing'
+        ? mode === 'replacing'
+          ? t('e2ee.recovery.fileReplacing')
+          : !hasFile
+            ? t('e2ee.recovery.fileNotSaved')
+            : checkedAt
+              ? t('e2ee.recovery.fileSavedChecked', {
+                  date: new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
+                    month: 'short',
+                    day: 'numeric',
+                  }).format(new Date(checkedAt)),
+                })
+              : t('e2ee.recovery.fileSaved')
+        : mode === 'none'
+          ? canCreateFile || canCreatePasskey || canCreatePassword
+            ? t('e2ee.recovery.fileNone')
+            : t('e2ee.recovery.createElsewhere')
+          : t('e2ee.recovery.offlineHint'),
+    leadActions: fileLeadActions,
+    secondaryActions: fileSecondaryActions,
+    restoreAction: canRestore && (mode === 'failed' || hasFile) ? makeRestoreAction('file') : null,
+  });
 
-  const passkeyHasLeadAction = Boolean((mode === 'none' && canCreatePasskey) || mode === 'ready');
+  const passkeyLeadActions: MethodAction[] = [];
+  if (mode === 'none' && canCreatePasskey) {
+    passkeyLeadActions.push({
+      key: 'create-passkey',
+      label: t('e2ee.recovery.createWithPasskey'),
+      variant: primaryCreate === 'passkey' ? 'primary' : 'secondary',
+      onClick: openPasskeyCreate,
+    });
+  }
+  if (mode === 'ready') {
+    passkeyLeadActions.push({
+      key: 'add-passkey',
+      label: t('e2ee.recovery.passkeyAdd'),
+      variant: 'secondary',
+      onClick: openPasskeyAdd,
+    });
+  }
+  const passkeySecondaryActions: MethodAction[] = [];
+  if (mode === 'ready') {
+    passkeySecondaryActions.push({
+      key: 'manage-passkey',
+      label: t('e2ee.recovery.passkeyManage'),
+      onClick: () =>
+        triggerWithUnlock(async (unlockMethod, options) => {
+          const listed =
+            unlockMethod === undefined && options === undefined
+              ? await port.listPasskeys()
+              : options === undefined
+                ? await port.listPasskeys(unlockMethod)
+                : await port.listPasskeys(unlockMethod, options);
+          if (listed.outcome === 'listed') {
+            setPasskeys(listed.passkeys);
+            setPending(listed.pending);
+          }
+          return undefined;
+        }),
+    });
+  }
   const passkeyRow =
     passkey &&
     ((mode === 'none' && canCreatePasskey) ||
       mode === 'ready' ||
       mode === 'replacing' ||
-      (canRestore && hasPasskey !== false)) ? (
-      <CompactRow
-        key="passkey"
-        label={t('e2ee.recovery.passkey')}
-        helper={
-          <span {...stylex.props(styles.methodHelper)}>
-            {mode === 'none' ? t('e2ee.recovery.passkeyNoneHelp') : t('e2ee.recovery.passkeyHelp')}
-          </span>
-        }
-        alignTop
-      >
-        <div {...stylex.props(styles.rowActions)}>
-          {mode === 'none' && canCreatePasskey && (
-            <Button
-              size="small"
-              variant={primaryCreate === 'passkey' ? 'primary' : 'secondary'}
-              disabled={busy}
-              onClick={openPasskeyCreate}
-            >
-              {t('e2ee.recovery.createWithPasskey')}
-            </Button>
-          )}
-          {mode === 'ready' && (
-            <Button size="small" variant="secondary" disabled={busy} onClick={openPasskeyAdd}>
-              {t('e2ee.recovery.passkeyAdd')}
-            </Button>
-          )}
-          {mode === 'ready' && (
-            <Button
-              size="small"
-              variant="ghost"
-              disabled={busy}
-              onClick={() =>
-                triggerWithUnlock(async (unlockMethod, options) => {
-                  const listed =
-                    unlockMethod === undefined && options === undefined
-                      ? await port.listPasskeys()
-                      : options === undefined
-                        ? await port.listPasskeys(unlockMethod)
-                        : await port.listPasskeys(unlockMethod, options);
-                  if (listed.outcome === 'listed') {
-                    setPasskeys(listed.passkeys);
-                    setPending(listed.pending);
-                  }
-                  return undefined;
-                })
-              }
-            >
-              {t('e2ee.recovery.passkeyManage')}
-            </Button>
-          )}
-          {canRestore && hasPasskey !== false && restoreButton('passkey', passkeyHasLeadAction)}
-        </div>
-      </CompactRow>
-    ) : null;
+      (canRestore && hasPasskey !== false))
+      ? renderMethodRow({
+          id: 'passkey',
+          icon: KeyRound,
+          title: t('e2ee.recovery.passkey'),
+          badge:
+            mode === 'ready' && hasPasskey === true
+              ? { label: t('e2ee.recovery.workspace.saved'), tone: 'success' }
+              : mode === 'ready' && hasPasskey === false
+                ? { label: t('e2ee.recovery.workspace.notSet'), tone: 'neutral' }
+                : undefined,
+          helper:
+            mode === 'none' ? t('e2ee.recovery.passkeyNoneHelp') : t('e2ee.recovery.passkeyHelp'),
+          leadActions: passkeyLeadActions,
+          secondaryActions: passkeySecondaryActions,
+          restoreAction: canRestore && hasPasskey !== false ? makeRestoreAction('passkey') : null,
+        })
+      : null;
 
-  const passwordHasLeadAction = Boolean(
-    (mode === 'none' && canCreatePassword) || (mode === 'ready' && setPassword)
-  );
+  const passwordLeadActions: MethodAction[] = [];
+  if (mode === 'none' && canCreatePassword) {
+    passwordLeadActions.push({
+      key: 'create-password',
+      label: t('e2ee.recovery.createWithPassword'),
+      variant: primaryCreate === 'password' ? 'primary' : 'secondary',
+      onClick: () => openPasswordDialog('create'),
+    });
+  }
+  if (mode === 'ready' && setPassword) {
+    passwordLeadActions.push({
+      key: 'set-password',
+      label: hasPassword ? t('e2ee.recovery.passwordChange') : t('e2ee.recovery.passwordSet'),
+      variant: 'secondary',
+      onClick: () => openPasswordDialog(hasPassword ? 'change' : 'set'),
+    });
+  }
+  const passwordSecondaryActions: MethodAction[] = [];
+  if (mode === 'ready' && canRemovePassword) {
+    passwordSecondaryActions.push({
+      key: 'remove-password',
+      label: t('e2ee.recovery.passwordRemove'),
+      tone: 'destructive',
+      onClick: () => setRemovingPassword(true),
+    });
+  }
   const passwordRow =
     passwordSupported &&
-    ((mode === 'none' && canCreatePassword) || mode === 'ready' || canRestorePassword) ? (
-      <CompactRow
-        key="password"
-        label={t('e2ee.recovery.password')}
-        helper={
-          <span {...stylex.props(styles.methodHelper)}>
-            {mode === 'none'
+    ((mode === 'none' && canCreatePassword) || mode === 'ready' || canRestorePassword)
+      ? renderMethodRow({
+          id: 'password',
+          icon: Lock,
+          title: t('e2ee.recovery.password'),
+          badge:
+            mode === 'ready'
+              ? hasPassword
+                ? { label: t('e2ee.recovery.workspace.saved'), tone: 'success' }
+                : { label: t('e2ee.recovery.workspace.notSet'), tone: 'neutral' }
+              : undefined,
+          helper:
+            mode === 'none'
               ? t('e2ee.recovery.passwordNoneHelp')
               : hasPassword
                 ? t('e2ee.recovery.passwordSavedHelp')
-                : t('e2ee.recovery.passwordUnsetHelp')}
-          </span>
-        }
-        alignTop
-      >
-        <div {...stylex.props(styles.rowActions)}>
-          {mode === 'none' && canCreatePassword && (
-            <Button
-              size="small"
-              variant={primaryCreate === 'password' ? 'primary' : 'secondary'}
-              disabled={busy}
-              onClick={() => openPasswordDialog('create')}
-            >
-              {t('e2ee.recovery.createWithPassword')}
-            </Button>
-          )}
-          {mode === 'ready' && setPassword && (
-            <Button
-              size="small"
-              variant="secondary"
-              disabled={busy}
-              onClick={() => openPasswordDialog(hasPassword ? 'change' : 'set')}
-            >
-              {hasPassword ? t('e2ee.recovery.passwordChange') : t('e2ee.recovery.passwordSet')}
-            </Button>
-          )}
-          {mode === 'ready' && canRemovePassword && (
-            <Button
-              size="small"
-              variant="ghost"
-              tone="destructive"
-              disabled={busy}
-              onClick={() => setRemovingPassword(true)}
-            >
-              {t('e2ee.recovery.passwordRemove')}
-            </Button>
-          )}
-          {canRestorePassword && restoreButton('password', passwordHasLeadAction)}
-        </div>
-      </CompactRow>
-    ) : null;
+                : t('e2ee.recovery.passwordUnsetHelp'),
+          leadActions: passwordLeadActions,
+          secondaryActions: passwordSecondaryActions,
+          restoreAction: canRestorePassword ? makeRestoreAction('password') : null,
+        })
+      : null;
+
+  const methodRows = (
+    mode === 'none' ? [passkeyRow, passwordRow, fileRow] : [fileRow, passkeyRow, passwordRow]
+  ).filter(Boolean);
 
   const hasRestoredWorkspace = Boolean(restoreRows?.some((row) => row.outcome === 'Committed'));
   const resultBanners = (
@@ -978,7 +1106,7 @@ export function RecoveryVaultSection({
   );
 
   return (
-    <div {...stylex.props(styles.stack)} data-testid="e2ee-recovery">
+    <div {...stylex.props(flushHeadingTheme, styles.stack)} data-testid="e2ee-recovery">
       {mode === 'failed' && (
         <Alert.Root tone="danger">
           <Alert.Title>{t('e2ee.recovery.planFailedTitle')}</Alert.Title>
@@ -1063,19 +1191,7 @@ export function RecoveryVaultSection({
         </Alert.Root>
       )}
       <CompactSection title={t('e2ee.recovery.methods')} boxed>
-        {mode === 'none' ? (
-          <>
-            {passkeyRow}
-            {passwordRow}
-            {fileRow}
-          </>
-        ) : (
-          <>
-            {fileRow}
-            {passkeyRow}
-            {passwordRow}
-          </>
-        )}
+        {methodRows}
       </CompactSection>
       {pending.length > 0 && (
         <Alert.Root tone="warning">
