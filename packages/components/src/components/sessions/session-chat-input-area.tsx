@@ -158,6 +158,12 @@ import {
 import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
+import { learnAgentStartDefaults } from '@/lib/local-storage-cache';
+import {
+  describeRunConfigSelection,
+  recordRecentRunConfig,
+  sanitizeConfigOptionValues,
+} from '@/lib/recent-run-configs';
 import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
 import {
@@ -2106,6 +2112,37 @@ export const SessionChatInputArea = memo(
             // publishes its own suggestion.
             if (!scheduled.at)
               promptSuggestionRef.current.markPromptSuggestionAnswered(shownPromptSuggestion);
+            // A configuration picked inside a conversation is what the person
+            // wants next time too. A Role's values are the Role's, not theirs.
+            if (!scheduled.at && !role && session.agentConfigId) {
+              const sent = agentRoleRunConfigRef.current;
+              learnAgentStartDefaults(session.agentConfigId, {
+                modeId: sent.modeId,
+                modelId: modelOptions.length > 0 ? sent.modelId : null,
+                configOptionValues: sent.configOptionValues,
+              });
+              const face = describeRunConfigSelection({
+                modelOptions,
+                selectedModelId: sent.modelId,
+                configOptionSelectors: configOptionSelectors ?? [],
+                configOptionValues: sent.configOptionValues,
+              });
+              recordRecentRunConfig(
+                workspaceId,
+                {
+                  agentId: session.agentConfigId,
+                  machineId: session.machineId,
+                  modelId: face.modelId,
+                  modelLabel: face.modelLabel,
+                  reasoningLabel: face.reasoningLabel,
+                  planOn: face.planOn,
+                  fastOn: face.fastOn,
+                  configOptionValues: sanitizeConfigOptionValues(sent.configOptionValues),
+                  agentRoleId: null,
+                },
+                Date.now()
+              );
+            }
             captureAgentRoleMentionsApplied(postHog, {
               spans: trimmedSpans,
               roles: workspaceAgentRolesRef.current,
@@ -2160,6 +2197,9 @@ export const SessionChatInputArea = memo(
         selectedModeId,
         selectedModelId,
         configOptionValues,
+        configOptionSelectors,
+        modelOptions,
+        workspaceId,
         isExternalHistoryRefreshing,
         isMachineRemoved,
         isVisible,
