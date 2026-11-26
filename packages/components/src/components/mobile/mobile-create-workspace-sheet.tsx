@@ -29,6 +29,7 @@ import { field } from '@lody/ui/field/field.tokens.stylex';
 import { Alert } from '@lody/ui/alert';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
+import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeSpace, themeRadius } from '../../style/theme-scale.stylex';
 import { sheetSurface } from './sheet-surface';
@@ -163,6 +164,7 @@ export function MobileCreateWorkspaceSheet({
   const maxHeight = useFoldAwareSheetHeight(92, true);
   const { createOrganization } = useOrganization();
   const platform = usePlatform();
+  const { isAuthenticated: isConvexAuthenticated } = useAuthenticatedConvex();
   const creationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
   const accountId = useE2eeAccountId(creationEnabled);
   const [name, setName] = useState('');
@@ -187,7 +189,7 @@ export function MobileCreateWorkspaceSheet({
 
   useEffect(() => {
     const port = platform.e2eeWorkspaces;
-    if (!open || !accountId || !port?.prepareCreation) return undefined;
+    if (!open || !accountId || !isConvexAuthenticated || !port?.prepareCreation) return undefined;
     let active = true;
     void reconcilePendingE2eeWorkspaces(
       port,
@@ -202,7 +204,7 @@ export function MobileCreateWorkspaceSheet({
     return () => {
       active = false;
     };
-  }, [accountId, open, platform.e2eeWorkspaces]);
+  }, [accountId, isConvexAuthenticated, open, platform.e2eeWorkspaces]);
 
   const slugReady = !!slug && !error && !isChecking && isAvailable;
   const canSubmit =

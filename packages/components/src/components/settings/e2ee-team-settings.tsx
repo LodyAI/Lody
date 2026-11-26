@@ -406,6 +406,29 @@ function TeamSession({
       unsubscribe?.();
     };
   }, [runtime, workspaceId, t]);
+  const hasInFlightDeliveries = deliveries.some(
+    (delivery) => delivery.state === 'pending' || delivery.state === 'delivering'
+  );
+  useEffect(() => {
+    if (!hasInFlightDeliveries || !runtime.memberKeyDeliveries) return undefined;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      if (disposed) return;
+      try {
+        const result = await runtime.memberKeyDeliveries!(workspaceId);
+        if (!disposed) setDeliveries(result.items);
+      } catch {
+        // Ignored; the 10s poll retries.
+      }
+      if (!disposed) timer = setTimeout(() => void poll(), 500);
+    };
+    timer = setTimeout(() => void poll(), 500);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [hasInFlightDeliveries, runtime, workspaceId]);
   if (
     !runtime.createMemberInvitation ||
     !runtime.memberJoinRequests ||

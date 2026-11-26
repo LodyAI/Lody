@@ -37,6 +37,7 @@ import {
 } from '@/lib/workspace';
 import { RouteMessage } from '@/components/route-message';
 import { useAuthSignOut } from '../../providers/convex-provider';
+import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -134,6 +135,7 @@ function CreateWorkspaceAuthed({
   const isMobile = useIsMobile();
   const platform = usePlatform();
   const platformSession = usePlatformSession();
+  const { isAuthenticated: isConvexAuthenticated } = useAuthenticatedConvex();
   const accountId = platformSession.status === 'authenticated' ? platformSession.user.id : null;
   const accountRef = useRef(accountId);
   accountRef.current = accountId;
@@ -195,8 +197,11 @@ function CreateWorkspaceAuthed({
   useEffect(() => {
     setCreating(false);
     setEncrypted(false);
+  }, [accountId, platform.e2eeWorkspaces]);
+
+  useEffect(() => {
     const port = platform.e2eeWorkspaces;
-    if (!accountId || !port?.prepareCreation) return undefined;
+    if (!accountId || !isConvexAuthenticated || !port?.prepareCreation) return undefined;
     let active = true;
     void reconcilePendingE2eeWorkspaces(
       port,
@@ -214,7 +219,7 @@ function CreateWorkspaceAuthed({
     return () => {
       active = false;
     };
-  }, [accountId, platform.e2eeWorkspaces]);
+  }, [accountId, isConvexAuthenticated, platform.e2eeWorkspaces]);
 
   const hasExistingWorkspaces = Boolean(organizations && organizations.length > 0);
   const paidRequired = creationAvailability?.canCreateFree === false;

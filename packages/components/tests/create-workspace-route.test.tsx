@@ -35,6 +35,7 @@ const fixture = vi.hoisted(() => ({
   } | null,
   creationEnabled: false,
   cancelPreparation: false,
+  convexAuthenticated: true,
   referralLead: false,
   referralListeners: new Set<() => void>(),
   createOrganization: undefined as unknown as (name: string, slug: string) => Promise<unknown>,
@@ -115,6 +116,17 @@ vi.mock('@lody/platform/react', async () => {
     useCloudAction: () => unusedAction,
   };
 });
+vi.mock('@/hooks/use-authenticated-convex', () => ({
+  useAuthenticatedConvex: () => ({
+    isAuthenticated: fixture.convexAuthenticated,
+    isLoading: !fixture.convexAuthenticated,
+    authSessionId: fixture.convexAuthenticated ? 'session-1' : null,
+    confirmedUnauthenticated: false,
+    isRecovering: false,
+    claimAutomaticCommand: () => true,
+    requestAuthRecovery: () => {},
+  }),
+}));
 vi.mock('@/hooks/useStableSession', () => ({
   useStableSession: () => ({
     data: { user: { id: 'account' } },
@@ -187,6 +199,7 @@ beforeEach(() => {
   fixture.activeOrganization = null;
   fixture.creationEnabled = false;
   fixture.cancelPreparation = false;
+  fixture.convexAuthenticated = true;
   fixture.referralLead = false;
   fixture.serverWorkspaces = new Set();
   stable.availability.canCreateFree = true;
@@ -317,6 +330,39 @@ describe('create workspace route encrypted creation (zero draft UI + silent reco
     expect(navigate).toHaveBeenCalledWith({
       to: '/workspace/e2ee/$workspaceId',
       params: { workspaceId: 'ws-reconciled' },
+      replace: true,
+    });
+  });
+
+  it('waits for Convex auth readiness before silently reconciling a leftover pending request', async () => {
+    savePendingE2eeWorkspace(localStorage, pending);
+    fixture.convexAuthenticated = false;
+    const navigate = vi.fn(async () => {});
+    fixture.router = { navigate } as unknown as AnyRouter;
+    fixture.create = vi.fn(async (request) => ({
+      workspaceId: 'ws-reconciled-after-auth',
+      name: request.name,
+      slug: request.slug,
+      contentMode: 'e2ee' as const,
+      contentModeVersion: 1 as const,
+      genesisHash: hash,
+      cryptoOrgId: hash,
+      activation: 'control-only' as const,
+    }));
+    const Component = (Route as unknown as { options: { component: () => JSX.Element } }).options
+      .component;
+    await render();
+    expect(fixture.create).not.toHaveBeenCalled();
+    expect(listPendingE2eeWorkspaces(localStorage, 'account')).toEqual([pending]);
+    expect(navigate).not.toHaveBeenCalled();
+
+    fixture.convexAuthenticated = true;
+    await act(async () => root!.render(<Component />));
+    expect(fixture.create).toHaveBeenCalledTimes(1);
+    expect(listPendingE2eeWorkspaces(localStorage, 'account')).toEqual([]);
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/workspace/e2ee/$workspaceId',
+      params: { workspaceId: 'ws-reconciled-after-auth' },
       replace: true,
     });
   });
