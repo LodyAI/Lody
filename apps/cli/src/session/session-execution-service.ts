@@ -3827,11 +3827,18 @@ export class SessionExecutionService {
 
       const sessionToTerminate = options.session ?? null;
       if (options.terminateSession && !sessionToTerminate && options.pendingSession) {
-        self.terminatePendingSessionWhenReady({
-          sessionId: options.sessionId,
-          turnId: options.turnId,
-          pendingSession: options.pendingSession,
-        });
+        const abandoned =
+          self.deps.sessionManager.abandonPendingSessionCreate?.(
+            options.sessionId,
+            'turn-cancelled'
+          ) ?? false;
+        if (!abandoned) {
+          self.terminatePendingSessionWhenReady({
+            sessionId: options.sessionId,
+            turnId: options.turnId,
+            pendingSession: options.pendingSession,
+          });
+        }
       }
 
       if (options.terminateSession && sessionToTerminate) {
