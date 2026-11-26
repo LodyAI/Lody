@@ -818,8 +818,9 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     api.analytics.getUsageSharingForCliToken,
     { cliToken: options.token },
     (enabled: boolean | null) => {
+      if (typeof enabled !== 'boolean') return;
       try {
-        syncAccountUsageSharing(enabled === true);
+        syncAccountUsageSharing(enabled);
       } catch {
         // Keep current local state if disk write fails.
       }
