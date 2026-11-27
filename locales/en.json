@@ -7281,5 +7281,9 @@
   "sidebar.promoBanner.descriptionBoth": "Plus annual gets an extra {{discount}}% off ({{perMonth}}/mo, {{combinedDiscount}}% off monthly), or {{monthlyDiscount}}% off monthly.",
   "sidebar.promoBanner.descriptionYearly": "Plus annual gets an extra {{discount}}% off ({{perMonth}}/mo, {{combinedDiscount}}% off monthly).",
   "sidebar.promoBanner.descriptionMonthly": "Get {{discount}}% off your first month of Plus ({{price}}/seat).",
-  "sidebar.promoBanner.descriptionUpgrade": "Switch to yearly for an extra {{discount}}% off ({{combinedDiscount}}% off monthly)."
+  "sidebar.promoBanner.descriptionUpgrade": "Switch to yearly for an extra {{discount}}% off ({{combinedDiscount}}% off monthly).",
+  "chat.machineSelector.diskFreeSuffix": "free",
+  "chat.machineSelector.cpuTitle": "CPU usage {{percent}}% across {{cores}} cores",
+  "chat.machineSelector.memoryTitle": "Memory used: {{pair}}",
+  "chat.machineSelector.diskTitle": "Disk available: {{pair}}"
 }

@@ -7281,5 +7281,9 @@
   "sidebar.promoBanner.descriptionBoth": "Plus 年繳享折上 {{rate}} 折（低至 {{perMonth}}/月，相當於月繳 {{combinedRate}} 折），月繳享 {{monthlyRate}} 折。",
   "sidebar.promoBanner.descriptionYearly": "Plus 年繳享折上 {{rate}} 折（低至 {{perMonth}}/月，相當於月繳 {{combinedRate}} 折）。",
   "sidebar.promoBanner.descriptionMonthly": "Plus 首月訂閱立享 {{rate}} 折（{{price}}/席位）。",
-  "sidebar.promoBanner.descriptionUpgrade": "切換年繳享折上 {{rate}} 折優惠（相當於月繳 {{combinedRate}} 折）。"
+  "sidebar.promoBanner.descriptionUpgrade": "切換年繳享折上 {{rate}} 折優惠（相當於月繳 {{combinedRate}} 折）。",
+  "chat.machineSelector.diskFreeSuffix": "可用",
+  "chat.machineSelector.cpuTitle": "CPU 使用率 {{percent}}%（共 {{cores}} 核心）",
+  "chat.machineSelector.memoryTitle": "已用記憶體：{{pair}}",
+  "chat.machineSelector.diskTitle": "可用磁碟：{{pair}}"
 }

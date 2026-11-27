@@ -7281,5 +7281,9 @@
   "sidebar.promoBanner.descriptionBoth": "Plus 年額はさらに {{discount}}% OFF（{{perMonth}}/月、月額比 {{combinedDiscount}}% OFF）、月額は {{monthlyDiscount}}% OFF。",
   "sidebar.promoBanner.descriptionYearly": "Plus 年額はさらに {{discount}}% OFF（{{perMonth}}/月、月額比 {{combinedDiscount}}% OFF）。",
   "sidebar.promoBanner.descriptionMonthly": "Plus 初月が {{discount}}% OFF（{{price}}/シート）。",
-  "sidebar.promoBanner.descriptionUpgrade": "年払いへの切り替えでさらに {{discount}}% OFF（月額比 {{combinedDiscount}}% OFF）。"
+  "sidebar.promoBanner.descriptionUpgrade": "年払いへの切り替えでさらに {{discount}}% OFF（月額比 {{combinedDiscount}}% OFF）。",
+  "chat.machineSelector.diskFreeSuffix": "空き",
+  "chat.machineSelector.cpuTitle": "CPU 使用率 {{percent}}%（全 {{cores}} コア）",
+  "chat.machineSelector.memoryTitle": "使用メモリ: {{pair}}",
+  "chat.machineSelector.diskTitle": "空きディスク: {{pair}}"
 }

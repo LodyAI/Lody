@@ -7281,5 +7281,9 @@
   "sidebar.promoBanner.descriptionBoth": "Plus annuel à −{{discount}} % suppl. ({{perMonth}}/mois, −{{combinedDiscount}} % vs mensuel) ou −{{monthlyDiscount}} % en mensuel.",
   "sidebar.promoBanner.descriptionYearly": "Plus annuel à −{{discount}} % suppl. ({{perMonth}}/mois, −{{combinedDiscount}} % vs mensuel).",
   "sidebar.promoBanner.descriptionMonthly": "−{{discount}} % sur votre 1er mois de Plus ({{price}}/siège).",
-  "sidebar.promoBanner.descriptionUpgrade": "Passez à l’annuel avec −{{discount}} % suppl. (−{{combinedDiscount}} % vs mensuel)."
+  "sidebar.promoBanner.descriptionUpgrade": "Passez à l’annuel avec −{{discount}} % suppl. (−{{combinedDiscount}} % vs mensuel).",
+  "chat.machineSelector.diskFreeSuffix": "libre",
+  "chat.machineSelector.cpuTitle": "Utilisation CPU {{percent}} % sur {{cores}} cœurs",
+  "chat.machineSelector.memoryTitle": "Mémoire utilisée : {{pair}}",
+  "chat.machineSelector.diskTitle": "Disque disponible : {{pair}}"
 }

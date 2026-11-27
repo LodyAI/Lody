@@ -380,13 +380,77 @@ function MachineScopeShell() {
   const [selectedMachineId, setSelectedMachineId] = useState(machineId);
 
   return (
-    <div {...stylex.props(storyLayout.row3)}>
+    <div {...stylex.props(storyLayout.row)}>
       <div {...stylex.props(storyLayout.row4)}>
         <DesktopMachineMenu
           value={selectedMachineId}
           options={[
             { value: machineId, label: 'zx-macbook' },
             { value: secondMachineId, label: 'build-machine' },
+          ]}
+          onChange={setSelectedMachineId}
+          onAddMachine={fn()}
+        />
+        <div {...stylex.props(storyLayoutStyles.row)}>lody</div>
+      </div>
+    </div>
+  );
+}
+
+function MachineScopeResourcesShell() {
+  const buildMachineId = 'machine-build' as MachineId;
+  const gpuMachineId = 'machine-gpu' as MachineId;
+  const legacyMachineId = 'machine-legacy' as MachineId;
+  const [selectedMachineId, setSelectedMachineId] = useState(machineId);
+
+  return (
+    <div {...stylex.props(storyLayout.row)}>
+      <div {...stylex.props(storyLayout.row4)}>
+        <DesktopMachineMenu
+          value={selectedMachineId}
+          visibleLocalMachineId={machineId}
+          options={[
+            {
+              value: machineId,
+              label: 'zx-macbook',
+              resources: {
+                cp: 340,
+                cc: 14,
+                mu: 184,
+                mt: 360,
+                df: 4120,
+                dt: 10240,
+              },
+            },
+            {
+              value: buildMachineId,
+              label: 'build-runner-shanghai',
+              resources: {
+                cp: 2816,
+                cc: 32,
+                mu: 560,
+                mt: 640,
+                df: 2400,
+                dt: 20480,
+              },
+            },
+            {
+              value: gpuMachineId,
+              label: 'ubuntu-gpu-workstation-02',
+              isPrivate: true,
+              resources: {
+                cp: 6200,
+                cc: 64,
+                mu: 2480,
+                mt: 2560,
+                df: 42,
+                dt: 5120,
+              },
+            },
+            {
+              value: legacyMachineId,
+              label: 'raspi-edge-node',
+            },
           ]}
           onChange={setSelectedMachineId}
           onAddMachine={fn()}
@@ -665,6 +729,22 @@ export const DeepSeekModels: Story = {
 export const MachineScope: Story = {
   args: { isEmptyConversation: true },
   render: () => <MachineScopeShell />,
+};
+export const MachineScopeWithResources: Story = {
+  args: { isEmptyConversation: true },
+  globals: { theme: 'dark' },
+  render: () => <MachineScopeResourcesShell />,
+  play: async ({ canvasElement }) => {
+    const trigger = canvasElement.querySelector<HTMLButtonElement>(
+      '[data-testid="chat-machine-trigger"]'
+    );
+    if (!trigger) throw new Error('Machine trigger is missing');
+    await userEvent.click(trigger);
+  },
+};
+export const MachineScopeWithResourcesLight: Story = {
+  ...MachineScopeWithResources,
+  globals: { theme: 'light' },
 };
 export const MachineScopeOffline: Story = {
   args: { isEmptyConversation: true },

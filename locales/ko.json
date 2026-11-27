@@ -7281,5 +7281,9 @@
   "sidebar.promoBanner.descriptionBoth": "Plus 연간 추가 {{discount}}% 할인({{perMonth}}/월, 월간 대비 {{combinedDiscount}}% 할인), 월간 {{monthlyDiscount}}% 할인.",
   "sidebar.promoBanner.descriptionYearly": "Plus 연간 추가 {{discount}}% 할인({{perMonth}}/월, 월간 대비 {{combinedDiscount}}% 할인).",
   "sidebar.promoBanner.descriptionMonthly": "Plus 첫 달 {{discount}}% 할인({{price}}/시트).",
-  "sidebar.promoBanner.descriptionUpgrade": "연간 결제로 전환 시 추가 {{discount}}% 할인(월간 대비 {{combinedDiscount}}% 할인)."
+  "sidebar.promoBanner.descriptionUpgrade": "연간 결제로 전환 시 추가 {{discount}}% 할인(월간 대비 {{combinedDiscount}}% 할인).",
+  "chat.machineSelector.diskFreeSuffix": "여유",
+  "chat.machineSelector.cpuTitle": "CPU 사용률 {{percent}}% (총 {{cores}}코어)",
+  "chat.machineSelector.memoryTitle": "사용 중인 메모리: {{pair}}",
+  "chat.machineSelector.diskTitle": "남은 디스크: {{pair}}"
 }

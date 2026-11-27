@@ -7281,5 +7281,9 @@
   "sidebar.promoBanner.descriptionBoth": "Plus anual con {{discount}}% extra ({{perMonth}}/mes, {{combinedDiscount}}% vs. mensual) o {{monthlyDiscount}}% en mensual.",
   "sidebar.promoBanner.descriptionYearly": "Plus anual con {{discount}}% extra ({{perMonth}}/mes, {{combinedDiscount}}% vs. mensual).",
   "sidebar.promoBanner.descriptionMonthly": "{{discount}}% de descuento en tu primer mes de Plus ({{price}}/asiento).",
-  "sidebar.promoBanner.descriptionUpgrade": "Cambia a anual con un {{discount}}% extra ({{combinedDiscount}}% vs. mensual)."
+  "sidebar.promoBanner.descriptionUpgrade": "Cambia a anual con un {{discount}}% extra ({{combinedDiscount}}% vs. mensual).",
+  "chat.machineSelector.diskFreeSuffix": "libre",
+  "chat.machineSelector.cpuTitle": "Uso de CPU {{percent}}% en {{cores}} núcleos",
+  "chat.machineSelector.memoryTitle": "Memoria usada: {{pair}}",
+  "chat.machineSelector.diskTitle": "Disco disponible: {{pair}}"
 }

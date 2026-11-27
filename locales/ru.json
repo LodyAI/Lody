@@ -7421,5 +7421,9 @@
   "sidebar.promoBanner.descriptionBoth": "Plus на год: ещё −{{discount}}% ({{perMonth}}/мес, −{{combinedDiscount}}% к помесячному) или −{{monthlyDiscount}}% на месяц.",
   "sidebar.promoBanner.descriptionYearly": "Plus на год: ещё −{{discount}}% ({{perMonth}}/мес, −{{combinedDiscount}}% к помесячному).",
   "sidebar.promoBanner.descriptionMonthly": "Скидка {{discount}}% на первый месяц Plus ({{price}}/место).",
-  "sidebar.promoBanner.descriptionUpgrade": "Перейдите на годовой план: ещё −{{discount}}% (−{{combinedDiscount}}% к помесячному)."
+  "sidebar.promoBanner.descriptionUpgrade": "Перейдите на годовой план: ещё −{{discount}}% (−{{combinedDiscount}}% к помесячному).",
+  "chat.machineSelector.diskFreeSuffix": "свободно",
+  "chat.machineSelector.cpuTitle": "Загрузка ЦП {{percent}}% ({{cores}} ядер)",
+  "chat.machineSelector.memoryTitle": "Использовано памяти: {{pair}}",
+  "chat.machineSelector.diskTitle": "Свободно на диске: {{pair}}"
 }
