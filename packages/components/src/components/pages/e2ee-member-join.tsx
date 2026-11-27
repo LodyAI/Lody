@@ -214,9 +214,9 @@ export function E2eeMemberJoinSurface(
       {...props}
       runtime={platform.e2eeWorkspaces?.runtime}
       watchClaim
-      accountId={session.data?.user.id ?? null}
-      email={session.data?.user.email}
-      emailVerified={session.isOptimistic ? undefined : session.data?.user.emailVerified}
+      accountId={session.data?.user?.id ?? null}
+      email={session.data?.user?.email}
+      emailVerified={session.isOptimistic ? undefined : session.data?.user?.emailVerified}
       loading={sessionLoading}
       preview={preview}
       previewError={previewError}

@@ -239,11 +239,21 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
   } = useStableSession();
   const user = session?.user ?? null;
   const {
-    data: ordinaryOrganizations,
+    data: rawOrdinaryOrganizations,
     isPending: ordinaryOrganizationsPending,
     error: organizationsError,
     refetch: refetchOrganizations,
   } = authClient.useListOrganizations();
+  const ordinaryOrganizations = useMemo(
+    () =>
+      Array.isArray(rawOrdinaryOrganizations)
+        ? rawOrdinaryOrganizations.filter(
+            (workspace): workspace is NonNullable<typeof workspace> =>
+              workspace != null && typeof workspace === 'object' && typeof workspace.id === 'string'
+          )
+        : rawOrdinaryOrganizations,
+    [rawOrdinaryOrganizations]
+  );
   const {
     data: listedActiveOrganization,
     isPending: activeOrganizationIsPending,
@@ -270,25 +280,38 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
   const [deletedEncrypted, setDeletedEncrypted] = useAtom(deletedEncryptedWorkspacesAtom);
   const deletedIds = deletedEncrypted?.accountId === user?.id ? deletedEncrypted?.ids : undefined;
   const ordinaryActiveOrganization =
-    listedActiveOrganization && deletedIds?.has(listedActiveOrganization.id)
-      ? null
-      : listedActiveOrganization;
+    listedActiveOrganization &&
+    typeof listedActiveOrganization === 'object' &&
+    typeof listedActiveOrganization.id === 'string' &&
+    !deletedIds?.has(listedActiveOrganization.id)
+      ? listedActiveOrganization
+      : null;
   const encryptedOrganizations = useMemo(
     () =>
-      encryptedWorkspaces
-        ?.filter((workspace) => !deletedIds?.has(workspace.id))
-        .map((workspace) => ({
-          ...workspace,
-          logo: null,
-          createdAt: LOCAL_ORGANIZATION_EPOCH,
-          metadata: null,
-          members: workspace.members.map((member) => ({
-            ...member,
-            organizationId: workspace.id,
-            createdAt: LOCAL_ORGANIZATION_EPOCH,
-          })),
-          invitations: [],
-        })),
+      Array.isArray(encryptedWorkspaces)
+        ? encryptedWorkspaces
+            .filter(
+              (workspace): workspace is NonNullable<typeof workspace> =>
+                workspace != null &&
+                typeof workspace === 'object' &&
+                typeof workspace.id === 'string' &&
+                !deletedIds?.has(workspace.id)
+            )
+            .map((workspace) => ({
+              ...workspace,
+              logo: null,
+              createdAt: LOCAL_ORGANIZATION_EPOCH,
+              metadata: null,
+              members: (Array.isArray(workspace.members) ? workspace.members : [])
+                .filter((member) => member != null)
+                .map((member) => ({
+                  ...member,
+                  organizationId: workspace.id,
+                  createdAt: LOCAL_ORGANIZATION_EPOCH,
+                })),
+              invitations: [],
+            }))
+        : undefined,
     [deletedIds, encryptedWorkspaces]
   );
   const organizationsRaw = useMemo(() => {

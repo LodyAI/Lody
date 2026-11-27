@@ -140,7 +140,7 @@ export function CloudPlatformProvider({
       const target = getTelemetryRouteTarget();
       if (
         identity.status !== 'authenticated' ||
-        live.session.data?.user.id !== identity.user.id ||
+        live.session.data?.user?.id !== identity.user.id ||
         organization.activeOrganization.id !== mode?.workspaceId ||
         ('contentMode' in organization.activeOrganization &&
           organization.activeOrganization.contentMode !== undefined &&
@@ -478,7 +478,7 @@ export function CloudPlatformProvider({
     electron,
     sessionStore,
     workspacesStore,
-    session.data?.user.id,
+    session.data?.user?.id,
   ]);
   useEffect(() => () => automaticPairing?.disposeAutomaticPairing(), [automaticPairing]);
   const e2eeWorkspaces = useMemo(
@@ -663,7 +663,7 @@ export function CloudPlatformProvider({
     <PlatformContext.Provider value={provider}>
       <CloudWorkspaceBridge organizationRef={organizationRef} workspacesStore={workspacesStore} />
       <E2eeAutomaticPairingInbox
-        key={session.data?.user.id ?? 'signed-out'}
+        key={session.data?.user?.id ?? 'signed-out'}
         runtime={e2eeWorkspaces.runtime}
       >
         {children}
