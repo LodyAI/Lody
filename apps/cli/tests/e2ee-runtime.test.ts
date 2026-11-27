@@ -2262,7 +2262,7 @@ describe('machine E2EE local runtime', () => {
         try {
           const original = await phase.promise;
           await expect(execute(openMachinePairingJournal(root))).rejects.toMatchObject({
-            code: 'storage',
+            code: 'busy',
             cause: { errcode: 5 },
           });
           const device = await readFile(
