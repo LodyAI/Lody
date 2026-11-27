@@ -66,6 +66,50 @@ export type AccountPairingRefusal =
   | 'pairing-elsewhere';
 const fail = (code: AccountPairingRefusal | 'invalid-input' | 'storage' | 'corrupt') =>
   Object.assign(new Error(`e2ee_${code}`), { code });
+const isTerminalInstallFailure = (error: unknown): boolean => {
+  if (
+    error instanceof Error &&
+    (error.message === 'e2ee_device_revoked' || error.message === 'e2ee_member_removed')
+  )
+    return true;
+  const code =
+    error && typeof error === 'object' && 'code' in error
+      ? (error as { code: unknown }).code
+      : null;
+  return code === 'revoked' || code === 'e2ee_device_revoked' || code === 'e2ee_member_removed';
+};
+
+type RequestSettlement = 'waiting' | 'approved' | 'expired';
+
+const evaluateRequestSettlement = (input: {
+  readonly request: PairingRequest;
+  readonly workspaces: readonly AccountPairingRequesterWorkspace[];
+  readonly listedByGenesis: ReadonlyMap<string, { workspaceId: string; name: string }>;
+  readonly joined: ReadonlySet<string>;
+  readonly permanentlyFailed: ReadonlySet<string> | undefined;
+  readonly covers: { readonly seen: boolean; readonly approved: ReadonlySet<string> } | undefined;
+  readonly expired: boolean;
+}): RequestSettlement => {
+  if (!input.covers?.seen) return input.expired ? 'expired' : 'waiting';
+  let approvedJoined = 0;
+  for (const item of input.request.rows) {
+    const genesisHex = hex(item.genesis);
+    if (!input.covers.approved.has(genesisHex)) continue;
+    const workspace =
+      input.workspaces.find((candidate) => hex(candidate.genesis) === genesisHex) ??
+      input.listedByGenesis.get(genesisHex);
+    if (!workspace) return input.expired ? 'expired' : 'waiting';
+    if (input.joined.has(workspace.workspaceId)) {
+      approvedJoined++;
+      continue;
+    }
+    if (input.permanentlyFailed?.has(workspace.workspaceId)) continue;
+    return input.expired ? 'expired' : 'waiting';
+  }
+  if (approvedJoined > 0) return 'approved';
+  return input.expired ? 'expired' : 'waiting';
+};
+
 /** Failures that refuse the whole approval rather than one workspace: the signed-in
  * account changed, the request was tampered with, or it expired. Shared by every
  * per-workspace step so refresh and signing classify the same way. */
@@ -387,6 +431,7 @@ export function makeAccountPairing(input: {
   /** Workspaces whose last install attempt found an unrelated unfinished
    * per-workspace pairing on this device; recomputed on every poll. */
   const blocked = new Map<string, Set<string>>();
+  const permanentlyFailed = new Map<string, Set<string>>();
   /** Per request: whether a verified approval arrived, and the genesis set it covers.
    * Kept across polls so a later failed claim never forgets an approval already seen. */
   const coverage = new Map<string, { seen: boolean; approved: Set<string> }>();
@@ -421,6 +466,7 @@ export function makeAccountPairing(input: {
       Effect.sync(() => {
         if (role === 'requester') secrets.get(lookupId)?.fill(0);
         secrets.delete(lookupId);
+        permanentlyFailed.delete(lookupId);
       })
     );
   const withKeys = <A, E, R>(
@@ -703,6 +749,7 @@ export function makeAccountPairing(input: {
               !workspace ||
               seenWorkspaces.has(workspace.workspaceId) ||
               alreadyJoined.has(workspace.workspaceId) ||
+              permanentlyFailed.get(row.lookup_id)?.has(workspace.workspaceId) ||
               !request.rows.some((item) => hex(item.genesis) === hex(approved.genesis))
             )
               continue;
@@ -747,25 +794,32 @@ export function makeAccountPairing(input: {
                 const set = blocked.get(row.lookup_id) ?? new Set<string>();
                 set.add(workspace.workspaceId);
                 blocked.set(row.lookup_id, set);
+              } else if (isTerminalInstallFailure(accepted.failure)) {
+                const set = permanentlyFailed.get(row.lookup_id) ?? new Set<string>();
+                set.add(workspace.workspaceId);
+                permanentlyFailed.set(row.lookup_id, set);
               }
               continue;
             }
             blocked.get(row.lookup_id)?.delete(workspace.workspaceId);
+            permanentlyFailed.get(row.lookup_id)?.delete(workspace.workspaceId);
             yield* sql(store.addJoined(row.lookup_id, workspace.workspaceId));
           }
         }
       })
     );
     const joined = yield* sql(joinedSet(row.lookup_id));
-    const requested = request.rows.flatMap((item) => {
-      const workspace =
-        workspaces.find((candidate) => hex(candidate.genesis) === hex(item.genesis)) ??
-        listedByGenesis.get(hex(item.genesis));
-      return workspace ? [workspace.workspaceId] : [];
+    const settlement = evaluateRequestSettlement({
+      request,
+      workspaces,
+      listedByGenesis,
+      joined,
+      permanentlyFailed: permanentlyFailed.get(row.lookup_id),
+      covers: coverage.get(row.lookup_id),
+      expired: now() >= row.expires_at,
     });
-    if (requested.length > 0 && requested.every((id) => joined.has(id)))
-      yield* settle(row.lookup_id, 'requester', 'approved');
-    else if (now() >= row.expires_at) yield* settle(row.lookup_id, 'requester', 'expired');
+    if (settlement === 'approved') yield* settle(row.lookup_id, 'requester', 'approved');
+    else if (settlement === 'expired') yield* settle(row.lookup_id, 'requester', 'expired');
     return yield* stateOf(row, workspaces);
   });
 
