@@ -40,24 +40,38 @@ import {
 import { MessageQueueRow } from './message-queue-row';
 import { ScheduledQueueRow, type ScheduledQueueItem } from './scheduled-queue-row';
 import { PendingQueueRow } from './pending-queue-row';
-import { useMessageQueueEditing } from './use-message-queue-editing';
+import type { QueuedRunConfigSummary } from './queued-message-details';
+import { deriveSessionSendProgress } from '@/lib/session-send-status';
 import { queueSurface } from './surface';
-import { usePendingQueueActions, usePendingQueueRecords } from './use-pending-queue-records';
+import {
+  usePendingQueueActions,
+  usePendingQueueEdits,
+  usePendingQueueRecords,
+} from './use-pending-queue-records';
 
 export type MessageQueueDisplayProps = {
   sessionId: SessionId;
   items: MessageQueueItem[];
   onRemove: (cid: string) => void | Promise<void>;
   onReorder: (activeCid: string, overCid: string) => void | Promise<void>;
+  /** Start a composer edit of this row. */
   onEditStart: (item: MessageQueueItem) => void | Promise<void>;
-  onEditCancel: (item: MessageQueueItem) => void | Promise<void>;
-  onEditSave: (item: MessageQueueItem, task: string) => void | Promise<void>;
+  /** The row this device is editing in the composer, if any. */
+  editingCid?: string | null;
+  /** The held row's "Editing" label returns focus to the composer. */
+  onFocusEdit?: (item: MessageQueueItem) => void;
+  /** A held edit was discarded before it saved; release the row. */
+  onPendingEditDiscarded?: (item: MessageQueueItem) => void | Promise<void>;
   onSteer: (item: MessageQueueItem) => void | Promise<void>;
   showSteerAction?: boolean;
   /** Native acknowledged steer: lets every queued row steer, not just the first. */
   nativeSteerAvailable?: boolean;
   sendWhileIdle?: boolean;
   renderItemFooter?: (item: MessageQueueItem) => ReactNode;
+  /** A sender face per row; omitted when the queue has a single sender. */
+  renderSenderAvatar?: (item: MessageQueueItem) => ReactNode;
+  /** How each row's frozen run configuration reads, for its details and tag. */
+  describeRunConfig?: (item: MessageQueueItem) => QueuedRunConfigSummary | undefined;
   /** Dedicated reservations, kept out of the executable mq list. */
   scheduledItems?: readonly ScheduledQueueItem[];
   onOpenScheduled?: (item: ScheduledQueueItem) => void;
@@ -164,13 +178,16 @@ export function MessageQueueDisplay({
   onRemove,
   onReorder,
   onEditStart,
-  onEditCancel,
-  onEditSave,
+  editingCid = null,
+  onFocusEdit,
+  onPendingEditDiscarded,
   onSteer,
   showSteerAction = false,
   nativeSteerAvailable = false,
   sendWhileIdle = false,
   renderItemFooter,
+  renderSenderAvatar,
+  describeRunConfig,
   scheduledItems: dedicatedScheduledItems = [],
   onOpenScheduled,
   onEditScheduledTime,
@@ -193,8 +210,8 @@ export function MessageQueueDisplay({
     () => [...dedicatedScheduledItems].sort((a, b) => a.at - b.at),
     [dedicatedScheduledItems]
   );
-  const editing = useMessageQueueEditing(items, { onEditStart, onEditCancel, onEditSave });
   const pending = usePendingQueueRecords(sessionId, items);
+  const pendingEdits = usePendingQueueEdits(sessionId);
   const pendingActions = usePendingQueueActions();
   const rowCount = items.length + pending.length + dedicatedScheduled.length;
   const failedCount = pending.filter((record) => Boolean(record.error)).length;
@@ -220,14 +237,7 @@ export function MessageQueueDisplay({
 
   useLayoutEffect(() => {
     updateOverflow();
-  }, [
-    dedicatedScheduled.length,
-    editing.editingCid,
-    expanded,
-    items,
-    pending.length,
-    updateOverflow,
-  ]);
+  }, [dedicatedScheduled.length, editingCid, expanded, items, pending.length, updateOverflow]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -258,8 +268,10 @@ export function MessageQueueDisplay({
     return null;
   }
 
+  const editBlocked = editingCid !== null;
   const renderRow = (item: MessageQueueItem, index: number) => {
-    const isEditing = editing.editingCid === item.$cid;
+    const pendingEdit = pendingEdits.get(item.$cid);
+    const pendingProgress = pendingEdit ? deriveSessionSendProgress(pendingEdit) : null;
     return (
       <MessageQueueRow
         key={item.$cid}
@@ -276,21 +288,31 @@ export function MessageQueueDisplay({
         nativeSteerAvailable={nativeSteerAvailable}
         sendWhileIdle={sendWhileIdle}
         canReorder={canReorder}
-        isEditing={isEditing}
-        editValue={isEditing ? editing.editValue : ''}
-        isPending={editing.pendingCid === item.$cid}
-        onEditValueChange={editing.setEditValue}
+        isEditing={editingCid === item.$cid}
+        editBlocked={editBlocked}
+        pendingEdit={
+          pendingEdit && pendingProgress
+            ? {
+                progress: pendingProgress.totalBytes > 0 ? pendingProgress.progress : null,
+                error: pendingEdit.error,
+                busy: pendingActions.busyId === pendingEdit.id,
+                onRetry: () => void pendingActions.run(pendingEdit, 'retry'),
+                onCancel: () => {
+                  void pendingActions
+                    .run(pendingEdit, 'cancel')
+                    .then(() => onPendingEditDiscarded?.(item));
+                },
+              }
+            : undefined
+        }
         onStartEdit={(nextItem) => {
-          void editing.startEdit(nextItem);
+          void onEditStart(nextItem);
         }}
-        onCancelEdit={(nextItem) => {
-          void editing.cancelEdit(nextItem);
-        }}
-        onSaveEdit={(nextItem) => {
-          void editing.saveEdit(nextItem);
-        }}
+        onFocusEdit={onFocusEdit}
         onRemove={onRemove}
         onSteer={onSteer}
+        senderAvatar={renderSenderAvatar?.(item)}
+        runConfig={describeRunConfig?.(item)}
       />
     );
   };

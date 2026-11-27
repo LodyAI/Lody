@@ -4,6 +4,7 @@ import { assertProtectedAttachmentReferences } from '../lib/encrypted-session-at
 import { requireEncryptedRoostOwner } from '../lib/encrypted-roost-history';
 import {
   getMachineRoomId,
+  getServerNow,
   normalizeSessionInputBlocks,
   type MachineMeta,
   type MachineId,
@@ -20,6 +21,20 @@ import {
   type SessionSendRuntime,
 } from '../lib/session-send-delivery';
 import { throwIfSendAborted } from '../lib/session-send-resources';
+import { QUEUED_EDIT_RENEW_INTERVAL_MS } from '../lib/queued-edit-lease';
+
+/** Refresh a held edit's row lease every interval until stopped. */
+function holdQueuedEditLease(runtime: SessionSendRuntime, sessionId: SessionId, cid: string) {
+  const renew = () => {
+    void runtime.writer
+      .updateSessionMessage(sessionId, cid, { isEditing: true, editingStartedAt: getServerNow() })
+      .catch((error: unknown) => {
+        console.warn('Failed to renew a queued edit lease', { sessionId, cid, error });
+      });
+  };
+  const timer = setInterval(renew, QUEUED_EDIT_RENEW_INTERVAL_MS);
+  return () => clearInterval(timer);
+}
 
 /** One workspace projection over held attachments and locally accepted ready input. */
 export function createWorkspacePendingSends(args: {
@@ -64,16 +79,25 @@ export function createWorkspacePendingSends(args: {
   const held = createPendingSessionSends({
     prepare: async (send, signal, update) => {
       await checkRoostOwner(send);
-      return prepareDraftAttachments({
-        content,
-        record: send,
-        signal,
-        resources: runtime.sendResources,
-        token: args.token,
-        attachmentToken: runtime.attachmentToken,
-        localMachineId: args.localMachineId,
-        update,
-      });
+      // An edit holds its row while it prepares: keep the CLI's editing lease
+      // fresh until the replacement lands (or the edit is canceled).
+      const stopLease = send.queueReplace
+        ? holdQueuedEditLease(runtime, send.sessionId, send.queueReplace.cid)
+        : undefined;
+      try {
+        return await prepareDraftAttachments({
+          content,
+          record: send,
+          signal,
+          resources: runtime.sendResources,
+          token: args.token,
+          attachmentToken: runtime.attachmentToken,
+          localMachineId: args.localMachineId,
+          update,
+        });
+      } finally {
+        stopLease?.();
+      }
     },
     write: (send, signal) =>
       runtime.sendResources.run(async (owned) => {

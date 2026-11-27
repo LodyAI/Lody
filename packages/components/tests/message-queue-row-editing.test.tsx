@@ -5,12 +5,17 @@ import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import type { MessageQueueItem, SessionId, WorkspaceId } from '@lody/shared';
 
-import { queueTask } from '../src/components/sessions/message-queue/queue-task';
 import { MessageQueueDisplay } from '../src/components/sessions/message-queue';
 import { currentWorkspaceIdAtom } from '../src/atoms';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import type { PendingSessionSend } from '../src/lib/session-pending-sends';
 import { initI18n } from '../src/i18n';
+import { ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
+import { useQueuedMessageComposerEdit } from '../src/components/sessions/message-queue/use-queued-message-composer-edit';
+import {
+  QUEUED_EDIT_RENEW_INTERVAL_MS,
+  queuedRunConfigOf,
+} from '../src/components/sessions/message-queue/queued-message-edit';
 
 // Each variant resolves to a distinct URL so the test can tell the row's
 // thumbnail from the full-size image the preview loads.
@@ -40,31 +45,20 @@ function makeItem(): MessageQueueItem {
   } as unknown as MessageQueueItem;
 }
 
-function setTextareaValue(textarea: HTMLTextAreaElement, value: string): void {
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-  setter?.call(textarea, value);
-  textarea.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
 describe('queued message editing commits', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
-  let saved: Array<{ cid: string; task: string }>;
-  let cancelled: string[];
-  let releaseSave: (() => void) | undefined;
+  let started: string[];
 
   beforeEach(async () => {
     await initI18n('en');
-    saved = [];
-    cancelled = [];
-    releaseSave = undefined;
+    started = [];
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
   });
 
   afterEach(async () => {
-    releaseSave?.();
     if (root) {
       await act(async () => {
         root?.unmount();
@@ -94,8 +88,6 @@ describe('queued message editing commits', () => {
         onRemove: () => {},
         onReorder: () => {},
         onEditStart: () => {},
-        onEditCancel: () => {},
-        onEditSave: () => {},
         onSteer: (item) => {
           sent.push(item.task);
           setQueued((rows) => rows.filter((row) => row.$cid !== item.$cid));
@@ -142,8 +134,6 @@ describe('queued message editing commits', () => {
           onRemove: () => {},
           onReorder: () => {},
           onEditStart: () => {},
-          onEditCancel: () => {},
-          onEditSave: () => {},
           onSteer: () => {},
         })
       );
@@ -200,8 +190,6 @@ describe('queued message editing commits', () => {
           onRemove: () => {},
           onReorder: () => {},
           onEditStart: () => {},
-          onEditCancel: () => {},
-          onEditSave: () => {},
           onSteer: () => {},
         })
       );
@@ -214,281 +202,146 @@ describe('queued message editing commits', () => {
     expect(opened).toEqual([]);
   });
 
-  // The save promise stays pending until the test releases it, so the row is
-  // observable in its mid-write state instead of racing a microtask.
-  const renderQueue = async (options?: {
-    holdSave?: boolean;
-    failSaveOnce?: boolean;
-    item?: MessageQueueItem;
-  }) => {
-    const items = [options?.item ?? makeItem()];
+  const renderQueue = async (props: Partial<Parameters<typeof MessageQueueDisplay>[0]> = {}) => {
     await act(async () => {
       root?.render(
         createElement(MessageQueueDisplay, {
           sessionId: 'session-test' as SessionId,
-          items,
+          items: [makeItem()],
           onRemove: () => undefined,
           onReorder: () => undefined,
-          onEditStart: () => undefined,
-          onEditCancel: (item: MessageQueueItem) => {
-            cancelled.push(item.$cid);
-          },
-          onEditSave: (item: MessageQueueItem, task: string) => {
-            saved.push({ cid: item.$cid, task });
-            if (options?.failSaveOnce && saved.length === 1)
-              return Promise.reject(new Error('Synthetic save failure'));
-            if (!options?.holdSave) return undefined;
-            return new Promise<void>((resolve) => {
-              releaseSave = resolve;
-            });
+          onEditStart: (item: MessageQueueItem) => {
+            started.push(item.$cid);
           },
           onSteer: () => undefined,
+          showSteerAction: true,
+          ...props,
         })
       );
     });
     return container as HTMLDivElement;
   };
 
-  const startEditing = async (view: HTMLDivElement): Promise<HTMLTextAreaElement> => {
-    const editButton = view.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]');
-    expect(editButton).toBeTruthy();
-    await act(async () => {
-      editButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    const textarea = view.querySelector('textarea');
-    expect(textarea).toBeTruthy();
-    return textarea as HTMLTextAreaElement;
-  };
-
-  const pressEnter = async (
-    textarea: HTMLTextAreaElement,
-    init: KeyboardEventInit = {}
-  ): Promise<KeyboardEvent> => {
-    const event = new KeyboardEvent('keydown', {
-      key: 'Enter',
-      bubbles: true,
-      cancelable: true,
-      ...init,
-    });
-    await act(async () => {
-      textarea.dispatchEvent(event);
-    });
-    return event;
-  };
-
-  it.each(['', 'Please read this'])(
-    'keeps a queued file separate from its editable caption (%s)',
-    async (caption) => {
-      const file = {
-        type: 'local_attachment',
-        machineId: 'machine',
-        kind: 'file',
-        path: '/tmp/synthetic.data',
-        fileName: 'pasted-text.txt',
-        mimeType: 'text/plain',
-        sizeBytes: 50_000,
-      } as const;
-      const blocks = caption ? [file, { type: 'text' as const, text: caption }] : [file];
-      const item = makeItem();
-      item.acpSessionConfig = { ...item.acpSessionConfig!, prompt: caption, inputBlocks: blocks };
-      item.task = queueTask(blocks);
-      const view = await renderQueue({ item });
-      expect(view.textContent).toContain(caption || 'pasted-text.txt');
-      const textarea = await startEditing(view);
-      expect(textarea.value).toBe(caption);
-      const nextCaption = caption ? '' : 'Read the file';
-      await act(async () => setTextareaValue(textarea, nextCaption));
-      await pressEnter(textarea);
-      expect(saved).toEqual([{ cid: item.$cid, task: nextCaption }]);
-    }
-  );
-
-  it('folds and reopens without committing or losing an editing draft', async () => {
+  it('starts a composer edit from the row without opening an inline editor', async () => {
     const view = await renderQueue();
-    const textarea = await startEditing(view);
-    await act(async () => setTextareaValue(textarea, 'Keep this unfinished draft'));
-    const toggle = view.querySelector<HTMLButtonElement>('[data-message-queue-toggle]')!;
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-
-    // The focus transition is shared by pointer presses and keyboard navigation.
-    await act(async () => toggle.focus());
-    await act(async () => toggle.click());
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(view.querySelector('textarea')).toBe(textarea);
-    expect(textarea.value).toBe('Keep this unfinished draft');
-    expect(saved).toEqual([]);
-    expect(cancelled).toEqual([]);
-
-    await act(async () => toggle.click());
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(view.querySelector('textarea')).toBe(textarea);
-    await act(async () => textarea.focus());
-    await pressEnter(textarea);
-    expect(saved).toEqual([{ cid: 'cid-0', task: 'Keep this unfinished draft' }]);
+    await act(async () => {
+      view.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')!.click();
+    });
+    expect(started).toEqual(['cid-0']);
+    expect(view.querySelector('textarea')).toBeNull();
   });
 
-  for (const nextEditPending of [false, true]) {
-    it(`keeps the next editor when an earlier save settles (next pending=${nextEditPending})`, async () => {
-      let finishSave!: () => void;
-      let finishStart!: () => void;
-      function QueueWithOverlappingEdits() {
-        const [items, setItems] = useState([
-          makeItem(),
-          {
-            ...makeItem(),
-            $cid: 'cid-1',
-            userTurnId: 'turn-1',
-            task: 'Add regression tests',
-            acpSessionConfig: { ...makeItem().acpSessionConfig, prompt: 'Add regression tests' },
-          },
-        ]);
-        return createElement(MessageQueueDisplay, {
-          sessionId: 'session-test' as SessionId,
-          items,
-          onRemove: () => undefined,
-          onReorder: () => undefined,
-          onSteer: () => undefined,
-          onEditStart: (item) => {
-            setItems((current) =>
-              current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: true } : row))
-            );
-            if (nextEditPending && item.$cid === 'cid-1')
-              return new Promise<void>((resolve) => {
-                finishStart = resolve;
-              });
-            return undefined;
-          },
-          onEditCancel: (item) => {
-            setItems((current) =>
-              current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: false } : row))
-            );
-          },
-          onEditSave: (item, task) => {
-            saved.push({ cid: item.$cid, task });
-            setItems((current) =>
-              current.map((row) =>
-                row.$cid === item.$cid
-                  ? {
-                      ...row,
-                      isEditing: false,
-                      task,
-                      acpSessionConfig: { ...row.acpSessionConfig, prompt: task },
-                    }
-                  : row
-              )
-            );
-            if (item.$cid === 'cid-0')
-              return new Promise<void>((resolve) => {
-                finishSave = resolve;
-              });
-            return undefined;
-          },
-        });
-      }
-      await act(async () => root?.render(createElement(QueueWithOverlappingEdits)));
-      const first = await startEditing(container!);
-      await act(async () => setTextareaValue(first, 'Preserve queue ordering'));
-      await act(async () => first.blur());
-      const nextButton = container!.querySelector<HTMLButtonElement>(
-        'button[aria-label="Edit queued message"]'
+  it('holds the edited row in place: dimmed, labelled, and without drag, steer or delete', async () => {
+    const second = { ...makeItem(), $cid: 'cid-1', userTurnId: 'turn-1', task: 'Second' };
+    const focused: string[] = [];
+    const view = await renderQueue({
+      items: [makeItem(), second],
+      editingCid: 'cid-0',
+      onFocusEdit: (item) => focused.push(item.$cid),
+    });
+    const [held, other] = view.querySelectorAll<HTMLElement>('[data-message-queue-row]');
+    expect(held!.dataset.queueRowState).toBe('editing');
+    expect(held!.textContent).toContain(ORIGINAL_TASK);
+    expect(held!.querySelector('[aria-label="Drag to reorder"]')).toBeNull();
+    expect(held!.querySelector('[aria-label="Remove from queue"]')).toBeNull();
+    expect(held!.querySelector('[aria-label*="Steer"]')).toBeNull();
+    await act(async () => {
+      held!.querySelector<HTMLButtonElement>('[aria-label="Editing in the composer"]')!.click();
+    });
+    expect(focused).toEqual(['cid-0']);
+    // One edit at a time: the other row cannot start a second one.
+    const otherEdit = other!.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]');
+    expect(otherEdit!.disabled).toBe(true);
+    expect(other!.querySelector('[aria-label="Remove from queue"]')).toBeTruthy();
+  });
+
+  it('fits the held state into the single touch action box', async () => {
+    const focused: string[] = [];
+    await act(async () => {
+      root?.render(
+        createElement(
+          ForceMobileLayoutProvider,
+          { force: true },
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [makeItem()],
+            editingCid: 'cid-0',
+            onFocusEdit: (item: MessageQueueItem) => focused.push(item.$cid),
+            onRemove: () => undefined,
+            onReorder: () => undefined,
+            onEditStart: () => undefined,
+            onSteer: () => undefined,
+            roomy: true,
+          })
+        )
       );
-      await act(async () => nextButton!.click());
-      let next = container!.querySelector('textarea')!;
-      expect(next.value).toBe(nextEditPending ? 'Preserve queue ordering' : 'Add regression tests');
-      if (!nextEditPending)
-        await act(async () => setTextareaValue(next, 'Cover ordering and cancellation'));
-      await act(async () => finishSave());
-      expect(container!.querySelector('textarea')).toBe(next);
-      expect(next.value).toBe(
-        nextEditPending ? 'Preserve queue ordering' : 'Cover ordering and cancellation'
+    });
+    const row = container!.querySelector<HTMLElement>('[data-message-queue-row]')!;
+    const held = row.querySelector<HTMLButtonElement>('[aria-label="Editing in the composer"]')!;
+    // The glyph takes the More box's place; no text label competes for the 40 px column.
+    expect(held.textContent).toBe('');
+    expect(row.querySelector('[aria-label="More"]')).toBeNull();
+    await act(async () => held.click());
+    expect(focused).toEqual(['cid-0']);
+  });
+
+  it('shows the full message and how it will run in the details', async () => {
+    const long = `${ORIGINAL_TASK} — and keep the cancellation tokens in the second pass.`;
+    const item = {
+      ...makeItem(),
+      userName: 'Ada',
+      task: long,
+      acpSessionConfig: { ...makeItem().acpSessionConfig!, prompt: long, modelId: 'opus' },
+    } as MessageQueueItem;
+    const view = await renderQueue({
+      items: [item],
+      describeRunConfig: () => ({
+        agentLabel: 'Claude Code',
+        modelLabel: 'Opus',
+        modeLabel: 'Plan',
+        reasoningLabel: 'High',
+      }),
+    });
+    await act(async () => {
+      view.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click();
+    });
+    const details = document.querySelector<HTMLElement>('[data-queued-message-details]');
+    expect(details).toBeTruthy();
+    expect(details!.querySelector('[data-text-selectable]')!.textContent).toBe(long);
+    for (const text of ['Ada', 'Claude Code', 'Opus', 'Plan', 'High'])
+      expect(details!.textContent).toContain(text);
+    await act(async () => {
+      [...details!.querySelectorAll('button')]
+        .find((button) => button.textContent?.trim() === 'Edit')!
+        .click();
+    });
+    expect(started).toEqual(['cid-0']);
+  });
+
+  it('marks a row that runs differently, and leaves the hint out on phones', async () => {
+    const describeRunConfig = () => ({ modelLabel: 'Opus', differenceTag: 'Opus · Plan' });
+    let view = await renderQueue({ describeRunConfig });
+    expect(view.querySelector('[data-queue-config-tag]')?.textContent).toBe('Opus · Plan');
+    await act(async () => {
+      root?.render(
+        createElement(
+          ForceMobileLayoutProvider,
+          { force: true },
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [makeItem()],
+            onRemove: () => undefined,
+            onReorder: () => undefined,
+            onEditStart: () => undefined,
+            onSteer: () => undefined,
+            describeRunConfig,
+            roomy: true,
+          })
+        )
       );
-      if (nextEditPending) {
-        await act(async () => finishStart());
-        next = container!.querySelector('textarea')!;
-        expect(next.value).toBe('Add regression tests');
-        await act(async () => setTextareaValue(next, 'Cover ordering and cancellation'));
-      }
-      expect(document.activeElement).toBe(next);
-      await pressEnter(next);
-      expect(container!.querySelector('textarea')).toBeNull();
-      expect(container!.textContent).toContain('Preserve queue ordering');
-      expect(container!.textContent).toContain('Cover ordering and cancellation');
-      expect(saved).toEqual([
-        { cid: 'cid-0', task: 'Preserve queue ordering' },
-        { cid: 'cid-1', task: 'Cover ordering and cancellation' },
-      ]);
     });
-  }
-
-  it('leaves Shift+Enter to the textarea as a newline', async () => {
-    const view = await renderQueue();
-    const textarea = await startEditing(view);
-
-    await act(async () => {
-      setTextareaValue(textarea, 'First line');
-    });
-    const event = await pressEnter(textarea, { shiftKey: true });
-
-    expect(event.defaultPrevented).toBe(false);
-    expect(saved).toEqual([]);
-    expect(view.querySelector('textarea')).toBeTruthy();
-  });
-
-  it('ignores the Enter that commits an IME candidate', async () => {
-    const view = await renderQueue();
-    const textarea = await startEditing(view);
-
-    await act(async () => {
-      setTextareaValue(textarea, '排队消息');
-    });
-    const event = await pressEnter(textarea, { isComposing: true });
-
-    expect(event.defaultPrevented).toBe(false);
-    expect(saved).toEqual([]);
-  });
-
-  it('saves once when the confirm button is clicked, even if a blur follows', async () => {
-    const view = await renderQueue({ holdSave: true });
-    const textarea = await startEditing(view);
-
-    await act(async () => {
-      setTextareaValue(textarea, 'Confirmed by button');
-    });
-
-    const confirmButton = view.querySelector<HTMLButtonElement>(
-      '[aria-label="Save changes (Enter)"]'
-    );
-    expect(confirmButton).toBeTruthy();
-    await act(async () => {
-      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    // The pending write disables the textarea, which blurs it in a real browser.
-    await act(async () => {
-      textarea.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
-    });
-
-    expect(saved).toEqual([{ cid: 'cid-0', task: 'Confirmed by button' }]);
-    expect(cancelled).toEqual([]);
-  });
-
-  it('preserves a rejected draft and lets the user save it again', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      const view = await renderQueue({ failSaveOnce: true });
-      const textarea = await startEditing(view);
-      await act(async () => setTextareaValue(textarea, 'Keep this clarification'));
-      await pressEnter(textarea);
-      expect(view.querySelector('textarea')).toBe(textarea);
-      expect(textarea.disabled).toBe(false);
-      expect(textarea.value).toBe('Keep this clarification');
-      expect(document.activeElement).toBe(textarea);
-      await pressEnter(textarea);
-      expect(view.querySelector('textarea')).toBeNull();
-      expect(saved.at(-1)).toEqual({ cid: 'cid-0', task: 'Keep this clarification' });
-    } finally {
-      consoleError.mockRestore();
-    }
+    view = container as HTMLDivElement;
+    expect(view.querySelector('[data-queue-config-tag]')).toBeNull();
   });
 });
 
@@ -548,8 +401,6 @@ describe('queued message images', () => {
             onRemove: () => undefined,
             onReorder: () => undefined,
             onEditStart: () => undefined,
-            onEditCancel: () => undefined,
-            onEditSave: () => undefined,
             onSteer: () => undefined,
           })
         )
@@ -624,8 +475,6 @@ describe('queued message images', () => {
               onRemove: () => undefined,
               onReorder: () => undefined,
               onEditStart: () => undefined,
-              onEditCancel: () => undefined,
-              onEditSave: () => undefined,
               onSteer: () => undefined,
             })
           )
@@ -685,8 +534,6 @@ describe('queued message images', () => {
             onEditStart: (started: MessageQueueItem) => {
               editsStarted.push(started.$cid);
             },
-            onEditCancel: () => undefined,
-            onEditSave: () => undefined,
             onSteer: () => undefined,
           })
         )
@@ -716,8 +563,6 @@ describe('queued message images', () => {
           onRemove: () => undefined,
           onReorder: () => undefined,
           onEditStart: () => undefined,
-          onEditCancel: () => undefined,
-          onEditSave: () => undefined,
           onSteer: () => undefined,
           roomy: true,
           footerPosition: 'inline',
@@ -740,5 +585,185 @@ describe('queued message images', () => {
     );
     expect(preview).toBeTruthy();
     expect(preview?.style.display).not.toBe('-webkit-box');
+  });
+});
+
+describe('composer edit of a queued message', () => {
+  type Harness = ReturnType<typeof useQueuedMessageComposerEdit>;
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  let current: Harness | undefined;
+  let writes: Array<{ cid: string; next: MessageQueueItem }>;
+  let saves: Array<{ cid: string; patch: Record<string, unknown> }>;
+  let finished: string[];
+  let now: number;
+
+  const composer = {
+    beginQueueEdit: () => {},
+    finishQueueEdit: (mode: 'restore' | 'keep') => {
+      finished.push(mode);
+    },
+  };
+
+  function Probe(props: { items: MessageQueueItem[]; visible: boolean }) {
+    current = useQueuedMessageComposerEdit({
+      sessionId: 'session-edit' as SessionId,
+      items: props.items,
+      ready: true,
+      visible: props.visible,
+      composerRef: { current: composer },
+      updateMessageQueueItem: async (cid, updater) => {
+        const item = props.items.find((row) => row.$cid === cid);
+        if (item) writes.push({ cid, next: updater(item) });
+      },
+      saveMessageQueueEdit: async (cid, patch) => {
+        saves.push({ cid, patch: patch as Record<string, unknown> });
+      },
+      editor: { userId: 'editor', userName: 'Editor' },
+      finishDraftWithoutComposer: () => {},
+    });
+    return null;
+  }
+
+  const render = async (items: MessageQueueItem[], visible = true) => {
+    await act(async () => {
+      root?.render(createElement(Provider, { store }, createElement(Probe, { items, visible })));
+    });
+  };
+  let store: ReturnType<typeof createStore>;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    store = createStore();
+    writes = [];
+    saves = [];
+    finished = [];
+    now = Date.parse('2026-11-27T10:00:00Z');
+    vi.useFakeTimers({ now, toFake: ['setInterval', 'clearInterval', 'Date'] });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    container?.remove();
+    vi.useRealTimers();
+  });
+
+  const locked = (item: MessageQueueItem) =>
+    ({ ...item, isEditing: true, editingStartedAt: Date.now() }) as MessageQueueItem;
+
+  it('writes only the lock on start, and renews it only while the editor is visible', async () => {
+    const item = makeItem();
+    await render([item]);
+    await act(async () => current!.start(item));
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.next).toMatchObject({ isEditing: true, task: ORIGINAL_TASK });
+    expect(writes[0]!.next.acpSessionConfig).toEqual(item.acpSessionConfig);
+    await render([locked(item)]);
+    writes = [];
+
+    await act(async () => vi.advanceTimersByTime(QUEUED_EDIT_RENEW_INTERVAL_MS));
+    expect(writes.map((write) => write.next.isEditing)).toEqual([true]);
+
+    // Hidden (left the Session, minimized): renewal stops and the lease lapses.
+    await render([locked(item)], false);
+    writes = [];
+    await act(async () => vi.advanceTimersByTime(QUEUED_EDIT_RENEW_INTERVAL_MS * 6));
+    expect(writes).toEqual([]);
+  });
+
+  it('treats an untouched save as a cancel and keeps the author', async () => {
+    const item = makeItem();
+    await render([item]);
+    await act(async () => current!.start(item));
+    await render([locked(item)]);
+    let accepted = false;
+    await act(async () => {
+      accepted = await current!.save({
+        composerBlocks: [{ type: 'text', text: ORIGINAL_TASK }],
+        attachments: [],
+        runConfig: queuedRunConfigOf(item),
+        buildConfig: () => {
+          throw new Error('unchanged edits keep the frozen config');
+        },
+      });
+    });
+    expect(accepted).toBe(true);
+    expect(saves).toEqual([]);
+    expect(writes.at(-1)!.next).toMatchObject({ isEditing: false, userId: 'user-1' });
+    expect(current!.edit).toBeUndefined();
+  });
+
+  it('saves a real change under the editor and keeps the frozen Role revision', async () => {
+    const item = {
+      ...makeItem(),
+      acpSessionConfig: {
+        ...makeItem().acpSessionConfig!,
+        agentRoleId: 'role-reviewer',
+        agentRoleRevision: 3,
+      },
+    } as MessageQueueItem;
+    await render([item]);
+    await act(async () => current!.start(item));
+    await render([locked(item)]);
+    await act(async () => {
+      await current!.save({
+        composerBlocks: [{ type: 'text', text: 'Refactor the queue, keep the order' }],
+        attachments: [],
+        runConfig: queuedRunConfigOf(item),
+        buildConfig: () => {
+          throw new Error('an unchanged run config keeps its frozen fields');
+        },
+      });
+    });
+    expect(saves).toHaveLength(1);
+    expect(saves[0]!.patch).toMatchObject({
+      task: 'Refactor the queue, keep the order',
+      userId: 'editor',
+      userName: 'Editor',
+      isEditing: false,
+      acpSessionConfig: {
+        prompt: 'Refactor the queue, keep the order',
+        agentRoleId: 'role-reviewer',
+        agentRoleRevision: 3,
+      },
+    });
+  });
+
+  it('rebuilds the config when the edit picks another model', async () => {
+    const item = makeItem();
+    await render([item]);
+    await act(async () => current!.start(item));
+    await render([locked(item)]);
+    await act(async () => {
+      await current!.save({
+        composerBlocks: [{ type: 'text', text: ORIGINAL_TASK }],
+        attachments: [],
+        runConfig: { ...queuedRunConfigOf(item), modelId: 'opus' },
+        buildConfig: (inputBlocks) => ({
+          prompt: ORIGINAL_TASK,
+          inputBlocks,
+          cliType: 'claude-code',
+          agentType: 'claude-code',
+          modelId: 'opus',
+        }),
+      });
+    });
+    expect(saves[0]!.patch).toMatchObject({
+      userId: 'editor',
+      acpSessionConfig: { modelId: 'opus' },
+    });
+  });
+
+  it('keeps the edit as a draft when its row ran or was removed meanwhile', async () => {
+    const item = makeItem();
+    await render([item]);
+    await act(async () => current!.start(item));
+    await render([locked(item)]);
+    await render([]);
+    expect(finished).toEqual(['keep']);
+    expect(current!.edit).toBeUndefined();
   });
 });

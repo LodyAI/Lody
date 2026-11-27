@@ -46,6 +46,11 @@ export type UserTurnSend = {
   creation?: SessionMeta;
   /** A message-queue row; written instead of a history turn. */
   queue?: Record<string, unknown>;
+  /**
+   * A composer edit of an existing row: `queue` replaces the fields of row
+   * `cid` under the same message id instead of appending a new row.
+   */
+  queueReplace?: { cid: string };
 };
 
 export type SessionSendRuntime = Pick<
@@ -140,7 +145,12 @@ export async function writeUserTurn(
   await prepareUserTurnWrite(runtime, send, signal);
   await persistHumanInputReceipt(runtime, send.sessionId, send.entry, signal);
   throwIfSendAborted(signal);
-  if (send.queue) {
+  if (send.queue && send.queueReplace) {
+    await replaceEditedQueueRow(runtime, send.sessionId, send.queueReplace.cid, {
+      ...send.queue,
+      ...(e2eeIntent ? { e2eeIntent } : {}),
+    });
+  } else if (send.queue) {
     try {
       await runtime.writer.enqueueSessionMessage(
         send.sessionId,
@@ -158,6 +168,28 @@ export async function writeUserTurn(
     );
   if (send.delivery.kind === 'dispatch')
     await activateUserTurn(runtime, send.sessionId, send.entry.id);
+}
+
+/** The edited row may have been sent or deleted while its attachments prepared. */
+export class QueueEditTargetGoneError extends SessionInputNotSentError {}
+
+async function replaceEditedQueueRow(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  cid: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const present = await runtime.sendResources.withSessionStore(sessionId, (store) =>
+    ((store.getState().mq ?? []) as MessageQueueItem[]).some((item) => item.$cid === cid)
+  );
+  if (!present)
+    throw new QueueEditTargetGoneError(
+      i18next.t(
+        'sessions.messageQueue.editTargetGone',
+        'This message was already sent or removed, so the edit was not saved.'
+      )
+    );
+  await runtime.writer.updateSessionMessage(sessionId, cid, patch);
 }
 
 /** How long an encrypted send waits for its signed intent past the shared preparation deadline. */
