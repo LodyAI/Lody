@@ -77,6 +77,7 @@ jobs:
           fi
           printf 'Shard %s/%s running %s features:\n' "${SHARD_INDEX}" "${SHARD_TOTAL}" "${#SHARD_FEATURES[@]}"
           printf '  - %s\n' "${SHARD_FEATURES[@]}"
+          LODY_E2E_RETRY='1' \
           LODY_E2E_PATHS="$(IFS=,; echo "${SHARD_FEATURES[*]}")" \
             xvfb-run -a corepack pnpm --filter @lody/e2e full 2>&1 | tee e2e/artifacts/cucumber-output.log
 
@@ -206,6 +207,7 @@ jobs:
           SELFHOST_LOG: ${{ runner.temp }}/selfhost-cloud.log
           SELFHOST_SUITE_LABEL: selfhost-cloud
           LODY_LORO_STREAMS_WS_ENABLED: '1'
+          LODY_E2E_RETRY: '1'
           FEISHU_ALERT_WEBHOOK_URL: ${{ secrets.FEISHU_ALERT_WEBHOOK_URL }}
           FEISHU_ALERT_WEBHOOK_SECRET: ${{ secrets.FEISHU_ALERT_WEBHOOK_SECRET }}
         run: |

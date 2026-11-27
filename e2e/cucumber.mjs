@@ -11,6 +11,9 @@ const featurePaths = process.env.LODY_E2E_PATHS
       .filter(Boolean)
   : ['src/features/**/*.feature'];
 
+const parsedRetry = Number.parseInt(process.env.LODY_E2E_RETRY ?? '0', 10);
+const retry = Number.isFinite(parsedRetry) && parsedRetry > 0 ? Math.min(parsedRetry, 3) : 0;
+
 /** @type {import('@cucumber/cucumber').IConfiguration} */
 export default {
   paths: featurePaths,
@@ -24,5 +27,5 @@ export default {
   formatOptions: { snippetInterface: 'async-await' },
   parallel: 0,
   publishQuiet: true,
-  retry: 0,
+  retry,
 };

@@ -55,6 +55,8 @@ export class TurnLifecyclePage {
       name: 'Deterministic Turn Lifecycle Agent',
       exact: true,
     });
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await expect(option).toBeEnabled();
     const bounds = await option.boundingBox();
     if (!bounds) throw new Error('The deterministic agent is not offered in the composer');
     // Cross the submenu gap the way a pointer does so the submenu stays open.
