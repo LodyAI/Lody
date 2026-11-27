@@ -743,24 +743,23 @@ export function createCloudE2eePort(
                 reply = cachedStatus;
               } else {
                 let usedSingle = false;
+                const ambientSignal = cloudE2eeRequestSignal.getStore();
+                const statusSignal = () => {
+                  const timeout = AbortSignal.timeout(30_000);
+                  return ambientSignal ? AbortSignal.any([ambientSignal, timeout]) : timeout;
+                };
                 const statusReply = await batchMailboxStatus(
                   { ...accessArgs, slot: parsedStatus.slot },
                   {
                     single: async (args) => {
                       usedSingle = true;
                       return e2eeMailboxReplySchemas.status.parse(
-                        await client(AbortSignal.timeout(30_000)).query(
-                          api.e2eeMailbox.status,
-                          args
-                        )
+                        await client(statusSignal()).query(api.e2eeMailbox.status, args)
                       );
                     },
                     batch: async (args) =>
                       e2eeMailboxReplySchemas.batchStatus.parse(
-                        await client(AbortSignal.timeout(30_000)).query(
-                          api.e2eeMailbox.batchStatus,
-                          args
-                        )
+                        await client(statusSignal()).query(api.e2eeMailbox.batchStatus, args)
                       ),
                   }
                 );
