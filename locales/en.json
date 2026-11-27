@@ -7308,5 +7308,11 @@
   "billing.switchPromoDiscountWithPercent": "Promotional discount (extra {{discount}}% off yearly)",
   "billing.switchRenewalDateStandardYearly": "Next renewal: {{date}} at the standard rate ({{amount}}/year).",
   "workspace.invite.seat.promoNoteUntil": "Includes {{discount}}% off if accepted by {{date}}. Renews at standard rate.",
-  "workspace.invite.seat.promoNoteYearlyUntil": "Includes an extra {{discount}}% off the annual rate if accepted by {{date}}. Renews at standard rate."
+  "workspace.invite.seat.promoNoteYearlyUntil": "Includes an extra {{discount}}% off the annual rate if accepted by {{date}}. Renews at standard rate.",
+  "sidebar.promoBanner.dismiss": "Dismiss promotion",
+  "sidebar.promoBanner.viewOffer": "View offer",
+  "sidebar.promoBanner.descriptionBoth": "Plus annual gets an extra {{discount}}% off ({{perMonth}}/mo, {{combinedDiscount}}% off monthly), or {{monthlyDiscount}}% off monthly.",
+  "sidebar.promoBanner.descriptionYearly": "Plus annual gets an extra {{discount}}% off ({{perMonth}}/mo, {{combinedDiscount}}% off monthly).",
+  "sidebar.promoBanner.descriptionMonthly": "Get {{discount}}% off your first month of Plus ({{price}}/seat).",
+  "sidebar.promoBanner.descriptionUpgrade": "Switch to yearly for an extra {{discount}}% off ({{combinedDiscount}}% off monthly)."
 }

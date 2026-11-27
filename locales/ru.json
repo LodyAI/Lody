@@ -7448,5 +7448,11 @@
   "billing.switchPromoDiscountWithPercent": "Акционная скидка (ещё −{{discount}}% на год)",
   "billing.switchRenewalDateStandardYearly": "Следующее продление: {{date}} по стандартному тарифу ({{amount}}/год).",
   "workspace.invite.seat.promoNoteUntil": "Скидка {{discount}}% при принятии приглашения до {{date}}. Продление по стандартному тарифу.",
-  "workspace.invite.seat.promoNoteYearlyUntil": "Ещё −{{discount}}% к годовому тарифу при принятии приглашения до {{date}}. Продление по стандартному тарифу."
+  "workspace.invite.seat.promoNoteYearlyUntil": "Ещё −{{discount}}% к годовому тарифу при принятии приглашения до {{date}}. Продление по стандартному тарифу.",
+  "sidebar.promoBanner.dismiss": "Закрыть акцию",
+  "sidebar.promoBanner.viewOffer": "Смотреть",
+  "sidebar.promoBanner.descriptionBoth": "Plus на год: ещё −{{discount}}% ({{perMonth}}/мес, −{{combinedDiscount}}% к помесячному) или −{{monthlyDiscount}}% на месяц.",
+  "sidebar.promoBanner.descriptionYearly": "Plus на год: ещё −{{discount}}% ({{perMonth}}/мес, −{{combinedDiscount}}% к помесячному).",
+  "sidebar.promoBanner.descriptionMonthly": "Скидка {{discount}}% на первый месяц Plus ({{price}}/место).",
+  "sidebar.promoBanner.descriptionUpgrade": "Перейдите на годовой план: ещё −{{discount}}% (−{{combinedDiscount}}% к помесячному)."
 }

@@ -138,6 +138,10 @@ const DISCOUNT_OR_RATE_KEYS = new Set([
   'billing.switchPromoDiscountWithPercent',
   'workspace.invite.seat.promoNoteUntil',
   'workspace.invite.seat.promoNoteYearlyUntil',
+  'sidebar.promoBanner.descriptionBoth',
+  'sidebar.promoBanner.descriptionYearly',
+  'sidebar.promoBanner.descriptionMonthly',
+  'sidebar.promoBanner.descriptionUpgrade',
 ]);
 
 /**
@@ -151,6 +155,7 @@ function extractPlaceholders(value, key) {
     ? matches.map((token) => {
         if (token === '{{rate}}') return '{{discount}}';
         if (token === '{{combinedRate}}') return '{{combinedDiscount}}';
+        if (token === '{{monthlyRate}}') return '{{monthlyDiscount}}';
         return token;
       })
     : matches;

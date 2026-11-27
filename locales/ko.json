@@ -7308,5 +7308,11 @@
   "billing.switchPromoDiscountWithPercent": "기간 한정 할인 (연간 추가 {{discount}}% 할인)",
   "billing.switchRenewalDateStandardYearly": "다음 갱신일: {{date}} (정상 요금 {{amount}}/년).",
   "workspace.invite.seat.promoNoteUntil": "{{date}}까지 수락 시 {{discount}}% 할인이 적용됩니다. 다음 갱신부터는 정상 요금으로 청구됩니다.",
-  "workspace.invite.seat.promoNoteYearlyUntil": "{{date}}까지 수락 시 연간 요금에서 추가 {{discount}}% 할인이 적용됩니다. 다음 갱신부터는 정상 요금으로 청구됩니다."
+  "workspace.invite.seat.promoNoteYearlyUntil": "{{date}}까지 수락 시 연간 요금에서 추가 {{discount}}% 할인이 적용됩니다. 다음 갱신부터는 정상 요금으로 청구됩니다.",
+  "sidebar.promoBanner.dismiss": "프로모션 알림 닫기",
+  "sidebar.promoBanner.viewOffer": "혜택 보기",
+  "sidebar.promoBanner.descriptionBoth": "Plus 연간 추가 {{discount}}% 할인({{perMonth}}/월, 월간 대비 {{combinedDiscount}}% 할인), 월간 {{monthlyDiscount}}% 할인.",
+  "sidebar.promoBanner.descriptionYearly": "Plus 연간 추가 {{discount}}% 할인({{perMonth}}/월, 월간 대비 {{combinedDiscount}}% 할인).",
+  "sidebar.promoBanner.descriptionMonthly": "Plus 첫 달 {{discount}}% 할인({{price}}/시트).",
+  "sidebar.promoBanner.descriptionUpgrade": "연간 결제로 전환 시 추가 {{discount}}% 할인(월간 대비 {{combinedDiscount}}% 할인)."
 }

@@ -451,6 +451,7 @@ import {
   type SidebarUpdatedBucketKey,
   type SidebarUpdatedItem,
 } from '@/components/sidebar-updated-session-list';
+import { SidebarPromoBannerHost } from '@/components/sidebar-promo-banner';
 import { SidebarUpdateBanner } from '@/components/sidebar-update-banner';
 import { UpdateChangelogDialog } from '@/components/update-changelog-dialog';
 import { pickLocalizedReleaseNotes, readUpdateBannerState } from '@/lib/electron-update-banner';
@@ -4781,6 +4782,10 @@ export function LoroAppSidebar({
     activeOrganization?.name ??
     t('organization.workspace', 'Workspace');
   const resolvedWorkspaceId = expectedWorkspaceId ?? workspaceId ?? '';
+  const handleOpenBillingFromPromo = useCallback(() => {
+    closeMobileDrawer();
+    openSettings('billing');
+  }, [closeMobileDrawer, openSettings]);
 
   const scopeProps = stylex.props(appStyles.focusScope, xstyle);
   return (
@@ -4830,7 +4835,15 @@ export function LoroAppSidebar({
         }
         desktopFilterAction={sidebarFilterPopover ?? undefined}
         afterSessionListContent={sidebarChatsContent ?? undefined}
-        bottomFloatingContent={sidebarBottomFloatingContent ?? undefined}
+        bottomFloatingContent={
+          sidebarBottomFloatingContent ??
+          (!isMobile && resolvedWorkspaceId ? (
+            <SidebarPromoBannerHost
+              workspaceId={resolvedWorkspaceId}
+              onOpenBilling={handleOpenBillingFromPromo}
+            />
+          ) : undefined)
+        }
         labels={labels}
         sessionListProps={sidebarSessionListProps}
         organizeMode={organizeMode}
