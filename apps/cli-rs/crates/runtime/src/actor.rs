@@ -1,4 +1,4 @@
-use crate::DaemonDependencies;
+use crate::{DaemonDependencies, McpStdioMountBuilder};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use lody_app::McpHttpEndpointConfig;
@@ -11,8 +11,8 @@ use lody_ports::{
     AcpEventSink, AcpInboundEvent, AcpNativeActivity, AcpSessionPort, AcpSpawnSpec,
     AdmittedTurnInput, CustomCommandSpec, DelegatedResultRecord, DiffCaptureScope, HistoryBlock,
     HistoryTurnRecord, InboxCategory, LocalProjectId, McpHttpHeader, McpServerMount,
-    PermissionDecision, PortError, PortErrorKind, PortResult, SessionId, SteerVerdict,
-    SubmissionStage, TurnId, TurnTerminalOutcome, UserId, WorkspaceId, WorktreeLease,
+    McpServerTransport, PermissionDecision, PortError, PortErrorKind, PortResult, SessionId,
+    SteerVerdict, SubmissionStage, TurnId, TurnTerminalOutcome, UserId, WorkspaceId, WorktreeLease,
 };
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -331,6 +331,7 @@ struct SessionActor {
     opts: SessionSpawnOptions,
     deps: Arc<DaemonDependencies>,
     mcp_endpoint: Arc<RwLock<Option<McpHttpEndpointConfig>>>,
+    mcp_stdio_mount_builder: Option<Arc<McpStdioMountBuilder>>,
     acp_start_semaphore: Arc<Semaphore>,
     state: SessionState,
     live_agent: Option<LiveAgentSlot>,
@@ -348,6 +349,7 @@ pub fn spawn_session_actor(
     opts: SessionSpawnOptions,
     deps: Arc<DaemonDependencies>,
     mcp_endpoint: Arc<RwLock<Option<McpHttpEndpointConfig>>>,
+    mcp_stdio_mount_builder: Option<Arc<McpStdioMountBuilder>>,
     acp_start_semaphore: Arc<Semaphore>,
 ) -> SessionHandle {
     let (control_tx, control_rx) = mpsc::channel(64);
@@ -362,6 +364,7 @@ pub fn spawn_session_actor(
         opts,
         deps,
         mcp_endpoint,
+        mcp_stdio_mount_builder,
         acp_start_semaphore,
         state,
         live_agent: None,
@@ -982,38 +985,52 @@ impl SessionActor {
 
     fn build_mcp_mounts(&self, cwd: &std::path::Path) -> Vec<McpServerMount> {
         let ep_opt = self.mcp_endpoint.read().expect("mcp endpoint lock").clone();
-        let Some(ep) = ep_opt else {
-            return Vec::new();
-        };
-        let workdir_b64 = URL_SAFE_NO_PAD.encode(cwd.to_string_lossy().as_bytes());
-        let headers = vec![
-            McpHttpHeader {
-                name: "Authorization".to_string(),
-                value: format!("Bearer {}", ep.token),
-            },
-            McpHttpHeader {
-                name: "x-lody-mcp-session-id".to_string(),
-                value: self.opts.session_id.0.clone(),
-            },
-            McpHttpHeader {
-                name: "x-lody-mcp-workspace-id".to_string(),
-                value: self.opts.workspace_id.0.clone(),
-            },
-            McpHttpHeader {
-                name: "x-lody-mcp-machine-id".to_string(),
-                value: self.deps.machine_id.0.clone(),
-            },
-            McpHttpHeader {
-                name: "x-lody-mcp-workdir-b64".to_string(),
-                value: workdir_b64,
-            },
-        ];
-        vec![McpServerMount {
-            name: "lody".to_string(),
-            transport_url: ep.url,
-            bearer_token: Some(ep.token),
-            headers,
-        }]
+        if let Some(ep) = ep_opt {
+            let workdir_b64 = URL_SAFE_NO_PAD.encode(cwd.to_string_lossy().as_bytes());
+            let headers = vec![
+                McpHttpHeader {
+                    name: "Authorization".to_string(),
+                    value: format!("Bearer {}", ep.token),
+                },
+                McpHttpHeader {
+                    name: "x-lody-mcp-session-id".to_string(),
+                    value: self.opts.session_id.0.clone(),
+                },
+                McpHttpHeader {
+                    name: "x-lody-mcp-workspace-id".to_string(),
+                    value: self.opts.workspace_id.0.clone(),
+                },
+                McpHttpHeader {
+                    name: "x-lody-mcp-machine-id".to_string(),
+                    value: self.deps.machine_id.0.clone(),
+                },
+                McpHttpHeader {
+                    name: "x-lody-mcp-workdir-b64".to_string(),
+                    value: workdir_b64,
+                },
+            ];
+            return vec![McpServerMount {
+                name: "lody".to_string(),
+                transport: McpServerTransport::Http {
+                    url: ep.url,
+                    bearer_token: Some(ep.token),
+                    headers,
+                },
+            }];
+        }
+
+        self.mcp_stdio_mount_builder
+            .as_ref()
+            .and_then(|builder| {
+                builder(
+                    &self.opts.session_id,
+                    &self.opts.workspace_id,
+                    &self.deps.machine_id,
+                    cwd,
+                )
+            })
+            .into_iter()
+            .collect()
     }
 
     async fn execute_single_action(

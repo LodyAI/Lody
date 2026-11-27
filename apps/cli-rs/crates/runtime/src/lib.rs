@@ -11,18 +11,18 @@ pub use actor::{
 use lody_app::{
     AppCommand, AppQuery, AppResponse, ApplicationService, AttachedWorkspaceView, CapabilitySet,
     CustomCommandSpec, DaemonStatusView, HistoryTurnRecord, LocalProjectId, MachineId,
-    McpHttpEndpointConfig, PortError, PortErrorKind, PortResult, ProfileId, ScheduleEditPatch,
-    SessionId, SessionRuntimeStatus, StorageLeaseMode, TerminalEventSink, TurnId, UserId,
-    VerifiedPrincipal, WorkspaceId, WorkspaceSecurityMode, enforce_command_policy,
+    McpHttpEndpointConfig, PortError, PortErrorKind, PortResult, PreparedProjectAdd, ProfileId,
+    ScheduleEditPatch, SessionId, SessionRuntimeStatus, StorageLeaseMode, TerminalEventSink,
+    TurnId, UserId, VerifiedPrincipal, WorkspaceId, WorkspaceSecurityMode, enforce_command_policy,
     enforce_query_policy,
 };
 use lody_kernel::{ChildRejectReason, FrozenTurnInvocation, SessionPhase, TurnSourceKind};
 use lody_ports::{
     AcpLauncherPort, AdmittedTurnInput, ArtifactRegistryPort, BackendPort, DiffStorePort,
-    EnginePort, HistoryPort, InboxCategory, InboxStorePort, MachineIdentityPort, ProjectStorePort,
-    PtyPort, ScheduleLedgerPort, ScheduleProposalInput, ScheduleRepoPort, StorageLeasePort,
-    TerminalOpenSpec, WorktreePort, validate_schedule_identifier, validate_schedule_prompt,
-    validate_schedule_rule, validate_schedule_title,
+    EnginePort, HistoryPort, InboxCategory, InboxStorePort, MachineIdentityPort, McpServerMount,
+    ProjectStorePort, PtyPort, ScheduleLedgerPort, ScheduleProposalInput, ScheduleRepoPort,
+    StorageLeasePort, TerminalOpenSpec, WorktreePort, validate_schedule_identifier,
+    validate_schedule_prompt, validate_schedule_rule, validate_schedule_title,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,8 @@ const DEFAULT_SETTLING_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub type AgentEnvBuilder = dyn Fn(&Path) -> BTreeMap<String, String> + Send + Sync;
 pub type TerminalEnvBuilder = dyn Fn(&str) -> BTreeMap<String, String> + Send + Sync;
+pub type McpStdioMountBuilder =
+    dyn Fn(&SessionId, &WorkspaceId, &MachineId, &Path) -> Option<McpServerMount> + Send + Sync;
 
 pub struct DaemonDependencies {
     pub machine_id: MachineId,
@@ -62,6 +64,7 @@ pub struct DaemonDependencies {
 pub struct DaemonRuntime {
     deps: Arc<DaemonDependencies>,
     mcp_endpoint: Arc<RwLock<Option<McpHttpEndpointConfig>>>,
+    mcp_stdio_mount_builder: Option<Arc<McpStdioMountBuilder>>,
     acp_start_semaphore: Arc<Semaphore>,
     workspaces: RwLock<FleetWorkspaceTable>,
     settling_timeout: Duration,
@@ -108,11 +111,17 @@ impl DaemonRuntime {
         Self {
             deps: Arc::new(deps),
             mcp_endpoint: Arc::new(RwLock::new(None)),
+            mcp_stdio_mount_builder: None,
             acp_start_semaphore: Arc::new(Semaphore::new(max_starts)),
             workspaces: RwLock::new(FleetWorkspaceTable::default()),
             settling_timeout,
             owned_tokio,
         }
+    }
+
+    pub fn with_mcp_stdio_mount_builder(mut self, builder: Arc<McpStdioMountBuilder>) -> Self {
+        self.mcp_stdio_mount_builder = Some(builder);
+        self
     }
 
     pub fn is_connected_composition(&self) -> bool {
@@ -345,6 +354,7 @@ impl DaemonRuntime {
             },
             Arc::clone(&self.deps),
             Arc::clone(&self.mcp_endpoint),
+            self.mcp_stdio_mount_builder.clone(),
             Arc::clone(&self.acp_start_semaphore),
         );
         mount.sessions.insert(session_id.clone(), handle.clone());
@@ -611,6 +621,24 @@ impl DaemonRuntime {
                     rec.git_summary = Some(git_summary);
                 }
                 Ok(AppResponse::ProjectRegistered(rec))
+            }
+            AppCommand::CreateLocalDirectory { parent_path, name } => {
+                let path = self.deps.worktree.create_directory(&parent_path, &name)?;
+                Ok(AppResponse::LocalDirectoryCreated { path })
+            }
+            AppCommand::CheckoutProjectBranch {
+                local_project_id,
+                root_path,
+                branch_name,
+                ..
+            } => {
+                let resolved_root =
+                    self.resolve_project_root_for_query(local_project_id.as_ref(), root_path)?;
+                let out = self
+                    .deps
+                    .worktree
+                    .checkout_branch(&resolved_root, &branch_name);
+                Ok(AppResponse::ProjectBranchCheckedOut(out))
             }
             AppCommand::CreateSession {
                 workspace_id,
@@ -1057,6 +1085,61 @@ impl DaemonRuntime {
                     .get_schedule(&workspace_id, &valid_id)?;
                 Ok(AppResponse::ScheduleRead { schedule })
             }
+            AppQuery::ListWorktreeFiles {
+                workspace_id,
+                repo_key,
+                session_id,
+                max_files,
+            } => {
+                let wt_root = match self.session_handle(&workspace_id, &session_id) {
+                    Some(h) => match h.inspect_workdir().await {
+                        Ok(Some(dir)) => dir,
+                        _ => self
+                            .deps
+                            .worktree
+                            .resolve_session_worktree_path(&repo_key, &session_id)?,
+                    },
+                    None => self
+                        .deps
+                        .worktree
+                        .resolve_session_worktree_path(&repo_key, &session_id)?,
+                };
+                let res = self.deps.worktree.list_project_files(&wt_root, max_files)?;
+                Ok(AppResponse::ProjectFilesListed(res))
+            }
+            AppQuery::ReadWorktreeFile {
+                workspace_id,
+                repo_key,
+                session_id,
+                relative_path,
+                max_bytes,
+            } => {
+                let wt_root_opt = match self.session_handle(&workspace_id, &session_id) {
+                    Some(h) => match h.inspect_workdir().await {
+                        Ok(Some(dir)) => Some(dir),
+                        _ => self
+                            .deps
+                            .worktree
+                            .resolve_session_worktree_path(&repo_key, &session_id)
+                            .ok(),
+                    },
+                    None => self
+                        .deps
+                        .worktree
+                        .resolve_session_worktree_path(&repo_key, &session_id)
+                        .ok(),
+                };
+                let file = match wt_root_opt {
+                    Some(wt_root) => self.deps.worktree.read_project_file(
+                        &wt_root,
+                        &relative_path,
+                        max_bytes,
+                        false,
+                    )?,
+                    None => None,
+                };
+                Ok(AppResponse::ProjectFileRead { file })
+            }
             other => self.query_sync(caller, other),
         }
     }
@@ -1114,6 +1197,44 @@ impl DaemonRuntime {
                 let projects = self.deps.projects.list_projects()?;
                 Ok(AppResponse::ProjectsListed { projects })
             }
+            AppQuery::PrepareProjectAdd { root_path, inspect } => {
+                let (local_project_id, name, canonical_root) =
+                    self.deps.worktree.prepare_project_root(&root_path)?;
+                let already_registered = match self.deps.projects.list_projects() {
+                    Ok(list) => list.iter().any(|p| p.project_id == local_project_id),
+                    Err(err) if err.kind == PortErrorKind::Unavailable => false,
+                    Err(err) => return Err(err),
+                };
+                let inspection =
+                    inspect.then(|| self.deps.worktree.inspect_git_summary(&canonical_root));
+                Ok(AppResponse::ProjectAddPrepared(PreparedProjectAdd {
+                    local_project_id,
+                    name,
+                    root_path: canonical_root.to_string_lossy().into_owned(),
+                    already_registered,
+                    inspection,
+                }))
+            }
+            AppQuery::ListBrowseRoots { home_dir } => {
+                let info = self.deps.worktree.list_browse_roots(&home_dir)?;
+                Ok(AppResponse::BrowseRootsListed(info))
+            }
+            AppQuery::BrowseLocalDirectory {
+                home_dir,
+                browse_query: mut query,
+            } => {
+                if query.registered_projects.is_empty()
+                    && let Ok(projects) = self.deps.projects.list_projects()
+                {
+                    for p in projects {
+                        query
+                            .registered_projects
+                            .insert(p.project_id.0, p.root_path);
+                    }
+                }
+                let page = self.deps.worktree.browse_directory(&home_dir, &query)?;
+                Ok(AppResponse::LocalDirectoryBrowsed(page))
+            }
             AppQuery::InspectProjectGitSummary {
                 local_project_id,
                 root_path,
@@ -1153,6 +1274,114 @@ impl DaemonRuntime {
                     limit,
                 )?;
                 Ok(AppResponse::ProjectFilesSearched(res))
+            }
+            AppQuery::ListProjectFiles {
+                local_project_id,
+                root_path,
+                max_files,
+                ..
+            } => {
+                let resolved_root =
+                    self.resolve_project_root_for_query(local_project_id.as_ref(), root_path)?;
+                let res = self
+                    .deps
+                    .worktree
+                    .list_project_files(&resolved_root, max_files)?;
+                Ok(AppResponse::ProjectFilesListed(res))
+            }
+            AppQuery::ListProjectDirectory {
+                local_project_id,
+                root_path,
+                relative_path,
+                limit,
+                ..
+            } => {
+                let resolved_root =
+                    self.resolve_project_root_for_query(local_project_id.as_ref(), root_path)?;
+                let page = self.deps.worktree.list_project_directory(
+                    &resolved_root,
+                    &relative_path,
+                    limit,
+                )?;
+                Ok(AppResponse::ProjectDirectoryListed(page))
+            }
+            AppQuery::ReadProjectFile {
+                local_project_id,
+                root_path,
+                relative_path,
+                max_bytes,
+                ..
+            } => {
+                let resolved_root =
+                    self.resolve_project_root_for_query(local_project_id.as_ref(), root_path)?;
+                let file = self.deps.worktree.read_project_file(
+                    &resolved_root,
+                    &relative_path,
+                    max_bytes,
+                    true,
+                )?;
+                Ok(AppResponse::ProjectFileRead { file })
+            }
+            AppQuery::ListProjectSkills {
+                local_project_id,
+                root_path,
+                skill_dirs,
+                known_fingerprint,
+                ..
+            } => {
+                let resolved_root =
+                    self.resolve_project_root_for_query(local_project_id.as_ref(), root_path)?;
+                let listing = self.deps.worktree.list_project_skills(
+                    &resolved_root,
+                    &skill_dirs,
+                    known_fingerprint.as_deref(),
+                )?;
+                Ok(AppResponse::ProjectSkillsListed(listing))
+            }
+            AppQuery::ListGlobalSkills {
+                home_dir,
+                known_fingerprint,
+            } => {
+                let listing = self
+                    .deps
+                    .worktree
+                    .list_global_skills(&home_dir, known_fingerprint.as_deref())?;
+                Ok(AppResponse::ProjectSkillsListed(listing))
+            }
+            AppQuery::ListWorktreeFiles {
+                repo_key,
+                session_id,
+                max_files,
+                ..
+            } => {
+                let wt_root = self
+                    .deps
+                    .worktree
+                    .resolve_session_worktree_path(&repo_key, &session_id)?;
+                let res = self.deps.worktree.list_project_files(&wt_root, max_files)?;
+                Ok(AppResponse::ProjectFilesListed(res))
+            }
+            AppQuery::ReadWorktreeFile {
+                repo_key,
+                session_id,
+                relative_path,
+                max_bytes,
+                ..
+            } => {
+                let file = match self
+                    .deps
+                    .worktree
+                    .resolve_session_worktree_path(&repo_key, &session_id)
+                {
+                    Ok(wt_root) => self.deps.worktree.read_project_file(
+                        &wt_root,
+                        &relative_path,
+                        max_bytes,
+                        false,
+                    )?,
+                    Err(_) => None,
+                };
+                Ok(AppResponse::ProjectFileRead { file })
             }
             AppQuery::ListSessions { .. } => Ok(AppResponse::SessionsListed {
                 sessions: Vec::new(),

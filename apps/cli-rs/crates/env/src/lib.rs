@@ -31,6 +31,10 @@ pub mod keys {
     pub const LODY_SERVER_URL: &str = "LODY_SERVER_URL";
     pub const LODY_MCP_HTTP_DISABLED: &str = "LODY_MCP_HTTP_DISABLED";
     pub const LODY_MCP_SOCKET_PATH: &str = "LODY_MCP_SOCKET_PATH";
+    pub const LODY_MCP_SESSION_ID: &str = "LODY_MCP_SESSION_ID";
+    pub const LODY_MCP_WORKSPACE_ID: &str = "LODY_MCP_WORKSPACE_ID";
+    pub const LODY_MCP_MACHINE_ID: &str = "LODY_MCP_MACHINE_ID";
+    pub const LODY_MCP_WORKDIR: &str = "LODY_MCP_WORKDIR";
     pub const LODY_MAX_CONCURRENT_ACP_SESSION_STARTS: &str =
         "LODY_MAX_CONCURRENT_ACP_SESSION_STARTS";
     pub const HTTPS_PROXY: &str = "HTTPS_PROXY";
@@ -130,6 +134,13 @@ impl InstallationPlatform {
         }
     }
 
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Cloud => "cloud",
+        }
+    }
+
     pub fn namespace(self) -> &'static str {
         match self {
             Self::Local => "lody-oss",
@@ -160,6 +171,9 @@ pub struct HostEnv {
     pub mcp_http_disabled: bool,
     pub max_concurrent_acp_starts: usize,
     pub electron_run_as_node: Option<String>,
+    pub auth_url: Option<String>,
+    pub auth_site_url: Option<String>,
+    pub server_url: Option<String>,
     pub https_proxy: Option<String>,
     pub no_proxy: Vec<String>,
     inherited_env: BTreeMap<String, String>,
@@ -229,6 +243,14 @@ impl HostEnv {
             .filter(|&n| n >= 1)
             .unwrap_or(DEFAULT_MAX_CONCURRENT_ACP_SESSION_STARTS);
         let electron_run_as_node = trimmed(keys::ELECTRON_RUN_AS_NODE);
+        let (auth_url, auth_site_url, server_url) = match platform {
+            InstallationPlatform::Local => (None, None, None),
+            InstallationPlatform::Cloud => (
+                trimmed(keys::LODY_AUTH_URL),
+                trimmed(keys::LODY_AUTH_SITE_URL),
+                trimmed(keys::LODY_SERVER_URL),
+            ),
+        };
 
         let https_proxy = trimmed(keys::HTTPS_PROXY)
             .or_else(|| trimmed(keys::HTTPS_PROXY_LOWER))
@@ -286,6 +308,9 @@ impl HostEnv {
             mcp_http_disabled,
             max_concurrent_acp_starts,
             electron_run_as_node,
+            auth_url,
+            auth_site_url,
+            server_url,
             https_proxy,
             no_proxy,
             inherited_env,
@@ -380,6 +405,128 @@ impl HostEnv {
         );
         env
     }
+
+    pub fn mcp_stdio_spawn_env(
+        &self,
+        effective_data_dir: &Path,
+        session_id: &str,
+        workspace_id: &str,
+        machine_id: &str,
+        workdir: &Path,
+        socket_path_override: Option<&Path>,
+    ) -> BTreeMap<String, String> {
+        let mut env = BTreeMap::new();
+        for key in [
+            keys::HOME,
+            keys::USERPROFILE,
+            keys::XDG_STATE_HOME,
+            keys::LOCALAPPDATA,
+        ] {
+            if let Some(val) = self.inherited_env.get(key).filter(|s| !s.trim().is_empty()) {
+                env.insert(key.to_string(), val.clone());
+            }
+        }
+        if let Some(flag) = &self.electron_run_as_node {
+            env.insert(keys::ELECTRON_RUN_AS_NODE.to_string(), flag.clone());
+        }
+        env.insert(
+            keys::LODY_PLATFORM.to_string(),
+            self.platform.as_str().to_string(),
+        );
+        env.insert(
+            keys::LODY_DATA_DIR.to_string(),
+            effective_data_dir.to_string_lossy().into_owned(),
+        );
+        if self.platform == InstallationPlatform::Cloud {
+            if let Some(url) = &self.auth_url {
+                env.insert(keys::LODY_AUTH_URL.to_string(), url.clone());
+            }
+            if let Some(url) = &self.auth_site_url {
+                env.insert(keys::LODY_AUTH_SITE_URL.to_string(), url.clone());
+            }
+            if let Some(url) = &self.server_url {
+                env.insert(keys::LODY_SERVER_URL.to_string(), url.clone());
+            }
+        }
+        if let Some(sock) = socket_path_override {
+            env.insert(
+                keys::LODY_MCP_SOCKET_PATH.to_string(),
+                sock.to_string_lossy().into_owned(),
+            );
+        }
+        env.insert(
+            keys::LODY_MCP_SESSION_ID.to_string(),
+            session_id.to_string(),
+        );
+        env.insert(
+            keys::LODY_MCP_WORKSPACE_ID.to_string(),
+            workspace_id.to_string(),
+        );
+        env.insert(
+            keys::LODY_MCP_MACHINE_ID.to_string(),
+            machine_id.to_string(),
+        );
+        env.insert(
+            keys::LODY_MCP_WORKDIR.to_string(),
+            workdir.to_string_lossy().into_owned(),
+        );
+        apply_loopback_no_proxy(&mut env);
+        env
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpStdioEnv {
+    pub session_id: String,
+    pub workspace_id: String,
+    pub machine_id: String,
+    pub workdir: String,
+    pub socket_path_override: Option<PathBuf>,
+}
+
+impl McpStdioEnv {
+    pub fn from_process() -> Result<Self, String> {
+        let fallback_workdir = std::env::current_dir()
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned());
+        Self::from_lookup(|key| std::env::var(key).ok(), fallback_workdir.as_deref())
+    }
+
+    pub fn from_lookup<F>(lookup: F, fallback_workdir: Option<&str>) -> Result<Self, String>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        let trimmed = |key: &str| {
+            lookup(key)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty() && !v.contains('\0'))
+        };
+
+        let session_id = trimmed(keys::LODY_MCP_SESSION_ID)
+            .or_else(|| trimmed(keys::LODY_SESSION_ID))
+            .ok_or_else(|| format!("missing {}", keys::LODY_MCP_SESSION_ID))?;
+        let workspace_id = trimmed(keys::LODY_MCP_WORKSPACE_ID)
+            .ok_or_else(|| format!("missing {}", keys::LODY_MCP_WORKSPACE_ID))?;
+        let machine_id = trimmed(keys::LODY_MCP_MACHINE_ID)
+            .ok_or_else(|| format!("missing {}", keys::LODY_MCP_MACHINE_ID))?;
+        let workdir = trimmed(keys::LODY_MCP_WORKDIR)
+            .or_else(|| {
+                fallback_workdir
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty() && !s.contains('\0'))
+                    .map(ToOwned::to_owned)
+            })
+            .ok_or_else(|| format!("missing {}", keys::LODY_MCP_WORKDIR))?;
+        let socket_path_override = trimmed(keys::LODY_MCP_SOCKET_PATH).map(PathBuf::from);
+
+        Ok(Self {
+            session_id,
+            workspace_id,
+            machine_id,
+            workdir,
+            socket_path_override,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -402,5 +549,62 @@ impl ConformanceEnv {
             baseline_bin: trimmed(keys::LODY_CONFORMANCE_BASELINE_BIN),
             candidate_bin: trimmed(keys::LODY_CONFORMANCE_CANDIDATE_BIN),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_stdio_env_clears_cloud_endpoints_in_local_mode_and_omits_credentials() {
+        let mut raw = BTreeMap::new();
+        raw.insert(keys::LODY_PLATFORM.to_string(), "local".to_string());
+        raw.insert(keys::HOME.to_string(), "/Users/alice".to_string());
+        raw.insert(
+            keys::LODY_SERVER_URL.to_string(),
+            "https://api.lody.ai".to_string(),
+        );
+        raw.insert(
+            keys::LODY_AUTH_URL.to_string(),
+            "https://auth.lody.ai".to_string(),
+        );
+        raw.insert("GH_TOKEN".to_string(), "ghp_secret".to_string());
+        raw.insert("LODY_CLI_TOKEN".to_string(), "cli_secret".to_string());
+
+        let host_env = HostEnv::from_lookup(|k| raw.get(k).cloned()).unwrap();
+        let child_env = host_env.mcp_stdio_spawn_env(
+            Path::new("/Users/alice/.lody-oss"),
+            "sess-1",
+            "local",
+            "machine-1",
+            Path::new("/Users/alice/repo"),
+            Some(Path::new("/tmp/custom-control.sock")),
+        );
+
+        assert_eq!(
+            child_env.get(keys::LODY_PLATFORM).map(String::as_str),
+            Some("local")
+        );
+        assert!(!child_env.contains_key(keys::LODY_SERVER_URL));
+        assert!(!child_env.contains_key(keys::LODY_AUTH_URL));
+        assert!(!child_env.contains_key("GH_TOKEN"));
+        assert!(!child_env.contains_key("LODY_CLI_TOKEN"));
+        assert_eq!(
+            child_env
+                .get(keys::LODY_MCP_SOCKET_PATH)
+                .map(String::as_str),
+            Some("/tmp/custom-control.sock")
+        );
+
+        let parsed = McpStdioEnv::from_lookup(|k| child_env.get(k).cloned(), None).unwrap();
+        assert_eq!(parsed.session_id, "sess-1");
+        assert_eq!(parsed.workspace_id, "local");
+        assert_eq!(parsed.machine_id, "machine-1");
+        assert_eq!(parsed.workdir, "/Users/alice/repo");
+        assert_eq!(
+            parsed.socket_path_override,
+            Some(PathBuf::from("/tmp/custom-control.sock"))
+        );
     }
 }

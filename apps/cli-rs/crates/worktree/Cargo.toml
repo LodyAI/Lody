@@ -7,11 +7,14 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+base64.workspace = true
 fastcdc.workspace = true
 flate2.workspace = true
 ignore.workspace = true
 lody-ports.workspace = true
 rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 zstd.workspace = true
 

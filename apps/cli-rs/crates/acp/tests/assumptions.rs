@@ -2,14 +2,14 @@ use lody_acp::{ManagedArtifactInstaller, PortablePtyManager, StdioAcpLauncher};
 use lody_ports::{
     AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpNativeActivity, AcpSessionArchiveOutcome,
     AcpSpawnSpec, ArtifactRegistryPort, ManagedArtifactSource, PortErrorKind, PtyPort, SessionId,
-    TERMINAL_MAX_PER_SESSION, TerminalOpenSpec,
+    SteerVerdict, TERMINAL_MAX_PER_SESSION, TerminalOpenSpec,
 };
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn scripted_acp_binary() -> PathBuf {
     let workspace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -181,4 +181,70 @@ fn pty_cap_never_exceeds_max_per_session_and_offline_bundle_rejects_sha256_misma
         pty.close_session_terminals(&sid);
         assert!(pty.list_session_terminals(&sid).is_empty());
     }
+}
+
+#[test]
+fn acknowledged_steer_enforces_three_state_verdict_boundary() {
+    let launcher = StdioAcpLauncher::default();
+    let bin = scripted_acp_binary();
+    let temp = tempfile::tempdir().unwrap();
+
+    let (tx, rx) = mpsc::channel();
+    let spec = AcpSpawnSpec {
+        adapter_id: "custom".to_string(),
+        command: bin,
+        args: Vec::new(),
+        cwd: temp.path().to_path_buf(),
+        env: BTreeMap::new(),
+        mcp_mounts: Vec::new(),
+    };
+    let session = launcher
+        .launch_session(&spec, Arc::new(ChannelSink(tx)))
+        .expect("launch steer session");
+
+    assert_eq!(
+        session.steer("idle-before-turn").unwrap(),
+        SteerVerdict::NotApplied
+    );
+
+    let barrier_dir = temp.path().join("hold-steer");
+    session
+        .send_prompt(&format!("[SCRIPTED:HOLD:{}]", barrier_dir.display()))
+        .expect("start hold turn");
+
+    let entered_path = barrier_dir.join("entered");
+    let wait_deadline = Instant::now() + Duration::from_secs(5);
+    while !entered_path.exists() {
+        assert!(Instant::now() < wait_deadline, "hold turn did not enter");
+        std::thread::yield_now();
+    }
+
+    assert_eq!(
+        session.steer("[SCRIPTED:STEER_REFUSE]").unwrap(),
+        SteerVerdict::NotApplied
+    );
+    assert_eq!(
+        session.steer("[SCRIPTED:STEER_INVALID_REQ]").unwrap(),
+        SteerVerdict::NotApplied
+    );
+    assert_eq!(
+        session.steer("inject-live-guidance").unwrap(),
+        SteerVerdict::Applied
+    );
+
+    let mut saw_steered_chunk = false;
+    while let Ok(ev) = rx.recv_timeout(Duration::from_secs(5)) {
+        if let AcpInboundEvent::MessageChunk { text } = ev
+            && text.contains("Steered: inject-live-guidance")
+        {
+            saw_steered_chunk = true;
+            break;
+        }
+    }
+    assert!(saw_steered_chunk);
+
+    assert_eq!(
+        session.steer("[SCRIPTED:STEER_CRASH]").unwrap(),
+        SteerVerdict::Unknown
+    );
 }

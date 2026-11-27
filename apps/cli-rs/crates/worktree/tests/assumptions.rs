@@ -385,3 +385,144 @@ fn non_worktree_diff_scope_tracks_only_uncommitted_changes_and_branch_queries_pa
             .any(|f| f.relative_path == "session_only_edit.rs")
     );
 }
+
+#[test]
+fn project_fs_enforces_root_containment_atomic_directory_creation_branch_guards_and_skill_fingerprints()
+ {
+    let temp = tempfile::tempdir().unwrap();
+    let outside = temp.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("secret.txt"), "top-secret-outside").unwrap();
+
+    let repo = temp.path().join("fs-repo");
+    init_git_repo(&repo);
+    fs::write(repo.join(".gitignore"), "ignored_secret.env\nbuild/\n").unwrap();
+    fs::write(repo.join("ignored_secret.env"), "SECRET=1\n").unwrap();
+    fs::create_dir_all(repo.join("src")).unwrap();
+    fs::write(repo.join("src/lib.rs"), "pub fn ok() -> u32 { 42 }\n").unwrap();
+    fs::write(repo.join("src/logo.png"), [0x89, b'P', b'N', b'G', 0x0D]).unwrap();
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(outside.join("secret.txt"), repo.join("escape_link.txt"))
+            .unwrap();
+        std::os::unix::fs::symlink(&outside, repo.join("escape_dir")).unwrap();
+    }
+
+    let mgr = GitWorktreeManager::new(temp.path().join("repos"));
+
+    assert!(
+        mgr.read_project_file(&repo, "../outside/secret.txt", 4096, true)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        mgr.read_project_file(&repo, ".git/HEAD", 4096, true)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        mgr.read_project_file(&repo, "ignored_secret.env", 4096, true)
+            .unwrap()
+            .is_none()
+    );
+    #[cfg(unix)]
+    {
+        assert!(
+            mgr.read_project_file(&repo, "escape_link.txt", 4096, true)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            mgr.list_project_directory(&repo, "escape_dir", 100)
+                .is_err()
+        );
+    }
+
+    let png_read = mgr
+        .read_project_file(&repo, "src/logo.png", 4096, true)
+        .unwrap()
+        .expect("read binary image");
+    assert_eq!(png_read.encoding.as_deref(), Some("base64"));
+    assert!(!png_read.truncated);
+
+    let rs_read = mgr
+        .read_project_file(&repo, "src/lib.rs", 10, true)
+        .unwrap()
+        .expect("read truncated rust file");
+    assert_eq!(rs_read.encoding, None);
+    assert!(rs_read.truncated);
+    assert_eq!(rs_read.content.len(), 10);
+
+    let dir_page = mgr.list_project_directory(&repo, "", 100).unwrap();
+    assert!(
+        dir_page
+            .entries
+            .iter()
+            .any(|e| e.name == "src" && e.entry_type == "directory")
+    );
+    assert!(!dir_page.entries.iter().any(|e| e.name == ".git"));
+    assert!(
+        !dir_page
+            .entries
+            .iter()
+            .any(|e| e.name == "ignored_secret.env")
+    );
+    #[cfg(unix)]
+    assert!(!dir_page.entries.iter().any(|e| e.name == "escape_dir"));
+
+    let parent_picker = temp.path().join("picker");
+    fs::create_dir_all(&parent_picker).unwrap();
+    let created = mgr.create_directory(&parent_picker, "new-project").unwrap();
+    assert!(created.is_dir());
+    let dup_err = mgr
+        .create_directory(&parent_picker, "new-project")
+        .unwrap_err();
+    assert_eq!(dup_err.kind, PortErrorKind::Conflict);
+    let traversal_err = mgr.create_directory(&parent_picker, "../evil").unwrap_err();
+    assert_eq!(traversal_err.kind, PortErrorKind::InvalidInput);
+
+    let skill_dir = repo.join(".agents/skills/review");
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: review-skill\ndescription: Code review helper\n---\nAlways check boundaries.\n",
+    )
+    .unwrap();
+
+    let skills_first = mgr
+        .list_project_skills(&repo, &[".agents/skills".to_string()], None)
+        .unwrap();
+    assert_eq!(skills_first.unchanged, None);
+    assert_eq!(skills_first.groups.len(), 1);
+    assert_eq!(skills_first.groups[0].skills[0].name, "review-skill");
+    assert_eq!(
+        skills_first.groups[0].skills[0].content.as_deref(),
+        Some("Always check boundaries.")
+    );
+    let fp = skills_first.content_fingerprint.clone().unwrap();
+    let skills_cached = mgr
+        .list_project_skills(&repo, &[".agents/skills".to_string()], Some(&fp))
+        .unwrap();
+    assert_eq!(skills_cached.unchanged, Some(true));
+    assert!(skills_cached.groups.is_empty());
+
+    let clean_repo = temp.path().join("checkout-repo");
+    init_git_repo(&clean_repo);
+    run_git(&clean_repo, &["branch", "feat/switch-target"]);
+
+    let flag_inject = mgr.checkout_branch(&clean_repo, "--orphan=hacked");
+    assert!(!flag_inject.success);
+
+    fs::write(clean_repo.join("README.md"), "dirty edit\n").unwrap();
+    let dirty_switch = mgr.checkout_branch(&clean_repo, "feat/switch-target");
+    assert!(!dirty_switch.success);
+
+    run_git(&clean_repo, &["checkout", "--", "README.md"]);
+    let ok_switch = mgr.checkout_branch(&clean_repo, "lody:branch:local:feat%2Fswitch-target");
+    assert!(ok_switch.success);
+    assert_eq!(
+        ok_switch.current_branch.as_deref(),
+        Some("feat/switch-target")
+    );
+}

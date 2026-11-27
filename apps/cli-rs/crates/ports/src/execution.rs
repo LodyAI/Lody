@@ -38,11 +38,30 @@ pub struct McpHttpHeader {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpEnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum McpServerTransport {
+    Http {
+        url: String,
+        bearer_token: Option<String>,
+        headers: Vec<McpHttpHeader>,
+    },
+    Stdio {
+        command: PathBuf,
+        args: Vec<String>,
+        env: Vec<McpEnvVar>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerMount {
     pub name: String,
-    pub transport_url: String,
-    pub bearer_token: Option<String>,
-    pub headers: Vec<McpHttpHeader>,
+    pub transport: McpServerTransport,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -231,6 +250,145 @@ pub struct ScannedFileIndex {
     pub estimated_bytes: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedProjectAdd {
+    pub local_project_id: LocalProjectId,
+    pub name: String,
+    pub root_path: String,
+    pub already_registered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inspection: Option<LocalProjectGitSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseRootsInfo {
+    pub platform: String,
+    pub path_separator: String,
+    pub home_dir: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drives: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseDirectoryQuery {
+    pub absolute_path: Option<PathBuf>,
+    pub show_hidden: bool,
+    pub limit: usize,
+    pub cursor: Option<String>,
+    pub registered_projects: BTreeMap<String, PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowseEntryHints {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseDirectoryEntry {
+    pub name: String,
+    pub absolute_path: String,
+    pub is_symlink: bool,
+    pub hidden: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hints: Option<BrowseEntryHints>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registered_project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseDirectoryPage {
+    pub path: String,
+    pub parent_path: Option<String>,
+    pub entries: Vec<BrowseDirectoryEntry>,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectoryChildEntry {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub entry_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectoryListPage {
+    pub entries: Vec<DirectoryChildEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectFileReadResult {
+    pub path: String,
+    pub content: String,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckoutBranchOutcome {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSkillEntry {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    pub relative_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub absolute_path: Option<String>,
+    pub is_symlink: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symlink_target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSkillGroupEntry {
+    pub scope: String,
+    pub dir: String,
+    pub skills: Vec<ProjectSkillEntry>,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped_external_symlinks: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSkillsListing {
+    pub groups: Vec<ProjectSkillGroupEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unchanged: Option<bool>,
+}
+
 pub trait WorktreePort: Send + Sync {
     fn supports_git_worktree(&self) -> bool;
     fn acquire_worktree(
@@ -273,6 +431,90 @@ pub trait WorktreePort: Send + Sync {
             truncated: false,
             estimated_bytes: 2,
         })
+    }
+    fn prepare_project_root(&self, _root: &Path) -> PortResult<(LocalProjectId, String, PathBuf)> {
+        Err(PortError::capability_unavailable("localProjectPrepare"))
+    }
+    fn list_browse_roots(&self, _home_dir: &Path) -> PortResult<BrowseRootsInfo> {
+        Err(PortError::capability_unavailable("localProjectBrowse"))
+    }
+    fn browse_directory(
+        &self,
+        _home_dir: &Path,
+        _query: &BrowseDirectoryQuery,
+    ) -> PortResult<BrowseDirectoryPage> {
+        Err(PortError::capability_unavailable("localProjectBrowse"))
+    }
+    fn create_directory(&self, _parent_path: &Path, _name: &str) -> PortResult<PathBuf> {
+        Err(PortError::capability_unavailable(
+            "localProjectCreateDirectory",
+        ))
+    }
+    fn list_project_files(&self, _root: &Path, _max_files: usize) -> PortResult<FileSearchResult> {
+        Ok(FileSearchResult {
+            paths: Vec::new(),
+            truncated: false,
+        })
+    }
+    fn list_project_directory(
+        &self,
+        _root: &Path,
+        _relative_path: &str,
+        _limit: usize,
+    ) -> PortResult<DirectoryListPage> {
+        Ok(DirectoryListPage {
+            entries: Vec::new(),
+            truncated: false,
+        })
+    }
+    fn read_project_file(
+        &self,
+        _root: &Path,
+        _relative_path: &str,
+        _max_bytes: usize,
+        _allow_binary_images: bool,
+    ) -> PortResult<Option<ProjectFileReadResult>> {
+        Ok(None)
+    }
+    fn checkout_branch(&self, _root: &Path, _branch_name: &str) -> CheckoutBranchOutcome {
+        CheckoutBranchOutcome {
+            success: false,
+            current_branch: None,
+            error: Some("Branch checkout unavailable".to_string()),
+        }
+    }
+    fn list_project_skills(
+        &self,
+        _root: &Path,
+        _skill_dirs: &[String],
+        _known_fingerprint: Option<&str>,
+    ) -> PortResult<ProjectSkillsListing> {
+        Ok(ProjectSkillsListing {
+            groups: Vec::new(),
+            content_fingerprint: None,
+            unchanged: None,
+        })
+    }
+    fn list_global_skills(
+        &self,
+        _home_dir: &Path,
+        _known_fingerprint: Option<&str>,
+    ) -> PortResult<ProjectSkillsListing> {
+        Ok(ProjectSkillsListing {
+            groups: Vec::new(),
+            content_fingerprint: None,
+            unchanged: None,
+        })
+    }
+    fn resolve_session_worktree_path(
+        &self,
+        _repo_key: &str,
+        _session_id: &SessionId,
+    ) -> PortResult<PathBuf> {
+        Err(PortError::new(
+            PortErrorKind::NotFound,
+            "Session worktree path not found.",
+        ))
     }
 }
 

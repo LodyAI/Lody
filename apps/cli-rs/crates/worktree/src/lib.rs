@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod git_meta;
+pub mod project_fs;
 pub mod scan;
 pub mod turn_diff;
 
@@ -9,8 +10,18 @@ pub use git_meta::{
     score_local_project_file_path, search_project_files,
 };
 use lody_ports::{
-    BranchListPage, BranchListQuery, FileSearchResult, LocalProjectGitSummary, LocalProjectId,
-    PortError, PortErrorKind, PortResult, ScannedFileIndex, SessionId, WorktreeLease, WorktreePort,
+    BranchListPage, BranchListQuery, BrowseDirectoryPage, BrowseDirectoryQuery, BrowseRootsInfo,
+    CheckoutBranchOutcome, DirectoryListPage, FileSearchResult, LocalProjectGitSummary,
+    LocalProjectId, PortError, PortErrorKind, PortResult, ProjectFileReadResult,
+    ProjectSkillsListing, ScannedFileIndex, SessionId, WorktreeLease, WorktreePort,
+};
+pub use project_fs::{
+    DEFAULT_BROWSE_DIR_LIMIT, DEFAULT_LIST_DIR_LIMIT, DEFAULT_PROJECT_MAX_FILES,
+    DEFAULT_READ_FILE_MAX_BYTES, HARD_BROWSE_DIR_LIMIT, HARD_LIST_DIR_LIMIT,
+    HARD_PROJECT_MAX_FILES, HARD_READ_FILE_MAX_BYTES, browse_directory, checkout_branch,
+    create_directory, list_browse_roots, list_global_skills, list_project_directory,
+    list_project_files, list_project_skills, prepare_project_root, read_project_file,
+    resolve_session_worktree_path, validate_directory_name,
 };
 pub use scan::{
     CODE_COLLAB_IGNORED_DIRECTORY_NAMES, CODE_COLLAB_MAX_INDEX_BYTES,
@@ -236,5 +247,77 @@ impl WorktreePort for GitWorktreeManager {
             CODE_COLLAB_MAX_INDEX_ENTRIES,
             CODE_COLLAB_MAX_INDEX_BYTES,
         )
+    }
+
+    fn prepare_project_root(&self, root: &Path) -> PortResult<(LocalProjectId, String, PathBuf)> {
+        prepare_project_root(root)
+    }
+
+    fn list_browse_roots(&self, home_dir: &Path) -> PortResult<BrowseRootsInfo> {
+        list_browse_roots(home_dir)
+    }
+
+    fn browse_directory(
+        &self,
+        home_dir: &Path,
+        query: &BrowseDirectoryQuery,
+    ) -> PortResult<BrowseDirectoryPage> {
+        browse_directory(home_dir, query)
+    }
+
+    fn create_directory(&self, parent_path: &Path, name: &str) -> PortResult<PathBuf> {
+        create_directory(parent_path, name)
+    }
+
+    fn list_project_files(&self, root: &Path, max_files: usize) -> PortResult<FileSearchResult> {
+        list_project_files(root, max_files)
+    }
+
+    fn list_project_directory(
+        &self,
+        root: &Path,
+        relative_path: &str,
+        limit: usize,
+    ) -> PortResult<DirectoryListPage> {
+        list_project_directory(root, relative_path, limit)
+    }
+
+    fn read_project_file(
+        &self,
+        root: &Path,
+        relative_path: &str,
+        max_bytes: usize,
+        allow_binary_images: bool,
+    ) -> PortResult<Option<ProjectFileReadResult>> {
+        read_project_file(root, relative_path, max_bytes, allow_binary_images)
+    }
+
+    fn checkout_branch(&self, root: &Path, branch_name: &str) -> CheckoutBranchOutcome {
+        checkout_branch(root, branch_name)
+    }
+
+    fn list_project_skills(
+        &self,
+        root: &Path,
+        skill_dirs: &[String],
+        known_fingerprint: Option<&str>,
+    ) -> PortResult<ProjectSkillsListing> {
+        list_project_skills(root, skill_dirs, known_fingerprint)
+    }
+
+    fn list_global_skills(
+        &self,
+        home_dir: &Path,
+        known_fingerprint: Option<&str>,
+    ) -> PortResult<ProjectSkillsListing> {
+        list_global_skills(home_dir, known_fingerprint)
+    }
+
+    fn resolve_session_worktree_path(
+        &self,
+        repo_key: &str,
+        session_id: &SessionId,
+    ) -> PortResult<PathBuf> {
+        resolve_session_worktree_path(&self.repos_root, repo_key, session_id)
     }
 }

@@ -4,14 +4,16 @@ use lody_acp::{ManagedArtifactInstaller, PortablePtyManager, StdioAcpLauncher};
 use lody_app::ApplicationService;
 use lody_engine::{EngineScheduleRepo, FlockProjectStore, RepoEngineClient, RoostHistoryStore};
 use lody_entry::{
-    DispatchPlan, OneShotAction, execute_offline_oneshot, format_restore_machine_id_error,
-    format_restore_machine_id_output, parse_cli_args, probe_live_daemon, serve_local_daemon,
-    start_daemon_detached, stop_running_daemon, try_execute_via_live_daemon,
+    DispatchPlan, McpRequestContext, OneShotAction, execute_offline_oneshot,
+    format_restore_machine_id_error, format_restore_machine_id_output, parse_cli_args,
+    probe_live_daemon, run_mcp_stdio_bridge, serve_local_daemon, start_daemon_detached,
+    stop_running_daemon, try_execute_via_live_daemon,
 };
-use lody_env::HostEnv;
+use lody_env::{HostEnv, McpStdioEnv};
 use lody_ports::{
-    BackendPort, MachineIdentityPort, ManagedArtifactSource, PortErrorKind, PortResult,
-    ScheduleLedgerPort, ScheduleRepoPort, StorageLeaseMode, StorageLeasePort,
+    BackendPort, MachineIdentityPort, ManagedArtifactSource, McpEnvVar, McpServerMount,
+    McpServerTransport, PortErrorKind, PortResult, ScheduleLedgerPort, ScheduleRepoPort, SessionId,
+    StorageLeaseMode, StorageLeasePort, WorkspaceId,
 };
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
 use lody_sqlite::{
@@ -113,8 +115,11 @@ fn compose_runtime(
         .unwrap_or_else(|| effective_data_dir.clone());
     let shell_command = host_env.shell_command();
     let current_exe = std::env::current_exe().ok();
+    let exe_for_mcp = current_exe.clone();
     let env_for_agents = host_env.clone();
     let env_for_terminals = host_env.clone();
+    let env_for_mcp_stdio = host_env.clone();
+    let data_dir_for_mcp = effective_data_dir.clone();
 
     let diff_store = Arc::new(LocalTurnDiffStore::new(&effective_data_dir));
     let layout = SqliteDataLayout::with_machine_id(&effective_data_dir, machine_id.0.clone());
@@ -122,7 +127,7 @@ fn compose_runtime(
         as Arc<dyn ScheduleLedgerPort>;
     let sqlite = Arc::new(SqliteStore::open(layout)?);
 
-    Ok(DaemonRuntime::new(DaemonDependencies {
+    let mut runtime = DaemonRuntime::new(DaemonDependencies {
         machine_id,
         identity: identity_store as Arc<dyn MachineIdentityPort>,
         default_cwd,
@@ -148,7 +153,34 @@ fn compose_runtime(
         pty: Arc::new(PortablePtyManager::new()),
         worktree: Arc::new(GitWorktreeManager::new(repos_root)),
         backend,
-    }))
+    });
+
+    if let Some(exe) = exe_for_mcp {
+        runtime = runtime.with_mcp_stdio_mount_builder(Arc::new(move |sid, ws, mid, cwd| {
+            let env_map = env_for_mcp_stdio.mcp_stdio_spawn_env(
+                &data_dir_for_mcp,
+                &sid.0,
+                &ws.0,
+                &mid.0,
+                cwd,
+                None,
+            );
+            let env_vec: Vec<McpEnvVar> = env_map
+                .into_iter()
+                .map(|(name, value)| McpEnvVar { name, value })
+                .collect();
+            Some(McpServerMount {
+                name: "lody".to_string(),
+                transport: McpServerTransport::Stdio {
+                    command: exe.clone(),
+                    args: vec!["mcp-stdio".to_string()],
+                    env: env_vec,
+                },
+            })
+        }));
+    }
+
+    Ok(runtime)
 }
 
 fn main() -> ExitCode {
@@ -264,6 +296,32 @@ fn main() -> ExitCode {
                     } else {
                         eprintln!("{rendered}");
                     }
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        DispatchPlan::OneShot(OneShotAction::McpStdio) => {
+            let mcp_env = match McpStdioEnv::from_process() {
+                Ok(env) => env,
+                Err(err) => {
+                    eprintln!("{err}");
+                    return ExitCode::from(2);
+                }
+            };
+            let ctx = McpRequestContext {
+                session_id: SessionId(mcp_env.session_id),
+                workspace_id: WorkspaceId(mcp_env.workspace_id),
+                machine_id: mcp_env.machine_id,
+                workdir: mcp_env.workdir,
+            };
+            match run_mcp_stdio_bridge(
+                &effective_data_dir,
+                mcp_env.socket_path_override.as_deref(),
+                &ctx,
+            ) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("{err}");
                     ExitCode::FAILURE
                 }
             }

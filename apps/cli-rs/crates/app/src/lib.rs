@@ -1,16 +1,20 @@
 #![forbid(unsafe_code)]
 
 pub use lody_ports::{
-    AnchorSyncStatus, BackendProfile, BranchListPage, BranchListQuery, CapabilitySet,
-    CustomCommandSpec, DiffCaptureScope, DiffFileEntry, EntitlementStatus, FileSearchResult,
-    HistoryBlock, HistoryTurnRecord, LocalProjectGitSummary, LocalProjectId, LocalProjectRecord,
-    MAX_SCHEDULE_PROMPT_BYTES, MachineId, MachineIdentityRestoreOutcome, McpHttpHeader,
-    PermissionDecision, PlatformCapability, PortError, PortErrorKind, PortResult, ProfileId,
-    ScannedFileEntry, ScannedFileIndex, ScheduleEditPatch, ScheduleProposalOutcome, ScheduleRecord,
-    SessionId, SessionMetaSnapshot, SteerVerdict, StorageLeaseMode, TERMINAL_MAX_PER_SESSION,
-    TerminalAttachReplay, TerminalEventSink, TerminalOpenOutcome, TerminalOutboundEvent,
-    TerminalSnapshot, TurnDiffSummary, TurnId, TurnTerminalOutcome, UserId, VerifiedPrincipal,
-    WorkspaceId, WorkspaceSecurityMode,
+    AnchorSyncStatus, BackendProfile, BranchListPage, BranchListQuery, BrowseDirectoryEntry,
+    BrowseDirectoryPage, BrowseDirectoryQuery, BrowseEntryHints, BrowseRootsInfo, CapabilitySet,
+    CheckoutBranchOutcome, CustomCommandSpec, DiffCaptureScope, DiffFileEntry, DirectoryChildEntry,
+    DirectoryListPage, EntitlementStatus, FileSearchResult, HistoryBlock, HistoryTurnRecord,
+    LocalProjectGitSummary, LocalProjectId, LocalProjectRecord, MAX_SCHEDULE_PROMPT_BYTES,
+    MachineId, MachineIdentityRestoreOutcome, McpEnvVar, McpHttpHeader, McpServerMount,
+    McpServerTransport, PermissionDecision, PlatformCapability, PortError, PortErrorKind,
+    PortResult, PreparedProjectAdd, ProfileId, ProjectFileReadResult, ProjectSkillEntry,
+    ProjectSkillGroupEntry, ProjectSkillsListing, ScannedFileEntry, ScannedFileIndex,
+    ScheduleEditPatch, ScheduleProposalOutcome, ScheduleRecord, SessionId, SessionMetaSnapshot,
+    SteerVerdict, StorageLeaseMode, TERMINAL_MAX_PER_SESSION, TerminalAttachReplay,
+    TerminalEventSink, TerminalOpenOutcome, TerminalOutboundEvent, TerminalSnapshot,
+    TurnDiffSummary, TurnId, TurnTerminalOutcome, UserId, VerifiedPrincipal, WorkspaceId,
+    WorkspaceSecurityMode,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -53,6 +57,16 @@ pub enum AppCommand {
     RegisterProject {
         name: String,
         root_path: PathBuf,
+    },
+    CreateLocalDirectory {
+        parent_path: PathBuf,
+        name: String,
+    },
+    CheckoutProjectBranch {
+        workspace_id: WorkspaceId,
+        local_project_id: Option<LocalProjectId>,
+        root_path: Option<PathBuf>,
+        branch_name: String,
     },
     CreateSession {
         workspace_id: WorkspaceId,
@@ -164,11 +178,13 @@ impl AppCommand {
             | Self::ArchiveSession { workspace_id, .. }
             | Self::ProposeSchedule { workspace_id, .. }
             | Self::ProposeScheduleEdit { workspace_id, .. }
-            | Self::PauseSchedule { workspace_id, .. } => Some(workspace_id),
+            | Self::PauseSchedule { workspace_id, .. }
+            | Self::CheckoutProjectBranch { workspace_id, .. } => Some(workspace_id),
             Self::ConfigureBackendProfile { .. }
             | Self::ClearBackendProfile
             | Self::RestoreMachineId { .. }
             | Self::RegisterProject { .. }
+            | Self::CreateLocalDirectory { .. }
             | Self::TerminalOpen { .. }
             | Self::TerminalAttach { .. }
             | Self::TerminalInput { .. }
@@ -187,6 +203,8 @@ impl AppCommand {
                 | Self::AttachWorkspace { .. }
                 | Self::DetachWorkspace { .. }
                 | Self::RegisterProject { .. }
+                | Self::CreateLocalDirectory { .. }
+                | Self::CheckoutProjectBranch { .. }
                 | Self::TerminalOpen { .. }
                 | Self::TerminalAttach { .. }
                 | Self::TerminalInput { .. }
@@ -217,6 +235,17 @@ pub enum AppQuery {
     MachineIdentity,
     ListAttachedWorkspaces,
     ListProjects,
+    PrepareProjectAdd {
+        root_path: PathBuf,
+        inspect: bool,
+    },
+    ListBrowseRoots {
+        home_dir: PathBuf,
+    },
+    BrowseLocalDirectory {
+        home_dir: PathBuf,
+        browse_query: BrowseDirectoryQuery,
+    },
     InspectProjectGitSummary {
         workspace_id: WorkspaceId,
         local_project_id: Option<LocalProjectId>,
@@ -234,6 +263,50 @@ pub enum AppQuery {
         root_path: Option<PathBuf>,
         search_query: String,
         limit: usize,
+    },
+    ListProjectFiles {
+        workspace_id: WorkspaceId,
+        local_project_id: Option<LocalProjectId>,
+        root_path: Option<PathBuf>,
+        max_files: usize,
+    },
+    ListProjectDirectory {
+        workspace_id: WorkspaceId,
+        local_project_id: Option<LocalProjectId>,
+        root_path: Option<PathBuf>,
+        relative_path: String,
+        limit: usize,
+    },
+    ReadProjectFile {
+        workspace_id: WorkspaceId,
+        local_project_id: Option<LocalProjectId>,
+        root_path: Option<PathBuf>,
+        relative_path: String,
+        max_bytes: usize,
+    },
+    ListProjectSkills {
+        workspace_id: WorkspaceId,
+        local_project_id: Option<LocalProjectId>,
+        root_path: Option<PathBuf>,
+        skill_dirs: Vec<String>,
+        known_fingerprint: Option<String>,
+    },
+    ListGlobalSkills {
+        home_dir: PathBuf,
+        known_fingerprint: Option<String>,
+    },
+    ListWorktreeFiles {
+        workspace_id: WorkspaceId,
+        repo_key: String,
+        session_id: SessionId,
+        max_files: usize,
+    },
+    ReadWorktreeFile {
+        workspace_id: WorkspaceId,
+        repo_key: String,
+        session_id: SessionId,
+        relative_path: String,
+        max_bytes: usize,
     },
     ListSessions {
         workspace_id: WorkspaceId,
@@ -277,6 +350,12 @@ impl AppQuery {
             Self::InspectProjectGitSummary { workspace_id, .. }
             | Self::ListProjectBranches { workspace_id, .. }
             | Self::SearchProjectFiles { workspace_id, .. }
+            | Self::ListProjectFiles { workspace_id, .. }
+            | Self::ListProjectDirectory { workspace_id, .. }
+            | Self::ReadProjectFile { workspace_id, .. }
+            | Self::ListProjectSkills { workspace_id, .. }
+            | Self::ListWorktreeFiles { workspace_id, .. }
+            | Self::ReadWorktreeFile { workspace_id, .. }
             | Self::ListSessions { workspace_id }
             | Self::GetSessionStatuses { workspace_id, .. }
             | Self::GetSessionHistory { workspace_id, .. }
@@ -287,6 +366,10 @@ impl AppQuery {
             | Self::MachineIdentity
             | Self::ListAttachedWorkspaces
             | Self::ListProjects
+            | Self::PrepareProjectAdd { .. }
+            | Self::ListBrowseRoots { .. }
+            | Self::BrowseLocalDirectory { .. }
+            | Self::ListGlobalSkills { .. }
             | Self::ScanProjectFiles { .. }
             | Self::ListTerminals { .. } => None,
         }
@@ -331,12 +414,25 @@ pub enum AppResponse {
         workspaces: Vec<AttachedWorkspaceView>,
     },
     ProjectRegistered(LocalProjectRecord),
+    ProjectAddPrepared(PreparedProjectAdd),
+    BrowseRootsListed(BrowseRootsInfo),
+    LocalDirectoryBrowsed(BrowseDirectoryPage),
+    LocalDirectoryCreated {
+        path: PathBuf,
+    },
     ProjectsListed {
         projects: Vec<LocalProjectRecord>,
     },
     ProjectGitSummary(LocalProjectGitSummary),
     ProjectBranchesListed(BranchListPage),
+    ProjectBranchCheckedOut(CheckoutBranchOutcome),
     ProjectFilesSearched(FileSearchResult),
+    ProjectFilesListed(FileSearchResult),
+    ProjectDirectoryListed(DirectoryListPage),
+    ProjectFileRead {
+        file: Option<ProjectFileReadResult>,
+    },
+    ProjectSkillsListed(ProjectSkillsListing),
     SessionAccepted {
         session_id: SessionId,
         turn_id: TurnId,
@@ -479,6 +575,15 @@ pub fn enforce_query_policy(caller: &VerifiedPrincipal, query: &AppQuery) -> Por
         }
 
         match query {
+            AppQuery::PrepareProjectAdd { .. }
+            | AppQuery::ListBrowseRoots { .. }
+            | AppQuery::BrowseLocalDirectory { .. }
+            | AppQuery::ListGlobalSkills { .. } => {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "host filesystem browse queries require local host or workspace member authority",
+                ));
+            }
             AppQuery::ListSchedules {
                 invoking_session_id,
                 ..

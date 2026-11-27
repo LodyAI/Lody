@@ -26,11 +26,41 @@ pub const MCP_HTTP_WORKSPACE_ID_HEADER: &str = "x-lody-mcp-workspace-id";
 pub const MCP_HTTP_MACHINE_ID_HEADER: &str = "x-lody-mcp-machine-id";
 pub const MCP_HTTP_WORKDIR_B64_HEADER: &str = "x-lody-mcp-workdir-b64";
 
-struct McpHttpServerState {
+pub struct McpDispatcher {
     service: Arc<dyn ApplicationService>,
-    token: String,
     version: String,
     next_seq: AtomicU64,
+}
+
+impl McpDispatcher {
+    pub fn new(service: Arc<dyn ApplicationService>, version: &str) -> Self {
+        Self {
+            service,
+            version: version.to_string(),
+            next_seq: AtomicU64::new(1),
+        }
+    }
+
+    pub async fn dispatch_jsonrpc(&self, ctx: &McpRequestContext, parsed: Value) -> Option<Value> {
+        if let Some(batch) = parsed.as_array() {
+            let mut replies = Vec::new();
+            for item in batch {
+                if let Some(r) = process_single_jsonrpc(self, ctx, item.clone()).await {
+                    replies.push(r);
+                }
+            }
+            if replies.is_empty() {
+                return None;
+            }
+            return Some(Value::Array(replies));
+        }
+        process_single_jsonrpc(self, ctx, parsed).await
+    }
+}
+
+struct McpHttpServerState {
+    dispatcher: Arc<McpDispatcher>,
+    token: String,
 }
 
 #[derive(Debug, Clone)]
@@ -184,6 +214,25 @@ fn decode_workdir_b64(encoded: &str) -> Option<String> {
         .ok()?;
     let decoded = String::from_utf8(bytes).ok()?;
     (!decoded.is_empty() && !decoded.contains('\0')).then_some(decoded)
+}
+
+pub fn encode_mcp_context_headers(ctx: &McpRequestContext) -> Vec<(String, String)> {
+    let workdir_b64 = URL_SAFE_NO_PAD.encode(ctx.workdir.as_bytes());
+    vec![
+        (
+            MCP_HTTP_SESSION_ID_HEADER.to_string(),
+            ctx.session_id.0.clone(),
+        ),
+        (
+            MCP_HTTP_WORKSPACE_ID_HEADER.to_string(),
+            ctx.workspace_id.0.clone(),
+        ),
+        (
+            MCP_HTTP_MACHINE_ID_HEADER.to_string(),
+            ctx.machine_id.clone(),
+        ),
+        (MCP_HTTP_WORKDIR_B64_HEADER.to_string(), workdir_b64),
+    ]
 }
 
 pub fn parse_mcp_context_headers(headers: &HeaderMap) -> Option<McpRequestContext> {
@@ -374,7 +423,7 @@ fn mcp_error_code(kind: PortErrorKind) -> &'static str {
 }
 
 async fn execute_tool_call(
-    st: &Arc<McpHttpServerState>,
+    st: &McpDispatcher,
     ctx: &McpRequestContext,
     tool_name: &str,
     args: &Value,
@@ -844,7 +893,7 @@ async fn execute_tool_call(
 }
 
 async fn process_single_jsonrpc(
-    st: &Arc<McpHttpServerState>,
+    st: &McpDispatcher,
     ctx: &McpRequestContext,
     req: Value,
 ) -> Option<Value> {
@@ -966,20 +1015,7 @@ async fn handle_mcp_endpoint(
         return jsonrpc_http_error(StatusCode::BAD_REQUEST, -32700, "Parse error", false);
     };
 
-    if let Some(batch) = parsed.as_array() {
-        let mut replies = Vec::new();
-        for item in batch {
-            if let Some(r) = process_single_jsonrpc(&st, &ctx, item.clone()).await {
-                replies.push(r);
-            }
-        }
-        if replies.is_empty() {
-            return StatusCode::ACCEPTED.into_response();
-        }
-        return (StatusCode::OK, Json(Value::Array(replies))).into_response();
-    }
-
-    match process_single_jsonrpc(&st, &ctx, parsed).await {
+    match st.dispatcher.dispatch_jsonrpc(&ctx, parsed).await {
         Some(reply) => (StatusCode::OK, Json(reply)).into_response(),
         None => StatusCode::ACCEPTED.into_response(),
     }
@@ -1014,10 +1050,8 @@ pub async fn start_mcp_http_server(
     service.set_mcp_http_endpoint(endpoint.clone());
 
     let state = Arc::new(McpHttpServerState {
-        service,
+        dispatcher: Arc::new(McpDispatcher::new(service, version)),
         token,
-        version: version.to_string(),
-        next_seq: AtomicU64::new(1),
     });
 
     let app = Router::new()

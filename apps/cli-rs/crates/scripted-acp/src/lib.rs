@@ -251,6 +251,7 @@ where
     let cancel_flags: Arc<Mutex<HashMap<String, bool>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let (req_tx, req_rx) = mpsc::channel::<Value>();
+    let (steer_tx, steer_rx) = mpsc::channel::<Value>();
     let replies_for_reader = Arc::clone(&pending_client_replies);
     let cancels_for_reader = Arc::clone(&cancel_flags);
     let recorder_for_reader = Arc::clone(&recorder);
@@ -304,6 +305,10 @@ where
                 }
                 continue;
             }
+            if method == "_lody/session/steer" || method == "_session/steering" {
+                let _ = steer_tx.send(msg);
+                continue;
+            }
             if req_tx.send(msg).is_err() {
                 break;
             }
@@ -314,6 +319,7 @@ where
     let mut outbound_req_seq = 0usize;
     let exit_code = process_requests(
         req_rx,
+        &steer_rx,
         &writer,
         &sessions,
         &pending_client_replies,
@@ -329,6 +335,7 @@ where
 #[allow(clippy::too_many_arguments)]
 fn process_requests<W: Write>(
     req_rx: Receiver<Value>,
+    steer_rx: &Receiver<Value>,
     writer: &Arc<Mutex<W>>,
     sessions: &Arc<Mutex<HashMap<String, SessionState>>>,
     pending_client_replies: &Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>,
@@ -339,6 +346,11 @@ fn process_requests<W: Write>(
     outbound_req_seq: &mut usize,
 ) -> io::Result<i32> {
     while let Ok(msg) = req_rx.recv() {
+        while let Ok(stale_steer) = steer_rx.try_recv() {
+            if let Some(steer_id_val) = stale_steer.get("id") {
+                send_error(writer, steer_id_val, -32600, "No active turn to steer")?;
+            }
+        }
         if let Some(ack_id) = msg.get("__cancel_ack_id") {
             send_json(
                 writer,
@@ -380,7 +392,13 @@ fn process_requests<W: Write>(
                                 "_meta": {
                                     "lody": {
                                         "sessionArchive": { "version": 1, "mode": "native" },
-                                        "sessionActivity": { "version": 1 }
+                                        "sessionActivity": { "version": 1 },
+                                        "steering": {
+                                            "version": 1,
+                                            "transport": "request",
+                                            "upstreamTurn": "same",
+                                            "configPolicy": "active"
+                                        }
                                     }
                                 }
                             },
@@ -812,8 +830,18 @@ fn process_requests<W: Write>(
                         emit_text_chunk(writer, &session_id, "Hold started.")?;
                         fs::write(barrier_dir.join("entered"), session_id.as_bytes())?;
                         let release_path = barrier_dir.join("release");
-                        let stop_reason =
-                            wait_for_release_or_cancel(&release_path, cancel_flags, &session_id);
+                        let hold_outcome = wait_for_release_or_cancel(
+                            &release_path,
+                            cancel_flags,
+                            steer_rx,
+                            writer,
+                            recorder,
+                            pid,
+                            &session_id,
+                        )?;
+                        let Some(stop_reason) = hold_outcome else {
+                            return Ok(1);
+                        };
                         if stop_reason == "end_turn" {
                             let suffix = fs::read_to_string(&release_path).unwrap_or_default();
                             let reply = if suffix.trim().is_empty() {
@@ -881,11 +909,15 @@ fn wait_for_permission_or_cancel(
     }
 }
 
-fn wait_for_release_or_cancel(
+fn wait_for_release_or_cancel<W: Write>(
     release_path: &Path,
     cancel_flags: &Arc<Mutex<HashMap<String, bool>>>,
+    steer_rx: &Receiver<Value>,
+    writer: &Arc<Mutex<W>>,
+    recorder: &Arc<EventRecorder>,
+    pid: u32,
     session_id: &str,
-) -> &'static str {
+) -> io::Result<Option<&'static str>> {
     loop {
         if cancel_flags
             .lock()
@@ -894,10 +926,96 @@ fn wait_for_release_or_cancel(
             .copied()
             .unwrap_or(false)
         {
-            return "cancelled";
+            return Ok(Some("cancelled"));
+        }
+        while let Ok(steer_msg) = steer_rx.try_recv() {
+            let Some(req_id) = steer_msg.get("id").cloned() else {
+                continue;
+            };
+            let params = steer_msg
+                .get("params")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let steer_sid = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let steer_id = params
+                .get("steerId")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let text = extract_prompt_text(&params);
+
+            if steer_sid != session_id || text.contains("[SCRIPTED:STEER_INVALID_REQ]") {
+                send_error(writer, &req_id, -32600, "No active turn to steer")?;
+                continue;
+            }
+            if text.contains("[SCRIPTED:STEER_REFUSE]") {
+                recorder.record(RecordedAcpEvent {
+                    pid,
+                    event: "session-steer".to_string(),
+                    session_id: Some(session_id.to_string()),
+                    mode: Some("steer".to_string()),
+                    marker: extract_marker(&text),
+                    outcome: Some("failed".to_string()),
+                    stop_reason: None,
+                });
+                send_json(
+                    writer,
+                    &json!({
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "result": { "outcome": "failed" }
+                    }),
+                )?;
+                continue;
+            }
+            if text.contains("[SCRIPTED:STEER_CRASH]") {
+                recorder.record(RecordedAcpEvent {
+                    pid,
+                    event: "session-steer-crash".to_string(),
+                    session_id: Some(session_id.to_string()),
+                    mode: Some("steer".to_string()),
+                    marker: extract_marker(&text),
+                    outcome: Some("crash".to_string()),
+                    stop_reason: None,
+                });
+                return Ok(None);
+            }
+
+            send_json(
+                writer,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "_lody/session/steer_applied",
+                    "params": {
+                        "sessionId": session_id,
+                        "steerId": steer_id,
+                    }
+                }),
+            )?;
+            emit_text_chunk(writer, session_id, &format!("Steered: {}", text.trim()))?;
+            recorder.record(RecordedAcpEvent {
+                pid,
+                event: "session-steer".to_string(),
+                session_id: Some(session_id.to_string()),
+                mode: Some("steer".to_string()),
+                marker: extract_marker(&text),
+                outcome: Some("injected".to_string()),
+                stop_reason: None,
+            });
+            send_json(
+                writer,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": { "outcome": "injected" }
+                }),
+            )?;
         }
         if release_path.exists() {
-            return "end_turn";
+            return Ok(Some("end_turn"));
         }
         thread::sleep(Duration::from_millis(15));
     }
@@ -949,9 +1067,134 @@ fn send_error<W: Write>(
     )
 }
 
+fn parse_mcp_rpc_result(rpc_json: &Value) -> String {
+    let is_err = rpc_json
+        .get("result")
+        .and_then(|r| r.get("isError"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let text = rpc_json
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(|c| c.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if is_err {
+        format!("rejected:{text}")
+    } else {
+        format!("accepted:{text}")
+    }
+}
+
+fn invoke_stdio_mcp_tool(mcp_entry: &Value, tool_name: &str, tool_args: Value) -> String {
+    use std::io::BufReader;
+    use std::process::{Command, Stdio};
+
+    let Some(cmd_str) = mcp_entry.get("command").and_then(Value::as_str) else {
+        return "err:missing_command".to_string();
+    };
+    let mut cmd = Command::new(cmd_str);
+    if let Some(args) = mcp_entry.get("args").and_then(Value::as_array) {
+        for arg in args.iter().filter_map(Value::as_str) {
+            cmd.arg(arg);
+        }
+    }
+    cmd.env_clear();
+    if let Some(envs) = mcp_entry.get("env").and_then(Value::as_array) {
+        for entry in envs {
+            if let (Some(k), Some(v)) = (
+                entry.get("name").and_then(Value::as_str),
+                entry.get("value").and_then(Value::as_str),
+            ) {
+                cmd.env(k, v);
+            }
+        }
+    }
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    let Ok(mut child) = cmd.spawn() else {
+        return "err:stdio_spawn_failed".to_string();
+    };
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return "err:stdio_missing_stdin".to_string();
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return "err:stdio_missing_stdout".to_string();
+    };
+
+    let frames = [
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": { "protocolVersion": "2025-03-26" }
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": tool_args,
+            }
+        }),
+    ];
+    for frame in &frames {
+        let Ok(line) = serde_json::to_string(frame) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return "err:stdio_serialize".to_string();
+        };
+        if writeln!(stdin, "{line}").is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return "err:stdio_write_failed".to_string();
+        }
+    }
+    let _ = stdin.flush();
+    drop(stdin);
+
+    let reader = BufReader::new(stdout);
+    let mut call_reply = None;
+    for line in reader.lines().map_while(Result::ok) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed)
+            && parsed.get("id").and_then(Value::as_u64) == Some(2)
+        {
+            call_reply = Some(parsed);
+            break;
+        }
+    }
+    let _ = child.wait();
+
+    match call_reply {
+        Some(rpc_json) => parse_mcp_rpc_result(&rpc_json),
+        None => "err:stdio_missing_reply".to_string(),
+    }
+}
+
 fn invoke_loopback_mcp_tool(mcp_entry: &Value, tool_name: &str, tool_args: Value) -> String {
     use std::io::Read as _;
     use std::net::TcpStream;
+
+    if mcp_entry.get("command").and_then(Value::as_str).is_some() {
+        return invoke_stdio_mcp_tool(mcp_entry, tool_name, tool_args);
+    }
 
     let Some(url) = mcp_entry.get("url").and_then(Value::as_str) else {
         return "err:missing_url".to_string();
@@ -1009,24 +1252,7 @@ fn invoke_loopback_mcp_tool(mcp_entry: &Value, tool_name: &str, tool_args: Value
     let Ok(rpc_json) = serde_json::from_str::<Value>(payload_part.trim()) else {
         return format!("err:non_json:{}", payload_part.trim());
     };
-    let is_err = rpc_json
-        .get("result")
-        .and_then(|r| r.get("isError"))
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    let text = rpc_json
-        .get("result")
-        .and_then(|r| r.get("content"))
-        .and_then(Value::as_array)
-        .and_then(|arr| arr.first())
-        .and_then(|c| c.get("text"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    if is_err {
-        format!("rejected:{text}")
-    } else {
-        format!("accepted:{text}")
-    }
+    parse_mcp_rpc_result(&rpc_json)
 }
 
 #[cfg(test)]

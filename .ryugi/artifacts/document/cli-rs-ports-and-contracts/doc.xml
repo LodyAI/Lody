@@ -86,7 +86,7 @@
         <p><b>主干已通</b></p>
       </td>
       <td>
-        <p>纯投影层（零直接磁盘身份读写）：<code>clap</code> CLI（含 <code>lody machine restore-id</code>）+ <code>axum</code> 本地 Unix Socket（<code>probe</code> &amp; <code>control</code>，支持 <code>local-project/search-files</code> 与分页 <code>list-branches</code>）+ 进程内 Streamable HTTP MCP Server（<code>/mcp</code> 含 <code>lody_schedule</code> <code>propose/propose_edit/pause</code> 与完整 32 KiB 提示词读取）+ <code>terminal.sock</code> PTY 服务。</p>
+        <p>纯投影层（零直接磁盘身份读写）：<code>clap</code> CLI（含 <code>lody machine restore-id</code> 与无存储锁争用的 <code>lody mcp-stdio</code> 桥接）+ <code>axum</code> 本地 Unix Socket（<code>probe</code> &amp; <code>control</code>，完整覆盖桌面端 <code>/project-control</code> 与 <code>worktree/*</code> 路由及 <code>/mcp-control</code> 转发）+ 进程内 Streamable HTTP MCP Server（<code>/mcp</code> 投影 <code>VerifiedPrincipal::AgentSession</code> 强校验会话归属，禁用 HTTP 时自动回退挂载 <code>mcp-stdio</code>）+ <code>terminal.sock</code> PTY 服务。</p>
       </td>
       <td>
         <p>新 <code>lody-mux.sock</code> 多路复用协议与远端 Machine RPC 网关。</p>
@@ -100,7 +100,7 @@
         <p><b>主干已通</b></p>
       </td>
       <td>
-        <p><code>FileStorageLease</code> 让位锁、5 级优先级 <code>LocalMachineIdentityStore</code>（含指纹校验备份锚点与离线恢复备份）、<code>operations.sqlite3</code> 与 <code>schedules.sqlite</code>；<code>ACP over stdio</code>（含隔离 <code>_lody/session/archive</code> 协商与 <code>sessionActivity</code>）+ <code>portable-pty</code> + 代理感知 SHA-256 制品安装；Git Worktree + 轻量分支分页/路径打分检索 + 区分 Worktree 与非 Worktree（仅未提交变更）的 <code>LTD1</code> v2 FastCDC <code>TurnDiffStore</code>。</p>
+        <p><code>FileStorageLease</code> 让位锁、5 级优先级 <code>LocalMachineIdentityStore</code>（含指纹校验备份锚点与离线恢复备份）、<code>operations.sqlite3</code> 与仅承载本地执行游标的 <code>schedules.sqlite</code>；<code>ACP over stdio</code>（含 <code>_lody/session/activity_update</code> v1、<code>steering</code> 能力协商与三态回执握手、隔离 <code>_lody/session/archive</code> 协商）+ <code>portable-pty</code> + 代理感知 SHA-256 制品安装；Git Worktree（保留显式 <code>base_branch</code>）+ 桌面端目录浏览/原子建目录/受限文件读取/受保护分支检出/技能指纹扫描 + <code>LTD1</code> v2 FastCDC <code>TurnDiffStore</code>。</p>
       </td>
       <td>
         <p><code>automations</code> 与 <code>pr-poller-state</code> 分库读写。</p>

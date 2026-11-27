@@ -4,13 +4,15 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lody_app::{
-    AppCommand, AppQuery, AppResponse, ApplicationService, BranchListQuery, CustomCommandSpec,
-    HistoryBlock, HistoryTurnRecord, LocalProjectId, PermissionDecision, PortError, PortErrorKind,
-    PortResult, SessionId, TurnId, TurnTerminalOutcome, UserId, VerifiedPrincipal, WorkspaceId,
+    AppCommand, AppQuery, AppResponse, ApplicationService, BranchListQuery, BrowseDirectoryQuery,
+    CustomCommandSpec, HistoryBlock, HistoryTurnRecord, LocalProjectId, PermissionDecision,
+    PortError, PortErrorKind, PortResult, SessionId, TurnId, TurnTerminalOutcome, UserId,
+    VerifiedPrincipal, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt::Write as _;
 use std::fs;
@@ -95,6 +97,7 @@ fn current_epoch_ms() -> u64 {
 
 struct ServerState {
     service: Arc<dyn ApplicationService>,
+    mcp_dispatcher: Arc<crate::mcp_http::McpDispatcher>,
     machine_id: String,
     home_dir: String,
     version: String,
@@ -261,8 +264,11 @@ async fn handle_daemon_shutdown(
     Ok(Json(json!({ "ok": true })))
 }
 
-fn map_project_control_error_code(kind: PortErrorKind) -> &'static str {
-    match kind {
+fn map_project_control_error(err: &PortError) -> (&'static str, String) {
+    if let Some(stripped) = err.message.strip_prefix("path_invalid:") {
+        return ("path_invalid", stripped.trim().to_string());
+    }
+    let code = match err.kind {
         PortErrorKind::InvalidInput => "invalid_request",
         PortErrorKind::Unauthorized
         | PortErrorKind::Forbidden
@@ -273,7 +279,41 @@ fn map_project_control_error_code(kind: PortErrorKind) -> &'static str {
         | PortErrorKind::CapabilityUnavailable
         | PortErrorKind::Timeout => "daemon_unavailable",
         PortErrorKind::Internal => "execution_failed",
-    }
+    };
+    (code, err.message.clone())
+}
+
+fn project_control_err_json(kind: &str, err: &PortError) -> Json<Value> {
+    let (code, message) = map_project_control_error(err);
+    Json(json!({
+        "ok": false,
+        "type": kind,
+        "error": code,
+        "message": message,
+    }))
+}
+
+fn extract_project_scope(
+    payload: &Value,
+) -> (WorkspaceId, Option<LocalProjectId>, Option<PathBuf>) {
+    let workspace_id = WorkspaceId(
+        payload
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .unwrap_or("local")
+            .to_string(),
+    );
+    let local_project_id = payload
+        .get("localProjectId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| LocalProjectId(s.to_string()));
+    let root_path = payload
+        .get("rootPath")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from);
+    (workspace_id, local_project_id, root_path)
 }
 
 async fn handle_project_control(
@@ -286,7 +326,11 @@ async fn handle_project_control(
         caller_pid: None,
         account_id: None,
     };
-    let kind = payload.get("type").and_then(Value::as_str).unwrap_or("");
+    let kind = payload
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     if let Some(req_machine_id) = payload
         .get("machineId")
         .and_then(Value::as_str)
@@ -303,7 +347,7 @@ async fn handle_project_control(
     }
     let service = Arc::clone(&st.service);
 
-    match kind {
+    match kind.as_str() {
         "local-project/add" | "project/add" => {
             let root_str = payload
                 .get("rootPath")
@@ -339,22 +383,179 @@ async fn handle_project_control(
                 ))
             }
         }
-        "local-project/list-branches" => {
-            let workspace_id = WorkspaceId(
-                payload
-                    .get("workspaceId")
-                    .and_then(Value::as_str)
-                    .unwrap_or("local")
-                    .to_string(),
-            );
-            let local_project_id = payload
-                .get("localProjectId")
-                .and_then(Value::as_str)
-                .map(|s| LocalProjectId(s.to_string()));
-            let root_path = payload
+        "local-project/prepare-add" => {
+            let Some(root_str) = payload
                 .get("rootPath")
                 .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+            else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "local-project/prepare-add",
+                    "error": "invalid_request",
+                    "message": "rootPath is required",
+                })));
+            };
+            let inspect = payload
+                .get("inspect")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let q = AppQuery::PrepareProjectAdd {
+                root_path: PathBuf::from(root_str),
+                inspect,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectAddPrepared(prep)) => {
+                    let mut res_obj = json!({
+                        "localProjectId": prep.local_project_id.0,
+                        "name": prep.name,
+                        "rootPath": prep.root_path,
+                        "alreadyRegistered": prep.already_registered,
+                    });
+                    if let Some(insp) = prep.inspection {
+                        let insp_val = if insp.git {
+                            json!({
+                                "git": true,
+                                "currentBranch": insp.current_branch,
+                                "defaultBranch": insp.default_branch,
+                                "githubRepoFullName": insp.github_repo_full_name,
+                            })
+                        } else {
+                            json!({ "git": false })
+                        };
+                        res_obj["inspection"] = insp_val;
+                    }
+                    Ok(Json(json!({
+                        "ok": true,
+                        "type": "local-project/prepare-add",
+                        "result": res_obj,
+                    })))
+                }
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json("local-project/prepare-add", &err)),
+            }
+        }
+        "local-project/list-roots" => {
+            let home_dir = PathBuf::from(&st.home_dir);
+            let q = AppQuery::ListBrowseRoots { home_dir };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::BrowseRootsListed(info)) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/list-roots",
+                    "result": info,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json("local-project/list-roots", &err)),
+            }
+        }
+        "local-project/browse-dir" => {
+            let home_dir = PathBuf::from(&st.home_dir);
+            let absolute_path = payload
+                .get("absolutePath")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
                 .map(PathBuf::from);
+            let show_hidden = payload
+                .get("showHidden")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let limit = payload
+                .get("limit")
+                .and_then(Value::as_u64)
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(0);
+            let cursor = payload
+                .get("cursor")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+            let mut registered_projects = BTreeMap::new();
+            if let Some(reg_map) = payload.get("registeredProjects").and_then(Value::as_object) {
+                for (pid, pval) in reg_map {
+                    if let Some(pstr) = pval.as_str().filter(|s| !s.trim().is_empty()) {
+                        registered_projects.insert(pid.clone(), PathBuf::from(pstr));
+                    }
+                }
+            }
+            let q = AppQuery::BrowseLocalDirectory {
+                home_dir,
+                browse_query: BrowseDirectoryQuery {
+                    absolute_path,
+                    show_hidden,
+                    limit,
+                    cursor,
+                    registered_projects,
+                },
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::LocalDirectoryBrowsed(page)) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/browse-dir",
+                    "result": page,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json("local-project/browse-dir", &err)),
+            }
+        }
+        "local-project/create-directory" => {
+            let Some(parent_str) = payload.get("parentPath").and_then(Value::as_str) else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "local-project/create-directory",
+                    "error": "invalid_request",
+                    "message": "parentPath is required",
+                })));
+            };
+            let Some(name_str) = payload.get("name").and_then(Value::as_str) else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "local-project/create-directory",
+                    "error": "invalid_request",
+                    "message": "name is required",
+                })));
+            };
+            let cmd = AppCommand::CreateLocalDirectory {
+                parent_path: PathBuf::from(parent_str),
+                name: name_str.to_string(),
+            };
+            let resp = tokio::task::spawn_blocking(move || service.execute(&caller, cmd))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::LocalDirectoryCreated { path }) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/create-directory",
+                    "result": { "path": path },
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json(
+                    "local-project/create-directory",
+                    &err,
+                )),
+            }
+        }
+        "local-project/list-branches" => {
+            let (workspace_id, local_project_id, root_path) = extract_project_scope(&payload);
             let limit = payload
                 .get("limit")
                 .and_then(Value::as_u64)
@@ -381,39 +582,30 @@ async fn handle_project_control(
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
             match resp {
-                Ok(AppResponse::ProjectBranchesListed(page)) => Ok(Json(json!({
-                    "ok": true,
-                    "type": "local-project/list-branches",
-                    "result": page,
-                }))),
+                Ok(AppResponse::ProjectBranchesListed(page)) => {
+                    let result = if page.git {
+                        json!(page)
+                    } else {
+                        json!({ "git": false })
+                    };
+                    Ok(Json(json!({
+                        "ok": true,
+                        "type": "local-project/list-branches",
+                        "result": result,
+                    })))
+                }
                 Ok(_) => Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "unexpected response".to_string(),
                 )),
-                Err(err) => Ok(Json(json!({
-                    "ok": false,
-                    "type": "local-project/list-branches",
-                    "error": map_project_control_error_code(err.kind),
-                    "message": err.message,
-                }))),
+                Err(err) => Ok(project_control_err_json(
+                    "local-project/list-branches",
+                    &err,
+                )),
             }
         }
         "local-project/search-files" => {
-            let workspace_id = WorkspaceId(
-                payload
-                    .get("workspaceId")
-                    .and_then(Value::as_str)
-                    .unwrap_or("local")
-                    .to_string(),
-            );
-            let local_project_id = payload
-                .get("localProjectId")
-                .and_then(Value::as_str)
-                .map(|s| LocalProjectId(s.to_string()));
-            let root_path = payload
-                .get("rootPath")
-                .and_then(Value::as_str)
-                .map(PathBuf::from);
+            let (workspace_id, local_project_id, root_path) = extract_project_scope(&payload);
             let search_query = payload
                 .get("query")
                 .and_then(Value::as_str)
@@ -444,15 +636,230 @@ async fn handle_project_control(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "unexpected response".to_string(),
                 )),
-                Err(err) => Ok(Json(json!({
-                    "ok": false,
-                    "type": "local-project/search-files",
-                    "error": map_project_control_error_code(err.kind),
-                    "message": err.message,
-                }))),
+                Err(err) => Ok(project_control_err_json("local-project/search-files", &err)),
             }
         }
-        "local-project/git-state" => {
+        "local-project/list-files" => {
+            let (workspace_id, local_project_id, root_path) = extract_project_scope(&payload);
+            let max_files = payload
+                .get("maxFiles")
+                .and_then(Value::as_u64)
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(0);
+            let q = AppQuery::ListProjectFiles {
+                workspace_id,
+                local_project_id,
+                root_path,
+                max_files,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectFilesListed(res)) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/list-files",
+                    "result": res,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json("local-project/list-files", &err)),
+            }
+        }
+        "local-project/list-dir" => {
+            let (workspace_id, local_project_id, root_path) = extract_project_scope(&payload);
+            let relative_path = payload
+                .get("relativePath")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let limit = payload
+                .get("limit")
+                .and_then(Value::as_u64)
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(0);
+            let q = AppQuery::ListProjectDirectory {
+                workspace_id,
+                local_project_id,
+                root_path,
+                relative_path,
+                limit,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectDirectoryListed(page)) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/list-dir",
+                    "result": page,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json("local-project/list-dir", &err)),
+            }
+        }
+        "local-project/read-file" => {
+            let (workspace_id, local_project_id, root_path) = extract_project_scope(&payload);
+            let Some(relative_path) = payload
+                .get("relativePath")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(ToOwned::to_owned)
+            else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "local-project/read-file",
+                    "error": "invalid_request",
+                    "message": "relativePath is required",
+                })));
+            };
+            let max_bytes = payload
+                .get("maxBytes")
+                .and_then(Value::as_u64)
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(0);
+            let q = AppQuery::ReadProjectFile {
+                workspace_id,
+                local_project_id,
+                root_path,
+                relative_path,
+                max_bytes,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectFileRead { file }) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/read-file",
+                    "result": file,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json("local-project/read-file", &err)),
+            }
+        }
+        "local-project/checkout-branch" => {
+            let (workspace_id, local_project_id, root_path) = extract_project_scope(&payload);
+            let Some(branch_name) = payload
+                .get("branchName")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(ToOwned::to_owned)
+            else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "local-project/checkout-branch",
+                    "error": "invalid_request",
+                    "message": "branchName is required",
+                })));
+            };
+            let cmd = AppCommand::CheckoutProjectBranch {
+                workspace_id,
+                local_project_id,
+                root_path,
+                branch_name,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.execute(&caller, cmd))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectBranchCheckedOut(out)) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/checkout-branch",
+                    "result": out,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json(
+                    "local-project/checkout-branch",
+                    &err,
+                )),
+            }
+        }
+        "local-project/list-skills" => {
+            let (workspace_id, local_project_id, root_path) = extract_project_scope(&payload);
+            let Some(skill_dirs_arr) = payload.get("skillDirs").and_then(Value::as_array) else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "local-project/list-skills",
+                    "error": "invalid_request",
+                    "message": "skillDirs is required",
+                })));
+            };
+            let skill_dirs: Vec<String> = skill_dirs_arr
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect();
+            let known_fingerprint = payload
+                .get("knownFingerprint")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(ToOwned::to_owned);
+            let q = AppQuery::ListProjectSkills {
+                workspace_id,
+                local_project_id,
+                root_path,
+                skill_dirs,
+                known_fingerprint,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectSkillsListed(listing)) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/list-skills",
+                    "result": listing,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json("local-project/list-skills", &err)),
+            }
+        }
+        "local-project/list-global-skills" => {
+            let home_dir = PathBuf::from(&st.home_dir);
+            let known_fingerprint = payload
+                .get("knownFingerprint")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(ToOwned::to_owned);
+            let q = AppQuery::ListGlobalSkills {
+                home_dir,
+                known_fingerprint,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectSkillsListed(listing)) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/list-global-skills",
+                    "result": listing,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json(
+                    "local-project/list-global-skills",
+                    &err,
+                )),
+            }
+        }
+        "worktree/list-files" => {
             let workspace_id = WorkspaceId(
                 payload
                     .get("workspaceId")
@@ -460,14 +867,134 @@ async fn handle_project_control(
                     .unwrap_or("local")
                     .to_string(),
             );
-            let local_project_id = payload
-                .get("localProjectId")
+            let Some(repo_key) = payload
+                .get("repoKey")
                 .and_then(Value::as_str)
-                .map(|s| LocalProjectId(s.to_string()));
-            let root_path = payload
-                .get("rootPath")
+                .filter(|s| !s.trim().is_empty())
+                .map(ToOwned::to_owned)
+            else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "worktree/list-files",
+                    "error": "invalid_request",
+                    "message": "repoKey is required",
+                })));
+            };
+            let Some(sid_str) = payload
+                .get("sessionId")
                 .and_then(Value::as_str)
-                .map(PathBuf::from);
+                .filter(|s| !s.trim().is_empty())
+            else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "worktree/list-files",
+                    "error": "invalid_request",
+                    "message": "sessionId is required",
+                })));
+            };
+            let max_files = payload
+                .get("maxFiles")
+                .and_then(Value::as_u64)
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(0);
+            let q = AppQuery::ListWorktreeFiles {
+                workspace_id,
+                repo_key,
+                session_id: SessionId(sid_str.to_string()),
+                max_files,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectFilesListed(res)) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "worktree/list-files",
+                    "result": res,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json("worktree/list-files", &err)),
+            }
+        }
+        "worktree/read-file" => {
+            let workspace_id = WorkspaceId(
+                payload
+                    .get("workspaceId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("local")
+                    .to_string(),
+            );
+            let Some(repo_key) = payload
+                .get("repoKey")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(ToOwned::to_owned)
+            else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "worktree/read-file",
+                    "error": "invalid_request",
+                    "message": "repoKey is required",
+                })));
+            };
+            let Some(sid_str) = payload
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+            else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "worktree/read-file",
+                    "error": "invalid_request",
+                    "message": "sessionId is required",
+                })));
+            };
+            let Some(relative_path) = payload
+                .get("relativePath")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(ToOwned::to_owned)
+            else {
+                return Ok(Json(json!({
+                    "ok": false,
+                    "type": "worktree/read-file",
+                    "error": "invalid_request",
+                    "message": "relativePath is required",
+                })));
+            };
+            let max_bytes = payload
+                .get("maxBytes")
+                .and_then(Value::as_u64)
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(0);
+            let q = AppQuery::ReadWorktreeFile {
+                workspace_id,
+                repo_key,
+                session_id: SessionId(sid_str.to_string()),
+                relative_path,
+                max_bytes,
+            };
+            let resp = tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectFileRead { file }) => Ok(Json(json!({
+                    "ok": true,
+                    "type": "worktree/read-file",
+                    "result": file,
+                }))),
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json("worktree/read-file", &err)),
+            }
+        }
+        "local-project/git-state" => {
+            let (workspace_id, local_project_id, root_path) = extract_project_scope(&payload);
             let q = AppQuery::InspectProjectGitSummary {
                 workspace_id,
                 local_project_id,
@@ -508,47 +1035,53 @@ async fn handle_project_control(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "unexpected response".to_string(),
                 )),
-                Err(err) => Ok(Json(json!({
-                    "ok": false,
-                    "type": "local-project/git-state",
-                    "error": map_project_control_error_code(err.kind),
-                    "message": err.message,
-                }))),
+                Err(err) => Ok(project_control_err_json("local-project/git-state", &err)),
             }
         }
-        _ => {
+        "local-project/list" | "" => {
             let resp =
                 tokio::task::spawn_blocking(move || service.query(&caller, AppQuery::ListProjects))
                     .await
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-                    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-            let projects_json: Vec<Value> = match resp {
-                AppResponse::ProjectsListed { projects } => projects
-                    .into_iter()
-                    .map(|p| {
-                        json!({
-                            "localProjectId": p.project_id.0,
-                            "name": p.name,
-                            "rootPath": p.root_path,
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            match resp {
+                Ok(AppResponse::ProjectsListed { projects }) => {
+                    let projects_json: Vec<Value> = projects
+                        .into_iter()
+                        .map(|p| {
+                            json!({
+                                "localProjectId": p.project_id.0,
+                                "name": p.name,
+                                "rootPath": p.root_path,
+                            })
                         })
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            };
-            Ok(Json(json!({
-                "ok": true,
-                "type": "local-project/list",
-                "result": {
-                    "workspaces": [
-                        {
-                            "workspaceId": "local",
-                            "workspaceName": "Local Workspace",
-                            "projects": projects_json,
+                        .collect();
+                    Ok(Json(json!({
+                        "ok": true,
+                        "type": "local-project/list",
+                        "result": {
+                            "workspaces": [
+                                {
+                                    "workspaceId": "local",
+                                    "workspaceName": "Local Workspace",
+                                    "projects": projects_json,
+                                }
+                            ]
                         }
-                    ]
+                    })))
                 }
-            })))
+                Ok(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "unexpected response".to_string(),
+                )),
+                Err(err) => Ok(project_control_err_json("local-project/list", &err)),
+            }
         }
+        other => Ok(Json(json!({
+            "ok": false,
+            "type": other,
+            "error": "invalid_request",
+            "message": format!("Unsupported project-control request type '{other}'"),
+        }))),
     }
 }
 
@@ -813,6 +1346,56 @@ async fn handle_session_control(
     }
 }
 
+async fn handle_mcp_control(
+    State(st): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    body: String,
+) -> impl IntoResponse {
+    if check_token(&headers, &st.token).is_err() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(header::CONTENT_TYPE, "application/json")],
+            json!({
+                "jsonrpc": "2.0",
+                "error": { "code": -32000, "message": "Unauthorized" },
+                "id": Value::Null,
+            })
+            .to_string(),
+        )
+            .into_response();
+    }
+    let Some(ctx) = crate::mcp_http::parse_mcp_context_headers(&headers) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json")],
+            json!({
+                "jsonrpc": "2.0",
+                "error": { "code": -32000, "message": "Missing or invalid Lody MCP session context headers" },
+                "id": Value::Null,
+            })
+            .to_string(),
+        )
+            .into_response();
+    };
+    let Ok(parsed) = serde_json::from_str::<Value>(&body) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json")],
+            json!({
+                "jsonrpc": "2.0",
+                "error": { "code": -32700, "message": "Parse error" },
+                "id": Value::Null,
+            })
+            .to_string(),
+        )
+            .into_response();
+    };
+    match st.mcp_dispatcher.dispatch_jsonrpc(&ctx, parsed).await {
+        Some(reply) => (StatusCode::OK, Json(reply)).into_response(),
+        None => StatusCode::ACCEPTED.into_response(),
+    }
+}
+
 #[cfg(unix)]
 pub async fn serve_local_daemon(
     data_dir: &Path,
@@ -901,8 +1484,13 @@ pub async fn serve_local_daemon(
     fs::rename(&tmp_file, &run_file)
         .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
 
+    let mcp_dispatcher = Arc::new(crate::mcp_http::McpDispatcher::new(
+        Arc::clone(&service),
+        version,
+    ));
     let shared = Arc::new(ServerState {
         service,
+        mcp_dispatcher,
         machine_id,
         home_dir: home_dir.to_string_lossy().into_owned(),
         version: version.to_string(),
@@ -919,6 +1507,7 @@ pub async fn serve_local_daemon(
         .route("/daemon-shutdown", post(handle_daemon_shutdown))
         .route("/project-control", post(handle_project_control))
         .route("/session-control", post(handle_session_control))
+        .route("/mcp-control", post(handle_mcp_control))
         .with_state(Arc::clone(&shared));
 
     let probe_shutdown = Arc::clone(&shutdown);
@@ -978,6 +1567,18 @@ pub fn send_unix_http(
     token: Option<&str>,
     body: Option<&Value>,
 ) -> io::Result<(u16, String)> {
+    send_unix_http_with_headers(socket_path, method, path, token, &[], body)
+}
+
+#[cfg(unix)]
+pub fn send_unix_http_with_headers(
+    socket_path: &Path,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    extra_headers: &[(String, String)],
+    body: Option<&Value>,
+) -> io::Result<(u16, String)> {
     use std::os::unix::net::UnixStream;
 
     let mut stream = UnixStream::connect(socket_path)?;
@@ -994,6 +1595,9 @@ pub fn send_unix_http(
     );
     if let Some(tok) = token {
         req.push_str(&format!("{IPC_TOKEN_HEADER}: {tok}\r\n"));
+    }
+    for (hk, hv) in extra_headers {
+        req.push_str(&format!("{hk}: {hv}\r\n"));
     }
     if body.is_some() {
         req.push_str(&format!(
@@ -1074,6 +1678,21 @@ pub fn send_unix_http(
     _method: &str,
     _path: &str,
     _token: Option<&str>,
+    _body: Option<&Value>,
+) -> io::Result<(u16, String)> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "unix sockets unavailable",
+    ))
+}
+
+#[cfg(not(unix))]
+pub fn send_unix_http_with_headers(
+    _socket_path: &Path,
+    _method: &str,
+    _path: &str,
+    _token: Option<&str>,
+    _extra_headers: &[(String, String)],
     _body: Option<&Value>,
 ) -> io::Result<(u16, String)> {
     Err(io::Error::new(

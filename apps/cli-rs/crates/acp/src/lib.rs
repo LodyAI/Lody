@@ -5,8 +5,8 @@ pub mod pty;
 use lody_ports::{
     AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpNativeActivity, AcpSessionArchiveMode,
     AcpSessionArchiveOutcome, AcpSessionPort, AcpSpawnSpec, ArtifactRegistryPort,
-    InstalledArtifact, ManagedArtifactSource, PermissionDecision, PortError, PortErrorKind,
-    PortResult, SteerVerdict,
+    InstalledArtifact, ManagedArtifactSource, McpServerTransport, PermissionDecision, PortError,
+    PortErrorKind, PortResult, SteerVerdict,
 };
 pub use pty::PortablePtyManager;
 use serde::Deserialize;
@@ -235,13 +235,109 @@ impl AcpEventSink for NoopAcpEventSink {
     fn on_acp_event(&self, _event: AcpInboundEvent) {}
 }
 
-fn parse_lody_extension_capabilities(init_res: &Value) -> (bool, Option<AcpSessionArchiveMode>) {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SteerTransport {
+    Request { method: String },
+    Prompt { meta_namespace: &'static str },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AcknowledgedSteerCapability {
+    transport: SteerTransport,
+    applied_notification_method: String,
+}
+
+fn parse_acknowledged_steer_capability(init_res: &Value) -> Option<AcknowledgedSteerCapability> {
+    let meta = init_res.get("agentCapabilities")?.get("_meta")?;
+
+    if let Some(steering) = meta.get("lody").and_then(|l| l.get("steering"))
+        && steering.get("version").and_then(Value::as_u64) == Some(1)
+        && matches!(
+            steering.get("upstreamTurn").and_then(Value::as_str),
+            Some("same" | "handoff")
+        )
+        && matches!(
+            steering.get("configPolicy").and_then(Value::as_str),
+            Some("active" | "apply")
+        )
+    {
+        match steering.get("transport").and_then(Value::as_str) {
+            Some("request") => {
+                return Some(AcknowledgedSteerCapability {
+                    transport: SteerTransport::Request {
+                        method: "_lody/session/steer".to_string(),
+                    },
+                    applied_notification_method: "lody/session/steer_applied".to_string(),
+                });
+            }
+            Some("prompt") => {
+                return Some(AcknowledgedSteerCapability {
+                    transport: SteerTransport::Prompt {
+                        meta_namespace: "lody",
+                    },
+                    applied_notification_method: "lody/session/steer_applied".to_string(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(codex) = meta.get("codex").and_then(|c| c.get("steer"))
+        && codex.get("method").and_then(Value::as_str) == Some("_session/steering")
+        && codex.get("upstreamTurn").and_then(Value::as_str) == Some("same")
+        && codex.get("configPolicy").and_then(Value::as_str) == Some("active")
+        && let Some(applied) = codex
+            .get("appliedNotification")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    {
+        let normalized = applied.trim_start_matches('_');
+        if !normalized.is_empty() {
+            return Some(AcknowledgedSteerCapability {
+                transport: SteerTransport::Request {
+                    method: "_session/steering".to_string(),
+                },
+                applied_notification_method: normalized.to_string(),
+            });
+        }
+    }
+
+    if let Some(claude) = meta.get("claudeCode").and_then(|c| c.get("steer"))
+        && let Some(applied) = claude
+            .get("appliedNotification")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    {
+        let normalized = applied.trim_start_matches('_');
+        if !normalized.is_empty() {
+            return Some(AcknowledgedSteerCapability {
+                transport: SteerTransport::Prompt {
+                    meta_namespace: "claudeCode",
+                },
+                applied_notification_method: normalized.to_string(),
+            });
+        }
+    }
+
+    None
+}
+
+fn parse_lody_extension_capabilities(
+    init_res: &Value,
+) -> (
+    bool,
+    Option<AcpSessionArchiveMode>,
+    Option<AcknowledgedSteerCapability>,
+) {
+    let steer_cap = parse_acknowledged_steer_capability(init_res);
     let Some(lody) = init_res
         .get("agentCapabilities")
         .and_then(|c| c.get("_meta"))
         .and_then(|m| m.get("lody"))
     else {
-        return (false, None);
+        return (false, None, steer_cap);
     };
 
     let session_activity = lody
@@ -261,7 +357,7 @@ fn parse_lody_extension_capabilities(init_res: &Value) -> (bool, Option<AcpSessi
         }
     });
 
-    (session_activity, archive_mode)
+    (session_activity, archive_mode, steer_cap)
 }
 
 pub struct StdioAcpLauncher {
@@ -332,7 +428,7 @@ impl AcpLauncherPort for StdioAcpLauncher {
                 }),
                 self.handshake_timeout,
             )?;
-            let (_, archive_mode) = parse_lody_extension_capabilities(&init_res);
+            let (_, archive_mode, _) = parse_lody_extension_capabilities(&init_res);
             let Some(mode) = archive_mode else {
                 return Ok(AcpSessionArchiveOutcome::Unsupported);
             };
@@ -357,11 +453,26 @@ impl AcpLauncherPort for StdioAcpLauncher {
     }
 }
 
+struct SteerWaiter {
+    session_id: String,
+    applied_notification_method: String,
+    rpc_id: u64,
+    target_prompt_id: u64,
+    is_prompt_transport: bool,
+    submission_settled: bool,
+    turn_completed: bool,
+    verdict_tx: mpsc::Sender<SteerVerdict>,
+}
+
+const STEER_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
+const JSONRPC_INVALID_REQUEST_CODE: i64 = -32600;
+
 struct SharedProcessState {
     pid: u32,
     stdin: Mutex<Option<ChildStdin>>,
     child: Mutex<Child>,
-    pending_rpc: Mutex<HashMap<u64, mpsc::Sender<Result<Value, String>>>>,
+    pending_rpc: Mutex<HashMap<u64, mpsc::Sender<Result<Value, Value>>>>,
+    steer_waiters: Mutex<HashMap<String, SteerWaiter>>,
     pending_permissions: Mutex<HashMap<String, Value>>,
     init_rpc_id: AtomicU64,
     session_new_rpc_id: AtomicU64,
@@ -423,7 +534,7 @@ impl SharedProcessState {
         }
         match rx.recv_timeout(timeout) {
             Ok(Ok(result)) => Ok(result),
-            Ok(Err(rpc_err)) => Err(PortError::new(PortErrorKind::Internal, rpc_err)),
+            Ok(Err(rpc_err)) => Err(PortError::new(PortErrorKind::Internal, rpc_err.to_string())),
             Err(_) => {
                 self.pending_rpc
                     .lock()
@@ -510,6 +621,7 @@ fn spawn_acp_process(
         stdin: Mutex::new(Some(stdin)),
         child: Mutex::new(child),
         pending_rpc: Mutex::new(HashMap::new()),
+        steer_waiters: Mutex::new(HashMap::new()),
         pending_permissions: Mutex::new(HashMap::new()),
         init_rpc_id: AtomicU64::new(0),
         session_new_rpc_id: AtomicU64::new(0),
@@ -529,6 +641,7 @@ fn spawn_acp_process(
 pub struct StdioAcpSession {
     acp_session_id: String,
     advertises_session_activity: bool,
+    steer_capability: Option<AcknowledgedSteerCapability>,
     shared: Arc<SharedProcessState>,
 }
 
@@ -540,7 +653,7 @@ impl StdioAcpSession {
     ) -> PortResult<Self> {
         let shared = spawn_acp_process(spec, sink)?;
 
-        let handshake = (|| -> PortResult<(String, bool)> {
+        let handshake = (|| -> PortResult<(String, bool, Option<AcknowledgedSteerCapability>)> {
             let init_res = shared.call_blocking_tracked(
                 "initialize",
                 json!({
@@ -550,7 +663,8 @@ impl StdioAcpSession {
                 handshake_timeout,
                 Some(&shared.init_rpc_id),
             )?;
-            let (advertises_activity, _) = parse_lody_extension_capabilities(&init_res);
+            let (advertises_activity, _, steer_capability) =
+                parse_lody_extension_capabilities(&init_res);
             shared
                 .advertises_session_activity
                 .store(advertises_activity, Ordering::SeqCst);
@@ -558,18 +672,31 @@ impl StdioAcpSession {
             let mcp_servers: Vec<Value> = spec
                 .mcp_mounts
                 .iter()
-                .map(|m| {
-                    let headers: Vec<Value> = m
-                        .headers
-                        .iter()
-                        .map(|h| json!({ "name": h.name, "value": h.value }))
-                        .collect();
-                    json!({
-                        "name": m.name,
-                        "type": "http",
-                        "url": m.transport_url,
-                        "headers": headers,
-                    })
+                .map(|m| match &m.transport {
+                    McpServerTransport::Http { url, headers, .. } => {
+                        let headers_json: Vec<Value> = headers
+                            .iter()
+                            .map(|h| json!({ "name": h.name, "value": h.value }))
+                            .collect();
+                        json!({
+                            "name": m.name,
+                            "type": "http",
+                            "url": url,
+                            "headers": headers_json,
+                        })
+                    }
+                    McpServerTransport::Stdio { command, args, env } => {
+                        let env_json: Vec<Value> = env
+                            .iter()
+                            .map(|e| json!({ "name": e.name, "value": e.value }))
+                            .collect();
+                        json!({
+                            "name": m.name,
+                            "command": command,
+                            "args": args,
+                            "env": env_json,
+                        })
+                    }
                 })
                 .collect();
 
@@ -597,13 +724,14 @@ impl StdioAcpSession {
                 .current_acp_session_id
                 .lock()
                 .expect("current_acp_session_id lock") = Some(sid.clone());
-            Ok((sid, advertises_activity))
+            Ok((sid, advertises_activity, steer_capability))
         })();
 
         match handshake {
-            Ok((acp_session_id, advertises_session_activity)) => Ok(Self {
+            Ok((acp_session_id, advertises_session_activity, steer_capability)) => Ok(Self {
                 acp_session_id,
                 advertises_session_activity,
+                steer_capability,
                 shared,
             }),
             Err(err) => {
@@ -648,8 +776,91 @@ impl AcpSessionPort for StdioAcpSession {
         res
     }
 
-    fn steer(&self, _prompt_text: &str) -> PortResult<SteerVerdict> {
-        Ok(SteerVerdict::NotApplied)
+    fn steer(&self, prompt_text: &str) -> PortResult<SteerVerdict> {
+        let Some(cap) = &self.steer_capability else {
+            return Ok(SteerVerdict::NotApplied);
+        };
+        if !self.shared.prompt_in_flight.load(Ordering::SeqCst) {
+            return Ok(SteerVerdict::NotApplied);
+        }
+        let target_prompt_id = self.shared.active_prompt_id.load(Ordering::SeqCst);
+        if target_prompt_id == 0 {
+            return Ok(SteerVerdict::NotApplied);
+        }
+
+        let req_id = self.shared.next_rpc_id.fetch_add(1, Ordering::SeqCst);
+        let steer_id = format!("steer-{}-{req_id}", self.shared.pid);
+        let (verdict_tx, verdict_rx) = mpsc::channel();
+        let is_prompt_transport = matches!(cap.transport, SteerTransport::Prompt { .. });
+
+        self.shared
+            .steer_waiters
+            .lock()
+            .expect("steer_waiters lock")
+            .insert(
+                steer_id.clone(),
+                SteerWaiter {
+                    session_id: self.acp_session_id.clone(),
+                    applied_notification_method: cap.applied_notification_method.clone(),
+                    rpc_id: req_id,
+                    target_prompt_id,
+                    is_prompt_transport,
+                    submission_settled: false,
+                    turn_completed: false,
+                    verdict_tx,
+                },
+            );
+
+        let payload = match &cap.transport {
+            SteerTransport::Request { method } => json!({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "method": method,
+                "params": {
+                    "sessionId": self.acp_session_id,
+                    "prompt": [{ "type": "text", "text": prompt_text }],
+                    "steerId": steer_id,
+                }
+            }),
+            SteerTransport::Prompt { meta_namespace } => {
+                let mut meta = serde_json::Map::new();
+                meta.insert(
+                    (*meta_namespace).to_string(),
+                    json!({ "steer": { "id": steer_id } }),
+                );
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": self.acp_session_id,
+                        "prompt": [{ "type": "text", "text": prompt_text }],
+                        "_meta": Value::Object(meta),
+                    }
+                })
+            }
+        };
+
+        if self.shared.write_json(&payload).is_err() {
+            self.shared
+                .steer_waiters
+                .lock()
+                .expect("steer_waiters lock")
+                .remove(&steer_id);
+            return Ok(SteerVerdict::NotApplied);
+        }
+
+        match verdict_rx.recv_timeout(STEER_WAIT_TIMEOUT) {
+            Ok(verdict) => Ok(verdict),
+            Err(_) => {
+                self.shared
+                    .steer_waiters
+                    .lock()
+                    .expect("steer_waiters lock")
+                    .remove(&steer_id);
+                Ok(SteerVerdict::Unknown)
+            }
+        }
     }
 
     fn reply_permission(&self, decision: &PermissionDecision) -> PortResult<()> {
@@ -713,6 +924,130 @@ fn parse_session_activity_update(
     }
 }
 
+fn is_jsonrpc_invalid_request(err: &Value) -> bool {
+    err.get("code").and_then(Value::as_i64) == Some(JSONRPC_INVALID_REQUEST_CODE)
+}
+
+fn handle_steer_rpc_response(shared: &SharedProcessState, rpc_id: u64, msg: &Value) -> bool {
+    let mut guard = shared.steer_waiters.lock().expect("steer_waiters lock");
+    let Some(key) = guard
+        .iter()
+        .find_map(|(k, w)| (w.rpc_id == rpc_id).then(|| k.clone()))
+    else {
+        return false;
+    };
+
+    if let Some(err) = msg.get("error") {
+        if let Some(waiter) = guard.remove(&key) {
+            let verdict = if is_jsonrpc_invalid_request(err) {
+                SteerVerdict::NotApplied
+            } else {
+                SteerVerdict::Unknown
+            };
+            let _ = waiter.verdict_tx.send(verdict);
+        }
+        return true;
+    }
+
+    let res = msg.get("result").cloned().unwrap_or(Value::Null);
+    let is_prompt_transport = guard.get(&key).is_some_and(|w| w.is_prompt_transport);
+    if is_prompt_transport {
+        if let Some(waiter) = guard.remove(&key) {
+            let _ = waiter.verdict_tx.send(SteerVerdict::Unknown);
+        }
+        return true;
+    }
+
+    match res.get("outcome").and_then(Value::as_str) {
+        Some("failed") => {
+            if let Some(waiter) = guard.remove(&key) {
+                let _ = waiter.verdict_tx.send(SteerVerdict::NotApplied);
+            }
+        }
+        Some("injected") => {
+            let settle_unknown = if let Some(waiter) = guard.get_mut(&key) {
+                waiter.submission_settled = true;
+                waiter.turn_completed
+            } else {
+                false
+            };
+            if settle_unknown && let Some(waiter) = guard.remove(&key) {
+                let _ = waiter.verdict_tx.send(SteerVerdict::Unknown);
+            }
+        }
+        _ => {
+            if let Some(waiter) = guard.remove(&key) {
+                let _ = waiter.verdict_tx.send(SteerVerdict::Unknown);
+            }
+        }
+    }
+    true
+}
+
+fn notify_steer_waiters_on_turn_end(shared: &SharedProcessState, finished_prompt_id: u64) {
+    let mut guard = shared.steer_waiters.lock().expect("steer_waiters lock");
+    let mut ready_unknown = Vec::new();
+    for (key, waiter) in guard.iter_mut() {
+        if !waiter.is_prompt_transport && waiter.target_prompt_id == finished_prompt_id {
+            waiter.turn_completed = true;
+            if waiter.submission_settled {
+                ready_unknown.push(key.clone());
+            }
+        }
+    }
+    for key in ready_unknown {
+        if let Some(waiter) = guard.remove(&key) {
+            let _ = waiter.verdict_tx.send(SteerVerdict::Unknown);
+        }
+    }
+}
+
+fn drain_steer_waiters_as_unknown(shared: &SharedProcessState) {
+    let mut guard = shared.steer_waiters.lock().expect("steer_waiters lock");
+    for (_, waiter) in guard.drain() {
+        let _ = waiter.verdict_tx.send(SteerVerdict::Unknown);
+    }
+}
+
+fn try_apply_steer_notification(
+    shared: &SharedProcessState,
+    normalized_method: &str,
+    params: &Value,
+) -> bool {
+    let Some(session_id) = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    else {
+        return false;
+    };
+    let Some(steer_id) = params
+        .get("steerId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    else {
+        return false;
+    };
+
+    let mut guard = shared.steer_waiters.lock().expect("steer_waiters lock");
+    let matches_waiter = guard.get(steer_id).is_some_and(|w| {
+        w.session_id == session_id && w.applied_notification_method == normalized_method
+    });
+    if !matches_waiter {
+        return false;
+    }
+    if let Some(waiter) = guard.remove(steer_id) {
+        if waiter.is_prompt_transport {
+            shared
+                .active_prompt_id
+                .store(waiter.rpc_id, Ordering::SeqCst);
+            shared.prompt_in_flight.store(true, Ordering::SeqCst);
+        }
+        let _ = waiter.verdict_tx.send(SteerVerdict::Applied);
+    }
+    true
+}
+
 fn run_stdout_reader(
     stdout: std::process::ChildStdout,
     shared: Arc<SharedProcessState>,
@@ -737,7 +1072,7 @@ fn run_stdout_reader(
                     && let Some(res_val) = msg.get("result")
                 {
                     if id_num != 0 && shared.init_rpc_id.load(Ordering::SeqCst) == id_num {
-                        let (advertises, _) = parse_lody_extension_capabilities(res_val);
+                        let (advertises, _, _) = parse_lody_extension_capabilities(res_val);
                         shared
                             .advertises_session_activity
                             .store(advertises, Ordering::SeqCst);
@@ -752,6 +1087,10 @@ fn run_stdout_reader(
                     }
                 }
 
+                if handle_steer_rpc_response(&shared, id_num, &msg) {
+                    continue;
+                }
+
                 if let Some(tx) = shared
                     .pending_rpc
                     .lock()
@@ -759,7 +1098,7 @@ fn run_stdout_reader(
                     .remove(&id_num)
                 {
                     if let Some(err) = msg.get("error") {
-                        let _ = tx.send(Err(err.to_string()));
+                        let _ = tx.send(Err(err.clone()));
                     } else {
                         let _ = tx.send(Ok(msg.get("result").cloned().unwrap_or(Value::Null)));
                     }
@@ -768,6 +1107,7 @@ fn run_stdout_reader(
 
                 if shared.active_prompt_id.load(Ordering::SeqCst) == id_num {
                     shared.prompt_in_flight.store(false, Ordering::SeqCst);
+                    notify_steer_waiters_on_turn_end(&shared, id_num);
                     if let Some(err) = msg.get("error") {
                         sink.on_acp_event(AcpInboundEvent::ProcessExited {
                             exit_code: Some(-1),
@@ -791,6 +1131,9 @@ fn run_stdout_reader(
         let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
         let normalized_method = method.strip_prefix('_').unwrap_or(method);
         let params = msg.get("params").cloned().unwrap_or(Value::Null);
+        if try_apply_steer_notification(&shared, normalized_method, &params) {
+            continue;
+        }
         match normalized_method {
             "session/update" => {
                 if let Some(update) = params.get("update") {
@@ -845,6 +1188,7 @@ fn run_stdout_reader(
         }
     }
 
+    drain_steer_waiters_as_unknown(&shared);
     if shared.terminated.load(Ordering::SeqCst) {
         return;
     }

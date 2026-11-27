@@ -26,12 +26,15 @@ pub use error::{PortError, PortErrorKind, PortResult};
 pub use execution::{
     AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpNativeActivity, AcpSessionArchiveMode,
     AcpSessionArchiveOutcome, AcpSessionPort, AcpSpawnSpec, ArtifactRegistryPort, BranchListPage,
-    BranchListQuery, CustomCommandSpec, FileSearchResult, InstalledArtifact,
-    LocalProjectGitSummary, ManagedArtifactSource, McpHttpHeader, McpServerMount,
-    PermissionDecision, PtyPort, ScannedFileEntry, ScannedFileIndex, SteerVerdict,
-    TERMINAL_MAX_PER_SESSION, TerminalAttachReplay, TerminalEventSink, TerminalOpenOutcome,
-    TerminalOpenSpec, TerminalOutboundEvent, TerminalSnapshot, UnavailablePtyPort, WorktreeLease,
-    WorktreePort,
+    BranchListQuery, BrowseDirectoryEntry, BrowseDirectoryPage, BrowseDirectoryQuery,
+    BrowseEntryHints, BrowseRootsInfo, CheckoutBranchOutcome, CustomCommandSpec,
+    DirectoryChildEntry, DirectoryListPage, FileSearchResult, InstalledArtifact,
+    LocalProjectGitSummary, ManagedArtifactSource, McpEnvVar, McpHttpHeader, McpServerMount,
+    McpServerTransport, PermissionDecision, PreparedProjectAdd, ProjectFileReadResult,
+    ProjectSkillEntry, ProjectSkillGroupEntry, ProjectSkillsListing, PtyPort, ScannedFileEntry,
+    ScannedFileIndex, SteerVerdict, TERMINAL_MAX_PER_SESSION, TerminalAttachReplay,
+    TerminalEventSink, TerminalOpenOutcome, TerminalOpenSpec, TerminalOutboundEvent,
+    TerminalSnapshot, UnavailablePtyPort, WorktreeLease, WorktreePort,
 };
 pub use identity::{
     AnchorSyncStatus, CapabilitySet, LocalProjectId, MAX_MACHINE_ID_LENGTH, MachineId,

@@ -7,7 +7,7 @@ pub mod terminal;
 use clap::{Parser, Subcommand};
 pub use ipc::{
     DaemonRunMetadata, format_history_json, probe_live_daemon, query_live_daemon_machine_id,
-    send_unix_http, serve_local_daemon,
+    send_unix_http, send_unix_http_with_headers, serve_local_daemon,
 };
 use lody_app::{
     AppCommand, AppQuery, AppResponse, ApplicationService, MachineIdentityRestoreOutcome,
@@ -15,9 +15,9 @@ use lody_app::{
 };
 pub use mcp_http::{
     MCP_HTTP_MACHINE_ID_HEADER, MCP_HTTP_SESSION_ID_HEADER, MCP_HTTP_WORKDIR_B64_HEADER,
-    MCP_HTTP_WORKSPACE_ID_HEADER, McpRequestContext, find_peer_uid_in_proc_net_tcp,
-    ip_to_proc_net_hexes, parse_mcp_context_headers, start_mcp_http_server,
-    timing_safe_token_equal,
+    MCP_HTTP_WORKSPACE_ID_HEADER, McpDispatcher, McpRequestContext, encode_mcp_context_headers,
+    find_peer_uid_in_proc_net_tcp, ip_to_proc_net_hexes, parse_mcp_context_headers,
+    start_mcp_http_server, timing_safe_token_equal,
 };
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -361,6 +361,125 @@ pub fn stop_running_daemon(data_dir: &Path) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(25));
     }
     Err("timed out waiting for running lody daemon to stop".to_string())
+}
+
+pub fn run_mcp_stdio_bridge(
+    data_dir: &Path,
+    socket_override: Option<&Path>,
+    ctx: &McpRequestContext,
+) -> Result<(), String> {
+    use std::io::{BufRead, Write};
+
+    let extra_headers = encode_mcp_context_headers(ctx);
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    let mut reader = stdin.lock();
+    let mut writer = stdout.lock();
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let bytes_read = reader
+            .read_line(&mut line)
+            .map_err(|e| format!("MCP stdio input failed: {e}"))?;
+        if bytes_read == 0 {
+            break;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let parsed = match serde_json::from_str::<Value>(trimmed) {
+            Ok(v) => v,
+            Err(_) => {
+                let err_frame = json!({
+                    "jsonrpc": "2.0",
+                    "error": { "code": -32700, "message": "Parse error" },
+                    "id": Value::Null,
+                });
+                writeln!(writer, "{err_frame}")
+                    .and_then(|()| writer.flush())
+                    .map_err(|e| format!("MCP stdio output failed: {e}"))?;
+                continue;
+            }
+        };
+
+        let req_id = parsed.get("id").cloned();
+        let meta = DaemonRunMetadata::read(data_dir);
+        let resolved_socket: Option<PathBuf> = socket_override
+            .map(Path::to_path_buf)
+            .or_else(|| meta.as_ref().map(|m| PathBuf::from(&m.control_socket_path)));
+        let token = meta.as_ref().and_then(|m| m.token.as_deref());
+
+        let Some(sock) = resolved_socket else {
+            if let Some(id) = req_id {
+                let err_frame = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": { "code": -32000, "message": "Lody daemon control socket unavailable" },
+                });
+                writeln!(writer, "{err_frame}")
+                    .and_then(|()| writer.flush())
+                    .map_err(|e| format!("MCP stdio output failed: {e}"))?;
+            }
+            continue;
+        };
+
+        match send_unix_http_with_headers(
+            &sock,
+            "POST",
+            "/mcp-control",
+            token,
+            &extra_headers,
+            Some(&parsed),
+        ) {
+            Ok((202, _)) => {}
+            Ok((200, resp_body)) => {
+                let compact = match serde_json::from_str::<Value>(&resp_body) {
+                    Ok(v) => serde_json::to_string(&v).unwrap_or(resp_body),
+                    Err(_) => resp_body.trim().to_string(),
+                };
+                if !compact.is_empty() {
+                    writeln!(writer, "{compact}")
+                        .and_then(|()| writer.flush())
+                        .map_err(|e| format!("MCP stdio output failed: {e}"))?;
+                }
+            }
+            Ok((status, resp_body)) => {
+                if let Some(id) = req_id {
+                    let err_frame = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": {
+                            "code": -32000,
+                            "message": format!("Lody daemon MCP control HTTP {status}: {}", resp_body.trim()),
+                        },
+                    });
+                    writeln!(writer, "{err_frame}")
+                        .and_then(|()| writer.flush())
+                        .map_err(|e| format!("MCP stdio output failed: {e}"))?;
+                }
+            }
+            Err(err) => {
+                if let Some(id) = req_id {
+                    let err_frame = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": {
+                            "code": -32000,
+                            "message": format!("Lody daemon MCP control unreachable: {err}"),
+                        },
+                    });
+                    writeln!(writer, "{err_frame}")
+                        .and_then(|()| writer.flush())
+                        .map_err(|e| format!("MCP stdio output failed: {e}"))?;
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub fn try_execute_via_live_daemon(

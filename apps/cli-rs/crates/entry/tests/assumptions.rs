@@ -277,3 +277,233 @@ fn live_daemon_enforces_mcp_http_guards_delegates_child_and_caps_terminal_socket
         "parent session must automatically wake with child completion receipt batch"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn live_daemon_mounts_mcp_stdio_fallback_and_serves_desktop_project_control_routes() {
+    let lody_bin = build_workspace_binary("lody", "lody");
+    let acp_bin = build_workspace_binary("lody-scripted-acp", "lody-scripted-acp");
+
+    let sandbox = tempfile::tempdir().unwrap();
+    let data_dir = sandbox.path().join("d-stdio");
+    let home_dir = sandbox.path().join("h-stdio");
+    let browse_base = home_dir.join("projects");
+    fs::create_dir_all(&data_dir).unwrap();
+    fs::create_dir_all(&browse_base).unwrap();
+
+    let global_skill_dir = home_dir.join(".agents/skills/global-helper");
+    fs::create_dir_all(&global_skill_dir).unwrap();
+    fs::write(
+        global_skill_dir.join("SKILL.md"),
+        "---\nname: global-helper\ndescription: Global skill\n---\nGlobal skill body.\n",
+    )
+    .unwrap();
+
+    let event_log = sandbox.path().join("stdio-acp-events.jsonl");
+
+    let child = Command::new(&lody_bin)
+        .args(["daemon", "run"])
+        .env("LODY_DATA_DIR", &data_dir)
+        .env("HOME", &home_dir)
+        .env("LODY_PLATFORM", "local")
+        .env("LODY_MCP_HTTP_DISABLED", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn stdio-only lody daemon");
+    let _guard = DaemonGuard {
+        child,
+        data_dir: data_dir.clone(),
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let meta = loop {
+        if let Some(m) = lody_entry::probe_live_daemon(&data_dir) {
+            break m;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "stdio daemon did not become ready"
+        );
+        std::thread::yield_now();
+    };
+    let control_sock = Path::new(&meta.control_socket_path);
+    let tok = meta.token.as_deref();
+
+    let (_, roots_body) = send_unix_http(
+        control_sock,
+        "POST",
+        "/project-control",
+        tok,
+        Some(&json!({ "type": "local-project/list-roots" })),
+    )
+    .unwrap();
+    let roots_json: Value = serde_json::from_str(&roots_body).unwrap();
+    assert_eq!(roots_json["ok"], true);
+    assert!(roots_json["result"]["homeDir"].as_str().is_some());
+
+    let (_, mkdir_body) = send_unix_http(
+        control_sock,
+        "POST",
+        "/project-control",
+        tok,
+        Some(&json!({
+            "type": "local-project/create-directory",
+            "parentPath": browse_base,
+            "name": "created-app",
+        })),
+    )
+    .unwrap();
+    let mkdir_json: Value = serde_json::from_str(&mkdir_body).unwrap();
+    assert_eq!(mkdir_json["ok"], true);
+    let created_path = PathBuf::from(mkdir_json["result"]["path"].as_str().unwrap());
+    fs::write(created_path.join("hello.txt"), "hello desktop ipc\n").unwrap();
+
+    let (_, dup_body) = send_unix_http(
+        control_sock,
+        "POST",
+        "/project-control",
+        tok,
+        Some(&json!({
+            "type": "local-project/create-directory",
+            "parentPath": browse_base,
+            "name": "created-app",
+        })),
+    )
+    .unwrap();
+    let dup_json: Value = serde_json::from_str(&dup_body).unwrap();
+    assert_eq!(dup_json["ok"], false);
+    assert_eq!(dup_json["error"], "already_exists");
+
+    let (_, browse_body) = send_unix_http(
+        control_sock,
+        "POST",
+        "/project-control",
+        tok,
+        Some(&json!({
+            "type": "local-project/browse-dir",
+            "absolutePath": browse_base,
+        })),
+    )
+    .unwrap();
+    let browse_json: Value = serde_json::from_str(&browse_body).unwrap();
+    assert_eq!(browse_json["ok"], true);
+    assert_eq!(browse_json["result"]["entries"][0]["name"], "created-app");
+
+    let (_, prep_body) = send_unix_http(
+        control_sock,
+        "POST",
+        "/project-control",
+        tok,
+        Some(&json!({
+            "type": "local-project/prepare-add",
+            "rootPath": created_path,
+            "inspect": true,
+        })),
+    )
+    .unwrap();
+    let prep_json: Value = serde_json::from_str(&prep_body).unwrap();
+    assert_eq!(prep_json["ok"], true);
+    assert!(
+        prep_json["result"]["localProjectId"]
+            .as_str()
+            .unwrap()
+            .starts_with("local-project-")
+    );
+    assert_eq!(prep_json["result"]["inspection"]["git"], false);
+
+    let (_, read_body) = send_unix_http(
+        control_sock,
+        "POST",
+        "/project-control",
+        tok,
+        Some(&json!({
+            "type": "local-project/read-file",
+            "workspaceId": "local",
+            "rootPath": created_path,
+            "relativePath": "hello.txt",
+        })),
+    )
+    .unwrap();
+    let read_json: Value = serde_json::from_str(&read_body).unwrap();
+    assert_eq!(read_json["ok"], true);
+    assert_eq!(read_json["result"]["content"], "hello desktop ipc\n");
+
+    let (_, gskills_body) = send_unix_http(
+        control_sock,
+        "POST",
+        "/project-control",
+        tok,
+        Some(&json!({ "type": "local-project/list-global-skills" })),
+    )
+    .unwrap();
+    let gskills_json: Value = serde_json::from_str(&gskills_body).unwrap();
+    assert_eq!(gskills_json["ok"], true);
+    assert_eq!(
+        gskills_json["result"]["groups"][0]["skills"][0]["name"],
+        "global-helper"
+    );
+
+    let (status, sess_body) = send_unix_http(
+        control_sock,
+        "POST",
+        "/session-control",
+        tok,
+        Some(&json!({
+            "type": "session/create",
+            "workspaceId": "local",
+            "sessionId": "stdio-parent-1",
+            "userTurnId": "turn-stdio-1",
+            "acpSessionConfig": {
+                "cliType": "custom",
+                "customAcp": {
+                    "command": acp_bin,
+                    "args": [&event_log],
+                },
+                "prompt": "[SCRIPTED:MCP_DELEGATE:[SCRIPTED:REPLY:child-via-mcp-stdio]]"
+            }
+        })),
+    )
+    .unwrap();
+    assert_eq!(status, 200);
+    assert!(sess_body.contains("session/create_response"));
+
+    let wait_until = Instant::now() + Duration::from_secs(10);
+    let mut saw_stdio_delegation = false;
+    let mut saw_parent_wakeup = false;
+    while Instant::now() < wait_until {
+        if let Ok(raw) = fs::read_to_string(&event_log) {
+            let events: Vec<Value> = raw
+                .lines()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect();
+            saw_stdio_delegation = events.iter().any(|e| {
+                e.get("event").and_then(Value::as_str) == Some("mcp-delegate")
+                    && e.get("outcome")
+                        .and_then(Value::as_str)
+                        .is_some_and(|o| o.starts_with("accepted:"))
+            });
+            let reply_ends = events
+                .iter()
+                .filter(|e| {
+                    e.get("event").and_then(Value::as_str) == Some("prompt-end")
+                        && e.get("mode").and_then(Value::as_str) == Some("reply")
+                })
+                .count();
+            saw_parent_wakeup = reply_ends >= 2;
+            if saw_stdio_delegation && saw_parent_wakeup {
+                break;
+            }
+        }
+        std::thread::yield_now();
+    }
+    assert!(
+        saw_stdio_delegation,
+        "LODY_MCP_HTTP_DISABLED=1 must fall back to lody mcp-stdio without StorageLease contention"
+    );
+    assert!(
+        saw_parent_wakeup,
+        "child delegated through lody mcp-stdio must wake parent with completion receipt"
+    );
+}
