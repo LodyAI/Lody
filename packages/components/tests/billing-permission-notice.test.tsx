@@ -328,6 +328,111 @@ describe('BillingSettingsView', () => {
     expect(container?.textContent).not.toContain('Next charge (estimated)');
   });
 
+  it('advances paid Plus renewal and post-gift charge dates past a stacked future gift phase while retaining pre-gift seat adjustments', async () => {
+    const paidPeriodEnd = Date.UTC(2029, 8, 17);
+    const nextBillingAt = Date.UTC(2029, 9, 17);
+    const stackedPaidOverview: BillingOverviewData = {
+      ...freeOverview,
+      billingAccountId: 'billing_paid_gift',
+      effectivePlanTier: 'plus',
+      entitlementSource: 'stripe',
+      subscriptionStatus: 'active',
+      billingInterval: 'year',
+      currentPeriodEnd: paidPeriodEnd,
+      promotionalEntitlementEndsAt: nextBillingAt,
+      giftStartsAt: paidPeriodEnd,
+      giftEndsAt: nextBillingAt,
+      nextBillingAt,
+      autoRenewAfterGift: true,
+      scheduledBillingInterval: 'year',
+      scheduleManaged: true,
+      seatCount: 1,
+    };
+
+    await renderView({
+      overview: stackedPaidOverview,
+      invoices: [],
+      upcomingInvoice: {
+        amountDue: 0,
+        currency: 'USD',
+        expectedAt: paidPeriodEnd,
+        renewal: { amount: 1000, quantity: 1 },
+        discount: { amount: -1000 },
+        adjustment: null,
+        creditApplied: null,
+      },
+    });
+
+    expect(container?.textContent).toContain('Next renewal');
+    expect(container?.textContent).toContain(formatDate(nextBillingAt));
+    expect(container?.textContent).not.toContain(formatDate(paidPeriodEnd));
+    expect(container?.textContent).toContain(
+      `Gift time included · yearly billing starts ${formatDate(nextBillingAt)}`
+    );
+    expect(container?.textContent).toContain('First charge after gift');
+    expect(container?.textContent).toContain('Amount pending');
+    expect(container?.textContent).not.toContain('Expected charge date');
+
+    const preGiftSeatChargeAt = Date.UTC(2029, 5, 17);
+    await renderView({
+      overview: stackedPaidOverview,
+      invoices: [],
+      upcomingInvoice: {
+        amountDue: 2400,
+        currency: 'USD',
+        expectedAt: preGiftSeatChargeAt,
+        renewal: null,
+        discount: null,
+        adjustment: { amount: 2400 },
+        creditApplied: null,
+      },
+    });
+
+    expect(container?.textContent).toContain('Expected charge date');
+    expect(container?.textContent).toContain(formatDate(preGiftSeatChargeAt));
+    expect(container?.textContent).toContain('$24');
+  });
+
+  it('uses the stacked gift end date as Access ends when a paid Plus plan cancels post-gift renewal', async () => {
+    const paidPeriodEnd = Date.UTC(2029, 8, 17);
+    const giftEndsAt = Date.UTC(2029, 9, 17);
+    await renderView({
+      overview: {
+        ...freeOverview,
+        billingAccountId: 'billing_paid_gift_canceled',
+        effectivePlanTier: 'plus',
+        entitlementSource: 'stripe',
+        subscriptionStatus: 'active',
+        billingInterval: 'year',
+        currentPeriodEnd: paidPeriodEnd,
+        promotionalEntitlementEndsAt: giftEndsAt,
+        giftStartsAt: paidPeriodEnd,
+        giftEndsAt,
+        nextBillingAt: null,
+        autoRenewAfterGift: false,
+        canResumeAfterGift: true,
+        cancelAtPeriodEnd: true,
+        scheduleManaged: true,
+      },
+      invoices: [],
+      upcomingInvoice: {
+        amountDue: 0,
+        currency: 'USD',
+        expectedAt: paidPeriodEnd,
+        renewal: { amount: 1000, quantity: 1 },
+        discount: { amount: -1000 },
+        adjustment: null,
+        creditApplied: null,
+      },
+    });
+
+    expect(container?.textContent).toContain('Access ends');
+    expect(container?.textContent).toContain(formatDate(giftEndsAt));
+    expect(container?.textContent).not.toContain(formatDate(paidPeriodEnd));
+    expect(container?.textContent).toContain(`Gift access through ${formatDate(giftEndsAt)}`);
+    expect(container?.textContent).not.toContain('Next charge (estimated)');
+  });
+
   it('explains why a member cannot upgrade and who to ask', async () => {
     await renderView({
       overview: { ...freeOverview, canManageBilling: false },
