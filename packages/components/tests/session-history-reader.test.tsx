@@ -235,32 +235,35 @@ async function selectCopy() {
   );
 }
 
-it.each([true, false])('opens published read-only Roost history with an offline owner (publication hint: %s)', async (hint) => {
-  const runtime = store.get(runtimeAtom)!;
-  const admission = store.get(workspaceContentModeAtom)!;
-  store.set(runtimeAtom, { ...runtime, contentMode: 'plaintext', cloudStreamsEnabled: true });
-  store.set(workspaceContentModeAtom, {
-    ...admission,
-    descriptor: { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
-  });
-  const metadata = store.get(sessionMetaCacheAtom);
-  const roomId = getSessionRoomId(sessionId);
-  store.set(sessionMetaCacheAtom, {
-    ...metadata,
-    [roomId]: {
-      ...metadata[roomId]!,
-      historyBackend: 'roost',
-      ...(hint && { roostCloudGeneration: 'root', roostCloudAuthor: 'A'.repeat(43) }),
-    },
-  });
-  machineStatus = 'offline';
-  historySync = { source: 'streams', phase: 'ready', newerVersionPending: true };
-  await render();
+it.each([true, false])(
+  'opens published read-only Roost history with an offline owner (publication hint: %s)',
+  async (hint) => {
+    const runtime = store.get(runtimeAtom)!;
+    const admission = store.get(workspaceContentModeAtom)!;
+    store.set(runtimeAtom, { ...runtime, contentMode: 'plaintext', cloudStreamsEnabled: true });
+    store.set(workspaceContentModeAtom, {
+      ...admission,
+      descriptor: { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+    });
+    const metadata = store.get(sessionMetaCacheAtom);
+    const roomId = getSessionRoomId(sessionId);
+    store.set(sessionMetaCacheAtom, {
+      ...metadata,
+      [roomId]: {
+        ...metadata[roomId]!,
+        historyBackend: 'roost',
+        ...(hint && { roostCloudGeneration: 'root', roostCloudAuthor: 'A'.repeat(43) }),
+      },
+    });
+    machineStatus = 'offline';
+    historySync = { source: 'streams', phase: 'ready', newerVersionPending: true };
+    await render();
 
-  expect(container.querySelector('[data-history-stream]')).toBeTruthy();
-  expect(container.textContent).toContain('History from Lody Streams');
-  expect(container.textContent).toContain('Showing the previous version');
-});
+    expect(container.querySelector('[data-history-stream]')).toBeTruthy();
+    expect(container.textContent).not.toContain('History from');
+    expect(container.textContent).toContain('Showing the previous version');
+  }
+);
 
 it('reads history without a composer or machine operation and requires explicit consent for copying', async () => {
   await render();

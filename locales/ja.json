@@ -2370,8 +2370,6 @@
   "sessions.tabWaitingForSync": "この会話の同期を待機しています…",
   "sessions.contentSync.updating": "同期中",
   "sessions.contentSync.loadingConversation": "会話を読み込み中",
-  "sessions.historySync.machine": "接続先のコンピュータから取得した履歴",
-  "sessions.historySync.streams": "Lody Streams から取得した履歴",
   "sessions.historySync.checking": "クラウドの履歴を確認中",
   "sessions.historySync.ownerRequired": "履歴へのアクセスには接続先のコンピュータによる確認が必要です",
   "sessions.historySync.pending": "履歴がクラウドに公開されるのを待機中",

@@ -2371,8 +2371,6 @@
   "sessions.tabWaitingForSync": "正在同步这个对话…",
   "sessions.contentSync.updating": "正在同步中",
   "sessions.contentSync.loadingConversation": "正在加载对话",
-  "sessions.historySync.machine": "历史来自目标机器",
-  "sessions.historySync.streams": "历史来自 Lody Streams",
   "sessions.historySync.checking": "正在确认云端历史",
   "sessions.historySync.ownerRequired": "需要目标机器确认历史读取权限",
   "sessions.historySync.pending": "等待发布云端历史",

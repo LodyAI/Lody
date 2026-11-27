@@ -2370,8 +2370,6 @@
   "sessions.tabWaitingForSync": "En attente de synchronisation de cette conversation…",
   "sessions.contentSync.updating": "Synchronisation",
   "sessions.contentSync.loadingConversation": "Chargement de la conversation",
-  "sessions.historySync.machine": "Historique de l’ordinateur distant",
-  "sessions.historySync.streams": "Historique de Lody Streams",
   "sessions.historySync.checking": "Vérification de l’historique dans le cloud",
   "sessions.historySync.ownerRequired": "L’ordinateur distant doit confirmer l’accès à cet historique",
   "sessions.historySync.pending": "En attente de la publication de l’historique dans le cloud",

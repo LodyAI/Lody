@@ -2,7 +2,11 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SESSION_GOAL_COMMANDS, type SessionGoalMessage } from '@lody/shared';
+import {
+  SESSION_GOAL_COMMANDS,
+  type RoostHistorySyncState,
+  type SessionGoalMessage,
+} from '@lody/shared';
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import type { SessionMachineInfo } from '../src/components/sessions/session-machine-info';
 import { createTestI18n, withTestI18n } from './test-i18n';
@@ -54,41 +58,32 @@ describe('SessionInfoBar ambient information', () => {
     container.remove();
   });
 
-  it('shows the selected Roost history source and the status of its replacement', () => {
-    act(() =>
-      root.render(
-        withTestI18n(
-          <SessionInfoBar
-            {...CONTEXT_LESS_PROPS}
-            historySync={{ source: 'machine', phase: 'pending' }}
-          />,
-          testI18n
+  it('shows Roost history status only when there is something to report', () => {
+    const renderSync = (historySync: RoostHistorySyncState) =>
+      act(() =>
+        root.render(
+          withTestI18n(
+            <SessionInfoBar {...CONTEXT_LESS_PROPS} historySync={historySync} />,
+            testI18n
+          )
         )
-      )
-    );
-    expect(container.querySelector('[role="status"]')?.textContent).toContain(
-      'History from the target machine'
-    );
-    expect(container.querySelector('[role="status"]')?.textContent).toContain(
-      'Waiting for cloud publication'
-    );
-    act(() =>
-      root.render(
-        withTestI18n(
-          <SessionInfoBar
-            {...CONTEXT_LESS_PROPS}
-            historySync={{ source: 'streams', phase: 'ready', newerVersionPending: true }}
-          />,
-          testI18n
-        )
-      )
-    );
-    expect(container.querySelector('[role="status"]')?.textContent).toContain(
-      'History from Lody Streams'
-    );
+      );
+    for (const historySync of [
+      { source: 'machine', phase: 'idle' },
+      { source: 'streams', phase: 'ready' },
+    ] as const) {
+      renderSync(historySync);
+      expect(container.textContent).toBe('');
+      expect(container.querySelector('[role="status"]')).toBeNull();
+    }
+    renderSync({ source: 'machine', phase: 'pending' });
+    const pending = container.querySelector('[role="status"]')?.textContent;
+    expect(pending).toBe('Waiting for cloud publication');
+    renderSync({ source: 'streams', phase: 'ready', newerVersionPending: true });
     expect(container.querySelector('[role="status"]')?.textContent).toContain(
       'Showing the previous version'
     );
+    expect(container.textContent).not.toContain('History from');
   });
 
   it.each([false, true])(

@@ -33,6 +33,7 @@ import {
 } from './session-info-chips';
 import type { SessionStatusStripState } from './session-status-strip';
 import {
+  hasRoostHistorySyncNotice,
   RoostHistorySyncIndicator,
   SessionSyncingIndicator,
   type SessionSyncIndicatorVariant,
@@ -405,7 +406,7 @@ export function SessionInfoBar({
     privateAccessStatus
   );
   if (!hasSurfaceContent && !hasMachine) {
-    return queue || historySync ? (
+    return queue || hasRoostHistorySyncNotice(historySync) ? (
       <div {...stylex.props(styles.bar)}>
         <ConversationColumn>
           {historySync && <RoostHistorySyncIndicator state={historySync} />}

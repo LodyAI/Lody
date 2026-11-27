@@ -2370,8 +2370,6 @@
   "sessions.tabWaitingForSync": "Ожидание синхронизации диалога…",
   "sessions.contentSync.updating": "Синхронизация",
   "sessions.contentSync.loadingConversation": "Загрузка диалога",
-  "sessions.historySync.machine": "История с целевого компьютера",
-  "sessions.historySync.streams": "История из Lody Streams",
   "sessions.historySync.checking": "Проверяем историю в облаке",
   "sessions.historySync.ownerRequired": "Целевой компьютер должен подтвердить доступ к этой истории",
   "sessions.historySync.pending": "Ожидаем публикации истории в облаке",
