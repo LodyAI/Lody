@@ -46,7 +46,6 @@ export const field = stylex.defineVars({
   // The family API shares the system state, including the label and help.
   disabledOpacity: control.disabledOpacity,
   background: colors.wellBackground,
-  // Flat 1px neutral hairline (no inset bevel shadow or bottom lit lip).
   well: `inset 0 0 0 1px color-mix(in oklab, ${colors.label} 10%, transparent)`,
   value: colors.label,
   label: colors.label,
@@ -55,7 +54,6 @@ export const field = stylex.defineVars({
   // The chevron on a trigger and any icon at rest: a hint, not a label.
   icon: colors.tertiaryLabel,
   error: colors.destructive,
-  // Minimalist 1px neutral focus edge (no saturated blue outline or outer halo).
   ring: `color-mix(in oklab, ${colors.label} 34%, transparent)`,
   invalidRing: colors.destructive,
   // Stored state is the accent fill: a checked box and a switch that is on take
@@ -80,7 +78,6 @@ export const field = stylex.defineVars({
  */
 export const fieldPaletteTheme = stylex.createTheme(field, {
   background: colors.wellBackground,
-  // Flat 1px neutral hairline (no inset bevel shadow or bottom lit lip).
   well: `inset 0 0 0 1px color-mix(in oklab, ${colors.label} 10%, transparent)`,
   value: colors.label,
   label: colors.label,
@@ -88,7 +85,6 @@ export const fieldPaletteTheme = stylex.createTheme(field, {
   hint: colors.tertiaryLabel,
   icon: colors.tertiaryLabel,
   error: colors.destructive,
-  // Minimalist 1px neutral focus edge (no saturated blue outline or outer halo).
   ring: `color-mix(in oklab, ${colors.label} 34%, transparent)`,
   invalidRing: colors.destructive,
   checkedFill: colors.accent,
