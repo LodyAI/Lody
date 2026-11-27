@@ -8,12 +8,12 @@ import { field } from './field.tokens.stylex';
  * Switch and the controls that migrate next cannot each grow their own focus,
  * invalid and disabled treatment.
  *
- * The ring rides in the same box-shadow as the control's own edge: 2px, tight
- * to the control, no offset, no glow. It is not an `outline` because the app
- * shell resets every outline with `!important`, which no layer order can beat.
- * The ring comes FIRST in that list: earlier shadows paint on top, and the
- * well's lit lower lip (a 1px light line under the field) otherwise covered the
- * ring's bottom edge, so the ring read 2px at the sides and 1px below.
+ * The ring rides in the same box-shadow as the control's own edge: 1px neutral
+ * edge, tight to the control, no offset, no glow. It is not an `outline`
+ * because the app shell resets every outline with `!important`, which no layer
+ * order can beat. The ring comes FIRST in that list: earlier shadows paint on
+ * top, and the well's lit lower lip (a 1px light line under the field)
+ * otherwise covered the ring's bottom edge.
  * CSS cannot append to a box-shadow list, so a control that changes its edge —
  * a checked box swaps the well for the ink highlight — restates the ring with
  * it, the way each Button variant does.
@@ -56,8 +56,8 @@ export const well = stylex.create({
     transitionTimingFunction: ease.standard,
   },
   // StyleX keys a conditional value per condition, so the focused case is
-  // restated here; otherwise an invalid control would flip back to the accent
-  // ring the moment it takes focus.
+  // restated here; otherwise an invalid control would flip back to the neutral
+  // focus edge the moment it takes focus.
   invalid: {
     boxShadow: {
       default: `${INVALID_RING}, ${field.well}`,

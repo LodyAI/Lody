@@ -25,7 +25,7 @@ export const field = stylex.defineVars({
   labelLeading: text.footnoteLeading,
   labelWeight: '500',
   gap: space[1.5],
-  ringWidth: '2px',
+  ringWidth: '1px',
   textareaMinHeight: '72px',
   // A checkbox and a radio are the rules' "16px things", so they take the mini
   // radius; a radio overrides it with a full round because it is a circle.
@@ -54,7 +54,8 @@ export const field = stylex.defineVars({
   // The chevron on a trigger and any icon at rest: a hint, not a label.
   icon: colors.tertiaryLabel,
   error: colors.destructive,
-  ring: colors.accent,
+  // Minimalist 1px neutral focus edge (no saturated blue outline or outer halo).
+  ring: `color-mix(in oklab, ${colors.label} 34%, transparent)`,
   invalidRing: colors.destructive,
   // Stored state is the accent fill: a checked box and a switch that is on take
   // the `accent` fill with `background` on top of it, and the raised ink edge
@@ -85,7 +86,8 @@ export const fieldPaletteTheme = stylex.createTheme(field, {
   hint: colors.tertiaryLabel,
   icon: colors.tertiaryLabel,
   error: colors.destructive,
-  ring: colors.accent,
+  // Minimalist 1px neutral focus edge (no saturated blue outline or outer halo).
+  ring: `color-mix(in oklab, ${colors.label} 34%, transparent)`,
   invalidRing: colors.destructive,
   checkedFill: colors.accent,
   checkedMark: colors.background,
