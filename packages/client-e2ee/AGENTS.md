@@ -38,17 +38,16 @@
   Retrying the same intent never signs a second genesis.
 - Entry pins route an exact desktop offer; they grant no approval. Never clear a
   ready/pending pin to bypass replacement or missing native protection.
-  `personalEntry` restricts `reuse-active` strictly to `seal` and `openContent`;
-  open, join and pairing always reconcile pins, and teardown closes the cached
-  `personalEntryPins` `IDBDatabase` handle.
-- Access loss (`e2ee_device_revoked`/`e2ee_member_removed`, exact plain messages) comes
-  only from an `E2eeAccessRefusal` (credential-bound call, account unchanged), the runtime's
-  verified-ledger `revoked` or its exact plain `Error(code)` rejection, or a status without
-  this device. It needs a definite same-account
-  session and this exact ready/cancelled pin; it then cancels that pin (offer and genesis kept)
-  and retires the entry. A credential `e2ee_device_revoked` history read retries once under
-  the account login so the signed revocation still verifies. Every cloud call is bounded by
-  30 s as retryable `unavailable`; a timeout is never access loss. Only gateway 502/503/504 retry thrice inside that bound with Effect sleep and account guards.
+  Only `seal` and `openContent` may use `reuse-active`; all other entry calls
+  reconcile pins, and teardown closes the cached pin `IDBDatabase`.
+- Access loss (`e2ee_device_revoked`/`e2ee_member_removed`) comes only from
+  `E2eeAccessRefusal` (credential-bound, same account), runtime verified-ledger
+  `revoked`, exact plain `Error(code)`, or a status missing this device. Confirmed
+  under a definite same-account session and matching ready/cancelled pin, it cancels
+  that pin (keeping offer/genesis) and retires the entry. A credential
+  `e2ee_device_revoked` history read retries once under account login. Cloud calls
+  time out at 30 s as retryable `unavailable` (never access loss), retrying only
+  gateway 502/503/504 thrice with Effect sleep and account guards.
 - Content calls snapshot the complete caller DTO before lazy account/pin I/O.
   Seal owns cleanup of its plaintext copy even if admission or the executor fails.
   Public runtime copies retain their own native-call lifetime; never wipe borrowed
@@ -61,12 +60,10 @@
   stays retryable. The approver offers every `ready` pin of the account (`listReady`),
   opening unopened ones on demand; display names are best effort. Requester methods
   exist only when the host passes `requester`.
-- Every approval session, from the facade or the approver, comes from `approvalSession`:
-  acquiring it and each of its operations pass `project`, and the open and each refresh
-  apply the status rule, so exact loss retires that pin. That rule also counts the public
-  runtime's exact loss refusal of `status` (via `failureLoss`); any other status failure
-  proves nothing. The approver skips a workspace whose session fails instead of
-  failing the list.
+- Every approval session comes from `approvalSession`: acquisition and operations
+  pass `project`, and open/refresh apply the status rule (including `status`
+  exact-loss refusals via `failureLoss`; other failures prove nothing) so exact
+  loss retires that pin. Approvers skip workspaces whose session fails.
 - Hosts build pairing cloud ports with `makePersonalCloudAccountPairingPorts`, which fences
   each attempt on the original signed-in account and bounds the whole call. `personalEntry`
   bounds append, list and history again on its executor's clock, since one unanswered
