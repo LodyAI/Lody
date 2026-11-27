@@ -137,6 +137,9 @@ function bundleControlRoute() {
     const ports = fileURLToPath(
       new URL('../../components/tests/browser/e2ee-control-route-ports.tsx', import.meta.url)
     );
+    const stylexStub = fileURLToPath(
+      new URL('../../components/tests/browser/stylex-runtime-stub.ts', import.meta.url)
+    );
     const output = await build({
       entryPoints: [
         fileURLToPath(
@@ -161,6 +164,7 @@ function bundleControlRoute() {
               { filter: /^react(?:-dom)?(?:\/.*)?$|^effect$|^@lody\/e2ee-core\/protocol$/ },
               ({ path }) => ({ path: testRequire.resolve(path) })
             );
+            builder.onResolve({ filter: /^@stylexjs\/stylex$/ }, () => ({ path: stylexStub }));
             // Relatively imported lost-access display page and hosted workspace removal.
             builder.onResolve(
               {

@@ -31,6 +31,9 @@ function Preview({
   access,
   removal = 'removed',
   form = 'phone',
+  browser = false,
+  link,
+  severalWorkspaces = false,
 }: {
   mode:
     | 'awaiting'
@@ -50,8 +53,17 @@ function Preview({
   removal?: 'removed' | 'pending' | 'not-owner' | 'billing';
   /** Phones scan codes; computers show them and take typed codes. */
   form?: 'phone' | 'desktop';
+  /** A browser host: the person confirms this is their own device before anything starts. */
+  browser?: boolean;
+  /** A synthetic pairing link as the system camera hands it over. */
+  link?: string;
+  /** The request names several workspaces this device can approve. */
+  severalWorkspaces?: boolean;
 }) {
   const runtime = useMemo(() => {
+    // The OS parks a link before the page mounts; the page claims it on mount.
+    if (link)
+      (window as { __LODY_PENDING_E2EE_PAIR_URL__?: string }).__LODY_PENDING_E2EE_PAIR_URL__ = link;
     const state: E2eeAutomaticPairingState & { requestId: string } = {
       id: 'synthetic-only',
       workspaceId: 'preview',
@@ -99,7 +111,20 @@ function Preview({
       pendingAutomaticPairing: async () => {
         if (terminal) return [];
         const { comparisonCode: _approverNeverShowsIt, ...review } = state;
-        return [review];
+        return [
+          {
+            ...review,
+            ...(severalWorkspaces
+              ? {
+                  workspaces: [
+                    { workspaceId: 'preview', name: 'Lody Design' },
+                    { workspaceId: 'platform', name: 'Platform' },
+                    { workspaceId: 'archive', name: 'Archive' },
+                  ],
+                }
+              : {}),
+          },
+        ];
       },
       // Type 528193 (the code the new device shows) to authorize; the third wrong code
       // ends the request, as the real host does.
@@ -136,8 +161,9 @@ function Preview({
       // No request ever arrives under the synthetic code, so nothing is signed.
       inspectAccountPairing: async () => null,
       approveAccountPairing: async () => ({ workspaces: [] }),
+      ...(browser ? { requirePersonalComputer: true } : {}),
     } as unknown as E2eeWorkspaceRuntime;
-  }, [mode]);
+  }, [mode, browser, link, severalWorkspaces]);
   if (mode === 'addDevice')
     return (
       <Layout form={form}>
@@ -227,10 +253,10 @@ const meta = {
 } satisfies Meta<typeof Preview>;
 export default meta;
 type Story = StoryObj<typeof meta>;
-/** No signed-in device has answered yet: the page says where to go and offers scanning. */
+/** No signed-in device has answered yet: the page says where to go. */
 export const PhoneAwaitingDevice: Story = { args: { mode: 'awaiting' } };
 export const PhoneWaiting: Story = { args: { mode: 'waiting' } };
-/** A new computer shows a QR code for a phone beside the code another computer types. */
+/** A new computer shows its six-digit code, and the same code as a QR a phone can scan. */
 export const DesktopNewDevice: Story = { args: { mode: 'waiting', form: 'desktop' } };
 /** Open "无法在其他设备上批准？": restore first, then "我没有设置过备份" → owner deletion. */
 export const PhoneWaitingWithBackup: Story = {
@@ -271,10 +297,24 @@ export const PhoneRevoked: Story = { args: { mode: 'revoked' } };
 export const PhoneRemoved: Story = { args: { mode: 'removed' } };
 /** Open “Restart this device’s previous pairing” to inspect its confirmation. */
 export const PhonePreviousRequest: Story = { args: { mode: 'previous' } };
-/** A computer approving: reveal a QR code for a new phone, or type a new computer's code. */
+/** A computer approving: type the new device's six-digit code. */
 export const DeviceApproval: Story = { args: { mode: 'approval', form: 'desktop' } };
-/** A phone approving: scan the new device's screen, or type its code. */
+/** A phone approving: type the code, or scan the new screen instead of typing. */
 export const DeviceApprovalOnPhone: Story = { args: { mode: 'approval' } };
+/** The request names three workspaces: all are ticked, and the requested one stays ticked. */
+export const DeviceApprovalSeveralWorkspaces: Story = {
+  args: { mode: 'approval', form: 'desktop', severalWorkspaces: true },
+};
+/** The same choice on a phone. */
+export const DeviceApprovalSeveralWorkspacesOnPhone: Story = {
+  args: { mode: 'approval', severalWorkspaces: true },
+};
+/** The system camera opened an approval link: the window shows the carried code to compare. */
+export const DeviceApprovalFromSystemCamera: Story = {
+  args: { mode: 'approval', link: 'lody://auto-pair?id=synthetic-only&code=528193' },
+};
+/** A phone browser: confirm this is your own device, then request access. */
+export const PhoneBrowserConsent: Story = { args: { mode: 'awaiting', browser: true } };
 /** The console's Devices tab entry. */
 export const AddDeviceCard: Story = { args: { mode: 'addDevice', form: 'desktop' } };
 
