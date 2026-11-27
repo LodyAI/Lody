@@ -83,6 +83,7 @@ interface LodyOptions {
     upgrade?: ManagedDaemonUpgradeOptions
   ) => Promise<string>;
   closeSessionTerminals?: (sessionId: SessionId) => void;
+  hasSessionTerminals?: (sessionId: SessionId, workdir?: string) => boolean;
   /** See `MessageHandlerConfig.readHostedPresenceStates`. */
   readHostedPresenceStates?: () => LodyPresenceStateMap[];
   cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
@@ -420,6 +421,7 @@ export class Lody {
           ? { localWorkspaceCatalog: options.localWorkspaceCatalog }
           : {}),
         closeSessionTerminals: options.closeSessionTerminals,
+        hasSessionTerminals: options.hasSessionTerminals,
         readHostedPresenceStates: options.readHostedPresenceStates,
         cleanupLocalProjectWorktreeSetupIfUnreferenced:
           options.cleanupLocalProjectWorktreeSetupIfUnreferenced,
