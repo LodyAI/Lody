@@ -736,7 +736,7 @@ describe('QR camera', () => {
       facingMode: { ideal: 'environment' },
       width: { ideal: 720 },
     });
-    expect(probe.states.at(-1)).toBe('unavailable');
+    expect(probe.states.at(-1)).toBe('denied');
     await probe.unmount();
   });
 
@@ -808,14 +808,23 @@ describe('E2eeWorkspaceControlPage mobile drill-down navigation', () => {
       }),
     });
     try {
-      const props = render({ workspaceName: 'Cipher Lab' });
+      const props = render({ workspaceName: 'Cipher Lab', onOpen: vi.fn() });
       expect(container!.querySelector('[data-testid="e2ee-mobile-menu"]')).not.toBeNull();
       expect(container!.querySelector('[data-testid="e2ee-workspace-control"]')?.textContent).toBe(
-        'Cipher Lab'
+        'e2ee.control.title'
       );
+      expect(
+        container!.querySelector('[data-testid="e2ee-mobile-identity"]')?.textContent
+      ).toContain('Cipher Lab');
       expect(container!.querySelectorAll('[data-testid="e2ee-mobile-menu"] button')).toHaveLength(
         5
       );
+      const menu = container!.querySelector('[data-testid="e2ee-mobile-menu"]')!;
+      const open = button('e2ee.control.openWorkspace')!;
+      expect(open).toBeDefined();
+      expect(menu.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      act(() => open.click());
+      expect(props.onOpen).toHaveBeenCalledTimes(1);
       act(() =>
         (container!.querySelector('[data-console-tab="members"]') as HTMLButtonElement).click()
       );

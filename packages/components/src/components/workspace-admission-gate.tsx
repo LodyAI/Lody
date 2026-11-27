@@ -60,6 +60,8 @@ function showsEncryptionDetail(
   );
 }
 
+const WAIT_BACK_DELAY_MS = 6_000;
+
 const styles = stylex.create({
   failureShell: { position: 'relative' },
   failureBack: {
@@ -67,6 +69,15 @@ const styles = stylex.create({
     top: `calc(${space[4]} + env(safe-area-inset-top, 0px))`,
     insetInlineStart: space[4],
     zIndex: 1,
+  },
+  waitBack: {
+    animationName: stylex.keyframes({
+      from: { opacity: 0 },
+      to: { opacity: 1 },
+    }),
+    animationDuration: '200ms',
+    animationTimingFunction: 'ease-out',
+    animationFillMode: 'both',
   },
 });
 
@@ -103,6 +114,26 @@ export function WorkspaceAdmissionGate({
   const currentScope = useRef<string | null>(recoveryScope);
   currentScope.current = recoveryScope;
   const [recheckScope, setRecheckScope] = useState<string | null>(null);
+  const [showWaitBack, setShowWaitBack] = useState(false);
+  const modeMissing = !mode || mode.workspaceSlug !== workspaceName || mode.accountId !== accountId;
+  const runtimeReadyForEncrypted =
+    encrypted &&
+    runtime?.workspaceId === mode?.workspaceId &&
+    runtime?.accountId === mode?.accountId &&
+    runtime?.contentMode === 'e2ee';
+  const waitingForAdmission =
+    Boolean(platform.e2eeWorkspaces) &&
+    ((modeMissing && failure?.workspaceSlug !== workspaceName) ||
+      (!modeMissing && encrypted && !runtimeReadyForEncrypted && initializing));
+  useEffect(() => {
+    if (!waitingForAdmission) {
+      setShowWaitBack(false);
+      return undefined;
+    }
+    setShowWaitBack(false);
+    const timer = setTimeout(() => setShowWaitBack(true), WAIT_BACK_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [waitingForAdmission, workspaceName]);
   useEffect(() => {
     currentScope.current = recoveryScope;
     return () => {
@@ -173,7 +204,25 @@ export function WorkspaceAdmissionGate({
           gate="workspace_admission"
           variant="boot"
           title={t('workspace.route.loadingTitle')}
-          description={t('workspace.route.loadingDescription')}
+          description={t(
+            encrypted || needsNativeIdentity
+              ? 'e2ee.mode.verifyingAccess'
+              : 'workspace.route.loadingDescription'
+          )}
+          action={
+            showWaitBack ? (
+              <div {...stylex.props(styles.waitBack)}>
+                <Button
+                  variant="ghost"
+                  size="small"
+                  data-testid="workspace-admission-wait-back"
+                  onClick={backToWorkspaces}
+                >
+                  {t('e2ee.lostAccess.back')}
+                </Button>
+              </div>
+            ) : undefined
+          }
         />
       );
     }
@@ -249,7 +298,21 @@ export function WorkspaceAdmissionGate({
           gate="workspace_admission"
           variant="boot"
           title={t('workspace.route.loadingTitle')}
-          description={t('workspace.route.loadingDescription')}
+          description={t('e2ee.mode.verifyingAccess')}
+          action={
+            showWaitBack ? (
+              <div {...stylex.props(styles.waitBack)}>
+                <Button
+                  variant="ghost"
+                  size="small"
+                  data-testid="workspace-admission-wait-back"
+                  onClick={backToWorkspaces}
+                >
+                  {t('e2ee.lostAccess.back')}
+                </Button>
+              </div>
+            ) : undefined
+          }
         />
       );
     return (

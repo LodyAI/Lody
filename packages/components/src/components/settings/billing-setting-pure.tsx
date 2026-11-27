@@ -917,7 +917,9 @@ export function BillingSettingsView({
                           'billing.promoYearlyOfferBadge',
                           discountBadgeValues(promoOffer!.upgradeToYearlyDiscountPercent!)
                         );
-                        return customUpgradeName ? `${customUpgradeName} · ${offerText}` : offerText;
+                        return customUpgradeName
+                          ? `${customUpgradeName} · ${offerText}`
+                          : offerText;
                       })()}
                     </Badge>
                   ) : null}

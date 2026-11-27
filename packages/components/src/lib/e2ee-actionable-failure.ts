@@ -1,8 +1,39 @@
 import { isTransientConvexQueryError } from './authed-convex-query';
 
+type RuntimeGlobalWindow = {
+  __LODY_ELECTRON__?: unknown;
+  __LODY_NATIVE__?: unknown;
+  Capacitor?: {
+    isNativePlatform?: () => boolean;
+    getPlatform?: () => string;
+  };
+};
+
+export function isWebBrowserStorageRuntime(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = window as unknown as RuntimeGlobalWindow;
+  if (host.__LODY_ELECTRON__ === true || host.__LODY_NATIVE__ === true) return false;
+  try {
+    if (host.Capacitor?.isNativePlatform?.() === true) return false;
+    const platform = host.Capacitor?.getPlatform?.();
+    if (platform === 'ios' || platform === 'android') return false;
+  } catch {
+    return true;
+  }
+  return true;
+}
+
+export function localStorageFailureKey(surface: 'recovery' | 'create' | 'team'): string {
+  const web = isWebBrowserStorageRuntime();
+  if (surface === 'recovery')
+    return web ? 'e2ee.recovery.error.storageWeb' : 'e2ee.recovery.error.storage';
+  if (surface === 'create') return web ? 'e2ee.create.storageWeb' : 'e2ee.create.storage';
+  return web ? 'e2ee.team.error.storageWeb' : 'e2ee.team.error.storage';
+}
+
 export function recoveryAvailabilityMessage(code: string): string | undefined {
   if (code.includes('e2ee_recovery_unavailable')) return 'e2ee.recovery.error.unavailable';
-  if (code.includes('e2ee_recovery_storage')) return 'e2ee.recovery.error.storage';
+  if (code.includes('e2ee_recovery_storage')) return localStorageFailureKey('recovery');
   if (/e2ee_recovery_(?:conflict|rollback)/.test(code)) return 'e2ee.recovery.error.conflict';
 }
 
@@ -58,7 +89,9 @@ export function isLocalStorageFailure(error: unknown): boolean {
     _tag === 'LocalStoreError' ||
     _tag === 'ClientCustodyError' ||
     _tag === 'KeyProtectorError' ||
-    /^(?:QuotaExceededError|InvalidStateError|UnknownError|NotReadableError)$/.test(name ?? '') ||
+    /^(?:QuotaExceededError|InvalidStateError|UnknownError|NotReadableError|SecurityError)$/.test(
+      name ?? ''
+    ) ||
     /^(?:e2ee_)?(?:storage|permissions|corrupt|custody_unavailable|protection-unavailable)$/.test(
       requestFailureCode(error) ?? ''
     )

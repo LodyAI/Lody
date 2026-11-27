@@ -58,6 +58,7 @@ export interface CreateWorkspacePageProps {
   workspaceSlug: string;
   error?: string | null;
   creating?: boolean;
+  creatingLabel?: string;
   submitDisabled?: boolean;
   creationOptions?: ReactNode;
   slugChecking?: boolean;
@@ -84,6 +85,7 @@ export function CreateWorkspacePage({
   workspaceSlug,
   error = null,
   creating = false,
+  creatingLabel,
   submitDisabled = false,
   creationOptions,
   slugChecking = false,
@@ -368,9 +370,10 @@ export function CreateWorkspacePage({
                       diameter="calc(var(--spacing) * 4)"
                       className={stylex.props(surface.spinnerMargin).className}
                     />
-                    {paidRequired
-                      ? t('billing.startingCheckout', 'Starting checkout...')
-                      : t('common.creating')}
+                    {creatingLabel ??
+                      (paidRequired
+                        ? t('billing.startingCheckout', 'Starting checkout...')
+                        : t('common.creating'))}
                   </span>
                 ) : (
                   <span {...stylex.props(surface.row)}>

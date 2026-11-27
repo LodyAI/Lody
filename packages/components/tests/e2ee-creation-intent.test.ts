@@ -10,6 +10,7 @@ import {
   reconcilePendingE2eeWorkspaces,
 } from '../src/lib/create-e2ee-workspace';
 import type { PlatformE2eeWorkspaces } from '@lody/platform';
+import { isListedEncryptedWorkspace } from '../src/components/e2ee/encrypted-workspace-mark';
 import {
   clearPendingE2eeWorkspace,
   hasPendingE2eeCreationForSlug,
@@ -487,5 +488,99 @@ describe('silent background reconciliation of leftover pending creations', () =>
     const result = await reconcilePendingE2eeWorkspaces(port, localStorage, 'account-A');
     expect(result?.workspaceId).toBe('ws-second');
     expect(listPendingE2eeWorkspaces(localStorage, 'account-A')).toEqual([]);
+  });
+});
+
+describe('FTUE storage classification and optimistic workspace creation', () => {
+  it('classifies SecurityError (private mode / blocked IndexedDB) as a local storage failure', async () => {
+    const { isLocalStorageFailure } = await import('../src/lib/e2ee-actionable-failure');
+    expect(isLocalStorageFailure(new DOMException('storage blocked', 'SecurityError'))).toBe(true);
+    expect(isLocalStorageFailure(new DOMException('quota exceeded', 'QuotaExceededError'))).toBe(
+      true
+    );
+  });
+
+  it('notifies onWorkspaceCreated and resolves without waiting on refreshWorkspaces', async () => {
+    const { createCloudE2eeWorkspaces } = await import('../src/providers/cloud-e2ee-workspaces');
+    const hash = 'ab'.repeat(32);
+    let releaseRefresh!: () => void;
+    const refreshPending = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const optimistic: unknown[] = [];
+    let refreshCalled = 0;
+    const port = createCloudE2eeWorkspaces({
+      session: () => ({
+        status: 'authenticated',
+        user: { id: 'account-A', email: 'a@example.com', name: 'A' },
+      }),
+      prepareCreation: async (input) => ({
+        ...input,
+        genesisRecordHex: 'aa',
+        genesisHashHex: hash,
+        deviceCredentialHash: 'bb',
+      }),
+      remote: {
+        create: async (request) => ({
+          workspaceId: 'ws-fast',
+          name: request.name,
+          slug: request.slug,
+          contentMode: 'e2ee',
+          contentModeVersion: 1,
+          genesisHash: hash,
+          cryptoOrgId: hash,
+          activation: 'control-only',
+        }),
+        deleteWorkspace: async () => ({ workspaceId: 'ws-fast', deleted: true }),
+        describe: async () => ({
+          workspaceId: 'ws-fast',
+          contentMode: 'e2ee',
+          contentModeVersion: 1,
+          genesisHash: hash,
+          cryptoOrgId: hash,
+          activation: 'control-only',
+        }),
+        history: async () => {
+          throw new Error('unused');
+        },
+      },
+      onWorkspaceCreated: (ws) => optimistic.push(ws),
+      refreshWorkspaces: async () => {
+        refreshCalled += 1;
+        await refreshPending;
+      },
+    });
+    const prepared = await port.prepareCreation!({
+      accountId: 'account-A',
+      requestId: 'req-fast',
+      name: 'Fast Vault',
+      slug: 'fast-vault',
+    });
+    const created = await port.create({
+      accountId: 'account-A',
+      requestId: prepared.requestId,
+      name: prepared.name,
+      slug: prepared.slug,
+      genesisRecordHex: prepared.genesisRecordHex,
+      deviceCredentialHash: prepared.deviceCredentialHash,
+      developerMode: true,
+    });
+    expect(created.workspaceId).toBe('ws-fast');
+    expect(optimistic).toEqual([
+      {
+        id: 'ws-fast',
+        name: 'Fast Vault',
+        slug: 'fast-vault',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: hash,
+        genesisHash: hash,
+      },
+    ]);
+    expect(isListedEncryptedWorkspace(optimistic[0])).toBe(true);
+    await Promise.resolve();
+    expect(refreshCalled).toBe(1);
+    releaseRefresh();
+    await refreshPending;
   });
 });

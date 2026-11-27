@@ -2,6 +2,9 @@ import { createFileRoute, notFound, Outlet, redirect } from '@tanstack/react-rou
 import { BootNavigate } from '@/components/boot-navigate';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useAtomValue } from 'jotai';
+import { workspaceContentModeAtom } from '../atoms/workspace-content-mode';
+import { runtimeAtom } from '../atoms/runtime';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useCloudQuery } from '@lody/platform/react';
@@ -19,6 +22,7 @@ import {
   recordWorkspaceAccessDenied,
   resolveOptimisticWorkspaceRouteGuard,
   resolveWorkspaceAccessDeniedFallback,
+  isAdmittedEncryptedWorkspace,
 } from '@/lib/workspace-route-guard';
 import { RouteMessage } from '@/components/route-message';
 import { BlockingWaitPlaceholder } from '@/components/blocking-wait-placeholder';
@@ -379,6 +383,10 @@ function PlaintextWorkspaceAuthedRoute({
 }) {
   const { t } = useTranslation();
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
+  const mode = useAtomValue(workspaceContentModeAtom);
+  const runtime = useAtomValue(runtimeAtom);
+  const accessConfirmed =
+    serverAccessConfirmed || isAdmittedEncryptedWorkspace(workspaceName, mode, runtime);
 
   useEffect(() => {
     if (!organizationsLoading) setOrgSettled(true);
@@ -392,7 +400,7 @@ function PlaintextWorkspaceAuthedRoute({
       organizations,
       activeOrganization,
       error: organizationsError,
-      serverAccessConfirmed,
+      serverAccessConfirmed: accessConfirmed,
     });
 
     if (optimisticGuard === 'redirect') {
@@ -472,7 +480,7 @@ function PlaintextWorkspaceAuthedRoute({
     organizations,
     activeOrganization,
     error: organizationsError,
-    serverAccessConfirmed,
+    serverAccessConfirmed: accessConfirmed,
   });
 
   if (workspaceGuard === 'redirect') {

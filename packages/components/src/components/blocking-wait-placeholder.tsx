@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { triggerDocMetaRescanAtom } from '../atoms/doc-meta';
@@ -314,12 +314,14 @@ export function BlockingWaitPlaceholder({
   variant,
   title,
   description,
+  action,
   recoveryDelayMs = BLOCKING_WAIT_RECOVERY_DELAY_MS,
 }: {
   gate: string;
   variant: 'content' | 'boot';
   title: string;
   description?: string;
+  action?: ReactNode;
   recoveryDelayMs?: number;
 }) {
   const observation = useWorkspaceDataScopeState();
@@ -327,7 +329,14 @@ export function BlockingWaitPlaceholder({
   const [waitStartedAt] = useState(() => Date.now());
 
   if (state === 'waiting') {
-    return <LoadingPlaceholder variant={variant} title={title} description={description} />;
+    return (
+      <LoadingPlaceholder
+        variant={variant}
+        title={title}
+        description={description}
+        action={action}
+      />
+    );
   }
   return (
     <RecoveryPage

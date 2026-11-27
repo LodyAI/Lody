@@ -11,13 +11,6 @@ const styles = stylex.create({
     borderTopColor: colors.separator,
     paddingTop: space[3],
   },
-  heading: {
-    margin: 0,
-    marginBottom: space[2],
-    color: colors.secondaryLabel,
-    fontSize: text.footnoteSize,
-    fontWeight: 500,
-  },
   choices: {
     display: 'grid',
     gridTemplateColumns: { default: '1fr 1fr', '@media (max-width: 420px)': '1fr' },
@@ -104,14 +97,7 @@ export function E2eeWorkspaceCreationOption(props: {
   const { t } = useTranslation();
   return (
     <section {...stylex.props(styles.section)}>
-      <p id="e2ee-workspace-mode" {...stylex.props(styles.heading)}>
-        {t('e2ee.create.label')}
-      </p>
-      <div
-        role="radiogroup"
-        aria-labelledby="e2ee-workspace-mode"
-        {...stylex.props(styles.choices)}
-      >
+      <div role="radiogroup" aria-label={t('e2ee.create.label')} {...stylex.props(styles.choices)}>
         <button
           type="button"
           role="radio"

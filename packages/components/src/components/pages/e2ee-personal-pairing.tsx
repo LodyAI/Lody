@@ -508,8 +508,14 @@ function PersonalPairingSession({
                 {t('e2ee.pair.scan')}
               </Button>
             ))}
-          {cameraState === 'unavailable' && (
-            <p role="status">{t('e2ee.verify.cameraUnavailable')}</p>
+          {(cameraState === 'denied' || cameraState === 'unavailable') && (
+            <p role="status">
+              {t(
+                cameraState === 'denied'
+                  ? 'e2ee.verify.cameraDenied'
+                  : 'e2ee.verify.cameraUnavailable'
+              )}
+            </p>
           )}
           <Textarea
             aria-label={t('e2ee.pair.code')}

@@ -1157,6 +1157,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
     const initialization = (async () => {
       let admitting = false;
+      let runtimeModulePromise: Promise<typeof import('./create-workspace-runtime')> | undefined;
       try {
         if (disposed) return;
         if (modeCloud && requiresAdmission) {
@@ -1222,6 +1223,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               nativeReaderOwner = requestedReader;
               nativeLeasePreallocated = true;
             }
+            // The prefetched Streams token reaches Loro Repo only after open verification.
+            runtimeModulePromise = import('./create-workspace-runtime');
+            const prefetchedStreamsToken =
+              typeof native.contentStreamsToken === 'function'
+                ? native.contentStreamsToken(effectiveWorkspaceId).catch(() => null)
+                : undefined;
             const status = await native.open(
               effectiveWorkspaceId,
               undefined,
@@ -1310,6 +1317,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               genesisHash: descriptor.genesisHash,
               epoch: status.writeEpoch ?? status.epoch,
               rotationRequired: status.rotationRequired,
+              ...(prefetchedStreamsToken ? { prefetchedStreamsToken } : {}),
               onKeyUpdateRequired: (source) => {
                 if (disposed || retired) return;
                 if (source === 'seal-complete') {
@@ -1369,7 +1377,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // module is statically reachable from the root route, so the workspace
         // runtime stack loads only once a workspace runtime is actually needed.
         markTodayWindowBoot('runtime-start');
-        const { createWorkspaceRuntime } = await import('./create-workspace-runtime');
+        const { createWorkspaceRuntime } = await (runtimeModulePromise ??
+          import('./create-workspace-runtime'));
         markTodayWindowBoot('runtime-module');
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },

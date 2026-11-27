@@ -966,8 +966,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
                   bindingSignature: fromHex(identity.request.bindingSignature),
                 });
               });
-            // Reuse the read-back verified identity from preparePersonalIdentity when available;
-            // its secret buffers are wiped when this Scope closes before network I/O.
+            // Reused identity buffers are wiped when this Scope closes before network I/O.
             const keyPackageHex = opened
               ? yield* buildKeyPackage(opened)
               : yield* withIdentity(p, buildKeyPackage);

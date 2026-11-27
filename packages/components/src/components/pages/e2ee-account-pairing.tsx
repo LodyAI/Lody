@@ -22,6 +22,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text as type } from '@lody/ui/tokens/scales.stylex';
 import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
 import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
+import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
 const styles = stylex.create({
   retryAlert: {
@@ -43,6 +44,7 @@ const styles = stylex.create({
   },
   qr: { backgroundColor: '#ffffff', padding: space[2], alignSelf: 'flex-start' },
   muted: { color: colors.secondaryLabel, margin: 0 },
+  art: { display: 'flex', justifyContent: 'center', paddingBlock: space[2] },
   list: { margin: 0, paddingInlineStart: 0, listStyle: 'none', display: 'grid', gap: space[2] },
   row: { display: 'flex', alignItems: 'center', gap: space[2] },
   facts: { margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: space[2] },
@@ -109,19 +111,27 @@ function usePoll(
         }
       });
     };
-    const timer = setInterval(() => {
-      if (!running) run();
-    }, ms);
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribe?.(run);
     } catch {
       /* Live hints are optional; the poll still reads the same verified state. */
     }
+    const timer = setInterval(
+      () => {
+        if (!running) run();
+      },
+      unsubscribe === undefined ? ms : Math.max(ms, 8_000)
+    );
+    const onOnline = () => {
+      if (!running) run();
+    };
+    window.addEventListener('online', onOnline);
     if (immediate) run();
     return () => {
       stopped = true;
       clearInterval(timer);
+      window.removeEventListener('online', onOnline);
       unsubscribe?.();
     };
   }, [active, ms, subscribe, immediate]);
@@ -272,7 +282,8 @@ export function E2eeAccountPairingRequest(props: {
         if (live.current) setError(failureKey(failure));
       }
     },
-    subscribeRequest
+    subscribeRequest,
+    true
   );
   const restart = () =>
     run(async () => {
@@ -289,6 +300,11 @@ export function E2eeAccountPairingRequest(props: {
   const terminal = state && state.status !== 'waiting' && state.status !== 'joined';
   return (
     <Card.Root data-testid="e2ee-account-pairing-request" data-e2ee-pairing-surface="">
+      {phase === 'idle' && !state && (
+        <div {...stylex.props(styles.art)}>
+          <E2eeDevicePairArt width={152} />
+        </div>
+      )}
       <Card.Title>{t('e2ee.accountPair.request.title')}</Card.Title>
       {phase === 'idle' && !state && (
         <p {...stylex.props(styles.muted)}>
@@ -593,8 +609,14 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
                 {t('e2ee.accountPair.approve.scan')}
               </Button>
             ))}
-          {cameraState === 'unavailable' && (
-            <p {...stylex.props(styles.muted)}>{t('e2ee.verify.cameraUnavailable')}</p>
+          {(cameraState === 'denied' || cameraState === 'unavailable') && (
+            <p {...stylex.props(styles.muted)}>
+              {t(
+                cameraState === 'denied'
+                  ? 'e2ee.verify.cameraDenied'
+                  : 'e2ee.verify.cameraUnavailable'
+              )}
+            </p>
           )}
           <Textarea
             aria-label={t('e2ee.accountPair.code.label')}
