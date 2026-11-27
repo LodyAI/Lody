@@ -956,7 +956,8 @@ void test('safeStorage temporary lock or unavailability reports custody-locked w
   for (const [error, expectedCode] of [
     [Object.assign(new Error('permission denied'), { code: 'EACCES' }), 'permissions'],
     [Object.assign(new Error('operation not permitted'), { code: 'EPERM' }), 'permissions'],
-    [new Error('permission denied'), 'storage']
+    [new Error('permission denied'), 'storage'],
+    [new Error('Keychain permission denied'), 'storage']
   ]) {
     const denied = await execute(
       Effect.result(

@@ -18,7 +18,7 @@ export interface DesktopSafeStorage {
 }
 
 const SAFE_STORAGE_LOCKED =
-  /keychain|lock|unlock|cancel|interaction not allowed|auth(?:entication)? failed|errsec|secret service|kwallet|safe storage|temporarily unavailable|not available|unavailable/i
+  /keychain.{0,32}lock|lock.{0,32}keychain|\block(?:ed)?\b|unlock|cancel|interaction not allowed|auth(?:entication)? failed|errsec|secret service|kwallet|temporarily unavailable|not available|unavailable/i
 
 const custodyLockedErrors = new WeakSet<object>()
 
@@ -43,12 +43,13 @@ function classifySafeStorageError(
       : ''
   if (errCode === 'EACCES' || errCode === 'EPERM')
     return new NodeE2eeCustodyError({ code: 'permissions' })
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  if (/permission denied/i.test(message)) return new NodeE2eeCustodyError({ code: 'storage' })
   try {
     if (!storage.isEncryptionAvailable()) return custodyLockedError()
   } catch {
     return custodyLockedError()
   }
-  const message = error instanceof Error ? error.message : String(error ?? '')
   if (SAFE_STORAGE_LOCKED.test(message)) return custodyLockedError()
   return new NodeE2eeCustodyError({ code: 'storage' })
 }
