@@ -618,7 +618,6 @@ describe('encrypted one-shot commands', () => {
         },
       });
 
-      // Mismatched requester falls back to direct Streams (which reports missing LODY_AUTH_URL in local tests).
       const mismatched = await withMachineRpcClient(
         {
           auth: {
