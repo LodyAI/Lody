@@ -62,9 +62,9 @@ this page is the full text of the rules summarised there.
 - Desktop direct HTML preview is the one exception to the `srcdoc` path. It applies when the
   file is on this desktop's machine and `useSessionFileActions().resolveHostPath` yields its
   absolute path. Large HTML files keep a paged, read-only source view and open the complete
-  file from disk through the same preview protocol. Each entry into rendered mode first shows a consent dialog. Its "Allow
-  JavaScript" checkbox starts unchecked. Electron main (`machineRpc.openHtmlPreview`) then serves
-  the file's folder by default. For a nested page the user can authorize the displayed workspace
+  file from disk through the same preview protocol. Each entry into rendered mode first shows a consent dialog with its "Allow
+  JavaScript" and (for nested pages) workspace-resource checkboxes checked by default; the user can uncheck either before confirming. Electron main (`machineRpc.openHtmlPreview`) serves
+  the file's folder unless workspace resources are authorized, in which case it serves the displayed workspace
   folder for that preview, preserving the page’s workspace-relative URL and asset paths. Both
   choices serve content from a fresh `lody-html-preview://<random token>/` origin. Relative CSS,
   scripts and images load, and reload re-reads disk. Without consent the iframe sandbox is

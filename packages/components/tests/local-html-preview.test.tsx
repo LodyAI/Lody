@@ -70,29 +70,57 @@ describe('desktop local HTML preview consent', () => {
   };
   const state = () => container.querySelector('[data-testid="state"]')?.textContent;
 
-  it('opens the preview with the chosen script setting when the user confirms', async () => {
+  it('checks all consent options by default and opens the preview when confirmed', async () => {
     let answer!: (value: unknown) => void;
     openHtmlPreview.mockReturnValue(new Promise((resolve) => (answer = resolve)));
     let cancelled = false;
     await act(async () => root.render(<Harness onCancel={() => (cancelled = true)} />));
 
-    await act(async () => document.querySelector<HTMLElement>('[role="checkbox"]')!.click());
+    const checkboxes = Array.from(document.querySelectorAll<HTMLElement>('[role="checkbox"]'));
+    expect(checkboxes).toHaveLength(2);
+    for (const checkbox of checkboxes) {
+      expect(checkbox.getAttribute('aria-checked')).toBe('true');
+    }
+
     await act(async () => button('Preview').click());
-    await act(async () => answer({ status: 'ok', url: 'lody-html-preview://t/index.html' }));
+    await act(async () => answer({ status: 'ok', url: 'lody-html-preview://t/site/index.html' }));
 
     expect(openHtmlPreview).toHaveBeenCalledWith({
       machineId: 'local',
       path: '/work/site/index.html',
       allowScripts: true,
+      workspaceRoot: '/work',
+      allowWorkspaceResources: true,
     });
-    expect(state()).toBe('ready lody-html-preview://t/index.html scripts=true');
+    expect(state()).toBe('ready lody-html-preview://t/site/index.html scripts=true');
     expect(cancelled).toBe(false);
   });
 
-  it('opens with workspace resources and scripts independently selected', async () => {
+  it('allows unchecking scripts while keeping workspace resources enabled', async () => {
     openHtmlPreview.mockResolvedValue({
       status: 'ok',
       url: 'lody-html-preview://t/site/index.html',
+    });
+    await act(async () => root.render(<Harness onCancel={() => {}} />));
+    const labels = Array.from(document.querySelectorAll('label'));
+    const scripts = labels.find((label) => label.textContent?.includes('Allow JavaScript'));
+    expect(scripts).toBeDefined();
+    await act(async () => scripts!.querySelector<HTMLElement>('[role="checkbox"]')!.click());
+    await act(async () => button('Preview').click());
+    expect(openHtmlPreview).toHaveBeenCalledWith({
+      machineId: 'local',
+      path: '/work/site/index.html',
+      allowScripts: false,
+      workspaceRoot: '/work',
+      allowWorkspaceResources: true,
+    });
+    expect(state()).toBe('ready lody-html-preview://t/site/index.html scripts=false');
+  });
+
+  it('allows unchecking workspace resources while keeping scripts enabled', async () => {
+    openHtmlPreview.mockResolvedValue({
+      status: 'ok',
+      url: 'lody-html-preview://t/index.html',
     });
     await act(async () => root.render(<Harness onCancel={() => {}} />));
     const labels = Array.from(document.querySelectorAll('label'));
@@ -103,11 +131,9 @@ describe('desktop local HTML preview consent', () => {
     expect(openHtmlPreview).toHaveBeenCalledWith({
       machineId: 'local',
       path: '/work/site/index.html',
-      allowScripts: false,
-      workspaceRoot: '/work',
-      allowWorkspaceResources: true,
+      allowScripts: true,
     });
-    expect(state()).toBe('ready lody-html-preview://t/site/index.html scripts=false');
+    expect(state()).toBe('ready lody-html-preview://t/index.html scripts=true');
   });
 
   it('returns to the code view without opening anything when the user cancels', async () => {
