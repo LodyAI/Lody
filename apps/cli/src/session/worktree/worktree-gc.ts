@@ -127,7 +127,10 @@ export type WorktreeGcDeps = {
   archiveProjectGroup?: (input: { sessionId: SessionId; worktreePath: string }) => Promise<void>;
   cleanArtifacts?: (
     worktreePath: string,
-    options: { shouldAbort: () => boolean | Promise<boolean> }
+    options: {
+      shouldAbort: () => boolean | Promise<boolean>;
+      onBeforeDelete?: (targetPath: string) => Promise<void>;
+    }
   ) => Promise<WorktreeArtifactCleanResult>;
   settledArtifactGraceMs?: number;
   now?: () => number;
@@ -200,6 +203,12 @@ export class WorktreeGarbageCollector {
     return this.sweepPromise;
   }
 
+  async waitForIdle(): Promise<void> {
+    while (this.sweepPromise) {
+      await this.sweepPromise;
+    }
+  }
+
   async sweep(): Promise<WorktreeGcSweepResult> {
     const result: WorktreeGcSweepResult = {
       scanned: 0,
@@ -231,7 +240,7 @@ export class WorktreeGarbageCollector {
         }
         if (state.kind !== 'archived' && state.kind !== 'deleted') continue;
         if (!this.isRetryDue(sessionId)) continue;
-        if (this.deps.isRuntimeActive(sessionId, worktreePath)) {
+        if (this.deps.isRuntimeActive(sessionId)) {
           this.deps.logger.debug(
             `[worktree-gc] ${sessionId} runtime still releasing; deferring worktree removal`
           );
@@ -309,16 +318,19 @@ export class WorktreeGarbageCollector {
     this.inFlight.add(sessionId);
     try {
       const clean = this.deps.cleanArtifacts ?? cleanWorktreeArtifacts;
+      let markedCleaned = false;
       const cleanResult = await clean(worktreePath, {
         shouldAbort: async () => {
           if (this.deps.isRuntimeActive(sessionId, worktreePath)) return true;
           const freshState = await this.deps.readOwnerState(sessionId);
           return freshState.kind !== 'settled' || freshState.settledSinceMs !== settledSinceMs;
         },
+        onBeforeDelete: async () => {
+          if (markedCleaned) return;
+          await markWorktreeArtifactsCleaned(worktreePath);
+          markedCleaned = true;
+        },
       });
-      if (cleanResult.deletedPaths.length > 0) {
-        await markWorktreeArtifactsCleaned(worktreePath);
-      }
       if (cleanResult.aborted) {
         this.deps.logger.debug(
           `[worktree-gc] Aborted settled artifact cleanup for ${sessionId}; session or runtime became active`

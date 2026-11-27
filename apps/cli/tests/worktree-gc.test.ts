@@ -929,18 +929,19 @@ describe('WorktreeGarbageCollector', () => {
       expect(retried.failed).toEqual([sessionId]);
     });
 
-    it('excludes recovery/config dirs (.ipynb_checkpoints, .swiftpm, .vs) and never deletes across nested .git boundaries', async () => {
+    it('excludes recovery/config dirs (.ipynb_checkpoints, .swiftpm, .vs, .gradle) and never deletes across nested .git or bare repo boundaries', async () => {
       expect(DEFAULT_ARTIFACT_DIR_NAMES.has('.ipynb_checkpoints')).toBe(false);
       expect(DEFAULT_ARTIFACT_DIR_NAMES.has('.swiftpm')).toBe(false);
       expect(DEFAULT_ARTIFACT_DIR_NAMES.has('.vs')).toBe(false);
+      expect(DEFAULT_ARTIFACT_DIR_NAMES.has('.gradle')).toBe(false);
 
       const sessionId = 'gc-nested-git-safety' as SessionId;
       const { worktree } = await createLocalWorktree(sessionId);
       fs.writeFileSync(
         path.join(worktree.hostPath, '.gitignore'),
-        '.ipynb_checkpoints/\n.swiftpm/\n.vs/\ndist/\nbuild/\n'
+        '.ipynb_checkpoints/\n.swiftpm/\n.vs/\n.gradle/\ndist/\nbuild/\nout/\n'
       );
-      for (const dir of ['.ipynb_checkpoints', '.swiftpm', '.vs']) {
+      for (const dir of ['.ipynb_checkpoints', '.swiftpm', '.vs', '.gradle']) {
         fs.mkdirSync(path.join(worktree.hostPath, dir), { recursive: true });
         fs.writeFileSync(path.join(worktree.hostPath, dir, 'keep.json'), '{}');
       }
@@ -955,6 +956,9 @@ describe('WorktreeGarbageCollector', () => {
       const nestedInsideCandidate = createLocalRepo(path.join(worktree.hostPath, 'dist', 'sub'));
       fs.writeFileSync(path.join(nestedInsideCandidate, 'important.txt'), 'keep');
       runGit(nestedInsideCandidate, ['add', 'important.txt']);
+      const bareInsideCandidate = path.join(worktree.hostPath, 'out', 'fixture.git');
+      fs.mkdirSync(bareInsideCandidate, { recursive: true });
+      runGit(bareInsideCandidate, ['init', '--bare']);
 
       const result = await cleanWorktreeArtifacts(worktree.hostPath);
       expect(result.errors).toEqual([]);
@@ -963,7 +967,8 @@ describe('WorktreeGarbageCollector', () => {
       expect(fs.existsSync(path.join(nestedAtCandidate, '.git'))).toBe(true);
       expect(fs.existsSync(path.join(nestedInsideCandidate, 'important.txt'))).toBe(true);
       expect(fs.existsSync(path.join(nestedInsideCandidate, '.git'))).toBe(true);
-      for (const dir of ['.ipynb_checkpoints', '.swiftpm', '.vs']) {
+      expect(fs.existsSync(path.join(bareInsideCandidate, 'HEAD'))).toBe(true);
+      for (const dir of ['.ipynb_checkpoints', '.swiftpm', '.vs', '.gradle']) {
         expect(fs.existsSync(path.join(worktree.hostPath, dir, 'keep.json'))).toBe(true);
       }
     });
@@ -1028,6 +1033,41 @@ describe('WorktreeGarbageCollector', () => {
       const result = await gc.sweep();
       expect(result.failed).toEqual([sessionId]);
       expect(result.artifactsCleaned).toEqual([]);
+    });
+
+    it('writes the artifact-cleaned marker before deleting the first artifact directory', async () => {
+      const sessionId = 'gc-write-ahead-marker' as SessionId;
+      const { worktree } = await createLocalWorktree(sessionId);
+      fs.writeFileSync(path.join(worktree.hostPath, '.gitignore'), 'node_modules/\n');
+      const nodeModules = path.join(worktree.hostPath, 'node_modules');
+      fs.mkdirSync(nodeModules, { recursive: true });
+      fs.writeFileSync(path.join(nodeModules, 'a.js'), '1');
+
+      let markerPresentAtRm = false;
+      const rm = fs.promises.rm;
+      vi.spyOn(fs.promises, 'rm').mockImplementation(async (target, options) => {
+        if (path.resolve(String(target)) === path.resolve(nodeModules)) {
+          markerPresentAtRm = hasWorktreeArtifactsCleaned(worktree.hostPath);
+        }
+        return rm(target, options);
+      });
+
+      const settledAt = 1_000_000;
+      const { gc } = createGc(
+        {
+          [sessionId]: {
+            kind: 'settled',
+            meta: sessionMeta(sessionId, { settledAt }),
+            settledSinceMs: settledAt,
+          },
+        },
+        { now: () => settledAt + SETTLED_ARTIFACT_CLEANUP_GRACE_MS }
+      );
+
+      const cleaned = await gc.sweep();
+      expect(cleaned.artifactsCleaned).toEqual([sessionId]);
+      expect(markerPresentAtRm).toBe(true);
+      expect(hasWorktreeArtifactsCleaned(worktree.hostPath)).toBe(true);
     });
   });
 });

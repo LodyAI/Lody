@@ -1879,6 +1879,38 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const parentMeta = await parentSessionDoc.getMetaState();
       if (parentMeta?.isWorktree) {
         await sessionDoc.setIsWorktree(true);
+        if (hasWorktreeArtifactsCleaned(workdir)) {
+          const setupHistory = createWorktreeScriptHistoryRecorder({
+            sessionDoc,
+            sessionId: config.sessionId!,
+            phase: 'setup',
+            logger: this.logger,
+            backend: await createSessionBackend(sessionDoc),
+            insertBeforeEntryId: config.worktreeScriptHistoryInsertBeforeEntryId,
+          });
+          await runWorktreeSetup({
+            config: await this.resolveWorktreeSetupConfig(config),
+            sessionId: config.sessionId!,
+            workspaceId: config.workspaceId,
+            workdir,
+            branch: parentMeta.branchName?.trim() ?? config.branch ?? '',
+            repoFullName: config.githubRepo,
+            localProjectId:
+              config.project?.kind === 'local' ? config.project.localProjectId : undefined,
+            logger: this.logger,
+            events: {
+              onStart: async (event) => {
+                this.reportStartStage(config, 'worktree-setup');
+                await setupHistory.onStart?.(event);
+              },
+              onStepStart: (event) => setupHistory.onStepStart?.(event),
+              onOutput: (event) => setupHistory.onOutput?.(event),
+              onStepEnd: (event) => setupHistory.onStepEnd?.(event),
+              onEnd: (event) => setupHistory.onEnd?.(event),
+            },
+          });
+          await clearWorktreeArtifactsCleaned(workdir);
+        }
       }
       this.logger.debug(
         `[${config.sessionId}] Child session of ${config.parentSessionId}, skipping worktree creation (workdir=${workdir})`

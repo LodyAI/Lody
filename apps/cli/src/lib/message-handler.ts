@@ -5538,6 +5538,7 @@ export class MessageHandler {
   ): Promise<MachineDeleteLocalProjectCommand['cleanupResult'] | undefined> {
     this.localProjectWorktreeRemovalInFlight += 1;
     try {
+      await this.worktreeGc.waitForIdle?.();
       return await this.deleteLocalProjectResourcesInner(localProjectId, command);
     } finally {
       this.localProjectWorktreeRemovalInFlight -= 1;

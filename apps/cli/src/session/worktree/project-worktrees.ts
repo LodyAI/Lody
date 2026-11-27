@@ -399,7 +399,8 @@ export async function materializeProjectGroup(
     // Scripts may depend on other members' output; retain the prior serial ordering.
     const artifactsWereCleaned = hasWorktreeArtifactsCleaned(root);
     for (const member of setupOrder) {
-      if (!newlyCreated.has(member) && !artifactsWereCleaned) continue;
+      if (!newlyCreated.has(member) && !(artifactsWereCleaned && member.access === 'worktree'))
+        continue;
       options.onProgress?.(encodeProjectPreparationProgress({ step: 'setup', path: member.path }));
       await options.setup(member, path.join(root, member.path));
     }

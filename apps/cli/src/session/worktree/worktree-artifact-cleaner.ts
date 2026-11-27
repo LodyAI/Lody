@@ -40,7 +40,6 @@ export const DEFAULT_ARTIFACT_DIR_NAMES: ReadonlySet<string> = new Set([
   'htmlcov',
   '.pyre',
   '.pytype',
-  '.gradle',
   'dist-newstyle',
   '.stack-work',
   'CMakeFiles',
@@ -67,6 +66,7 @@ export type WorktreeArtifactCleanResult = {
 export type CleanWorktreeArtifactsOptions = {
   artifactDirNames?: ReadonlySet<string>;
   shouldAbort?: () => boolean | Promise<boolean>;
+  onBeforeDelete?: (targetPath: string) => Promise<void>;
   isGitIgnored?: (repoRoot: string, targetPath: string) => Promise<boolean>;
 };
 
@@ -120,6 +120,33 @@ const hasDotGit = async (dir: string): Promise<boolean> => {
   }
 };
 
+const isBareGitRepo = async (dir: string): Promise<boolean> => {
+  try {
+    const [headStat, objectsStat] = await Promise.all([
+      fs.promises.lstat(path.join(dir, 'HEAD')),
+      fs.promises.lstat(path.join(dir, 'objects')),
+    ]);
+    if (
+      headStat.isSymbolicLink() ||
+      !headStat.isFile() ||
+      objectsStat.isSymbolicLink() ||
+      !objectsStat.isDirectory()
+    ) {
+      return false;
+    }
+    try {
+      const refsStat = await fs.promises.lstat(path.join(dir, 'refs'));
+      if (!refsStat.isSymbolicLink() && refsStat.isDirectory()) return true;
+    } catch {
+      void 0;
+    }
+    const packedRefsStat = await fs.promises.lstat(path.join(dir, 'packed-refs'));
+    return !packedRefsStat.isSymbolicLink() && packedRefsStat.isFile();
+  } catch {
+    return false;
+  }
+};
+
 async function verifyRealDirectoryWithinBoundary(
   boundaryRoot: string,
   realBoundaryRoot: string,
@@ -165,6 +192,10 @@ async function containsNestedGitRepo(
     }
     const current = stack.pop();
     if (!current) continue;
+
+    if (await isBareGitRepo(current)) {
+      return { hasGit: true, aborted: false };
+    }
 
     let entries: fs.Dirent[];
     try {
@@ -248,11 +279,17 @@ export async function scanArtifactDirs(
       }
       const entryPath = path.join(dir, entry.name);
       if (artifactDirNames.has(entry.name)) {
+        if (await isBareGitRepo(entryPath)) {
+          continue;
+        }
         if (await hasDotGit(entryPath)) {
           stack.push(entryPath);
           continue;
         }
         results.push(entryPath);
+        continue;
+      }
+      if (await isBareGitRepo(entryPath)) {
         continue;
       }
       stack.push(entryPath);
@@ -432,6 +469,7 @@ export async function cleanWorktreeArtifacts(
     }
 
     try {
+      await options.onBeforeDelete?.(targetPath);
       await fs.promises.rm(targetPath, { recursive: true, force: true });
       result.deletedPaths.push(targetPath);
     } catch (error) {
