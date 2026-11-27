@@ -743,6 +743,9 @@ export function makeAutomaticPairingRuntime(options: {
       return snapshotRequester(value);
     }
     if (value.state._tag === 'AdmittedSyncing') {
+      yield* Effect.result(
+        promise(() => runtime.accountPairingRequest?.() ?? Promise.resolve(null))
+      );
       yield* updateKeys(value);
       return snapshotRequester(value);
     }
@@ -803,11 +806,18 @@ export function makeAutomaticPairingRuntime(options: {
           pairingString: readyState.code,
           expiresAt: value.context.expiresAt,
           preserveExisting: true,
-          workspace: hint,
         })
       );
       if (submitted.expiresAt !== value.context.expiresAt)
         return yield* Effect.fail(refuse('pairing-update-required'));
+      // Without this workspace no approver could ever answer the request: end it.
+      if (!submitted.workspaces.some((w) => w.workspaceId === hint.workspaceId)) {
+        if (submitted.lookupId)
+          yield* Effect.result(
+            promise(() => runtime.cancelAccountPairing!({ expectedLookupId: submitted.lookupId! }))
+          );
+        return yield* Effect.fail(refuse('pairing-unavailable'));
+      }
       justSubmitted = true;
       advanceRequester(value, 'ChannelReady', {
         _tag: 'RequestSubmitted',
