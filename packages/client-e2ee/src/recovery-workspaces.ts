@@ -518,20 +518,19 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           : [];
         const covered: RecoveryWorkspacePlan['covered'][number][] = [];
         const uncovered: { id: string; name: string }[] = [];
+        const listed = yield* Effect.exit(pins.listAccountPins(options.accountId));
+        const readyIds = Exit.isSuccess(listed)
+          ? new Set(listed.value.ready.map((pin) => pin.offer.workspaceId))
+          : null;
+        const corruptIds = Exit.isSuccess(listed) ? listed.value.corruptWorkspaceIds : null;
         for (const workspace of visible) {
-          // A pin or restore marker that cannot be read is unknown and not acted on.
-          const usable = yield* Effect.exit(
-            Effect.gen(function* () {
-              const pin = yield* pins.read(options.accountId, workspace.id);
-              return pin?.phase === 'ready';
-            })
-          );
           const row = { id: workspace.id, name: workspace.name };
-          if (Exit.isFailure(usable)) {
+          if (readyIds === null || corruptIds?.has(workspace.id)) {
+            // A pin store or workspace pin that cannot be read leaves it unknown rather than acting on it.
             covered.push({ ...row, status: { kind: 'unknown' } });
             continue;
           }
-          if (!usable.value) {
+          if (!readyIds.has(workspace.id)) {
             uncovered.push(row);
             continue;
           }
@@ -605,6 +604,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
       batch('setup', unlock, [...selected], observe),
     dispose: () => {
       disposed = true;
+      pins.close();
       recovery.dispose();
     },
   };

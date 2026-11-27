@@ -245,14 +245,15 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
    * `read` ledger reads stay usable after access loss. `governance` commands are refused
    * once this device lost access, but a committed command that itself ends this device's
    * access (revoking itself, removing its member) still reports its success. */
-  type Access = 'admitted' | 'read' | 'governance';
+  type Access = 'admitted' | 'admitted-on-delivery' | 'read' | 'governance';
   const check = Effect.fnUntraced(function* (
     lease: NonNullable<typeof entry>,
     access: Access = 'admitted'
   ) {
     yield* guard(workspaceId);
     if (entry !== lease || lease.closing || !lease.readers.size) return yield* fail('closed');
-    if (access === 'admitted') yield* verifiedLoss(lease.session);
+    if (access === 'admitted' || access === 'admitted-on-delivery')
+      yield* verifiedLoss(lease.session);
     return undefined;
   });
   const withSession = <A>(
@@ -263,7 +264,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
   ) =>
     Effect.gen(function* () {
       const lease = yield* active(id);
-      if (access !== 'read') yield* verifiedLoss(lease.session);
+      if (access === 'admitted' || access === 'governance') yield* verifiedLoss(lease.session);
       const work =
         access === 'read'
           ? operation(lease.session)
@@ -1037,7 +1038,8 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
                     )
                   );
                 }),
-              (bytes) => bytes.fill(0)
+              (bytes) => bytes.fill(0),
+              'admitted-on-delivery'
             )
           )
         )

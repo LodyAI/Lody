@@ -62,98 +62,203 @@ const parse = (raw: unknown, accountId: string, workspaceId: string): Pin | null
     ...('kind' in raw ? { kind: 'member' as const } : {}),
   };
 };
+interface CachedIdbHandle {
+  readonly withDatabase: <A>(
+    work: (db: IDBDatabase) => Promise<A>
+  ) => Effect.Effect<A, PersonalHostError>;
+  readonly close: () => void;
+}
+function makeCachedIdbHandle(databaseName: string): CachedIdbHandle {
+  let cachedDb: IDBDatabase | null = null;
+  let opening: Promise<IDBDatabase> | null = null;
+  let cachedFactory: IDBFactory | null = null;
+  let epoch = 0;
+
+  const close = () => {
+    epoch++;
+    opening = null;
+    const db = cachedDb;
+    cachedDb = null;
+    if (db) {
+      try {
+        db.close();
+      } catch {}
+    }
+  };
+
+  const openDatabase = (): Promise<IDBDatabase> => {
+    const factory = indexedDB;
+    if (cachedFactory !== factory) {
+      close();
+      cachedFactory = factory;
+    }
+    if (cachedDb) return Promise.resolve(cachedDb);
+    if (opening) return opening;
+    const startEpoch = epoch;
+    const pending = new Promise<IDBDatabase>((resolve, reject) => {
+      let finished = false;
+      const request = factory.open(databaseName, 1);
+      request.onupgradeneeded = (event) => {
+        if (event.oldVersion !== 0) {
+          request.transaction?.abort();
+          return;
+        }
+        request.result.createObjectStore('pins');
+      };
+      request.onerror = request.onblocked = () => {
+        finished = true;
+        if (opening === pending) opening = null;
+        reject(failure());
+      };
+      request.onsuccess = () => {
+        const value = request.result;
+        if (opening === pending) opening = null;
+        if (finished) {
+          value.close();
+          return;
+        }
+        finished = true;
+        if (
+          epoch !== startEpoch ||
+          cachedFactory !== factory ||
+          value.objectStoreNames.length !== 1 ||
+          !value.objectStoreNames.contains('pins')
+        ) {
+          value.close();
+          reject(failure());
+          return;
+        }
+        value.onversionchange = () => {
+          if (cachedDb === value) cachedDb = null;
+          value.close();
+        };
+        value.onclose = () => {
+          if (cachedDb === value) cachedDb = null;
+        };
+        cachedDb = value;
+        resolve(value);
+      };
+    });
+    opening = pending;
+    return pending;
+  };
+
+  const withDatabase = <A>(work: (db: IDBDatabase) => Promise<A>) =>
+    Effect.tryPromise({
+      try: async () => {
+        const db = await openDatabase();
+        try {
+          return await work(db);
+        } catch (cause) {
+          if (cause instanceof PersonalHostError) throw cause;
+          if (
+            cause instanceof DOMException &&
+            cause.name === 'InvalidStateError' &&
+            cachedDb === db
+          ) {
+            cachedDb = null;
+            const reopened = await openDatabase();
+            return await work(reopened);
+          }
+          throw cause;
+        }
+      },
+      catch: (cause) => (cause instanceof PersonalHostError ? cause : failure()),
+    });
+
+  return { withDatabase, close };
+}
 /** Public desktop pins only; neither this routing index nor its phase grants approval. */
 export function personalEntryPins(databaseName: string) {
-  const database = Effect.acquireRelease(
-    Effect.tryPromise({
-      try: () =>
-        new Promise<IDBDatabase>((resolve, reject) => {
-          let finished = false;
-          const request = indexedDB.open(databaseName, 1);
-          request.onupgradeneeded = (event) => {
-            if (event.oldVersion !== 0) {
-              request.transaction?.abort();
-              return;
-            }
-            request.result.createObjectStore('pins');
-          };
-          request.onerror = request.onblocked = () => {
-            finished = true;
-            reject(failure());
-          };
-          request.onsuccess = () => {
-            const value = request.result;
-            if (finished) {
-              value.close();
-              return;
-            }
-            finished = true;
-            if (value.objectStoreNames.length !== 1 || !value.objectStoreNames.contains('pins')) {
-              value.close();
-              reject(failure());
-              return;
-            }
-            resolve(value);
-          };
-        }),
-      catch: failure,
-    }),
-    (opened) => Effect.sync(() => opened.close())
-  );
+  const { withDatabase, close } = makeCachedIdbHandle(databaseName);
+
   const transact = <A>(
     accountId: string,
     workspaceId: string,
     write: boolean,
     work: (old: Pin | null) => { result: A; next?: Pin }
   ) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const db = yield* database;
-        return yield* Effect.tryPromise({
-          try: () =>
-            new Promise<A>((resolve, reject) => {
-              const tx = db.transaction('pins', write ? 'readwrite' : 'readonly'),
-                store = tx.objectStore('pins'),
-                key = JSON.stringify([accountId, workspaceId]);
-              let result: A,
-                complete = false,
-                error: unknown;
-              const abort = (cause: unknown) => {
-                error = cause;
-                tx.abort();
-              };
-              tx.onabort = () => reject(error ?? failure());
-              tx.oncomplete = () => (complete ? resolve(result) : reject(failure()));
-              const read = store.get(key);
-              read.onsuccess = () => {
-                try {
-                  const next = work(parse(read.result, accountId, workspaceId));
-                  result = next.result;
-                  if (!next.next) {
+    withDatabase(
+      (db) =>
+        new Promise<A>((resolve, reject) => {
+          const tx = db.transaction('pins', write ? 'readwrite' : 'readonly'),
+            store = tx.objectStore('pins'),
+            key = JSON.stringify([accountId, workspaceId]);
+          let result: A,
+            complete = false,
+            error: unknown;
+          const abort = (cause: unknown) => {
+            error = cause;
+            tx.abort();
+          };
+          tx.onabort = () => reject(error ?? failure());
+          tx.oncomplete = () => (complete ? resolve(result) : reject(failure()));
+          const read = store.get(key);
+          read.onsuccess = () => {
+            try {
+              const next = work(parse(read.result, accountId, workspaceId));
+              result = next.result;
+              if (!next.next) {
+                complete = true;
+                return;
+              }
+              const put = store.put(next.next, key);
+              put.onsuccess = () => {
+                const back = store.get(key);
+                back.onsuccess = () => {
+                  try {
+                    const saved = parse(back.result, accountId, workspaceId);
+                    if (JSON.stringify(saved) !== JSON.stringify(next.next)) throw failure();
                     complete = true;
-                    return;
+                  } catch (cause) {
+                    abort(cause);
                   }
-                  const put = store.put(next.next, key);
-                  put.onsuccess = () => {
-                    const back = store.get(key);
-                    back.onsuccess = () => {
-                      try {
-                        const saved = parse(back.result, accountId, workspaceId);
-                        if (JSON.stringify(saved) !== JSON.stringify(next.next)) throw failure();
-                        complete = true;
-                      } catch (cause) {
-                        abort(cause);
-                      }
-                    };
-                  };
-                } catch (cause) {
-                  abort(cause);
-                }
+                };
               };
-            }),
-          catch: (cause) => (cause instanceof PersonalHostError ? cause : failure()),
-        });
-      })
+            } catch (cause) {
+              abort(cause);
+            }
+          };
+        })
+    );
+  const listAccountPins = (accountId: string) =>
+    withDatabase(
+      (db) =>
+        new Promise<{ readonly ready: Pin[]; readonly corruptWorkspaceIds: ReadonlySet<string> }>(
+          (resolve, reject) => {
+            const tx = db.transaction('pins', 'readonly'),
+              store = tx.objectStore('pins'),
+              ready: Pin[] = [],
+              corruptWorkspaceIds = new Set<string>();
+            const cursor = store.openCursor();
+            cursor.onsuccess = () => {
+              const row = cursor.result;
+              if (!row) return;
+              let key: unknown;
+              try {
+                key = JSON.parse(String(row.key));
+              } catch {
+                key = null;
+              }
+              if (
+                Array.isArray(key) &&
+                key.length === 2 &&
+                key[0] === accountId &&
+                typeof key[1] === 'string'
+              ) {
+                try {
+                  const pin = parse(row.value, accountId, key[1]);
+                  if (pin?.phase === 'ready') ready.push(pin);
+                } catch {
+                  corruptWorkspaceIds.add(key[1]);
+                }
+              }
+              row.continue();
+            };
+            tx.oncomplete = () => resolve({ ready, corruptWorkspaceIds });
+            tx.onabort = tx.onerror = () => reject(failure());
+          }
+        )
     );
   return {
     read: (accountId: string, workspaceId: string) =>
@@ -163,48 +268,9 @@ export function personalEntryPins(databaseName: string) {
      * all of its workspaces in this process. A malformed pin is skipped here; reading
      * that workspace still refuses it.
      */
-    listReady: (accountId: string) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const db = yield* database;
-          return yield* Effect.tryPromise({
-            try: () =>
-              new Promise<Pin[]>((resolve, reject) => {
-                const tx = db.transaction('pins', 'readonly'),
-                  store = tx.objectStore('pins'),
-                  ready: Pin[] = [];
-                const cursor = store.openCursor();
-                cursor.onsuccess = () => {
-                  const row = cursor.result;
-                  if (!row) return;
-                  let key: unknown;
-                  try {
-                    key = JSON.parse(String(row.key));
-                  } catch {
-                    key = null;
-                  }
-                  if (
-                    Array.isArray(key) &&
-                    key.length === 2 &&
-                    key[0] === accountId &&
-                    typeof key[1] === 'string'
-                  ) {
-                    try {
-                      const pin = parse(row.value, accountId, key[1]);
-                      if (pin?.phase === 'ready') ready.push(pin);
-                    } catch {
-                      /* Skipped; `read` keeps refusing it. */
-                    }
-                  }
-                  row.continue();
-                };
-                tx.oncomplete = () => resolve(ready);
-                tx.onabort = tx.onerror = () => reject(failure());
-              }),
-            catch: failure,
-          });
-        })
-      ),
+    listReady: (accountId: string) => Effect.map(listAccountPins(accountId), ({ ready }) => ready),
+    listAccountPins,
+    close,
     prepare: (accountId: string, offer: PersonalPairingOffer, kind?: 'member') =>
       transact(accountId, offer.workspaceId, true, (old) => {
         if (Result.isFailure(verifyPersonalOffer(offer)))

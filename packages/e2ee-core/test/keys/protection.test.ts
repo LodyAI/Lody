@@ -986,4 +986,211 @@ describe('protected store repair and read-only authority pins', () => {
     ).not.toEqual(unreadable);
     repaired.close();
   });
+
+  const appendEpoch = (
+    f: ReturnType<typeof envelopeFixture>,
+    epoch: number,
+    previousKey: Bytes.EpochKey,
+    currentKey: Bytes.EpochKey
+  ) =>
+    f.append([
+      7,
+      epoch,
+      ok(commitEpochKey(f.context.genesis, epoch, currentKey)).toBytes(),
+      ok(sealHistoryPacket({ genesis: f.context.genesis, epoch, currentKey, previousKey })),
+    ]);
+
+  it('caches installed epoch keys in memory and synchronously wipes on invalidate, epoch advance, revocation, and close', async () => {
+    const f = envelopeFixture(),
+      native = synthetic(),
+      dbPath = file();
+    let unprotectCalls = 0;
+    const countingProtector: NativeEpochProtector = {
+      ...native.protector,
+      unprotect: async (blob) => {
+        unprotectCalls++;
+        return native.protector.unprotect(blob);
+      },
+    };
+    const key1 = ok(Bytes.epochKey(new Uint8Array(32).fill(191)));
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const store = yield* makeSqliteProtectedEpochKeys({
+              ...config(f, countingProtector),
+              path: dbPath,
+              mode: 'create',
+            });
+            yield* store.saveAndReload(0, f.secret);
+            const history = yield* makeInstalledEpochHistory({
+              genesis: f.context.genesis,
+              ledger: f.ledger,
+              installed: store,
+            });
+            unprotectCalls = 0;
+
+            for (let i = 0; i < 5; i++) {
+              const k = yield* history.read(0);
+              expect(ok(commitEpochKey(f.context.genesis, 0, k))).toEqual(
+                ok(commitEpochKey(f.context.genesis, 0, f.secret))
+              );
+              disposeEpochKey(k);
+            }
+            expect(unprotectCalls).toBe(1);
+
+            history.invalidate();
+            const afterInvalidate = yield* history.read(0);
+            disposeEpochKey(afterInvalidate);
+            expect(unprotectCalls).toBe(2);
+
+            appendEpoch(f, 1, f.secret, key1);
+            const afterEpochAdvance = yield* history.read(0);
+            disposeEpochKey(afterEpochAdvance);
+            expect(unprotectCalls).toBe(3);
+
+            f.append([5, f.phone.raw]);
+            const revoked = yield* Effect.exit(history.read(0));
+            expect(Exit.isFailure(revoked)).toBe(true);
+          })
+        )
+      );
+      wiped(native.plains);
+    } finally {
+      disposeEpochKey(key1);
+    }
+  });
+
+  it('single-flights concurrent InstalledEpochHistory reads for a missing historical epoch', async () => {
+    const f = envelopeFixture(),
+      native = synthetic(),
+      dbPath = file();
+    const key1 = ok(Bytes.epochKey(new Uint8Array(32).fill(181)));
+    const key2 = ok(Bytes.epochKey(new Uint8Array(32).fill(182)));
+    appendEpoch(f, 1, f.secret, key1);
+    appendEpoch(f, 2, key1, key2);
+    let protectCalls = 0;
+    const countingProtector: NativeEpochProtector = {
+      ...native.protector,
+      protect: async (body) => {
+        protectCalls++;
+        return native.protector.protect(body);
+      },
+    };
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const store = yield* makeSqliteProtectedEpochKeys({
+              ...config(f, countingProtector),
+              path: dbPath,
+              mode: 'create',
+            });
+            yield* store.saveAndReload(2, key2);
+            protectCalls = 0;
+            const history = yield* makeInstalledEpochHistory({
+              genesis: f.context.genesis,
+              ledger: f.ledger,
+              installed: store,
+            });
+            const keys = yield* Effect.all(
+              Array.from({ length: 8 }, () => history.read(0)),
+              { concurrency: 'unbounded' }
+            );
+            for (const k of keys) {
+              expect(ok(commitEpochKey(f.context.genesis, 0, k))).toEqual(
+                ok(commitEpochKey(f.context.genesis, 0, f.secret))
+              );
+              disposeEpochKey(k);
+            }
+            expect(protectCalls).toBe(2);
+          })
+        )
+      );
+      wiped(native.plains);
+    } finally {
+      disposeEpochKey(key1);
+      disposeEpochKey(key2);
+    }
+  });
+
+  it('prevents a suspended read from backfilling stale cache entries after invalidate() or returning a key after revocation', async () => {
+    const f = envelopeFixture(),
+      native = synthetic(),
+      dbPath = file();
+    let pauseFirst = false;
+    let unprotectCalls = 0;
+    let enteredA!: () => void;
+    let releaseA!: () => void;
+    const waitEnteredA = () =>
+      new Promise<void>((resolve) => {
+        enteredA = resolve;
+      });
+    let gateA = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const gatedProtector: NativeEpochProtector = {
+      ...native.protector,
+      unprotect: async (blob) => {
+        unprotectCalls++;
+        const out = await native.protector.unprotect(blob);
+        if (pauseFirst) {
+          pauseFirst = false;
+          enteredA();
+          await gateA;
+        }
+        return out;
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const store = yield* makeSqliteProtectedEpochKeys({
+            ...config(f, gatedProtector),
+            path: dbPath,
+            mode: 'create',
+          });
+          yield* store.saveAndReload(0, f.secret);
+          const history = yield* makeInstalledEpochHistory({
+            genesis: f.context.genesis,
+            ledger: f.ledger,
+            installed: store,
+          });
+          unprotectCalls = 0;
+
+          const pEntered1 = waitEnteredA();
+          gateA = new Promise<void>((resolve) => {
+            releaseA = resolve;
+          });
+          pauseFirst = true;
+          const fiberA = yield* Effect.forkChild(history.read(0));
+          yield* Effect.promise(() => pEntered1);
+          history.invalidate();
+          releaseA();
+          const keyA = yield* Fiber.join(fiberA);
+          disposeEpochKey(keyA);
+
+          const callsBeforeSubsequent = unprotectCalls;
+          const keyAfter = yield* history.read(0);
+          disposeEpochKey(keyAfter);
+          expect(unprotectCalls).toBe(callsBeforeSubsequent + 1);
+
+          history.invalidate();
+          const pEntered2 = waitEnteredA();
+          gateA = new Promise<void>((resolve) => {
+            releaseA = resolve;
+          });
+          pauseFirst = true;
+          const fiberRevoked = yield* Effect.forkChild(history.read(0));
+          yield* Effect.promise(() => pEntered2);
+          f.append([5, f.phone.raw]);
+          history.invalidate();
+          releaseA();
+          const revokedExit = yield* Fiber.await(fiberRevoked);
+          expect(Exit.isFailure(revokedExit)).toBe(true);
+        })
+      )
+    );
+    wiped(native.plains);
+  });
 });

@@ -377,19 +377,39 @@ export function personalEntry(options: PersonalEntryOptions) {
       if (loss && (await lose(entry, accountId, allowPending))) throw new Error(loss);
       throw error;
     };
-    const get = async (
-      workspaceId: string,
-      source?: PersonalPairingOffer | ((accountId: string) => PersonalPairingOffer),
-      live: () => boolean = () => true,
-      kind?: 'member'
-    ) => {
+    type AcquireMode =
+      | { readonly kind: 'reuse-active' }
+      | {
+          readonly kind: 'reconcile-pin';
+          readonly source?: PersonalPairingOffer | ((accountId: string) => PersonalPairingOffer);
+          readonly live?: () => boolean;
+          readonly pinKind?: 'member';
+        };
+    const settleEntry = async (entry: RecordEntry, accountId: string) => {
+      const runtime = await entry.ready;
+      check(accountId);
+      if (entry.retired) throw fail('closed');
+      return { entry, runtime, accountId };
+    };
+    const get = async (workspaceId: string, mode: AcquireMode = { kind: 'reconcile-pin' }) => {
       if (closed) throw fail('closed');
+      const source = mode.kind === 'reconcile-pin' ? mode.source : undefined;
+      const live = mode.kind === 'reconcile-pin' && mode.live ? mode.live : () => true;
+      const kind = mode.kind === 'reconcile-pin' ? mode.pinKind : undefined;
       if (source && typeof source !== 'function' && Result.isFailure(verifyPersonalOffer(source)))
         throw fail('invalid-input');
       observe();
-      const accountId = await execute(resolveAccount(live));
+      const accountId =
+        live() && session.get().status !== 'loading'
+          ? identity()
+          : await execute(resolveAccount(live));
       if (!live()) throw fail('closed');
       if (!accountId) throw fail('scope-mismatch');
+      const id = key(accountId, workspaceId);
+      if (mode.kind === 'reuse-active') {
+        const active = records.get(id);
+        if (active && !active.retired) return settleEntry(active, accountId);
+      }
       // An offer derived from the account is derived from this resolved one, never from an
       // earlier synchronous read that an account switch may have overtaken.
       const supplied = typeof source === 'function' ? source(accountId) : source;
@@ -399,7 +419,6 @@ export function personalEntry(options: PersonalEntryOptions) {
       if (supplied) assertPersonalEntryOffer(saved, supplied);
       const offer = supplied ?? saved?.offer;
       if (!offer) throw fail('approval-required');
-      const id = key(accountId, workspaceId);
       let previous = records.get(id);
       if (previous && (previous.retired || !sameOffer(previous.offer, offer))) {
         await retire(previous);
@@ -488,17 +507,15 @@ export function personalEntry(options: PersonalEntryOptions) {
           void retire(record).catch(() => {});
         });
       }
-      const runtime = await entry.ready;
-      check(accountId);
-      if (entry.retired) throw fail('closed');
-      return { entry, runtime, accountId };
+      return settleEntry(entry, accountId);
     };
     const invoke = async <A>(
       workspaceId: string,
       work: (runtime: E2eeWorkspaceRuntime) => Promise<A>,
-      inspect?: (value: unknown) => AccessLoss | null
+      inspect?: (value: unknown) => AccessLoss | null,
+      mode: AcquireMode = { kind: 'reconcile-pin' }
     ) => {
-      const { entry, runtime, accountId } = await get(workspaceId);
+      const { entry, runtime, accountId } = await get(workspaceId, mode);
       const value = await work(runtime).catch((error: unknown) => project(entry, accountId, error));
       const loss = inspect?.(value) ?? null;
       if (loss && (await lose(entry, accountId))) throw new Error(loss);
@@ -644,7 +661,10 @@ export function personalEntry(options: PersonalEntryOptions) {
         pending.set(label, state);
         try {
           for (let attempt = 0; attempt < 2; attempt++) {
-            const { entry, runtime, accountId } = await get(id, undefined, () => !state.cancelled);
+            const { entry, runtime, accountId } = await get(id, {
+              kind: 'reconcile-pin',
+              live: () => !state.cancelled,
+            });
             state.accountId = accountId;
             if (expected && expected !== accountId) throw fail('scope-mismatch');
             if (state.cancelled) throw fail('closed');
@@ -749,7 +769,9 @@ export function personalEntry(options: PersonalEntryOptions) {
           plaintext: new Uint8Array(input.plaintext),
         };
         try {
-          return await invoke(id, (runtime) => runtime.seal(id, captured));
+          return await invoke(id, (runtime) => runtime.seal(id, captured), undefined, {
+            kind: 'reuse-active',
+          });
         } finally {
           // The public runtime owns its separate native-call copy.
           captured.plaintext.fill(0);
@@ -766,7 +788,9 @@ export function personalEntry(options: PersonalEntryOptions) {
           sealed: new Uint8Array(input.sealed),
         };
         try {
-          return await invoke(id, (runtime) => runtime.openContent(id, captured));
+          return await invoke(id, (runtime) => runtime.openContent(id, captured), undefined, {
+            kind: 'reuse-active',
+          });
         } finally {
           captured.header.fill(0);
           captured.additionalData.fill(0);
@@ -806,7 +830,10 @@ export function personalEntry(options: PersonalEntryOptions) {
       rejectMemberJoin: (id, requestId) => call(id, 'rejectMemberJoin', [id, requestId]),
       revokeMemberInvitation: (id, token) => call(id, 'revokeMemberInvitation', [id, token]),
       preparePersonalJoin: async (offer) => {
-        const { runtime, accountId, entry } = await get(offer.workspaceId, { ...offer });
+        const { runtime, accountId, entry } = await get(offer.workspaceId, {
+          kind: 'reconcile-pin',
+          source: { ...offer },
+        });
         const value = await runtime.preparePersonalJoin!(offer);
         check(accountId);
         if (entry.retired) throw fail('closed');
@@ -836,12 +863,11 @@ export function personalEntry(options: PersonalEntryOptions) {
       // member join, so personal pairing never shows it; the portable host verifies admission.
       prepareMemberJoin: async (invitation) => {
         await settleEndedMemberJoin(invitation);
-        const { runtime, accountId, entry } = await get(
-          invitation.workspaceId,
-          (account) => memberPairingOffer(account, invitation),
-          undefined,
-          'member'
-        );
+        const { runtime, accountId, entry } = await get(invitation.workspaceId, {
+          kind: 'reconcile-pin',
+          source: (account) => memberPairingOffer(account, invitation),
+          pinKind: 'member',
+        });
         const value = await runtime.prepareMemberJoin!(invitation);
         check(accountId);
         if (entry.retired) throw fail('closed');
@@ -1121,9 +1147,9 @@ export function personalEntry(options: PersonalEntryOptions) {
                     genesisRecordHex: string;
                     membershipId: string;
                   }) => {
-                    const opened = await get(
-                      workspaceId,
-                      pin
+                    const opened = await get(workspaceId, {
+                      kind: 'reconcile-pin',
+                      source: pin
                         ? accountPairingOffer(
                             {
                               workspaceId,
@@ -1133,8 +1159,8 @@ export function personalEntry(options: PersonalEntryOptions) {
                             },
                             pin
                           )
-                        : undefined
-                    );
+                        : undefined,
+                    });
                     const requester = personalRuntimeAccountRequester(opened.runtime);
                     if (!requester) throw fail('unsupported');
                     return { ...opened, requester };
@@ -1279,7 +1305,7 @@ export function personalEntry(options: PersonalEntryOptions) {
     }
     recoveries.set(facade, {
       restore: async (workspaceId, offer, input) => {
-        const opened = await get(workspaceId, offer);
+        const opened = await get(workspaceId, { kind: 'reconcile-pin', source: offer });
         const commands = personalRuntimeRecovery(opened.runtime);
         if (!commands) throw fail('unsupported');
         const result = await execute(commands.restore(input)).catch((error: unknown) =>
@@ -1333,7 +1359,11 @@ export function personalEntry(options: PersonalEntryOptions) {
       for (const publish of accountWaiters) publish();
       for (const stop of subscriptions.values()) stop();
       subscriptions.clear();
-      await Promise.all([...all].map(retire));
+      try {
+        await Promise.all([...all].map(retire));
+      } finally {
+        options.pins.close?.();
+      }
     },
   };
 }
