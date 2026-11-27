@@ -404,7 +404,6 @@ describe('openContent hot path performance baseline & invariants', () => {
         frames.push({ header: sealed.header, sealed: sealed.sealed, expected: plaintext });
       }
 
-      // Warm up 1 openContent
       await rt.openContent(offer.workspaceId, {
         room,
         context: {
@@ -442,7 +441,6 @@ describe('openContent hot path performance baseline & invariants', () => {
       const hotIdbTxs = idbTxs;
       const hotUnwraps = custodyUnwraps;
 
-      // Measure cold-start reopen (close reader + reopen)
       await rt.close(offer.workspaceId, 'account-A', opened.readerOwner);
       const coldOpensBefore = idbOpens;
       const coldUnwrapsBefore = custodyUnwraps;
@@ -453,14 +451,11 @@ describe('openContent hot path performance baseline & invariants', () => {
       const coldIdbOpens = idbOpens - coldOpensBefore;
       await rt.close(offer.workspaceId, 'account-A', reopened.readerOwner);
 
-      // Assert hot-path and cold-start invariants
       expect(hotIdbOpens).toBe(0);
       expect(hotIdbTxs).toBeLessThanOrEqual(N * 4);
       expect(hotUnwraps).toBe(0);
-      // 1x identity open (3 private keys) + 1x epoch key check in status() = 4 unwraps (down from 10)
       expect(coldUnwraps).toBe(4);
 
-      // Also verify personalEntryPins pools its IDBDatabase across repeated reads
       const pinOpensBefore = idbOpens;
       for (let i = 0; i < 10; i++) {
         const pin = await Effect.runPromise(pins.read('account-A', offer.workspaceId));
