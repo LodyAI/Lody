@@ -1,4 +1,5 @@
 import { useCloudQuery } from '@lody/platform/react';
+import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   SeatCostNotice,
@@ -265,11 +266,22 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
   const [sending, setSending] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
   const requestedSeats = invites.filter((entry) => entry.status === 'pending').length;
+  const [seatPolicyRefreshKey, refreshSeatPolicy] = useState(0);
   const seatPreview = useCloudQuery(
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
     activeOrganization && requestedSeats > 0
-      ? { workspaceId: activeOrganization.id, requestedSeats }
+      ? {
+          workspaceId: activeOrganization.id,
+          requestedSeats,
+          ...(seatPolicyRefreshKey > 0 ? { policyRefreshKey: seatPolicyRefreshKey } : {}),
+        }
       : 'skip'
+  );
+  useReferralPolicyRefresh(
+    seatPreview?.status === 'billed'
+      ? (seatPreview.policyNextChangeAt ?? seatPreview.promoEndsAt)
+      : undefined,
+    refreshSeatPolicy
   );
 
   const handleAdd = useCallback(() => {

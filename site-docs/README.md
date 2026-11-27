@@ -21,6 +21,9 @@ builds to `site-docs/out/client`. Binding rules live in
 ## Component responsibilities
 
 - `components/landing.tsx` — landing copy, nav, and footer.
+- `components/promo-banner.tsx` and `components/use-public-promo.ts` — narrow
+  dismissible promotional strip below the fixed landing nav and shared client fetch
+  for `/api/billing/public-promo`.
 - `components/landing-hero-download.tsx` and `components/landing-cta-section.tsx` —
   platform-aware download and Web App links on the landing page; unknown platforms
   link to all downloads.

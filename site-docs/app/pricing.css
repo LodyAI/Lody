@@ -548,6 +548,29 @@
   font-weight: 600;
 }
 
+.pricing-price-strike {
+  margin-bottom: 0.4rem;
+  color: hsl(var(--landing-ink-muted) / 0.72);
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pricing-promo-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--ocean-aqua) / 0.4);
+  background: hsl(var(--ocean-aqua) / 0.15);
+  color: hsl(var(--ocean-aqua));
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
 .pricing-price-note {
   position: relative;
   z-index: 1;

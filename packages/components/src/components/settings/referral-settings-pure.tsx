@@ -3,6 +3,8 @@ import { Trans, useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Check, ChevronRight, Copy, Share } from 'lucide-react';
 import type {
+  PromoCheckoutOffer,
+  PromoPolicy,
   ReferralCheckoutOffer,
   ReferralLedgerEntry,
   ReferralOverview,
@@ -18,6 +20,7 @@ import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { Dialog } from '@/ui/dialog';
 import { CompactSection } from './compact-layout';
+import { discountBadgeValues } from './discount-badge-values';
 import { formatUsd } from './billing-setting-pure';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
@@ -588,7 +591,73 @@ function policyValues(policy?: ReferralPolicy) {
   };
 }
 
-function ReferralCampaignDates({ policy }: { policy?: ReferralPolicy }) {
+export { discountBadgeValues };
+
+/**
+ * Time-bound promotional first-payment discount, using the same layout and
+ * phrasing as `ReferralOfferNotice` so checkout surfaces speak with one voice.
+ */
+export function PromoOfferNotice({
+  interval,
+  regularCents,
+  discountPercent,
+  policy,
+  retained,
+}: {
+  interval: 'month' | 'year';
+  regularCents: number;
+  discountPercent: number;
+  policy?: PromoPolicy | null;
+  retained?: PromoCheckoutOffer['retained'];
+}) {
+  const { t } = useTranslation();
+  const activeRetained = retained && retained.interval === interval ? retained : null;
+  const effectivePercent =
+    discountPercent > 0 ? discountPercent : (activeRetained?.discountPercent ?? 0);
+  if (effectivePercent <= 0) return null;
+  const values = {
+    first: formatUsd(Math.round((regularCents * (100 - effectivePercent)) / 100)),
+    regular: formatUsd(regularCents),
+  };
+  const dateRange =
+    discountPercent > 0 && policy
+      ? { startsAt: policy.startsAt, endsAt: policy.endsAt }
+      : activeRetained
+        ? { startsAt: activeRetained.startsAt, endsAt: activeRetained.endsAt }
+        : undefined;
+  return (
+    <div {...stylex.props(surface.formBlock, styles.head)} role="status">
+      <div {...stylex.props(styles.text)}>
+        <p {...stylex.props(surface.rowLabel)}>
+          {t('billing.promoOfferTitle')}{' '}
+          <Badge tone="success">
+            {t('referral.offerBadge', discountBadgeValues(effectivePercent))}
+          </Badge>
+        </p>
+        {activeRetained &&
+        discountPercent > 0 &&
+        activeRetained.discountPercent !== discountPercent ? (
+          <p {...stylex.props(surface.rowHelper)}>
+            {t('referral.retainedCheckout', {
+              ...discountBadgeValues(activeRetained.discountPercent),
+              first: formatUsd(
+                Math.round((regularCents * (100 - activeRetained.discountPercent)) / 100)
+              ),
+            })}
+          </p>
+        ) : null}
+        <ReferralCampaignDates policy={dateRange} />
+        <p {...stylex.props(surface.rowHelper)}>
+          {interval === 'year'
+            ? t('referral.offerYearly', values)
+            : t('referral.offerMonthly', values)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ReferralCampaignDates({ policy }: { policy?: { startsAt?: number; endsAt?: number } }) {
   const { t, i18n } = useTranslation();
   if (!policy?.startsAt || !policy.endsAt) return null;
   const format = (time: number) =>

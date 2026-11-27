@@ -9,10 +9,18 @@ import type { SiteLocale } from '@site/src/site-pages/shared';
  * Content and structure were ported from the retired VitePress site. Styles
  * live in `app/pricing.css`.
  *
- * Public Plus uses standard list pricing: $96 yearly or $10 monthly per seat.
+ * Prerendered HTML displays standard list pricing ($96 yearly or $10 monthly per
+ * seat); client mount progressively overlays active time-bound first-period
+ * promotions returned by `/api/billing/public-promo`.
  */
 
 import '@site/app/pricing.css';
+import {
+  computeDiscountedPlusPricing,
+  formatPublicPromoBadge,
+  formatPublicPromoNote,
+  type PublicPromoActive,
+} from '@site/lib/public-promo';
 import NumberFlow from '@number-flow/react';
 import { useState, type CSSProperties, type ReactNode } from 'react';
 
@@ -20,6 +28,7 @@ import { LandingEffects } from './landing-interactions';
 import { PRICING_COPY, type FeatureSection, type PricingPlan } from './pricing-copy';
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
+import { usePublicPromo } from './use-public-promo';
 
 /** Spring-ish easing matched to pricing card motion tokens. */
 const PRICE_NUMBER_TIMING = {
@@ -39,6 +48,7 @@ type BillingCycle = 'yearly' | 'monthly';
 export function PricingPage({ locale }: { locale: PricingLocale }) {
   const page = PRICING_COPY[locale];
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('yearly');
+  const promo = usePublicPromo();
   const isYearly = billingCycle === 'yearly';
   return (
     <div className="landing-page-root marketing-shell">
@@ -95,7 +105,9 @@ export function PricingPage({ locale }: { locale: PricingLocale }) {
               <PricingCard
                 isYearly={isYearly}
                 key={plan.id}
+                locale={locale}
                 plan={plan}
+                promo={plan.id === 'plus' ? promo : null}
                 style={{ '--card-index': String(index) } as CSSProperties}
               />
             ))}
@@ -220,17 +232,44 @@ function FeatureSectionBlock({
 
 function PricingCard({
   isYearly,
+  locale,
   plan,
+  promo,
   style,
 }: {
   isYearly: boolean;
+  locale: PricingLocale;
   plan: PricingPlan;
+  promo: PublicPromoActive | null;
   style: CSSProperties;
 }) {
-  const currentPrice = isYearly ? plan.yearly : plan.monthly;
-  const note = isYearly ? plan.yearlyNote : plan.monthlyNote;
-  const numericPrice =
-    isNumeric(plan.yearly) && isNumeric(plan.monthly) ? Number(currentPrice) : null;
+  const regularPrice = isYearly ? plan.yearly : plan.monthly;
+  const promoPricing = promo ? computeDiscountedPlusPricing(promo) : null;
+  const activePromoPercent = promoPricing
+    ? isYearly
+      ? promoPricing.yearlyPercent
+      : promoPricing.monthlyPercent
+    : 0;
+  const discountedNumeric =
+    activePromoPercent > 0 && promoPricing
+      ? isYearly
+        ? promoPricing.yearlyPerMonth
+        : promoPricing.monthlyPerMonth
+      : null;
+  const baseNumeric =
+    isNumeric(plan.yearly) && isNumeric(plan.monthly) ? Number(regularPrice) : null;
+  const numericPrice = discountedNumeric ?? baseNumeric;
+  const currentPriceLabel =
+    numericPrice !== null
+      ? Number.isInteger(numericPrice)
+        ? String(numericPrice)
+        : numericPrice.toFixed(2)
+      : regularPrice;
+  const promoNote =
+    promo && activePromoPercent > 0 ? formatPublicPromoNote({ isYearly, promo, locale }) : null;
+  const note = promoNote ?? (isYearly ? plan.yearlyNote : plan.monthlyNote);
+  const promoBadge =
+    activePromoPercent > 0 ? formatPublicPromoBadge(activePromoPercent, locale) : null;
   const isMailto = plan.href.startsWith('mailto:');
   return (
     <article
@@ -252,6 +291,7 @@ function PricingCard({
           aria-hidden={plan.featured ? undefined : true}
         >
           {plan.featured ? plan.eyebrow : ''}
+          {promoBadge ? <span className="pricing-promo-badge">{promoBadge}</span> : null}
         </span>
         <h2 className="pricing-plan-name">{plan.name}</h2>
         <p className="pricing-plan-desc">{plan.description}</p>
@@ -261,9 +301,13 @@ function PricingCard({
         {plan.prefix ? <span className="pricing-price-prefix">{plan.prefix}</span> : null}
         {numericPrice !== null ? (
           <NumberFlow
-            aria-label={`${currentPrice}${plan.unit}`}
+            aria-label={`${currentPriceLabel}${plan.unit}`}
             className="pricing-price-value"
-            format={{ useGrouping: false }}
+            format={{
+              useGrouping: false,
+              minimumFractionDigits: Number.isInteger(numericPrice) ? 0 : 2,
+              maximumFractionDigits: Number.isInteger(numericPrice) ? 0 : 2,
+            }}
             opacityTiming={PRICE_OPACITY_TIMING}
             spinTiming={PRICE_NUMBER_TIMING}
             transformTiming={PRICE_NUMBER_TIMING}
@@ -271,8 +315,14 @@ function PricingCard({
             willChange
           />
         ) : (
-          <span className="pricing-price-custom">{currentPrice}</span>
+          <span className="pricing-price-custom">{regularPrice}</span>
         )}
+        {discountedNumeric !== null ? (
+          <s className="pricing-price-strike">
+            {plan.prefix}
+            {regularPrice}
+          </s>
+        ) : null}
         {plan.unit ? <span className="pricing-price-unit">{plan.unit}</span> : null}
       </div>
 

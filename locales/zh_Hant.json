@@ -7265,5 +7265,9 @@
   "settings.agent.dialog.section.defaultPermission": "預設權限",
   "settings.agent.dialog.defaultPermissionLastUsed": "沿用上次選擇",
   "e2ee.access.waitingKey.checkFailed": "暫時無法檢查金鑰，請檢查網路連線後重試。",
-  "e2ee.instantQr.retrying": "連線中斷，正在重試…"
+  "e2ee.instantQr.retrying": "連線中斷，正在重試…",
+  "billing.promoOfferTitle": "限時折扣",
+  "billing.switchPromoDiscountWithPercent": "限時升級優惠（{{rate}} 折）",
+  "billing.switchRenewalDateStandardYearly": "下次續訂：{{date}}，按標準價 {{amount}}/年計費。",
+  "workspace.invite.seat.promoNoteUntil": "{{date}} 前接受邀請加入享當期 {{rate}} 折，下期續訂按標準價計費。"
 }

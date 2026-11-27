@@ -2,6 +2,36 @@ import { z } from 'zod';
 import { createLocalStorageCache } from '@/lib/local-storage-cache';
 import type { BillingOverviewData } from './billing-setting-pure';
 
+const promoPolicySchema = z.object({
+  campaignId: z.string(),
+  startsAt: z.number(),
+  endsAt: z.number(),
+  monthly: z.object({ discountPercent: z.number() }).nullable().optional(),
+  yearly: z.object({ discountPercent: z.number() }).nullable().optional(),
+  upgradeToYearly: z.boolean(),
+  seatExpansion: z.boolean(),
+  nextChangeAt: z.number().optional(),
+});
+
+const promoCheckoutOfferSchema = z.object({
+  policy: promoPolicySchema.nullable().optional(),
+  nextChangeAt: z.number().optional(),
+  monthlyDiscountPercent: z.number().optional(),
+  yearlyDiscountPercent: z.number().optional(),
+  upgradeToYearlyDiscountPercent: z.number().optional(),
+  retained: z
+    .object({
+      campaignId: z.string(),
+      interval: z.enum(['month', 'year']),
+      discountPercent: z.number(),
+      startsAt: z.number(),
+      endsAt: z.number(),
+      expiresAt: z.number(),
+    })
+    .nullable()
+    .optional(),
+});
+
 const billingOverviewSchema: z.ZodType<BillingOverviewData> = z.object({
   billingAccountId: z.string().nullable(),
   giftStackingSupported: z.boolean().catch(false),
@@ -31,6 +61,7 @@ const billingOverviewSchema: z.ZodType<BillingOverviewData> = z.object({
     yearlyAmountCents: z.number(),
     monthlyOfferKey: z.string().nullable(),
     yearlyOfferKey: z.string().nullable(),
+    promo: promoCheckoutOfferSchema.nullable().optional(),
   }),
 });
 
@@ -137,7 +168,8 @@ export function areBillingOverviewsEqual(
     left.pricing.monthlyAmountCents === right.pricing.monthlyAmountCents &&
     left.pricing.yearlyAmountCents === right.pricing.yearlyAmountCents &&
     left.pricing.monthlyOfferKey === right.pricing.monthlyOfferKey &&
-    left.pricing.yearlyOfferKey === right.pricing.yearlyOfferKey
+    left.pricing.yearlyOfferKey === right.pricing.yearlyOfferKey &&
+    JSON.stringify(left.pricing.promo ?? null) === JSON.stringify(right.pricing.promo ?? null)
   );
 }
 
