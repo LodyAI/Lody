@@ -1606,7 +1606,9 @@ describe('approval coverage across workspaces', () => {
           );
         },
         accountPairingRequest: () => Effect.runPromise(harness.requester.accountPairingRequest()),
-        cancelAccountPairing: () => Effect.runPromise(harness.requester.cancelAccountPairing()),
+        cancelAccountPairing: (
+          input?: Parameters<typeof harness.requester.cancelAccountPairing>[0]
+        ) => Effect.runPromise(harness.requester.cancelAccountPairing(input)),
         status: async (workspaceId: string) => ({
           deviceKind: 'personal',
           hasDeviceCredential: harness.installed.includes(workspaceId),
@@ -1765,7 +1767,7 @@ describe('approval coverage across workspaces', () => {
       await pair.desktop.approveAutomaticPairing!(first.review.id, first.shown, ['w1']);
       expect((await pair.phone.automaticPairingState('w1'))?.phase).toBe('joined');
       const settled = await Effect.runPromise(harness.requester.accountPairingRequest());
-      expect(settled?.status).toBe('joined');
+      expect(settled?.status).not.toBe('waiting');
       expect(coverageOf(settled)).toEqual({ w1: 'joined/approved', w2: 'pending/omitted' });
 
       const second = await pair.review('w2');

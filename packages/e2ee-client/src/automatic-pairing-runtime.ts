@@ -218,8 +218,18 @@ const hasPendingApprovedSiblings = (
       (item) =>
         item.workspaceId !== primaryWorkspaceId &&
         item.state === 'pending' &&
-        item.approval !== 'omitted'
+        item.approval === 'approved'
     )
+  );
+const shouldReleaseSettledPartialApproval = (
+  state: E2eeAccountPairingRequestState | null | undefined
+): boolean =>
+  Boolean(
+    state &&
+    state.status === 'waiting' &&
+    state.workspaces.some((item) => item.approval === 'omitted') &&
+    state.workspaces.some((item) => item.state === 'joined') &&
+    !state.workspaces.some((item) => item.approval === 'approved' && item.state === 'pending')
   );
 /** Bound for the native decline at lockout; the hosted client may hold calls while offline. */
 const LOCKOUT_DECLINE_TIMEOUT_MS = 5_000;
@@ -305,6 +315,17 @@ export function makeAutomaticPairingRuntime(options: {
     siblingSettlement = null;
     current.cancel();
   };
+  const releaseSettledPartialApproval = (
+    lookupId: string,
+    state: E2eeAccountPairingRequestState | null | undefined
+  ) =>
+    shouldReleaseSettledPartialApproval(state) && runtime.cancelAccountPairing
+      ? Effect.asVoid(
+          Effect.result(
+            promise(() => runtime.cancelAccountPairing!({ expectedLookupId: lookupId }))
+          )
+        )
+      : Effect.void;
   const ensureSiblingSettlement = (
     lookupId: string,
     expiresAt: number,
@@ -341,7 +362,10 @@ export function makeAutomaticPairingRuntime(options: {
             }
             const current = next.success;
             if (!current || (current.lookupId && current.lookupId !== lookupId)) return;
-            if (!hasPendingApprovedSiblings(current, primaryWorkspaceId)) return;
+            if (!hasPendingApprovedSiblings(current, primaryWorkspaceId)) {
+              yield* releaseSettledPartialApproval(lookupId, current);
+              return;
+            }
           }
         })
       )
@@ -829,12 +853,11 @@ export function makeAutomaticPairingRuntime(options: {
       );
       yield* updateKeys(value);
       const lookupId = requesterLookupIdOf(value.state);
-      if (
-        lookupId &&
-        Result.isSuccess(latest) &&
-        hasPendingApprovedSiblings(latest.success, value.context.workspaceId)
-      )
-        ensureSiblingSettlement(lookupId, value.context.expiresAt, value.context.workspaceId);
+      if (lookupId && Result.isSuccess(latest)) {
+        if (hasPendingApprovedSiblings(latest.success, value.context.workspaceId))
+          ensureSiblingSettlement(lookupId, value.context.expiresAt, value.context.workspaceId);
+        else yield* releaseSettledPartialApproval(lookupId, latest.success);
+      }
       return snapshotRequester(value);
     }
     if (value.state._tag === 'Terminal') {
@@ -936,8 +959,11 @@ export function makeAutomaticPairingRuntime(options: {
         });
       }
       yield* updateKeys(value);
-      if (lookupId && hasPendingApprovedSiblings(state, hint.workspaceId))
-        ensureSiblingSettlement(lookupId, value.context.expiresAt, hint.workspaceId);
+      if (lookupId) {
+        if (hasPendingApprovedSiblings(state, hint.workspaceId))
+          ensureSiblingSettlement(lookupId, value.context.expiresAt, hint.workspaceId);
+        else yield* releaseSettledPartialApproval(lookupId, state);
+      }
     } else if (value.state._tag === 'RequestSubmitted' && value.state.phase !== 'waiting') {
       advanceRequester(value, 'RequestSubmitted', {
         ...value.state,

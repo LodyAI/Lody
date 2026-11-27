@@ -114,10 +114,11 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   entry ends the request before signing. An approver-shown QR signs every listed
   workspace without another confirmation; showing it as a request arrives is an
   owner decision. Approvers publish only once every admitted workspace has its
-  invitation, so `omitted` coverage is exact; requesters settle once every
-  approved workspace settles (`omitted` never blocks later pairing) and retry
-  remaining approved siblings in bounded background work after the opened
-  workspace joins.
+  invitation, so `omitted` coverage is exact. Offline account pairing stays
+  `waiting` until all requested workspaces join (supporting multiple approvers);
+  single-approver automatic pairing releases its underlying request once every
+  approved workspace settles and retries remaining approved siblings in bounded
+  background work after the opened workspace joins.
 - Requester listings open only the workspaces a request names. Cached history saves
   downloads, never verification.
 

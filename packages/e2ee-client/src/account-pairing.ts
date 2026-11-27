@@ -79,37 +79,6 @@ const isTerminalInstallFailure = (error: unknown): boolean => {
   return code === 'revoked' || code === 'e2ee_device_revoked' || code === 'e2ee_member_removed';
 };
 
-type RequestSettlement = 'waiting' | 'approved' | 'expired';
-
-const evaluateRequestSettlement = (input: {
-  readonly request: PairingRequest;
-  readonly workspaces: readonly AccountPairingRequesterWorkspace[];
-  readonly listedByGenesis: ReadonlyMap<string, { workspaceId: string; name: string }>;
-  readonly joined: ReadonlySet<string>;
-  readonly permanentlyFailed: ReadonlySet<string> | undefined;
-  readonly covers: { readonly seen: boolean; readonly approved: ReadonlySet<string> } | undefined;
-  readonly expired: boolean;
-}): RequestSettlement => {
-  if (!input.covers?.seen) return input.expired ? 'expired' : 'waiting';
-  let approvedJoined = 0;
-  for (const item of input.request.rows) {
-    const genesisHex = hex(item.genesis);
-    if (!input.covers.approved.has(genesisHex)) continue;
-    const workspace =
-      input.workspaces.find((candidate) => hex(candidate.genesis) === genesisHex) ??
-      input.listedByGenesis.get(genesisHex);
-    if (!workspace) return input.expired ? 'expired' : 'waiting';
-    if (input.joined.has(workspace.workspaceId)) {
-      approvedJoined++;
-      continue;
-    }
-    if (input.permanentlyFailed?.has(workspace.workspaceId)) continue;
-    return input.expired ? 'expired' : 'waiting';
-  }
-  if (approvedJoined > 0) return 'approved';
-  return input.expired ? 'expired' : 'waiting';
-};
-
 /** Failures that refuse the whole approval rather than one workspace: the signed-in
  * account changed, the request was tampered with, or it expired. Shared by every
  * per-workspace step so refresh and signing classify the same way. */
@@ -809,17 +778,15 @@ export function makeAccountPairing(input: {
       })
     );
     const joined = yield* sql(joinedSet(row.lookup_id));
-    const settlement = evaluateRequestSettlement({
-      request,
-      workspaces,
-      listedByGenesis,
-      joined,
-      permanentlyFailed: permanentlyFailed.get(row.lookup_id),
-      covers: coverage.get(row.lookup_id),
-      expired: now() >= row.expires_at,
+    const requested = request.rows.flatMap((item) => {
+      const workspace =
+        workspaces.find((candidate) => hex(candidate.genesis) === hex(item.genesis)) ??
+        listedByGenesis.get(hex(item.genesis));
+      return workspace ? [workspace.workspaceId] : [];
     });
-    if (settlement === 'approved') yield* settle(row.lookup_id, 'requester', 'approved');
-    else if (settlement === 'expired') yield* settle(row.lookup_id, 'requester', 'expired');
+    if (requested.length > 0 && requested.every((id) => joined.has(id)))
+      yield* settle(row.lookup_id, 'requester', 'approved');
+    else if (now() >= row.expires_at) yield* settle(row.lookup_id, 'requester', 'expired');
     return yield* stateOf(row, workspaces);
   });
 
