@@ -274,6 +274,7 @@
   "e2ee.auto.authorizeSelected": "Aprobar los espacios seleccionados ({{count}})",
   "e2ee.auto.requestedHere": "Solicitado",
   "e2ee.auto.scopeListed": "Aprueba los espacios de trabajo de la lista de arriba.",
+  "e2ee.auto.scopeListedOne": "Aprueba el espacio de trabajo de arriba.",
   "e2ee.auto.approvalRetry": "Confirmando la aprobación. Espera un momento.",
   "e2ee.auto.expiresIn": "Expira en {{time}}",
   "e2ee.auto.laterHint": "Puedes continuar después en Solicitudes de dispositivos.",

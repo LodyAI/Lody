@@ -274,6 +274,7 @@
   "e2ee.auto.authorizeSelected": "選択したワークスペースを承認（{{count}}）",
   "e2ee.auto.requestedHere": "リクエスト元",
   "e2ee.auto.scopeListed": "上に表示されたワークスペースを承認します。",
+  "e2ee.auto.scopeListedOne": "上に表示されたワークスペースを承認します。",
   "e2ee.auto.approvalRetry": "承認を確認しています。しばらくお待ちください。",
   "e2ee.auto.expiresIn": "あと {{time}} で期限切れ",
   "e2ee.auto.laterHint": "後で「デバイスリクエスト」から再開できます。",

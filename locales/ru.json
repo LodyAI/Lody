@@ -274,6 +274,7 @@
   "e2ee.auto.authorizeSelected": "Подтвердить выбранные пространства ({{count}})",
   "e2ee.auto.requestedHere": "Запрошено",
   "e2ee.auto.scopeListed": "Подтверждает рабочие пространства из списка выше.",
+  "e2ee.auto.scopeListedOne": "Подтверждает рабочее пространство выше.",
   "e2ee.auto.approvalRetry": "Подтверждаем одобрение. Подождите.",
   "e2ee.auto.expiresIn": "Истекает через {{time}}",
   "e2ee.auto.laterHint": "Можно продолжить позже в разделе «Запросы устройств».",

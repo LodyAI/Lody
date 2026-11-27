@@ -274,6 +274,7 @@
   "e2ee.auto.authorizeSelected": "核准所選工作區（{{count}}）",
   "e2ee.auto.requestedHere": "發起申請",
   "e2ee.auto.scopeListed": "只核准上面列出的工作區。",
+  "e2ee.auto.scopeListedOne": "只核准上面這個工作區。",
   "e2ee.auto.approvalRetry": "正在確認核准結果，請稍候。",
   "e2ee.auto.expiresIn": "將於 {{time}} 後過期",
   "e2ee.auto.laterHint": "稍後可在「裝置請求」中繼續。",

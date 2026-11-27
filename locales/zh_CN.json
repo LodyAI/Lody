@@ -274,6 +274,7 @@
   "e2ee.auto.authorizeSelected": "批准所选工作区（{{count}}）",
   "e2ee.auto.requestedHere": "发起请求",
   "e2ee.auto.scopeListed": "只批准上面列出的工作区。",
+  "e2ee.auto.scopeListedOne": "只批准上面这个工作区。",
   "e2ee.auto.approvalRetry": "正在确认批准结果，请稍候。",
   "e2ee.auto.expiresIn": "{{time}} 后过期",
   "e2ee.auto.laterHint": "稍后可在「设备请求」中继续。",

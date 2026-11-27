@@ -498,7 +498,7 @@ describe('instant QR join and form-factor pairing', () => {
     expect(document.querySelector('[data-testid="e2ee-instant-qr"]')).toBeNull();
     expect(document.querySelector('[role="tablist"]')).toBeNull();
     expect(document.querySelector('[data-testid="e2ee-approval-scan-start"]')).toBeNull();
-    expect(document.body.textContent).toContain('e2ee.auto.scopeListed');
+    expect(document.body.textContent).toContain('e2ee.auto.scopeListedOne');
     const input = document.querySelector('[data-testid="e2ee-approval-code"]') as HTMLInputElement;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
@@ -558,6 +558,8 @@ describe('instant QR join and form-factor pairing', () => {
       box('w1').hasAttribute('data-disabled') || box('w1').getAttribute('aria-disabled') === 'true'
     ).toBe(true);
     expect(authorize().textContent).toBe('e2ee.auto.authorizeSelected {"count":3}');
+    expect(document.body.textContent).toContain('e2ee.auto.scopeListed');
+    expect(document.body.textContent).not.toContain('e2ee.auto.scopeListedOne');
     await act(async () => box('w2').click());
     expect(box('w2').getAttribute('aria-checked')).toBe('false');
     expect(authorize().textContent).toBe('e2ee.auto.authorizeSelected {"count":2}');

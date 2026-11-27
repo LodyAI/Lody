@@ -1205,7 +1205,11 @@ export function E2eeAutomaticPairingInbox({
                       )}
                     </form>
                   )}
-                  <p {...stylex.props(themeStyles.scopeFootnote)}>{t('e2ee.auto.scopeListed')}</p>
+                  <p {...stylex.props(themeStyles.scopeFootnote)}>
+                    {t(
+                      candidates.length > 1 ? 'e2ee.auto.scopeListed' : 'e2ee.auto.scopeListedOne'
+                    )}
+                  </p>
                 </>
               )}
             </div>

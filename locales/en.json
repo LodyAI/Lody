@@ -274,6 +274,7 @@
   "e2ee.auto.authorizeSelected": "Approve selected workspaces ({{count}})",
   "e2ee.auto.requestedHere": "Requested",
   "e2ee.auto.scopeListed": "Approves the workspaces listed above.",
+  "e2ee.auto.scopeListedOne": "Approves the workspace above.",
   "e2ee.auto.approvalRetry": "Still confirming approval. Please wait.",
   "e2ee.auto.expiresIn": "Expires in {{time}}",
   "e2ee.auto.laterHint": "You can resume later from Device requests.",
