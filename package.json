@@ -55,6 +55,7 @@
     "check:local-loro-writer-boundary": "node scripts/check-local-loro-writer-boundary.mjs",
     "check:operation-inbox-boundary": "node scripts/check-operation-inbox-boundary.mjs",
     "check:legacy-cloud-access": "node scripts/check-legacy-cloud-access.mjs",
+    "check:external-boundary-decode": "node scripts/check-external-boundary-decode.mjs",
     "check:affected": "node scripts/run-local-check.mjs --affected"
   },
   "keywords": [

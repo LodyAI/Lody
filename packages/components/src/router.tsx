@@ -1,9 +1,15 @@
-import type { ComponentType } from 'react';
-import { createRouter as createTanstackRouter } from '@tanstack/react-router';
+import { useEffect, type ComponentType } from 'react';
+import {
+  createRouter as createTanstackRouter,
+  useRouter,
+  type ErrorComponentProps,
+} from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 import type { E2eeRuntimeFactory, PlatformE2eeWorkspaces } from '@lody/platform';
 import type { LodyAuthClient } from './lib/auth';
 import { setTelemetryRouteTarget } from './lib/posthog-privacy';
+import { ErrorBoundaryFallback } from './components/error-boundary-fallback';
+import { recordClientError } from './lib/client-log';
 
 export type RouterContext = {
   authClient: LodyAuthClient;
@@ -37,12 +43,48 @@ export function shouldRouterRestoreScroll(pathname: string): boolean {
   return !CONVERSATION_PATH.test(pathname);
 }
 
+function normalizeRouterError(error: unknown): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+  if (typeof error === 'string' && error.length > 0) {
+    return new Error(error);
+  }
+  return new Error('Unexpected routing error');
+}
+
+export function RouterErrorFallback({ error, reset }: ErrorComponentProps) {
+  const router = useRouter();
+  const normalizedError = normalizeRouterError(error);
+
+  useEffect(() => {
+    recordClientError('router.default_error_component', normalizedError, {
+      boundary: 'TanStackRouter',
+    });
+  }, [normalizedError]);
+
+  return (
+    <ErrorBoundaryFallback
+      error={normalizedError}
+      resetErrorBoundary={() => {
+        reset();
+        void router.invalidate();
+      }}
+      variant="page"
+      componentStack={null}
+      boundaryName="TanStackRouter"
+      showErrorDetails
+    />
+  );
+}
+
 export const createRouter = (options: CreateRouterOptions) => {
   const router = createTanstackRouter({
     routeTree,
     basepath: options.basepath ?? '',
     history: options.history,
     defaultPreload: 'intent',
+    defaultErrorComponent: RouterErrorFallback,
     scrollRestoration: ({ location }) => shouldRouterRestoreScroll(location.pathname),
     context: {
       authClient: options.authClient,

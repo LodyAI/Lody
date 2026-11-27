@@ -923,4 +923,136 @@ describe('useOrganization list recovery', () => {
     });
     expect(latestOrganizationState?.activeOrganization?.id).toBe('encrypted-a');
   });
+
+  it('drops null and malformed items from organization lists without crashing render', async () => {
+    const validOrg = createOrganization('workspace-valid', 'valid-workspace', 'Valid Workspace');
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useListOrganizations: () => ({
+        data: [null, { slug: 'missing-id' }, validOrg, undefined] as unknown[],
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: validOrg,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    const localStore = createStore();
+    await act(async () => {
+      if (!container) {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+      }
+      root?.render(
+        createElement(TestApp, { targetSlug: 'valid-workspace', renderVersion: 1, store: localStore })
+      );
+    });
+    expect(latestOrganizationState?.organizations).toEqual([validOrg]);
+    expect(latestOrganizationState?.activeOrganization?.id).toBe('workspace-valid');
+    expect(latestOrganizationState?.error).toBeNull();
+  });
+
+  it('degrades malformed activeOrganization payloads into an explicit error instead of crashing', async () => {
+    const validOrg = createOrganization('workspace-valid', 'valid-workspace', 'Valid Workspace');
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useListOrganizations: () => ({
+        data: [validOrg],
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: { slug: 'broken-without-id' } as unknown,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    const localStore = createStore();
+    await act(async () => {
+      if (!container) {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+      }
+      root?.render(
+        createElement(TestApp, { targetSlug: 'valid-workspace', renderVersion: 1, store: localStore })
+      );
+    });
+    expect(latestOrganizationState?.activeOrganization).toBeNull();
+    expect(latestOrganizationState?.error).toBeInstanceOf(Error);
+  });
+});
+
+describe('runtime external boundary decoding across auth, cloud, and IPC', () => {
+  it('filters null organization items and rejects malformed single objects in cloudOperations decoders', async () => {
+    const { cloudOperations } = await import('../src/lib/cloud-api-operations');
+
+    const membersDecoded = cloudOperations.workspaceMembers.list.decode!([
+      null,
+      { userId: 'u-1', name: 'Alice', image: null },
+      { userId: '' },
+    ]);
+    expect(membersDecoded.ok).toBe(true);
+    if (membersDecoded.ok) {
+      expect(membersDecoded.data).toEqual([{ userId: 'u-1', name: 'Alice', image: null }]);
+    }
+
+    const badAccess = cloudOperations.auth.getWorkspaceAccessBySlug.decode!({
+      status: 'member',
+    });
+    expect(badAccess.ok).toBe(false);
+
+    const goodAccess = cloudOperations.auth.getWorkspaceAccessBySlug.decode!({
+      status: 'member',
+      organizationId: 'org-1',
+    });
+    expect(goodAccess).toEqual({
+      ok: true,
+      data: { status: 'member', organizationId: 'org-1' },
+    });
+  });
+
+  it('drops malformed IPC push payloads in onIpcEvent', async () => {
+    const { onIpcEvent } = await import('../src/lib/electron-ipc-client');
+    let listener: ((payload: unknown) => void) | undefined;
+    const prevIpc = window.ipc;
+    window.ipc = {
+      invoke: async () => undefined,
+      send: () => {},
+      on: (_channel, fn) => {
+        listener = fn;
+        return () => {};
+      },
+    };
+    const received: unknown[] = [];
+    try {
+      const stop = onIpcEvent('auth.loginState', (state) => {
+        received.push(state);
+      });
+      listener?.({ phase: 'authenticated', revision: 'not-a-number' });
+      expect(received).toEqual([]);
+      const validState = {
+        revision: 1,
+        attemptId: null,
+        phase: 'idle',
+        session: null,
+        error: null,
+        errorDetail: null,
+      };
+      listener?.(validState);
+      expect(received).toEqual([validState]);
+      stop();
+    } finally {
+      window.ipc = prevIpc;
+    }
+  });
 });

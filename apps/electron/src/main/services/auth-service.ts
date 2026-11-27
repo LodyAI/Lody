@@ -4,6 +4,12 @@ import { captureElectronMainException } from '../posthog-error-reporting'
 import { DesktopLogin, DesktopLoginFailure } from './desktop-login'
 import { isLocalPlatform, desktopInstallationProfile } from '../platform'
 import {
+  decodeBetterAuthActiveOrganization,
+  decodeBetterAuthOrganizations,
+  formatBoundaryDecodeDiagnostic,
+  type BoundaryDecodeDiagnostic
+} from '@lody/shared/boundary-decode'
+import {
   ElectronAuthCallbackSessionSchema,
   isDevEmailPasswordLoginEnabled,
   type ElectronLoginState,
@@ -349,25 +355,68 @@ function isDefinitiveUnauthenticatedResponse(response: unknown): boolean {
   return status === 401 || status === 403 || status === 404
 }
 
-function unwrapResponseData<T>(response: unknown): T | null {
+function unwrapResponseData(response: unknown): unknown {
   if (!isRecord(response)) {
     return null
   }
 
   if ('data' in response) {
-    return (response.data as T | null | undefined) ?? null
+    return response.data ?? null
   }
 
-  return response as T
+  return response
 }
 
-function readOrganizationId(value: unknown): string | null {
-  if (!isRecord(value)) {
-    return null
+function replaceResponseData(response: unknown, nextData: unknown): unknown {
+  if (isRecord(response) && 'data' in response) {
+    return {
+      ...response,
+      data: nextData
+    }
   }
+  return nextData
+}
 
-  const id = value.id
-  return typeof id === 'string' && id.length > 0 ? id : null
+function logAuthServiceBoundaryDiagnostic(diagnostic: BoundaryDecodeDiagnostic): void {
+  console.warn(`[Auth] ${formatBoundaryDecodeDiagnostic(diagnostic)}`)
+}
+
+function sanitizeOrganizationsResponse(boundary: string, response: unknown): unknown {
+  if (hasResponseError(response)) {
+    return response
+  }
+  const decoded = decodeBetterAuthOrganizations(boundary, unwrapResponseData(response), {
+    onDiagnostic: logAuthServiceBoundaryDiagnostic
+  })
+  if (!decoded.ok) {
+    return {
+      data: null,
+      error: {
+        message: decoded.error.message,
+        code: 'MALFORMED_RESPONSE'
+      }
+    }
+  }
+  return replaceResponseData(response, decoded.data)
+}
+
+function sanitizeActiveOrganizationResponse(boundary: string, response: unknown): unknown {
+  if (hasResponseError(response)) {
+    return response
+  }
+  const decoded = decodeBetterAuthActiveOrganization(boundary, unwrapResponseData(response), {
+    onDiagnostic: logAuthServiceBoundaryDiagnostic
+  })
+  if (!decoded.ok) {
+    return {
+      data: null,
+      error: {
+        message: decoded.error.message,
+        code: 'MALFORMED_RESPONSE'
+      }
+    }
+  }
+  return replaceResponseData(response, decoded.data)
 }
 
 function withSessionTokenInResponse(response: unknown, sessionToken: string | null): unknown {
@@ -858,7 +907,8 @@ export class AuthService {
 
   async listOrganizations(options?: unknown) {
     const sessionToken = await this.getSessionToken(options)
-    return await authClient.organization.list(withAuthorization({}, sessionToken))
+    const response = await authClient.organization.list(withAuthorization({}, sessionToken))
+    return sanitizeOrganizationsResponse('electron.main.listOrganizations', response)
   }
 
   async getActiveOrganization(
@@ -867,7 +917,10 @@ export class AuthService {
   ) {
     if (query) {
       const token = await this.getSessionToken(options)
-      return await authClient.organization.getFullOrganization(withAuthorization({ query }, token))
+      const response = await authClient.organization.getFullOrganization(
+        withAuthorization({ query }, token)
+      )
+      return sanitizeActiveOrganizationResponse('electron.main.getActiveOrganization', response)
     }
     const sessionToken = await this.getSessionToken(options)
     const activeOrganizationResponse = await authClient.organization.getFullOrganization(
@@ -877,11 +930,22 @@ export class AuthService {
       return activeOrganizationResponse
     }
 
-    const activeOrganization = unwrapResponseData<Record<string, unknown>>(
-      activeOrganizationResponse
+    const decodedActive = decodeBetterAuthActiveOrganization(
+      'electron.main.getActiveOrganization',
+      unwrapResponseData(activeOrganizationResponse),
+      { onDiagnostic: logAuthServiceBoundaryDiagnostic }
     )
-    if (activeOrganization) {
-      return activeOrganizationResponse
+    if (!decodedActive.ok) {
+      return {
+        data: null,
+        error: {
+          message: decodedActive.error.message,
+          code: 'MALFORMED_RESPONSE'
+        }
+      }
+    }
+    if (decodedActive.data) {
+      return replaceResponseData(activeOrganizationResponse, decodedActive.data)
     }
 
     const organizationsResponse = await authClient.organization.list(
@@ -891,10 +955,15 @@ export class AuthService {
       return organizationsResponse
     }
 
-    const organizations = unwrapResponseData<unknown[]>(organizationsResponse)
-    const firstOrganizationId = Array.isArray(organizations)
-      ? readOrganizationId(organizations[0])
-      : null
+    const decodedOrganizations = decodeBetterAuthOrganizations(
+      'electron.main.getActiveOrganization.list',
+      unwrapResponseData(organizationsResponse),
+      { onDiagnostic: logAuthServiceBoundaryDiagnostic }
+    )
+    const firstOrganizationId =
+      decodedOrganizations.ok && decodedOrganizations.data && decodedOrganizations.data.length > 0
+        ? decodedOrganizations.data[0]!.id
+        : null
     if (!firstOrganizationId) {
       return activeOrganizationResponse
     }
@@ -911,7 +980,13 @@ export class AuthService {
       return setActiveResponse
     }
 
-    return await authClient.organization.getFullOrganization(withAuthorization({}, sessionToken))
+    const refreshedResponse = await authClient.organization.getFullOrganization(
+      withAuthorization({}, sessionToken)
+    )
+    return sanitizeActiveOrganizationResponse(
+      'electron.main.getActiveOrganization.afterSetActive',
+      refreshedResponse
+    )
   }
 
   async changeEmail(input: unknown) {

@@ -30,3 +30,20 @@ export function normalizeCurrentUserFromSessionUser(sessionUser: unknown): Curre
     image: parsed.image,
   });
 }
+
+export function safeNormalizeCurrentUserFromSessionUser(sessionUser: unknown): CurrentUser | null {
+  const parsed = SessionUserSchema.safeParse(sessionUser, { jitless: true });
+  if (!parsed.success) {
+    return null;
+  }
+  const normalized = CurrentUserSchema.safeParse(
+    {
+      id: parsed.data.id ?? parsed.data._id,
+      email: parsed.data.email,
+      name: parsed.data.name,
+      image: parsed.data.image,
+    },
+    { jitless: true }
+  );
+  return normalized.success ? normalized.data : null;
+}

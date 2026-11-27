@@ -24,6 +24,13 @@ import {
   workspaceContextSnapshotAtom,
 } from '@/atoms';
 import { WorkspaceId } from '@lody/shared';
+import {
+  decodeBetterAuthActiveOrganization,
+  decodeBetterAuthOrganizations,
+  formatBoundaryDecodeDiagnostic,
+  type BoundaryDecodeDiagnostic,
+} from '@lody/shared/boundary-decode';
+import { recordClientLog } from '@/lib/client-log';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useAuthClient } from '../providers/convex-provider';
 import {
@@ -51,6 +58,18 @@ const deletedEncryptedWorkspacesAtom = atom<{ accountId: string; ids: ReadonlySe
 const inFlightSetActiveRequests = new Map<string, Promise<void>>();
 let completedUnobservedSetActiveRequestKey: string | null = null;
 let organizationSwitchSeq = 0;
+
+function reportOrganizationHookDiagnostic(diagnostic: BoundaryDecodeDiagnostic): void {
+  const summary = formatBoundaryDecodeDiagnostic(diagnostic);
+  console.warn(`[useOrganization] ${summary}`);
+  recordClientLog('warn', 'boundary.decode', summary, {
+    boundary: diagnostic.boundary,
+    kind: diagnostic.kind,
+    droppedCount: diagnostic.droppedCount,
+    totalCount: diagnostic.totalCount,
+    issueCount: diagnostic.issueCount,
+  });
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object';
@@ -239,17 +258,58 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
   } = useStableSession();
   const user = session?.user ?? null;
   const {
-    data: ordinaryOrganizations,
+    data: rawOrdinaryOrganizations,
     isPending: ordinaryOrganizationsPending,
-    error: organizationsError,
+    error: rawOrganizationsError,
     refetch: refetchOrganizations,
   } = authClient.useListOrganizations();
   const {
-    data: listedActiveOrganization,
+    data: rawListedActiveOrganization,
     isPending: activeOrganizationIsPending,
     refetch: refetchActiveOrganization,
-    error: activeOrganizationQueryError,
+    error: rawActiveOrganizationQueryError,
   } = authClient.useActiveOrganization();
+
+  const decodedOrdinaryOrganizations = useMemo(() => {
+    if (rawOrdinaryOrganizations === undefined || rawOrdinaryOrganizations === null) {
+      return { data: rawOrdinaryOrganizations, error: null as Error | null };
+    }
+    const decoded = decodeBetterAuthOrganizations(
+      'useOrganization.ordinaryOrganizations',
+      rawOrdinaryOrganizations,
+      { onDiagnostic: reportOrganizationHookDiagnostic }
+    );
+    if (!decoded.ok) {
+      return { data: null, error: decoded.error };
+    }
+    return {
+      data: decoded.data as typeof rawOrdinaryOrganizations,
+      error: null as Error | null,
+    };
+  }, [rawOrdinaryOrganizations]);
+  const ordinaryOrganizations = decodedOrdinaryOrganizations.data;
+  const organizationsError = rawOrganizationsError ?? decodedOrdinaryOrganizations.error;
+
+  const decodedActiveOrganization = useMemo(() => {
+    if (rawListedActiveOrganization === undefined || rawListedActiveOrganization === null) {
+      return { data: rawListedActiveOrganization, error: null as Error | null };
+    }
+    const decoded = decodeBetterAuthActiveOrganization(
+      'useOrganization.activeOrganization',
+      rawListedActiveOrganization,
+      { onDiagnostic: reportOrganizationHookDiagnostic }
+    );
+    if (!decoded.ok) {
+      return { data: null, error: decoded.error };
+    }
+    return {
+      data: decoded.data as typeof rawListedActiveOrganization,
+      error: null as Error | null,
+    };
+  }, [rawListedActiveOrganization]);
+  const listedActiveOrganization = decodedActiveOrganization.data;
+  const activeOrganizationQueryError =
+    rawActiveOrganizationQueryError ?? decodedActiveOrganization.error;
 
   const encryptedDirectory = useOptionalCloudPlatformQuery(
     cloudOperations.e2eeMembers.workspaces,
@@ -276,17 +336,29 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
   const encryptedOrganizations = useMemo(
     () =>
       encryptedWorkspaces
-        ?.filter((workspace) => !deletedIds?.has(workspace.id))
+        ?.filter(
+          (workspace) =>
+            workspace != null &&
+            typeof workspace.id === 'string' &&
+            workspace.id.length > 0 &&
+            Array.isArray(workspace.members) &&
+            !deletedIds?.has(workspace.id)
+        )
         .map((workspace) => ({
           ...workspace,
           logo: null,
           createdAt: LOCAL_ORGANIZATION_EPOCH,
           metadata: null,
-          members: workspace.members.map((member) => ({
-            ...member,
-            organizationId: workspace.id,
-            createdAt: LOCAL_ORGANIZATION_EPOCH,
-          })),
+          members: workspace.members
+            .filter(
+              (member) =>
+                member != null && typeof member.userId === 'string' && member.userId.length > 0
+            )
+            .map((member) => ({
+              ...member,
+              organizationId: workspace.id,
+              createdAt: LOCAL_ORGANIZATION_EPOCH,
+            })),
           invitations: [],
         })),
     [deletedIds, encryptedWorkspaces]

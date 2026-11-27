@@ -9,6 +9,11 @@ const client = vi.hoisted(() => ({
   getSession: vi.fn(),
   getCookie: vi.fn(),
   signOut: vi.fn(),
+  organization: {
+    list: vi.fn(),
+    getFullOrganization: vi.fn(),
+    setActive: vi.fn(),
+  },
 }));
 
 vi.mock('../../../apps/electron/src/main/auth', () => ({ authClient: client }));
@@ -220,5 +225,51 @@ describe('desktop session recovery with a stale renderer bearer', () => {
     client.getCookie.mockReturnValue('');
     client.getSession.mockRejectedValueOnce(new Error('synthetic offline'));
     expect(await service.getSessionToken(staleBearer)).toBe('synthetic-stale');
+  });
+
+  it('filters null and malformed organizations in listOrganizations and skips leading null in getActiveOrganization', async () => {
+    const service = new AuthService();
+    client.getSession.mockResolvedValue(session);
+
+    client.organization.list.mockResolvedValueOnce({
+      data: [null, { slug: 'missing-id' }, { id: 'org-valid', slug: 'valid', name: 'Valid' }],
+      error: null,
+    });
+    const listResult = await service.listOrganizations();
+    expect(listResult).toEqual({
+      data: [{ id: 'org-valid', slug: 'valid', name: 'Valid' }],
+      error: null,
+    });
+
+    client.organization.getFullOrganization
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          id: 'org-valid',
+          slug: 'valid',
+          name: 'Valid',
+          members: [null, { userId: 'synthetic-user', role: 'owner' }],
+        },
+        error: null,
+      });
+    client.organization.list.mockResolvedValueOnce({
+      data: [null, { id: 'org-valid', slug: 'valid', name: 'Valid' }],
+      error: null,
+    });
+    client.organization.setActive.mockResolvedValueOnce({ data: { id: 'org-valid' }, error: null });
+
+    const activeResult = await service.getActiveOrganization();
+    expect(client.organization.setActive).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: 'org-valid' })
+    );
+    expect(activeResult).toEqual({
+      data: {
+        id: 'org-valid',
+        slug: 'valid',
+        name: 'Valid',
+        members: [{ userId: 'synthetic-user', role: 'owner' }],
+      },
+      error: null,
+    });
   });
 });
