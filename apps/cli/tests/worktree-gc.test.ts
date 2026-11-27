@@ -693,8 +693,6 @@ describe('WorktreeGarbageCollector', () => {
           nowMs
         )
       ).toBe(explicitAt);
-
-      // Newer message reopens a settled session.
       expect(
         resolveSettledSinceMs(
           sessionMeta('s1' as SessionId, {
@@ -704,14 +702,10 @@ describe('WorktreeGarbageCollector', () => {
           nowMs
         )
       ).toBeNull();
-
-      // Inactive for >= 7 days auto-settles at lastMessageAt + 7d.
       const inactiveAt = nowMs - STATUS_VIEW_SETTLE_INACTIVITY_MS - DAY_MS;
       expect(
         resolveSettledSinceMs(sessionMeta('s2' as SessionId, { lastMessageAt: inactiveAt }), nowMs)
       ).toBe(inactiveAt + STATUS_VIEW_SETTLE_INACTIVITY_MS);
-
-      // Focus restore overrides 7-day auto-settle for 7 days.
       expect(
         resolveSettledSinceMs(
           sessionMeta('s2' as SessionId, {
@@ -721,8 +715,6 @@ describe('WorktreeGarbageCollector', () => {
           nowMs
         )
       ).toBeNull();
-
-      // Pinned, snoozed, child Tabs, archived, running, and permission-waiting are never settled.
       expect(
         resolveSettledSinceMs(
           sessionMeta('s3' as SessionId, { settledAt: explicitAt, isPinned: true }),
@@ -773,38 +765,26 @@ describe('WorktreeGarbageCollector', () => {
     it('deletes only gitignored built-in artifact dirs and preserves non-ignored, stateful, and symlinked dirs', async () => {
       const sessionId = 'gc-artifacts-safety' as SessionId;
       const { worktree } = await createLocalWorktree(sessionId);
-
-      // Configure gitignore: ignore node_modules, dist, .terraform, tmp; do NOT ignore build/.
       fs.writeFileSync(
         path.join(worktree.hostPath, '.gitignore'),
         'node_modules/\ndist/\npackages/*/dist/\n.terraform/\ntmp/\n'
       );
-
-      // Ignored artifact dirs (should be removed).
       fs.mkdirSync(path.join(worktree.hostPath, 'node_modules', 'pkg'), { recursive: true });
       fs.writeFileSync(path.join(worktree.hostPath, 'node_modules', 'pkg', 'index.js'), 'x');
       fs.mkdirSync(path.join(worktree.hostPath, 'packages', 'web', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(worktree.hostPath, 'packages', 'web', 'dist', 'app.js'), 'x');
-
-      // Matching dir name NOT ignored by git (must be preserved).
       fs.mkdirSync(path.join(worktree.hostPath, 'build'), { recursive: true });
       fs.writeFileSync(path.join(worktree.hostPath, 'build', 'keep.txt'), 'tracked-or-unignored');
-
-      // Ignored stateful/user-managed dirs NOT in DEFAULT_ARTIFACT_DIR_NAMES (must be preserved).
       fs.mkdirSync(path.join(worktree.hostPath, '.terraform'), { recursive: true });
       fs.writeFileSync(path.join(worktree.hostPath, '.terraform', 'state.tfstate'), 'secret');
       fs.mkdirSync(path.join(worktree.hostPath, 'tmp'), { recursive: true });
       fs.writeFileSync(path.join(worktree.hostPath, 'tmp', 'notes.txt'), 'keep');
       expect(DEFAULT_ARTIFACT_DIR_NAMES.has('.terraform')).toBe(false);
       expect(DEFAULT_ARTIFACT_DIR_NAMES.has('tmp')).toBe(false);
-
-      // Symlink named `dist` pointing outside the worktree (must not be deleted or followed).
       const externalTarget = path.join(testDir, 'external-dir');
       fs.mkdirSync(externalTarget, { recursive: true });
       fs.writeFileSync(path.join(externalTarget, 'important.txt'), 'do-not-delete');
       fs.symlinkSync(externalTarget, path.join(worktree.hostPath, 'dist'));
-
-      // Uncommitted user source file (must be preserved).
       fs.writeFileSync(path.join(worktree.hostPath, 'uncommitted.ts'), 'export const a = 1;');
 
       const result = await cleanWorktreeArtifacts(worktree.hostPath);
@@ -835,8 +815,6 @@ describe('WorktreeGarbageCollector', () => {
       fs.writeFileSync(path.join(memberA, '.gitignore'), 'target/\n');
       fs.mkdirSync(path.join(memberA, 'target', 'debug'), { recursive: true });
       fs.writeFileSync(path.join(memberA, 'target', 'debug', 'bin'), 'x');
-
-      // Non-git sibling inside groupRoot: must be skipped because no `.git` owns it.
       fs.mkdirSync(path.join(groupRoot, 'non-git', 'node_modules'), { recursive: true });
       fs.writeFileSync(path.join(groupRoot, 'non-git', 'node_modules', 'keep.js'), 'x');
 
@@ -877,22 +855,16 @@ describe('WorktreeGarbageCollector', () => {
           },
         }
       );
-
-      // Before 24h grace period: untouched.
       const tooSoon = await gc.sweep();
       expect(tooSoon.artifactsCleaned).toEqual([]);
       expect(cleanCalls).toBe(0);
       expect(fs.existsSync(nodeModules)).toBe(true);
-
-      // Grace period elapsed, but runtime is active: deferred.
       nowMs = settledAt + SETTLED_ARTIFACT_CLEANUP_GRACE_MS;
       runtimeActive = true;
       const whileActive = await gc.sweep();
       expect(whileActive.artifactsCleaned).toEqual([]);
       expect(cleanCalls).toBe(0);
       expect(fs.existsSync(nodeModules)).toBe(true);
-
-      // Runtime becomes idle: cleans artifacts while keeping the worktree.
       runtimeActive = false;
       const cleaned = await gc.sweep();
       expect(cleaned.artifactsCleaned).toEqual([sessionId]);
@@ -900,13 +872,9 @@ describe('WorktreeGarbageCollector', () => {
       expect(cleanCalls).toBe(1);
       expect(fs.existsSync(nodeModules)).toBe(false);
       expect(fs.existsSync(worktree.hostPath)).toBe(true);
-
-      // Subsequent sweep for the same settled period does not rescan.
       const cached = await gc.sweep();
       expect(cached.artifactsCleaned).toEqual([]);
       expect(cleanCalls).toBe(1);
-
-      // Session returns to active, creates new build output, and settles again later.
       ownerState = { kind: 'active' };
       await gc.sweep();
       const distDir = path.join(worktree.hostPath, 'dist');
@@ -931,7 +899,6 @@ describe('WorktreeGarbageCollector', () => {
       const sessionId = 'gc-settled-retry' as SessionId;
       const { worktree } = await createLocalWorktree(sessionId);
       fs.mkdirSync(path.join(worktree.hostPath, 'node_modules'), { recursive: true });
-      // Corrupt `.git` so `git check-ignore` fails.
       fs.rmSync(path.join(worktree.hostPath, '.git'), { force: true });
       fs.mkdirSync(path.join(worktree.hostPath, '.git'));
 
@@ -973,14 +940,10 @@ describe('WorktreeGarbageCollector', () => {
         path.join(worktree.hostPath, '.gitignore'),
         '.ipynb_checkpoints/\n.swiftpm/\n.vs/\ndist/\nbuild/\n'
       );
-
-      // Recovery/user-state dirs must be preserved even when ignored.
       for (const dir of ['.ipynb_checkpoints', '.swiftpm', '.vs']) {
         fs.mkdirSync(path.join(worktree.hostPath, dir), { recursive: true });
         fs.writeFileSync(path.join(worktree.hostPath, dir, 'keep.json'), '{}');
       }
-
-      // Case 1: `build/` is itself a nested independent Git repo whose own `target/` is ignored.
       const nestedAtCandidate = path.join(worktree.hostPath, 'build');
       fs.mkdirSync(nestedAtCandidate, { recursive: true });
       runGit(nestedAtCandidate, ['init']);
@@ -989,15 +952,12 @@ describe('WorktreeGarbageCollector', () => {
       fs.writeFileSync(path.join(nestedAtCandidate, 'target', 'artifact.o'), 'x');
       fs.writeFileSync(path.join(nestedAtCandidate, 'staged.txt'), 'keep');
       runGit(nestedAtCandidate, ['add', 'staged.txt']);
-
-      // Case 2: `dist/` is ignored by outer repo, and contains a nested independent Git repo deeper inside.
       const nestedInsideCandidate = createLocalRepo(path.join(worktree.hostPath, 'dist', 'sub'));
       fs.writeFileSync(path.join(nestedInsideCandidate, 'important.txt'), 'keep');
       runGit(nestedInsideCandidate, ['add', 'important.txt']);
 
       const result = await cleanWorktreeArtifacts(worktree.hostPath);
       expect(result.errors).toEqual([]);
-      // Only the nested repo's own ignored `target/` is deleted; neither nested repo is removed.
       expect(result.deletedPaths).toEqual([path.join(nestedAtCandidate, 'target')]);
       expect(fs.existsSync(path.join(nestedAtCandidate, 'staged.txt'))).toBe(true);
       expect(fs.existsSync(path.join(nestedAtCandidate, '.git'))).toBe(true);
@@ -1017,15 +977,10 @@ describe('WorktreeGarbageCollector', () => {
 
       const oldSettledAt = 1_000_000;
       let nowMs = oldSettledAt + 10 * DAY_MS;
-      // Initially pinned -> treated as active by readOwnerState.
       let ownerState: WorktreeOwnerState = { kind: 'active' };
       const { gc } = createGc({}, { now: () => nowMs, readOwnerState: async () => ownerState });
-
-      // Observe as active (pinned) at `nowMs`.
       await gc.sweep();
       expect(hasWorktreeArtifactsCleaned(worktree.hostPath)).toBe(false);
-
-      // Unpinned right after: even though `oldSettledAt` is 10d old, grace period starts from leaving active.
       ownerState = {
         kind: 'settled',
         meta: sessionMeta(sessionId, { settledAt: oldSettledAt }),
@@ -1034,8 +989,6 @@ describe('WorktreeGarbageCollector', () => {
       nowMs += SETTLED_ARTIFACT_CLEANUP_GRACE_MS - 1;
       expect((await gc.sweep()).artifactsCleaned).toEqual([]);
       expect(fs.existsSync(path.join(worktree.hostPath, 'node_modules'))).toBe(true);
-
-      // Once 24h elapse after leaving active, cleanup runs and writes the setup marker.
       nowMs += 1;
       const cleaned = await gc.sweep();
       expect(cleaned.artifactsCleaned).toEqual([sessionId]);

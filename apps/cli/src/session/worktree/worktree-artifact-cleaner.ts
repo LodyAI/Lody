@@ -8,22 +8,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 
 const GIT_CHECK_IGNORE_TIMEOUT_MS = 15_000;
 
-/**
- * Conservative built-in build-artifact directory names adapted from `clean-my-code`
- * (https://github.com/zxch3n/clean-code) for unattended background cleanup of
- * settled worktrees. Candidates are only removed when:
- * 1. `git check-ignore` confirms they are ignored by their enclosing repository,
- * 2. no `.git` boundary exists at or inside the candidate directory, and
- * 3. every path component from the worktree root to the candidate is a real
- *    directory (no symlinks) whose canonical path stays inside the worktree root.
- *
- * Intentionally excludes stateful, recovery, or user-managed directories
- * (e.g. `.ipynb_checkpoints`, `.swiftpm`, `.vs`, `.terraform`, `.direnv`,
- * `.vercel`, `.serverless`, `.cache`, `public`, `packages`, `bin`, `env`,
- * `ENV`, `tmp`, `temp`, `.pulumi`, `.vagrant`).
- */
 export const DEFAULT_ARTIFACT_DIR_NAMES: ReadonlySet<string> = new Set([
-  // General build outputs.
   'target',
   'dist',
   'build',
@@ -31,7 +16,6 @@ export const DEFAULT_ARTIFACT_DIR_NAMES: ReadonlySet<string> = new Set([
   'obj',
   'Debug',
   'Release',
-  // Frontend / JS / Node.
   'node_modules',
   'bower_components',
   'elm-stuff',
@@ -45,7 +29,6 @@ export const DEFAULT_ARTIFACT_DIR_NAMES: ReadonlySet<string> = new Set([
   '.parcel-cache',
   '.vite',
   '.angular',
-  // Python / tooling.
   '__pycache__',
   '.pytest_cache',
   '.mypy_cache',
@@ -57,53 +40,36 @@ export const DEFAULT_ARTIFACT_DIR_NAMES: ReadonlySet<string> = new Set([
   'htmlcov',
   '.pyre',
   '.pytype',
-  // JVM / Haskell / build tools.
   '.gradle',
   'dist-newstyle',
   '.stack-work',
-  // CMake (CLion).
   'CMakeFiles',
   'cmake-build-debug',
   'cmake-build-release',
   'cmake-build-relwithdebinfo',
   'cmake-build-minsizerel',
-  // Apple platforms.
   'Pods',
   'Carthage',
   '.build',
   'DerivedData',
-  // Mobile / Flutter.
   '.dart_tool',
-  // Misc.
   'coverage',
 ]);
 
 export type WorktreeArtifactCleanResult = {
-  /** Candidate artifact directories discovered during scan. */
   scannedDirs: number;
-  /** Gitignored artifact directories removed from disk. */
   deletedPaths: string[];
-  /** Candidates skipped (not ignored, nested repo, not inside a git repo, vanished, or symlink). */
   skippedPaths: number;
-  /** Non-fatal per-directory errors encountered during scan, verification, or removal. */
   errors: Array<{ path: string; message: string }>;
-  /** True if cleanup stopped early because `shouldAbort` signaled active use or state change. */
   aborted: boolean;
 };
 
 export type CleanWorktreeArtifactsOptions = {
   artifactDirNames?: ReadonlySet<string>;
   shouldAbort?: () => boolean | Promise<boolean>;
-  /** Override for deterministic tests; defaults to `git check-ignore --quiet`. */
   isGitIgnored?: (repoRoot: string, targetPath: string) => Promise<boolean>;
 };
 
-/**
- * Local marker path recording that a managed worktree had gitignored artifacts
- * removed by settled GC, so resuming that worktree re-runs worktree setup.
- * Stored as a sibling of `<reposDir>/<repoId>/worktrees` so `git status` and
- * worktree enumeration never see it.
- */
 export function getWorktreeArtifactsCleanedMarkerPath(worktreePath: string): string {
   const resolved = path.resolve(worktreePath);
   const worktreesDir = path.dirname(resolved);
@@ -126,7 +92,7 @@ export async function clearWorktreeArtifactsCleaned(worktreePath: string): Promi
   try {
     await fs.promises.rm(getWorktreeArtifactsCleanedMarkerPath(worktreePath), { force: true });
   } catch {
-    // Best-effort cleanup of local marker file.
+    return;
   }
 }
 
@@ -154,11 +120,6 @@ const hasDotGit = async (dir: string): Promise<boolean> => {
   }
 };
 
-/**
- * Verifies every path segment from `boundaryRoot` to `targetPath` is a real
- * directory (never a symlink) and that `realpath(targetPath)` stays strictly
- * inside `realBoundaryRoot`.
- */
 async function verifyRealDirectoryWithinBoundary(
   boundaryRoot: string,
   realBoundaryRoot: string,
@@ -193,11 +154,6 @@ async function verifyRealDirectoryWithinBoundary(
   return isStrictDescendant(realBoundaryRoot, realTarget) ? 'ok' : 'unsafe';
 }
 
-/**
- * Checks whether `dirPath` itself or any non-symlink descendant contains a
- * `.git` entry (nested repository or submodule), so cleanup never deletes
- * across an independent Git repository boundary.
- */
 async function containsNestedGitRepo(
   dirPath: string,
   shouldAbort?: () => boolean | Promise<boolean>
@@ -229,10 +185,6 @@ async function containsNestedGitRepo(
   return { hasGit: false, aborted: false };
 }
 
-/**
- * Finds the nearest directory containing `.git` (file or directory) walking
- * upward from `startDir`, strictly bounded by `boundaryRoot`.
- */
 export async function findGitRootWithinBoundary(
   startDir: string,
   boundaryRoot: string
@@ -261,12 +213,6 @@ type ScanArtifactDirsResult = {
   aborted: boolean;
 };
 
-/**
- * Recursively scans `rootPath` for directories whose basename matches
- * `artifactDirNames`, skipping symlinks and `.git`. If a directory matching
- * `artifactDirNames` is itself a Git repo root (contains `.git`), we descend
- * into it rather than treating the repository itself as an artifact.
- */
 export async function scanArtifactDirs(
   rootPath: string,
   artifactDirNames: ReadonlySet<string> = DEFAULT_ARTIFACT_DIR_NAMES,
@@ -317,10 +263,6 @@ export async function scanArtifactDirs(
   return { candidates: Array.from(new Set(results)), errors, aborted: false };
 }
 
-/**
- * Verifies whether `targetPath` is ignored by Git in `repoRoot` using
- * `git check-ignore --quiet -- <relative-path>`.
- */
 export async function isGitIgnored(repoRoot: string, targetPath: string): Promise<boolean> {
   const resolvedRoot = path.resolve(repoRoot);
   const resolvedTarget = path.resolve(targetPath);
@@ -350,12 +292,6 @@ export async function isGitIgnored(repoRoot: string, targetPath: string): Promis
   );
 }
 
-/**
- * Removes gitignored build-artifact directories inside a managed worktree.
- * Supports single-repo worktrees as well as multi-repo project-group worktrees
- * and submodules by resolving the nearest `.git` root within `worktreeRoot`,
- * refusing to delete across nested `.git` boundaries or symlinked parents.
- */
 export async function cleanWorktreeArtifacts(
   worktreeRoot: string,
   options: CleanWorktreeArtifactsOptions = {}
@@ -408,7 +344,6 @@ export async function cleanWorktreeArtifacts(
     return result;
   }
 
-  // Defensive deduplication: skip any path nested under an earlier candidate.
   const planned: string[] = [];
   for (const candidate of scan.candidates) {
     if (planned.some((selected) => isStrictDescendant(selected, candidate))) {
@@ -459,7 +394,6 @@ export async function cleanWorktreeArtifacts(
       continue;
     }
 
-    // Never delete across an independent nested Git repository / submodule boundary.
     let nestedGit: { hasGit: boolean; aborted: boolean };
     try {
       nestedGit = await containsNestedGitRepo(targetPath, shouldAbort);
@@ -482,7 +416,6 @@ export async function cleanWorktreeArtifacts(
       break;
     }
 
-    // Re-verify the entire real path chain right before removal to guard against parent/leaf symlink swaps.
     try {
       const freshCheck = await verifyRealDirectoryWithinBoundary(
         resolvedRoot,

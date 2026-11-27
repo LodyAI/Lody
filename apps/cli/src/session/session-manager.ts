@@ -2031,10 +2031,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return this.sessions.has(sessionId);
   }
 
-  /**
-   * True when the root Session or any contained child Tab is resident, starting,
-   * terminating, or archiving, so worktree GC must defer touching its directory.
-   */
   isWorktreeSessionBusy(rootSessionId: SessionId): boolean {
     if (
       this.isArchiveInFlight(rootSessionId) ||

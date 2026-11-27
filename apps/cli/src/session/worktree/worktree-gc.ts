@@ -26,20 +26,11 @@ import { getWorktreeManager } from './worktree-manager';
 
 const GIT_PROBE_TIMEOUT_MS = 30_000;
 
-/**
- * Grace period a root Session must remain in the Settled tier before its
- * gitignored code artifacts are eligible for background removal.
- */
 export const SETTLED_ARTIFACT_CLEANUP_GRACE_MS = 24 * 60 * 60 * 1000;
 
 const finiteTimestamp = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
 
-/**
- * Returns the epoch ms at which a root Session entered its current Settled
- * state (matching `statusViewTier`), or `null` if it is not settled, is pinned,
- * archived, a child Tab, or still active/waiting on permission.
- */
 export function resolveSettledSinceMs(meta: SessionMeta, nowMs: number): number | null {
   if (meta.parentSessionId || meta.isArchived === true || meta.isPinned === true) {
     return null;
@@ -134,12 +125,10 @@ export type WorktreeGcDeps = {
    */
   recordArchivedBranch: (sessionId: SessionId, branchName: string) => Promise<void>;
   archiveProjectGroup?: (input: { sessionId: SessionId; worktreePath: string }) => Promise<void>;
-  /** Override for deterministic tests; defaults to `cleanWorktreeArtifacts`. */
   cleanArtifacts?: (
     worktreePath: string,
     options: { shouldAbort: () => boolean | Promise<boolean> }
   ) => Promise<WorktreeArtifactCleanResult>;
-  /** How long a root Session must stay settled before cleaning code artifacts. */
   settledArtifactGraceMs?: number;
   now?: () => number;
   retryBaseDelayMs?: number;
@@ -147,13 +136,9 @@ export type WorktreeGcDeps = {
 };
 
 export type WorktreeGcSweepResult = {
-  /** Directories inspected. */
   scanned: number;
-  /** Directories removed by this sweep. */
   removed: SessionId[];
-  /** Settled worktrees whose gitignored code artifacts were cleaned in this sweep. */
   artifactsCleaned: SessionId[];
-  /** Directories whose cleanup failed and will be retried with backoff. */
   failed: SessionId[];
 };
 
@@ -177,9 +162,7 @@ export class WorktreeGarbageCollector {
   private readonly deps: WorktreeGcDeps;
   private readonly inFlight = new Set<string>();
   private readonly retryState = new Map<string, { attempt: number; notBeforeMs: number }>();
-  /** Maps root SessionId -> `settledSinceMs` for which artifacts were already cleaned cleanly. */
   private readonly settledCleanedState = new Map<string, number>();
-  /** Last timestamp when a Session was observed active/pinned, so unpinning an old settled Session still honors the grace period. */
   private readonly lastActiveObservedAt = new Map<string, number>();
   private sweepPromise: Promise<WorktreeGcSweepResult> | null = null;
   private rerunRequested = false;
