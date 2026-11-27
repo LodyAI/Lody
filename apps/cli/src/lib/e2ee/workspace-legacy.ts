@@ -53,7 +53,14 @@ import {
 } from '@lody/shared/e2ee-execution-intent';
 import type { LoroDoc } from 'loro-crdt';
 import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../cloud-e2ee-errors';
-import { isSessionDocRoomId, type SessionId, type LoroStreamsTokenAuth } from '@lody/shared';
+import {
+  isSessionDocRoomId,
+  loroStreamsWebSocketOptions,
+  type SessionId,
+  type LoroStreamsTokenAuth,
+} from '@lody/shared';
+import { resolveCliLoroStreamsWebSocketEnabled } from '@/platform/presence';
+import { createPresenceWebSocketAuthLegacy } from '@/lib/loro/presence-legacy';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { randomBytes } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
@@ -1238,12 +1245,23 @@ async function openWorkspaceOwned(
       const provider = yield* createTokenProvider(true);
       yield* provider.getToken();
       const bucketId = provider.getBucketId();
-      if (!bucketId || bucketId === 'lody' || !provider.getGatewayBaseUrl())
+      const gatewayBaseUrl = provider.getGatewayBaseUrl();
+      if (!bucketId || bucketId === 'lody' || !gatewayBaseUrl)
         return yield* Effect.fail(new Error('e2ee_content_configuration'));
+      const webSocketEnabled = resolveCliLoroStreamsWebSocketEnabled(
+        undefined,
+        process.env.LODY_LORO_STREAMS_WS_ENABLED
+      );
       return createLoroStreamsJsonStreamClient({
         bucketId,
         getBaseUrl: provider.getGatewayBaseUrl,
         getToken: () => Effect.runPromise(provider.getToken()),
+        ...loroStreamsWebSocketOptions(
+          webSocketEnabled,
+          gatewayBaseUrl,
+          options.workspaceId,
+          createPresenceWebSocketAuthLegacy(provider.createAuthCallback())
+        ),
         ...(signal
           ? {
               fetchImpl: (url: string, init?: RequestInit) =>

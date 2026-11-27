@@ -15,6 +15,7 @@ import {
   getLoroStreamsPresenceBaseUrl,
   getMachineMonitorSnapshotKey,
   getServerNow,
+  loroStreamsWebSocketOptions,
   parseMachineMonitorStates,
   toLodyMachineMonitorStreamUrl,
   type MachineId,
@@ -22,6 +23,7 @@ import {
   type MachineMonitorSnapshot,
   type WorkspaceId,
 } from '@lody/shared';
+import { resolveCliLoroStreamsWebSocketEnabled } from '@/platform/presence';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { withTimeout } from '@/lib/loro/timeout-utils';
@@ -39,6 +41,7 @@ export type CliMachineMonitorStreamsOptions = {
   auth: StreamsAuthCallback;
   /** Hosted shard topology from the token response; the monitor room lives on the presence host when set. */
   shardHostSuffix?: string;
+  webSocketEnabled?: boolean;
 };
 
 export function resolveMachineMonitorObservers(args: {
@@ -114,6 +117,14 @@ export class CliMachineMonitorRuntime {
     this.transport = new EphemeralStreamCrdt({
       streamUrl: toLodyMachineMonitorStreamUrl(durableStreamUrl),
       auth: streamsOptions.auth,
+      ...loroStreamsWebSocketOptions(
+        resolveCliLoroStreamsWebSocketEnabled(
+          streamsOptions.webSocketEnabled,
+          process.env.LODY_LORO_STREAMS_WS_ENABLED
+        ),
+        streamsOptions.streamsBaseUrl,
+        this.options.workspaceId
+      ),
       adaptor: EphemeralStoreAdaptor(this.store),
     });
     this.started = true;

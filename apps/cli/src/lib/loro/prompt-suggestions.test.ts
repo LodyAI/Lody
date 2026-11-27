@@ -5,6 +5,7 @@ import { type WorkspaceId } from '@lody/shared';
 
 const harness = vi.hoisted(() => ({
   transports: [] as Array<{
+    options: Record<string, unknown>;
     updates: Uint8Array[];
     receive: (updates: Uint8Array[]) => void;
   }>,
@@ -16,6 +17,7 @@ vi.mock('@loro-dev/streams-crdt/loro', async (original) => ({
     private readonly updates: Uint8Array[] = [];
     constructor(
       private readonly options: {
+        webSocket?: unknown;
         adaptor: {
           applyRemoteUpdates: (updates: Uint8Array[]) => void;
           subscribeLocalUpdates: (listener: (update: Uint8Array) => void) => () => void;
@@ -23,6 +25,7 @@ vi.mock('@loro-dev/streams-crdt/loro', async (original) => ({
       }
     ) {
       harness.transports.push({
+        options,
         updates: this.updates,
         receive: options.adaptor.applyRemoteUpdates,
       });
@@ -34,12 +37,16 @@ vi.mock('@loro-dev/streams-crdt/loro', async (original) => ({
       options.onStatusChange('joined');
       return { ok: true, value: { unsubscribe: () => this.unsubscribe?.() } };
     }
+    async close() {
+      this.unsubscribe?.();
+    }
     async disposeLegacy() {
       this.unsubscribe?.();
     }
   },
 }));
 import { CliPromptSuggestions } from './prompt-suggestions';
+import { CliMachineMonitorRuntime } from './machine-monitor';
 
 describe('workspace suggestion publisher', () => {
   it('reconciles offline values on attachment and keeps remote text out of the local snapshot', async () => {
@@ -78,6 +85,45 @@ describe('workspace suggestion publisher', () => {
       await publisher.stop();
       remote.destroy();
       decode.destroy();
+    }
+  });
+
+  it('shares the workspace gateway WebSocket options for prompt suggestions and machine monitor when enabled', async () => {
+    const publisher = new CliPromptSuggestions(
+      'workspace-ws' as WorkspaceId,
+      { warn: () => {} } as never
+    );
+    const monitor = new CliMachineMonitorRuntime({
+      workspaceId: 'workspace-ws' as WorkspaceId,
+      logger: { warn: () => {}, debug: () => {} } as never,
+    });
+    try {
+      publisher.attachStreams({
+        streamsBaseUrl: 'https://streams.example.test',
+        auth: async () => 'test',
+        webSocketEnabled: true,
+      });
+      const suggestionTransport = harness.transports.at(-1)!;
+      expect(suggestionTransport.options.webSocket).toEqual({
+        enabled: true,
+        url: 'https://streams.example.test',
+        authPoolKey: 'workspace-ws',
+      });
+
+      monitor.attachStreams({
+        streamsBaseUrl: 'https://streams.example.test',
+        auth: async () => 'test',
+        webSocketEnabled: true,
+      });
+      const monitorTransport = harness.transports.at(-1)!;
+      expect(monitorTransport.options.webSocket).toEqual({
+        enabled: true,
+        url: 'https://streams.example.test',
+        authPoolKey: 'workspace-ws',
+      });
+    } finally {
+      await publisher.stop();
+      await monitor.stop();
     }
   });
 });
