@@ -2,6 +2,7 @@ import { App } from '@capacitor/app';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
 import type { NativePushBridge } from '@lody/components/lib/push-notifications';
+import { getAuthUserId, subscribeAuthUserId } from './auth';
 
 const activity = registerPlugin<{
   configurePushTokens(input: {
@@ -65,7 +66,70 @@ async function report() {
       });
     }).catch(() => console.error('Activity push configuration failed'));
 }
+/** A same-origin in-app path; anything else never navigates. */
+type SafeAppRoute = string & { readonly safeAppRoute: unique symbol };
+type PushTap = { readonly route: SafeAppRoute; readonly recipient: string };
+/** `logging-out`: `unregister()` ran for logout but the old session may still read briefly. */
+type PushTapGate =
+  | { readonly phase: 'signed-out' }
+  | { readonly phase: 'signed-in'; readonly user: string }
+  | { readonly phase: 'logging-out'; readonly user: string };
+
+function pushTap(data: unknown): PushTap | null {
+  const { route, recipientUserId } = (typeof data === 'object' && data !== null ? data : {}) as {
+    route?: unknown;
+    recipientUserId?: unknown;
+  };
+  if (typeof recipientUserId !== 'string' || !recipientUserId) return null;
+  if (typeof route !== 'string' || !route.startsWith('/') || route.startsWith('//')) return null;
+  if (new URL(route, window.location.origin).origin !== window.location.origin) return null;
+  return { route: route as SafeAppRoute, recipient: recipientUserId };
+}
+
+let gate: PushTapGate = { phase: 'signed-out' };
+let parked: PushTap | undefined;
+let tapsInstalled = false;
+const signedIn = (user: string | null): PushTapGate =>
+  user ? { phase: 'signed-in', user } : { phase: 'signed-out' };
+
+/** Opens the newest tap for the signed-in recipient. Workspace admission stays the route's
+ * own check, so a startup workspace that never registers push cannot strand the tap. */
+function openParked() {
+  if (gate.phase === 'logging-out' && localStorage.getItem('lody:push-user') === gate.user)
+    gate = signedIn(gate.user);
+  const tap = parked;
+  if (!tap || gate.phase === 'signed-out') return;
+  if (gate.phase === 'logging-out') {
+    // The leaving account's taps never open; another account's wait for its own sign-in.
+    if (tap.recipient === gate.user) parked = undefined;
+    return;
+  }
+  parked = undefined;
+  if (tap.recipient !== gate.user) return;
+  if (`${window.location.pathname}${window.location.search}${window.location.hash}` === tap.route)
+    return;
+  window.history.pushState(null, '', tap.route);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+function installPushTaps() {
+  if (tapsInstalled) return;
+  tapsInstalled = true;
+  gate = signedIn(getAuthUserId());
+  subscribeAuthUserId((user) => {
+    if (gate.phase !== 'logging-out' || gate.user !== user) gate = signedIn(user);
+    openParked();
+  });
+  void PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
+    const tap = pushTap(event.notification.data);
+    if (!tap) return;
+    parked = tap;
+    openParked();
+  }).catch(() => console.error('Push notification tap listener failed'));
+}
+
 export function initPushBridge() {
+  installPushTaps();
   window.__LODY_PUSH__ = {
     async permission() {
       const { receive } = await PushNotifications.checkPermissions();
@@ -76,6 +140,7 @@ export function initPushBridge() {
     },
     async register(listener) {
       tokenWaiter?.finish(new Error('Native push registration replaced'));
+      if (gate.phase === 'logging-out') gate = signedIn(getAuthUserId());
       notify = listener;
       const current = ++epoch;
       listeners ??= (async () => {
@@ -86,16 +151,6 @@ export function initPushBridge() {
         });
         await PushNotifications.addListener('registrationError', () => {
           tokenWaiter?.finish(new Error('Native push registration failed'));
-        });
-        await PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
-          if (event.notification.data?.recipientUserId !== localStorage.getItem('lody:push-user'))
-            return;
-          const route = event.notification.data?.route;
-          if (typeof route !== 'string' || !route.startsWith('/') || route.startsWith('//')) return;
-          const target = new URL(route, window.location.origin);
-          if (target.origin !== window.location.origin) return;
-          window.history.pushState(null, '', route);
-          window.dispatchEvent(new PopStateEvent('popstate'));
         });
       })();
       await listeners;
@@ -126,6 +181,11 @@ export function initPushBridge() {
       tokenWaiter?.finish(new Error('Native push registration cancelled'));
       notify = undefined;
       token = undefined;
+      // Logout clears the push user first; a Settings opt-out keeps it and fences nothing.
+      if (!localStorage.getItem('lody:push-user')) {
+        if (gate.phase === 'signed-in') gate = { phase: 'logging-out', user: gate.user };
+        if (gate.phase === 'signed-out' || parked?.recipient === gate.user) parked = undefined;
+      }
       await nativeCommand(async () => {
         await Promise.allSettled([
           ...(Capacitor.getPlatform() === 'ios'

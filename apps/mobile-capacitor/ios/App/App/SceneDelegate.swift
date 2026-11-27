@@ -16,10 +16,22 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // forwarding a cold-start URL; AppPlugin retains the event until JS listens.
         window?.rootViewController?.loadViewIfNeeded()
         forwardOpenURLs(connectionOptions.urlContexts)
+        for activity in connectionOptions.userActivities { forward(activity) }
+    }
+
+    func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        forward(userActivity)
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
         forwardOpenURLs(URLContexts)
+    }
+
+    // A scene-based app no longer receives the AppDelegate's continue callback.
+    private func forward(_ activity: NSUserActivity) {
+        _ = ApplicationDelegateProxy.shared.application(
+            UIApplication.shared, continue: activity, restorationHandler: { _ in }
+        )
     }
 
     private func forwardOpenURLs(_ contexts: Set<UIOpenURLContext>) {

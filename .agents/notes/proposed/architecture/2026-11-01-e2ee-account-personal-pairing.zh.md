@@ -186,4 +186,4 @@ owner 已在会话 `911f5684` 批准（经转达）。它取代上文记录的�
 
 窗口列出 `E2eeAutomaticPairingReview.workspaces`，请求所属的排在最前，全部默认勾选，请求所属的那个固定勾选，并且只传出列出的 id。`approveAutomaticPairing(id, code, workspaceIds?)` 先比对验证码；比对一致的那次调用固定所选集合，忽略不在列表里的 id，始终包含请求所属的工作区，之后每次重试都签同一集合，因为原生流程会把改变了的范围拒为 `pairing-used`。后续改动起，请求方会请求宿主列出的全部加密工作区（不带 `workspace` 调用 `requestAccountPairing`，即扫码即加入早已使用的路径）；如果列表里没有它打开的那个工作区，就以 `pairing-unavailable` 结束自己的提交，因为没有批准方能回应它。它只等待自己的工作区加入；同步期间会继续读取该请求，让其他已批准工作区的 claim 完成；取消勾选的工作区是 `omitted` 而不是 pending。原生宿主仍只保留一个请求：第二个窗口（即使是另一个工作区）会得到 `pairing-elsewhere`，而它的工作区现在通常已被第一个窗口的请求覆盖。`packages/e2ee-client/test/account-pairing.test.ts` 中的多窗口测试在这次改动上超时，只是因为测试编排按所请求的工作区识别第二个窗口；现在改为给该窗口独立的宿主，并断言第一个请求覆盖两个工作区。默认设备名为 `Lody desktop`、`Lody iOS`、`Lody Android` 和 `Lody Web`。
 
-系统相机打开的 `lody://pair` 链接不再在新设备页上加入；该页只显示自己的码。
+系统相机打开的 `lody://pair` 链接不再在新设备页上加入；该页只显示自己的码。由于已没有外部消费者，原生壳与共享链接队列只接受 `auto-pair` 链接，`pair` 链接直接丢弃，不再把其中的秘密留在待处理状态；未被认领的 `auto-pair` 链接仍在到达 60 秒后丢弃。

@@ -58,7 +58,9 @@ Recovery enablement does not enable native passkey signing, a backend switch or 
   the system share sheet (choose Save to Files). A fresh explicit tap selects the
   saved `.lodyrecovery` file. Exact byte verification precedes uploading its wrap;
   cancellation or mismatch cannot create a stranded vault. iOS removes temporaries
-  after the native share call settles, including failure/cancellation. Android retains
+  after the native share call settles, including failure/cancellation; a failed removal
+  never replaces the cancellation or the original failure, and only turns a save into a
+  `storage` failure, so success is never reported over a leftover secret. Android retains
   them because chooser completion can precede the receiving app reading its URI;
   the next export removes prior recovery temporaries, including those from a prior process.
   Files are not held in React state. OS eviction may also clear Cache temporaries.
@@ -74,12 +76,22 @@ subsequent writes. Independent capability/security-feed reads never hold the
 vault-command permit, so unavailable activity cannot block file/passkey use.
 
 Vault commands serialize until actual native/network/IDB completion. UI dismissal
-never releases raw work early. Public Scopes wipe V/PRF; the private operation
+never releases raw work early. Saved-file verification runs inside the command, and
+WKWebView can close its file picker without `cancel` or deliver `change` long after
+focus returns, so focus is never treated as dismissal. Instead the host prompt stays
+open while any recovery chooser runs, for verification and file actions alike: Cancel
+aborts the chooser and answers its caller, the prompt's file button reopens the chooser
+(replacing a silent one), and logout or unmount aborts both. `chooseRecoveryFile` also
+settles when a newer chooser opens or its signal aborts, and it never reads a late
+`change` after settling, so a never-answered picker cannot hold the permit. Public Scopes wipe V/PRF; the private operation
 also retains final cleanup ownership of every native PRF result, including early
 public validation failures. Private file copies are wiped on every exit, including
 file-picker/read races. Nothing logs native detail
 or persists file bytes, U, V or plaintext keys. The public cancellation class is
-preserved by the Capacitor port and displayed silently by the UI.
+preserved by the Capacitor port and displayed silently by the UI. A ceremony requested
+while the scene is `.foregroundInactive` waits up to one second for activation; a scene
+that stays inactive, or `ASAuthorizationError.notInteractive`, rejects `unavailable`,
+which the port reports as `e2ee_passkey_unavailable`, never as `e2ee_passkey_failed`.
 
 `src/e2ee/recovery-journal.ts` stores only public-protocol pins/intents under
 `lody-e2ee:mobile:recovery:v1:<account>`. Every transaction requests **strict**

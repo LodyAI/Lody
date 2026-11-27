@@ -12,13 +12,13 @@ Parent mobile and repository rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
 - As a new device, the phone requests account pairing over the account's workspace list
   and history (`requester`); the relay's account is the current runtime login, never a
   placeholder.
-- `../e2ee-pair-link.ts` publishes OS-opened `lody://pair/…` and `lody://auto-pair?…` links
-  (at most 512 characters) on `window.__LODY_PENDING_E2EE_PAIR_URL__` and the
-  `lody:e2ee-pair-url` event for the shared pairing surfaces. These links carry a pairing
-  secret, so they are never logged or reported, and other links pass untouched. Any app can
-  open such a link: consumers treat it as untrusted input (`auto-pair` only prefills on an
-  idle approval dialog, `pair` stays queued until a ready join page stages explicit
-  confirmation), never inspect, submit, or approve on their own, and clear the global once read.
+- `../e2ee-pair-link.ts` publishes OS-opened `lody://auto-pair?…` links (at most 512
+  characters) on `window.__LODY_PENDING_E2EE_PAIR_URL__` and the `lody:e2ee-pair-url` event
+  for the shared approval dialog. These links carry a pairing secret, so they are never
+  logged or reported. No surface joins from an external `lody://pair/…` link, so it and all
+  other links pass untouched and are never parked. Any app can open such a link: consumers
+  treat it as untrusted input (`auto-pair` only prefills on an idle approval dialog), never
+  inspect, submit, or approve on their own, and clear the global once read.
 - Capture account/workspace/genesis/device/installation before native calls. Save
   installation intent and first exact wrapping originals before exposing success;
   unknown outcomes preserve the original and cannot re-wrap or replace identity.

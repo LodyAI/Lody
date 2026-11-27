@@ -23,8 +23,13 @@ Parent mobile and repository rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   [Entry, lifetime and acceptance boundary](../../e2ee-passkey.md).
 
 - `recovery-file.ts` writes at most 4 KiB to a unique Capacitor Cache file, shares
-  only its URI. iOS removes it after native settlement (including cancellation);
+  only its URI. iOS removes it after native settlement (including cancellation); a failed
+  removal never masks a cancellation or logout and turns only a save into `storage`.
   Android retains it for the receiving app and deletes prior recovery temporaries before the next export.
+- WKWebView may close a file picker without `cancel`, or send `change` long after focus
+  returns. Never dismiss a chooser on `blur`/`focus`. The port's file prompt stays open while
+  any chooser runs (a file action's or saved-file verification), with Cancel and a button
+  that reopens the chooser; `input.click()` stays synchronous inside that tap.
   The provider asks for a fresh tap to choose the saved file; only exact readback
   allows core to upload the file wrap. No file bytes or unlocked vault enter React state.
   Logout/setting changes fence export, readback and every cloud write. Native passkeys

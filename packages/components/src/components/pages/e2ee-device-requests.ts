@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import { parseAutoPairLink } from '@lody/shared/e2ee-pair-link';
 
 /** The account's waiting device requests, as the application-level inbox sees them. */
 export type E2eeDeviceRequestsUi = {
@@ -13,11 +14,12 @@ export const E2eeDeviceRequestsContext = createContext<E2eeDeviceRequestsUi | nu
 export const useE2eeDeviceRequests = () => useContext(E2eeDeviceRequestsContext);
 
 /**
- * Pairing links opened outside Lody (a phone's system camera scanning `lody://pair/…`
- * or `lody://auto-pair?…`). The native shell parks the URL on
- * `window.__LODY_PENDING_E2EE_PAIR_URL__` and dispatches `lody:e2ee-pair-url`. The most
- * recently mounted handler that accepts it consumes it; an unaccepted link is retried
- * on `retryE2eePairLink` (a request or join page that is not ready yet) until it goes stale.
+ * Approval links opened outside Lody (a phone's system camera scanning `lody://auto-pair?…`).
+ * The native shell parks the URL on `window.__LODY_PENDING_E2EE_PAIR_URL__` and dispatches
+ * `lody:e2ee-pair-url`. The most recently mounted handler that accepts it consumes it; an
+ * unaccepted link is retried on `retryE2eePairLink` (an inbox that has not fetched the
+ * request yet) for `LINK_TTL_MS` after it arrives, then dropped. A `lody://pair/…` link has
+ * no external handler: it is discarded instead of being kept as a pending secret.
  */
 type PairLinkHandler = (url: string) => boolean;
 const handlers: PairLinkHandler[] = [];
@@ -26,7 +28,7 @@ let pending: { url: string; at: number } | null = null;
 let listening = false;
 type PairLinkWindow = Window & { __LODY_PENDING_E2EE_PAIR_URL__?: string };
 
-export const isPairLink = (url: string) => /^lody:\/\/(?:pair\/|auto-pair\?)/i.test(url.trim());
+export const isPairLink = (url: string) => parseAutoPairLink(url) !== null;
 
 function takeParked() {
   if (typeof window === 'undefined') return;

@@ -811,3 +811,98 @@ it('a staging build binds the origin of its VITE_SITE_URL instead of Lody Cloud'
     'e2ee_recovery_authentication'
   );
 });
+
+function silentPickers() {
+  const opened: (EventTarget & { removed: boolean; files: unknown[] })[] = [];
+  let reads = 0;
+  const waiting: (() => void)[] = [];
+  const page = Object.assign(new EventTarget(), {
+    body: { append: () => {} },
+    createElement: () => {
+      const input = Object.assign(new EventTarget(), {
+        removed: false,
+        files: [] as unknown[],
+        remove: () => void (input.removed = true),
+        click: () => {
+          opened.push(input);
+          for (const wake of waiting.splice(0)) wake();
+        },
+      });
+      return input;
+    },
+  });
+  vi.stubGlobal('document', page);
+  const nth = (count: number) =>
+    new Promise<(typeof opened)[number]>((resolve) => {
+      const check = () =>
+        opened.length >= count ? resolve(opened[count - 1]!) : waiting.push(check);
+      check();
+    });
+  const answer = (input: (typeof opened)[number], bytes: Uint8Array) => {
+    input.files = [
+      { size: bytes.length, arrayBuffer: async () => (reads++, bytes.slice().buffer) },
+    ];
+    input.dispatchEvent(new Event('change'));
+  };
+  return { nth, answer, reads: () => reads };
+}
+
+async function promptedPort() {
+  const f = await fixture();
+  f.empty();
+  const prompts: (string | null)[] = [];
+  const owned = mobileRecoveryPort({
+    config: {
+      ...f.options,
+      run: Effect.runPromise,
+      defaultLabel: async () => 'iPhone',
+      runtime: () => undefined,
+    },
+    accountId: 'account-a',
+    sessionId: 'login-a',
+    currentSession: f.options.currentSession,
+    onFilePrompt: (mode) => prompts.push(mode),
+    exportFile: async () => true,
+  });
+  return { f, owned, prompts, pickers: silentPickers() };
+}
+
+it('a file prompt survives a silent WKWebView picker: Choose again replaces it, Cancel and logout answer', async () => {
+  const { owned, prompts, pickers } = await promptedPort();
+  const stuck = owned.port.checkFile!();
+  const silent = await pickers.nth(1);
+  expect(prompts).toEqual(['open']);
+  owned.filePrompt.pick();
+  expect(silent.removed).toBe(true);
+  pickers.answer(silent, new Uint8Array([1, 2, 3]));
+  expect(pickers.reads()).toBe(0);
+  owned.filePrompt.cancel();
+  expect(await stuck).toEqual({ outcome: 'cancelled' });
+  expect((await pickers.nth(2)).removed).toBe(true);
+  expect(prompts.at(-1)).toBeNull();
+  const dismissed = owned.port.checkFile!();
+  (await pickers.nth(3)).dispatchEvent(new Event('cancel'));
+  expect(await dismissed).toEqual({ outcome: 'cancelled' });
+  const orphan = owned.port.checkFile!();
+  await pickers.nth(4);
+  owned.dispose();
+  expect(await orphan).toEqual({ outcome: 'cancelled' });
+});
+
+it('Cancel and logout on saved-file verification release the vault command permit without an upload', async () => {
+  const { f, owned, prompts, pickers } = await promptedPort();
+  const first = owned.port.create!();
+  await vi.waitFor(() => expect(prompts.at(-1)).toBe('verify'));
+  owned.filePrompt.pick();
+  await pickers.nth(1);
+  owned.filePrompt.cancel();
+  expect(await first).toEqual({ outcome: 'cancelled' });
+  const second = owned.port.create!();
+  await vi.waitFor(() => expect(prompts.at(-1)).toBe('verify'));
+  owned.filePrompt.pick();
+  const open = await pickers.nth(2);
+  owned.dispose();
+  await expect(second).rejects.toThrow();
+  expect(open.removed).toBe(true);
+  expect(f.paths).not.toContain('e2eeRecoveryVault:putImmutable');
+}, 30_000);
