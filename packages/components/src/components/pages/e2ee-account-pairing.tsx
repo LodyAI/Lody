@@ -22,6 +22,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text as type } from '@lody/ui/tokens/scales.stylex';
 import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
 import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
+import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
 const styles = stylex.create({
   retryAlert: {
@@ -43,6 +44,7 @@ const styles = stylex.create({
   },
   qr: { backgroundColor: '#ffffff', padding: space[2], alignSelf: 'flex-start' },
   muted: { color: colors.secondaryLabel, margin: 0 },
+  art: { display: 'flex', justifyContent: 'center', paddingBlock: space[2] },
   list: { margin: 0, paddingInlineStart: 0, listStyle: 'none', display: 'grid', gap: space[2] },
   row: { display: 'flex', alignItems: 'center', gap: space[2] },
   facts: { margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: space[2] },
@@ -298,6 +300,11 @@ export function E2eeAccountPairingRequest(props: {
   const terminal = state && state.status !== 'waiting' && state.status !== 'joined';
   return (
     <Card.Root data-testid="e2ee-account-pairing-request" data-e2ee-pairing-surface="">
+      {phase === 'idle' && !state && (
+        <div {...stylex.props(styles.art)}>
+          <E2eeDevicePairArt width={152} />
+        </div>
+      )}
       <Card.Title>{t('e2ee.accountPair.request.title')}</Card.Title>
       {phase === 'idle' && !state && (
         <p {...stylex.props(styles.muted)}>

@@ -6687,7 +6687,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     webAttachReconnectLoop?.update();
   }, RECONNECT_BACKSTOP_INTERVAL_MS);
 
-  window.repo = repo;
+  if (!deps.signal?.aborted) window.repo = repo;
   const codeCollabFileIndexCache = createCodeCollabFileIndexCache(repo);
   const sendResources = createSessionSendResources({
     acquire: sessionStoreCache.acquire,
