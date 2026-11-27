@@ -1,7 +1,7 @@
 import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-failure';
 import * as stylex from '@stylexjs/stylex';
 import { Result } from 'effect';
-import { Check, Copy, ScanLine } from 'lucide-react';
+import { Camera, Check, Copy, ScanLine } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PAIRING_URL_PREFIX, parsePairingString } from '@lody/e2ee-core/protocol';
@@ -21,6 +21,7 @@ import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text as type } from '@lody/ui/tokens/scales.stylex';
 import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
+import { useIsHandheldScanner } from '@/hooks/use-mobile';
 import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
 import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
@@ -194,6 +195,8 @@ export function E2eeAccountPairingRequest(props: {
   pollMs?: number;
   /** Consent-first browser choice; approval then uses the existing automatic flow. */
   onRequestApproval?: () => void;
+  /** Scans another device's code to join, offered beside the consent on the same view. */
+  onScanJoin?: () => void;
 }) {
   const { runtime } = props;
   const { t } = useTranslation();
@@ -205,6 +208,12 @@ export function E2eeAccountPairingRequest(props: {
   const [personalComputer, setPersonalComputer] = useState(false);
   const personalRequired = Boolean(runtime.requirePersonalComputer || runtime.openBrowserRecovery);
   const [input, setInput] = useState('');
+  const [camera, setCamera] = useState(false);
+  // Phones scan the code another device shows; computers paste it.
+  const canScan =
+    useIsHandheldScanner() &&
+    typeof navigator !== 'undefined' &&
+    typeof navigator.mediaDevices?.getUserMedia === 'function';
   const joined = useRef(false);
   const accept = (next: E2eeAccountPairingRequestState | null) => {
     if (!live.current) return;
@@ -296,6 +305,18 @@ export function E2eeAccountPairingRequest(props: {
     setEntering(false);
     void start(input.trim());
   };
+  // A scanned code is submitted at once: the host parses it again and checks the account.
+  const { video, state: cameraState } = useQrCamera(camera, (scanned) => {
+    setCamera(false);
+    const value = scanned.trim();
+    const wrong = /^lody:\/\/auto-pair\?/i.test(value)
+      ? 'e2ee.instantQr.wrongRole'
+      : localCodeError(value);
+    if (wrong) return setError(wrong);
+    setEntering(false);
+    setInput('');
+    void start(value);
+  });
   if (!runtime.requestAccountPairing) return null;
   const terminal = state && state.status !== 'waiting' && state.status !== 'joined';
   return (
@@ -326,7 +347,17 @@ export function E2eeAccountPairingRequest(props: {
       )}
       {phase === 'idle' && !state && (
         <div {...stylex.props(styles.actions)}>
-          <Button disabled={personalRequired && !personalComputer} onClick={() => void start()}>
+          {props.onScanJoin && (
+            <Button disabled={personalRequired && !personalComputer} onClick={props.onScanJoin}>
+              <Camera size={16} aria-hidden="true" />
+              {t('e2ee.auto.scanJoin')}
+            </Button>
+          )}
+          <Button
+            variant={props.onScanJoin ? 'secondary' : 'primary'}
+            disabled={personalRequired && !personalComputer}
+            onClick={() => void start()}
+          >
             {t('e2ee.accountPair.request.start')}
           </Button>
           {personalRequired && runtime.openBrowserRecovery && props.workspaceId && (
@@ -423,6 +454,37 @@ export function E2eeAccountPairingRequest(props: {
       {terminal && <p role="status">{t(`e2ee.accountPair.request.${state.status}`)}</p>}
       {entering && (
         <>
+          {canScan &&
+            (camera ? (
+              <>
+                <video ref={video} muted playsInline {...stylex.props(styles.video)} />
+                <div {...stylex.props(styles.actions)}>
+                  <Button variant="ghost" onClick={() => setCamera(false)}>
+                    {t('common.cancel')}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Button
+                disabled={phase === 'busy' || (personalRequired && !personalComputer)}
+                onClick={() => {
+                  setError(null);
+                  setCamera(true);
+                }}
+              >
+                <ScanLine size={16} aria-hidden="true" />
+                {t('e2ee.accountPair.request.scan')}
+              </Button>
+            ))}
+          {(cameraState === 'denied' || cameraState === 'unavailable') && (
+            <p {...stylex.props(styles.muted)}>
+              {t(
+                cameraState === 'denied'
+                  ? 'e2ee.verify.cameraDenied'
+                  : 'e2ee.verify.cameraUnavailable'
+              )}
+            </p>
+          )}
           <Textarea
             aria-label={t('e2ee.accountPair.code.label')}
             placeholder={t('e2ee.accountPair.code.placeholder')}
@@ -448,6 +510,7 @@ export function E2eeAccountPairingRequest(props: {
               disabled={phase === 'busy'}
               onClick={() => {
                 setEntering(false);
+                setCamera(false);
                 setInput('');
                 setError(null);
               }}

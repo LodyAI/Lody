@@ -31,6 +31,9 @@ function Preview({
   access,
   removal = 'removed',
   form = 'phone',
+  browser = false,
+  link,
+  requesterKind,
 }: {
   mode:
     | 'awaiting'
@@ -50,8 +53,17 @@ function Preview({
   removal?: 'removed' | 'pending' | 'not-owner' | 'billing';
   /** Phones scan codes; computers show them and take typed codes. */
   form?: 'phone' | 'desktop';
+  /** A browser host: the person confirms this is their own device before anything starts. */
+  browser?: boolean;
+  /** A synthetic pairing link as the system camera hands it over. */
+  link?: string;
+  /** The requester's own form factor, as a host may report it. */
+  requesterKind?: 'desktop' | 'mobile';
 }) {
   const runtime = useMemo(() => {
+    // The OS parks a link before the page mounts; the page claims it on mount.
+    if (link)
+      (window as { __LODY_PENDING_E2EE_PAIR_URL__?: string }).__LODY_PENDING_E2EE_PAIR_URL__ = link;
     const state: E2eeAutomaticPairingState & { requestId: string } = {
       id: 'synthetic-only',
       workspaceId: 'preview',
@@ -99,7 +111,7 @@ function Preview({
       pendingAutomaticPairing: async () => {
         if (terminal) return [];
         const { comparisonCode: _approverNeverShowsIt, ...review } = state;
-        return [review];
+        return [requesterKind ? { ...review, requesterDeviceKind: requesterKind } : review];
       },
       // Type 528193 (the code the new device shows) to authorize; the third wrong code
       // ends the request, as the real host does.
@@ -136,8 +148,9 @@ function Preview({
       // No request ever arrives under the synthetic code, so nothing is signed.
       inspectAccountPairing: async () => null,
       approveAccountPairing: async () => ({ workspaces: [] }),
+      ...(browser ? { requirePersonalComputer: true } : {}),
     } as unknown as E2eeWorkspaceRuntime;
-  }, [mode]);
+  }, [mode, browser, link, requesterKind]);
   if (mode === 'addDevice')
     return (
       <Layout form={form}>
@@ -271,8 +284,23 @@ export const PhoneRevoked: Story = { args: { mode: 'revoked' } };
 export const PhoneRemoved: Story = { args: { mode: 'removed' } };
 /** Open “Restart this device’s previous pairing” to inspect its confirmation. */
 export const PhonePreviousRequest: Story = { args: { mode: 'previous' } };
-/** A computer approving: reveal a QR code for a new phone, or type a new computer's code. */
+/** A computer approving: the QR code for a new phone leads; a link switches to typing a
+ * new computer's code. */
 export const DeviceApproval: Story = { args: { mode: 'approval', form: 'desktop' } };
+/** The requester reports a computer, so typing its code leads and the QR code is one link away. */
+export const DeviceApprovalForComputer: Story = {
+  args: { mode: 'approval', form: 'desktop', requesterKind: 'desktop' },
+};
+/** The system camera opened an approval link: the window shows the carried code to compare. */
+export const DeviceApprovalFromSystemCamera: Story = {
+  args: { mode: 'approval', link: 'lody://auto-pair?id=synthetic-only&code=528193' },
+};
+/** A phone browser: "this is my own device" and scanning share one view. */
+export const PhoneBrowserConsent: Story = { args: { mode: 'awaiting', browser: true } };
+/** The system camera opened a join link: the page joins at once and stays cancelable. */
+export const PhoneJoiningFromSystemCamera: Story = {
+  args: { mode: 'awaiting', link: `lody://pair/${SYNTHETIC_PAIRING.replace(/-/g, '')}` },
+};
 /** A phone approving: scan the new device's screen, or type its code. */
 export const DeviceApprovalOnPhone: Story = { args: { mode: 'approval' } };
 /** The console's Devices tab entry. */

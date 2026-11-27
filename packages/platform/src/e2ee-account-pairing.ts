@@ -158,6 +158,9 @@ export type E2eeAutomaticPairingState = {
  * compares it locally. `deviceName` is the requester's own, unverified label. */
 export type E2eeAutomaticPairingReview = Omit<E2eeAutomaticPairingState, 'comparisonCode'> & {
   requestId: string;
+  /** The requester's own, unverified form factor. It only chooses which approval
+   * method leads; hosts that do not report it leave it absent. */
+  requesterDeviceKind?: 'desktop' | 'mobile' | 'web';
 };
 /** Optional real runtime capability. Discovery alone never grants access. */
 export interface E2eeAutomaticPairingRuntime {
