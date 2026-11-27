@@ -58,7 +58,7 @@ export function LocalHtmlPreviewFrame({
   );
 }
 
-/** Asks once per preview entry; scripts stay off unless the user ticks the box. */
+/** Asks once per preview entry; all options start checked and can be unchecked before confirming. */
 export function LocalHtmlPreviewConsentDialog({
   open,
   fileName,
@@ -73,10 +73,10 @@ export function LocalHtmlPreviewConsentDialog({
   readonly onCancel: () => void;
 }) {
   const { t } = useTranslation();
-  const [allowScripts, setAllowScripts] = useState(false);
+  const [allowScripts, setAllowScripts] = useState(true);
   const checkboxId = useId();
   const workspaceCheckboxId = useId();
-  const [allowWorkspaceResources, setAllowWorkspaceResources] = useState(false);
+  const [allowWorkspaceResources, setAllowWorkspaceResources] = useState(true);
   return (
     <AlertDialog.Root
       open={open}
