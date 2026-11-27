@@ -23,11 +23,21 @@ export const LODY_PRESENCE_DETAIL_MAX_LENGTH = 280;
 
 export type LodyPresenceInstanceId = string & { __brand: 'LodyPresenceInstanceId' };
 
+export type LodyMachinePresenceResources = {
+  cp: number;
+  cc: number;
+  mu: number;
+  mt: number;
+  df?: number;
+  dt?: number;
+};
+
 export type LodyMachinePresenceState = {
   kind: 'machine';
   machineId: MachineId;
   instanceId: LodyPresenceInstanceId;
   updatedAt: number;
+  r?: LodyMachinePresenceResources;
 };
 
 export type LodySessionPresenceState = {
@@ -127,6 +137,35 @@ const PresenceInstanceIdSchema = z
     return value as LodyPresenceInstanceId;
   });
 
+const PresenceMachineResourcesSchema = z.preprocess(
+  omitNullValues,
+  z
+    .object({
+      cp: z.number().int().min(0),
+      cc: z.number().int().min(1),
+      mu: z.number().int().min(0),
+      mt: z.number().int().min(1),
+      df: z.number().int().min(0).optional(),
+      dt: z.number().int().min(1).optional(),
+    })
+    .refine((value) => (value.df === undefined) === (value.dt === undefined), {
+      message: 'Disk free and total must be paired',
+    })
+);
+
+const sanitizeMachinePresenceInput = (value: unknown): unknown => {
+  const cleaned = omitNullValues(value);
+  if (typeof cleaned !== 'object' || cleaned === null || Array.isArray(cleaned)) return cleaned;
+  const record = cleaned as Record<string, unknown>;
+  if (!('r' in record)) return record;
+  const parsed = PresenceMachineResourcesSchema.safeParse(record.r);
+  if (!parsed.success) {
+    const { r: _dropped, ...rest } = record;
+    return rest;
+  }
+  return { ...record, r: parsed.data };
+};
+
 const PresenceMachineStateSchema = z.object({
   kind: z.literal('machine'),
   machineId: z
@@ -135,6 +174,7 @@ const PresenceMachineStateSchema = z.object({
     .transform((value) => value as MachineId),
   instanceId: PresenceInstanceIdSchema,
   updatedAt: z.number().finite(),
+  r: PresenceMachineResourcesSchema.optional(),
 });
 
 const PresenceSessionStateSchema = z.object({
@@ -171,12 +211,23 @@ const PresenceDesktopForegroundStateSchema = z.object({
   updatedAt: z.number().finite(),
 });
 
-export const LodyPresenceStateSchema = z.discriminatedUnion('kind', [
-  PresenceMachineStateSchema,
-  PresenceSessionStateSchema,
-  PresenceSessionViewingStateSchema,
-  PresenceDesktopForegroundStateSchema,
-]);
+const sanitizePresenceInput = (value: unknown): unknown => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  if ((value as Record<string, unknown>).kind === 'machine') {
+    return sanitizeMachinePresenceInput(value);
+  }
+  return value;
+};
+
+export const LodyPresenceStateSchema = z.preprocess(
+  sanitizePresenceInput,
+  z.discriminatedUnion('kind', [
+    PresenceMachineStateSchema,
+    PresenceSessionStateSchema,
+    PresenceSessionViewingStateSchema,
+    PresenceDesktopForegroundStateSchema,
+  ])
+);
 
 // Minimal metadata must not accept arbitrary strings disguised as branded IDs.
 // Route-supplied session IDs require UUIDs; timestamp-shaped text proves no provenance.
@@ -380,6 +431,27 @@ export const collectOnlineMachineIdsFromPresence = (
     online.add(state.machineId);
   }
   return online;
+};
+
+export const collectMachinePresenceResourcesFromPresence = (
+  states: LodyPresenceStateMap,
+  nowMs: number,
+  ttlMs: number = LODY_PRESENCE_TTL_MS
+): Map<MachineId, LodyMachinePresenceResources> => {
+  const latestByMachine = new Map<MachineId, LodyMachinePresenceState>();
+  for (const state of Object.values(states)) {
+    if (state.kind !== 'machine' || !state.r) continue;
+    if (!isFreshLodyPresenceState(state, nowMs, ttlMs)) continue;
+    const prev = latestByMachine.get(state.machineId);
+    if (!prev || state.updatedAt > prev.updatedAt) {
+      latestByMachine.set(state.machineId, state);
+    }
+  }
+  const result = new Map<MachineId, LodyMachinePresenceResources>();
+  for (const [machineId, state] of latestByMachine) {
+    if (state.r) result.set(machineId, state.r);
+  }
+  return result;
 };
 
 /**

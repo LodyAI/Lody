@@ -22,6 +22,7 @@ import {
   type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
+  type LodyMachinePresenceResources,
   type MachineId,
   type MachineViewMeta,
 } from '@lody/shared';
@@ -48,6 +49,7 @@ import {
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import { composerSurface as surface } from '@/components/shared/composer-surface';
+import { MachineResourceSummary } from '@/components/shared/machine-resource-summary';
 import { MenuOptionSearchList } from '@/components/shared/menu-option-search-list';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
@@ -137,6 +139,61 @@ const styles = stylex.create({
     width: '20px',
     height: '20px',
     color: colors.tertiaryLabel,
+  },
+  machineMenuItemWithResources: {
+    flexShrink: 0,
+    alignItems: 'stretch',
+    paddingBlock: '6px',
+  },
+  machineItemStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '3px',
+    minWidth: 0,
+    width: '100%',
+    flex: '1 1 0%',
+  },
+  machineItemHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minHeight: '20px',
+    minWidth: 0,
+    width: '100%',
+  },
+  machineItemIconBox: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '16px',
+    height: '16px',
+    color: colors.tertiaryLabel,
+  },
+  machineItemIconGlyph: {
+    display: 'block',
+    width: '100%',
+    height: '100%',
+  },
+  machineItemTitleGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+    flex: '1 1 0%',
+  },
+  machineItemLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 500,
+  },
+  machineItemCheck: {
+    flexShrink: 0,
+  },
+  machineItemMetrics: {
+    paddingInlineStart: '24px',
   },
 });
 
@@ -267,6 +324,7 @@ export type DesktopMachineMenuOption = {
   label: string;
   disabled?: boolean;
   isPrivate?: boolean;
+  resources?: LodyMachinePresenceResources;
 };
 
 export function DesktopMachineMenu({
@@ -297,6 +355,7 @@ export function DesktopMachineMenu({
   const label =
     selectedOption?.label ?? selectedLabel ?? t('chat.machineSelector.placeholder', 'Machine');
   const isDisabled = disabled || (options.length === 0 && !onAddMachine);
+  const hasAnyResources = options.some((option) => option.resources != null);
 
   return (
     <Menu.Root>
@@ -321,51 +380,85 @@ export function DesktopMachineMenu({
         side="top"
         align="start"
         collisionAvoidance={{ side: 'none', align: 'none', fallbackAxisSide: 'none' }}
-        minWidth="calc(var(--spacing) * 52)"
-        maxWidth="calc(var(--spacing) * 72)"
+        minWidth={hasAnyResources ? '304px' : 'calc(var(--spacing) * 52)'}
+        maxWidth={hasAnyResources ? '368px' : 'calc(var(--spacing) * 72)'}
       >
         <Menu.GroupLabel>{t('chat.machineSelector.placeholder', 'Machine')}</Menu.GroupLabel>
-        {options.map((option) => (
-          <Menu.Item
-            key={option.value}
-            data-testid="chat-machine-option"
-            data-machine-id={option.value}
-            disabled={option.disabled}
-            onClick={() => onChange(option.value)}
-            icon={Monitor}
-            endContent={
-              option.value === value ? (
-                <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />
-              ) : null
-            }
-          >
-            {option.label}
-            {option.value === visibleLocalMachineId ? (
-              <Badge>{t('chat.machineSelector.local', 'Local')}</Badge>
-            ) : null}
-            {option.isPrivate ? (
-              <Tooltip.Root>
-                <Tooltip.Trigger
-                  delay={250}
-                  render={
-                    <Badge icon={<LockKeyhole size="100%" aria-hidden="true" />}>
-                      {t('sharing.private', 'Private')}
-                    </Badge>
-                  }
-                />
-                <Tooltip.Content
-                  side="right"
-                  className={stylex.props(styles.machineTooltip).className}
-                >
-                  {t(
-                    'sharing.machinePrivateHelp',
-                    'Only you can use this machine. Share it from machine settings so teammates can see its shared projects and conversations.'
-                  )}
-                </Tooltip.Content>
-              </Tooltip.Root>
-            ) : null}
-          </Menu.Item>
-        ))}
+        {options.map((option) => {
+          const hasResources = option.resources != null;
+          const badges = (
+            <>
+              {option.value === visibleLocalMachineId ? (
+                <Badge>{t('chat.machineSelector.local', 'Local')}</Badge>
+              ) : null}
+              {option.isPrivate ? (
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    delay={250}
+                    render={
+                      <Badge icon={<LockKeyhole size="100%" aria-hidden="true" />}>
+                        {t('sharing.private', 'Private')}
+                      </Badge>
+                    }
+                  />
+                  <Tooltip.Content
+                    side="right"
+                    className={stylex.props(styles.machineTooltip).className}
+                  >
+                    {t(
+                      'sharing.machinePrivateHelp',
+                      'Only you can use this machine. Share it from machine settings so teammates can see its shared projects and conversations.'
+                    )}
+                  </Tooltip.Content>
+                </Tooltip.Root>
+              ) : null}
+            </>
+          );
+          return (
+            <Menu.Item
+              key={option.value}
+              data-testid="chat-machine-option"
+              data-machine-id={option.value}
+              disabled={option.disabled}
+              onClick={() => onChange(option.value)}
+              xstyle={hasResources ? styles.machineMenuItemWithResources : undefined}
+              icon={hasResources ? undefined : Monitor}
+              endContent={
+                !hasResources && option.value === value ? (
+                  <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />
+                ) : null
+              }
+            >
+              {hasResources ? (
+                <span {...stylex.props(styles.machineItemStack)}>
+                  <span {...stylex.props(styles.machineItemHeader)}>
+                    <span {...stylex.props(styles.machineItemIconBox)}>
+                      <Monitor {...stylex.props(styles.machineItemIconGlyph)} aria-hidden="true" />
+                    </span>
+                    <span {...stylex.props(styles.machineItemTitleGroup)}>
+                      <span {...stylex.props(styles.machineItemLabel)}>{option.label}</span>
+                      {badges}
+                    </span>
+                    {option.value === value ? (
+                      <Check
+                        {...stylex.props(surface.glyph14, styles.machineItemCheck)}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </span>
+                  <span {...stylex.props(styles.machineItemMetrics)}>
+                    <MachineResourceSummary resources={option.resources!} />
+                  </span>
+                </span>
+              ) : (
+                <>
+                  {option.label}
+                  {badges}
+                </>
+              )}
+            </Menu.Item>
+          );
+        })}
         {onAddMachine ? (
           <>
             {options.length > 0 ? <Menu.Separator /> : null}

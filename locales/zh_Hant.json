@@ -7308,5 +7308,9 @@
   "sessions.messageQueue.details.mode": "模式",
   "sessions.messageQueue.details.plan": "Plan",
   "sessions.messageQueue.details.fast": "Fast",
-  "sessions.messageQueue.details.on": "開啟"
+  "sessions.messageQueue.details.on": "開啟",
+  "chat.machineSelector.diskFreeSuffix": "可用",
+  "chat.machineSelector.cpuTitle": "CPU 使用率 {{percent}}%（共 {{cores}} 核心）",
+  "chat.machineSelector.memoryTitle": "已用記憶體：{{pair}}",
+  "chat.machineSelector.diskTitle": "可用磁碟：{{pair}}"
 }

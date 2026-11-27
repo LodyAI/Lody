@@ -7448,5 +7448,9 @@
   "sessions.messageQueue.details.mode": "Режим",
   "sessions.messageQueue.details.plan": "Plan",
   "sessions.messageQueue.details.fast": "Fast",
-  "sessions.messageQueue.details.on": "Вкл."
+  "sessions.messageQueue.details.on": "Вкл.",
+  "chat.machineSelector.diskFreeSuffix": "свободно",
+  "chat.machineSelector.cpuTitle": "Загрузка ЦП {{percent}}% ({{cores}} ядер)",
+  "chat.machineSelector.memoryTitle": "Использовано памяти: {{pair}}",
+  "chat.machineSelector.diskTitle": "Свободно на диске: {{pair}}"
 }

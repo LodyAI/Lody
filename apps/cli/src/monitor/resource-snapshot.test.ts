@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MachinePresenceResourceSampler } from './machine-presence-resources';
 import { parseCpuTimeMicros } from './process-table';
 import { aggregateProcessTreeUsage } from './process-tree';
 import { resolveAggregateMemoryKind, toDeviceCpuCores, toResourceUsage } from './resource-snapshot';
@@ -113,3 +114,48 @@ function entry(
 ): ProcessTableEntry {
   return { pid, parentPid, processGroupId, startedAtMs, cpuTimeMicros, memoryBytes };
 }
+
+describe('MachinePresenceResourceSampler', () => {
+  it('encodes multi-core CPU percent and 0.1 GiB integer memory/disk without blocking heartbeats', async () => {
+    const GIB = 1024 ** 3;
+    let nowMs = 10_000;
+    let cpuCall = 0;
+    const cpuSamples = [
+      { sample: { busyMs: 1_000, totalMs: 2_000 }, logicalCores: 16 },
+      { sample: { busyMs: 2_000, totalMs: 4_000 }, logicalCores: 16 },
+    ];
+
+    const sampler = new MachinePresenceResourceSampler({
+      now: () => nowMs,
+      readCpu: () => cpuSamples[Math.min(cpuCall++, cpuSamples.length - 1)]!,
+      readLoadAvg1m: () => 3.4,
+      readFallbackMemory: () => ({ totalBytes: 36 * GIB, freeBytes: 17.6 * GIB }),
+      readMemoryPressure: async () => ({
+        effectiveMemoryLimitBytes: 32 * GIB,
+        availableMemoryBytes: 13.6 * GIB,
+        source: 'os',
+      }),
+      readDisk: async () => ({ freeGB: 412.04, totalGB: 1024 }),
+    });
+
+    expect(sampler.read()).toEqual({
+      cp: 340,
+      cc: 16,
+      mu: 184,
+      mt: 360,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    nowMs += 30_000;
+    expect(sampler.read()).toEqual({
+      cp: 800,
+      cc: 16,
+      mu: 184,
+      mt: 320,
+      df: 4120,
+      dt: 10240,
+    });
+  });
+});

@@ -7308,5 +7308,9 @@
   "sessions.messageQueue.details.mode": "Modo",
   "sessions.messageQueue.details.plan": "Plan",
   "sessions.messageQueue.details.fast": "Fast",
-  "sessions.messageQueue.details.on": "Activado"
+  "sessions.messageQueue.details.on": "Activado",
+  "chat.machineSelector.diskFreeSuffix": "libre",
+  "chat.machineSelector.cpuTitle": "Uso de CPU {{percent}}% en {{cores}} núcleos",
+  "chat.machineSelector.memoryTitle": "Memoria usada: {{pair}}",
+  "chat.machineSelector.diskTitle": "Disco disponible: {{pair}}"
 }

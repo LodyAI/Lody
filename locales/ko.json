@@ -7308,5 +7308,9 @@
   "sessions.messageQueue.details.mode": "모드",
   "sessions.messageQueue.details.plan": "Plan",
   "sessions.messageQueue.details.fast": "Fast",
-  "sessions.messageQueue.details.on": "켜짐"
+  "sessions.messageQueue.details.on": "켜짐",
+  "chat.machineSelector.diskFreeSuffix": "여유",
+  "chat.machineSelector.cpuTitle": "CPU 사용률 {{percent}}% (총 {{cores}}코어)",
+  "chat.machineSelector.memoryTitle": "사용 중인 메모리: {{pair}}",
+  "chat.machineSelector.diskTitle": "남은 디스크: {{pair}}"
 }

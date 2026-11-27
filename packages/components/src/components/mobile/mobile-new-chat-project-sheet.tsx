@@ -15,7 +15,7 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import type { LocalProjectId, MachineId } from '@lody/shared';
+import type { LocalProjectId, LodyMachinePresenceResources, MachineId } from '@lody/shared';
 
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Input } from '@lody/ui/input';
@@ -24,6 +24,7 @@ import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { sheetSurface } from './sheet-surface';
 import type { UnifiedProjectSelection } from '@/components/chat/unified-project-selector';
+import { MachineResourceSummary } from '@/components/shared/machine-resource-summary';
 import { filterMobileProjectOptions } from './mobile-new-chat-project-options';
 
 export type MobileProjectMachine = {
@@ -31,6 +32,7 @@ export type MobileProjectMachine = {
   name: string;
   online: boolean;
   disabledReason?: string;
+  resources?: LodyMachinePresenceResources;
 };
 
 export type MobileProjectFolder = {
@@ -250,6 +252,7 @@ export function MobileNewChatProjectSheet({
                       ? (lockedMachineReason ?? t('chat.mobileNewChat.roleMachineLocked'))
                       : undefined);
                   const selected = machine.id === selectedMachineId;
+                  const showResources = machine.online && machine.resources != null;
                   return (
                     <button
                       key={machine.id}
@@ -259,17 +262,37 @@ export function MobileNewChatProjectSheet({
                       aria-pressed={selected}
                       {...stylex.props(
                         styles.machineRow,
+                        showResources && styles.machineRowStacked,
                         selected && styles.selectedRow,
                         Boolean(disabledReason) && styles.disabledRow
                       )}
                     >
-                      <Monitor {...stylex.props(styles.hintGlyph)} aria-hidden="true" />
-                      <span {...stylex.props(styles.truncateGrow)}>{machine.name}</span>
-                      {disabledReason ? (
-                        <span {...stylex.props(styles.disabledReason)}>{disabledReason}</span>
-                      ) : selected ? (
-                        <Check {...stylex.props(styles.checkGlyph)} aria-hidden="true" />
-                      ) : null}
+                      {showResources ? (
+                        <>
+                          <span {...stylex.props(styles.machineRowHeader)}>
+                            <Monitor {...stylex.props(styles.hintGlyph)} aria-hidden="true" />
+                            <span {...stylex.props(styles.truncateGrow)}>{machine.name}</span>
+                            {disabledReason ? (
+                              <span {...stylex.props(styles.disabledReason)}>{disabledReason}</span>
+                            ) : selected ? (
+                              <Check {...stylex.props(styles.checkGlyph)} aria-hidden="true" />
+                            ) : null}
+                          </span>
+                          <span {...stylex.props(styles.machineRowMetrics)}>
+                            <MachineResourceSummary resources={machine.resources!} />
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Monitor {...stylex.props(styles.hintGlyph)} aria-hidden="true" />
+                          <span {...stylex.props(styles.truncateGrow)}>{machine.name}</span>
+                          {disabledReason ? (
+                            <span {...stylex.props(styles.disabledReason)}>{disabledReason}</span>
+                          ) : selected ? (
+                            <Check {...stylex.props(styles.checkGlyph)} aria-hidden="true" />
+                          ) : null}
+                        </>
+                      )}
                     </button>
                   );
                 })}
@@ -646,6 +669,21 @@ const styles = stylex.create({
         ':hover': `color-mix(in oklab,${themeColors.muted} 50%,transparent)`,
       },
     },
+  },
+  machineRowStacked: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: '3px',
+  },
+  machineRowHeader: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: '10px',
+    minWidth: 0,
+  },
+  machineRowMetrics: {
+    paddingInlineStart: '26px',
   },
   footerAction: {
     display: 'flex',

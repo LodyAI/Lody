@@ -7308,5 +7308,9 @@
   "sessions.messageQueue.details.mode": "モード",
   "sessions.messageQueue.details.plan": "Plan",
   "sessions.messageQueue.details.fast": "Fast",
-  "sessions.messageQueue.details.on": "オン"
+  "sessions.messageQueue.details.on": "オン",
+  "chat.machineSelector.diskFreeSuffix": "空き",
+  "chat.machineSelector.cpuTitle": "CPU 使用率 {{percent}}%（全 {{cores}} コア）",
+  "chat.machineSelector.memoryTitle": "使用メモリ: {{pair}}",
+  "chat.machineSelector.diskTitle": "空きディスク: {{pair}}"
 }

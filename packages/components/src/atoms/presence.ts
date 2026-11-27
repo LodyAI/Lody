@@ -1,9 +1,11 @@
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import {
+  collectMachinePresenceResourcesFromPresence,
   collectOnlineMachineIdsFromPresence,
   findFreshSessionPresenceState,
   getServerNow,
+  type LodyMachinePresenceResources,
   type LodyPresenceStateMap,
   type MachineId,
   type SessionId,
@@ -82,6 +84,43 @@ export const onlineMachineIdsAtom = atom<ReadonlySet<MachineId>>((get) => {
     return _prevOnlineMachineIds;
   }
   _prevOnlineMachineIds = next;
+  return next;
+});
+
+const resourceMapsEqual = (
+  a: ReadonlyMap<MachineId, LodyMachinePresenceResources>,
+  b: ReadonlyMap<MachineId, LodyMachinePresenceResources>
+): boolean => {
+  if (a.size !== b.size) return false;
+  for (const [id, left] of a) {
+    const right = b.get(id);
+    if (
+      !right ||
+      left.cp !== right.cp ||
+      left.cc !== right.cc ||
+      left.mu !== right.mu ||
+      left.mt !== right.mt ||
+      left.df !== right.df ||
+      left.dt !== right.dt
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
+let _prevOnlineMachineResources: ReadonlyMap<MachineId, LodyMachinePresenceResources> = new Map();
+export const onlineMachineResourcesAtom = atom<
+  ReadonlyMap<MachineId, LodyMachinePresenceResources>
+>((get) => {
+  const next = collectMachinePresenceResourcesFromPresence(
+    get(lodyPresenceStatesAtom),
+    get(lodyPresenceNowMsAtom)
+  );
+  if (resourceMapsEqual(next, _prevOnlineMachineResources)) {
+    return _prevOnlineMachineResources;
+  }
+  _prevOnlineMachineResources = next;
   return next;
 });
 

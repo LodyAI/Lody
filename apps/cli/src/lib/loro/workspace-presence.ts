@@ -18,6 +18,7 @@ import {
   LODY_PRESENCE_TTL_MS,
   LoroStreamsTokenShutdownFailed,
   type LoroStreamsTokenProvider,
+  type LodyMachinePresenceResources,
   type LodyPresenceInstanceId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -82,6 +83,7 @@ export class PresenceHost extends Context.Service<
   {
     readonly instanceId: () => LodyPresenceInstanceId;
     readonly serverOffsetMs: () => number;
+    readonly machineResources?: () => LodyMachinePresenceResources | undefined;
     readonly report: (workspaceId: WorkspaceId, event: PresenceDiagnostic) => void;
   }
 >()('lody/loro/PresenceHost') {}
@@ -154,7 +156,10 @@ export const makeWorkspacePresence = Effect.fnUntraced(function* (
     return yield* Effect.die(new RangeError('Invalid presence release budget'));
   const scope = yield* Scope.make();
   const gate = yield* Semaphore.make(1);
-  const replica = new PresenceReplica(host.instanceId(), { minimal: options.minimal });
+  const replica = new PresenceReplica(host.instanceId(), {
+    minimal: options.minimal,
+    machineResources: host.machineResources,
+  });
   let generation: Generation | undefined;
   let sequence = 0;
   let stopped = false;

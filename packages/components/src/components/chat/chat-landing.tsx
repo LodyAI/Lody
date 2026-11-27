@@ -129,7 +129,9 @@ import {
   lodyPresenceNowMsAtom,
   lodyPresenceStatesAtom,
   lodyPresenceSyncStateAtom,
+  onlineMachineResourcesAtom,
 } from '@/atoms/presence';
+import { formatMachineResourceText } from '@/components/shared/machine-resource-summary';
 import { buildAgentPrompt } from '@/lib';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
@@ -4590,6 +4592,7 @@ function WorkspaceChatLanding({
     [handleAgentRoleSelect, recentRunConfigAgentConfigs, recentRunConfigRecords]
   );
 
+  const onlineMachineResources = useAtomValue(onlineMachineResourcesAtom);
   const desktopMachineOptions = useMemo(
     () =>
       Array.from(selectableMachines.values()).map((machine) => ({
@@ -4597,8 +4600,9 @@ function WorkspaceChatLanding({
         label: machine.name,
         isPrivate:
           showProjectSharing && accessByMachineId.get(machine.id)?.sharedWithTeam === false,
+        resources: onlineMachineResources.get(machine.id),
       })),
-    [accessByMachineId, selectableMachines, showProjectSharing]
+    [accessByMachineId, onlineMachineResources, selectableMachines, showProjectSharing]
   );
   // An offline selection stays visible and marked rather than reading as unset.
   const desktopSelectedMachineId =
@@ -4802,6 +4806,7 @@ function WorkspaceChatLanding({
           !onlineIds.has(machine.id) && machine.id !== mobileProjectSelectedMachineId
             ? t('chat.machineSelector.offline', 'Offline')
             : undefined,
+        resources: onlineIds.has(machine.id) ? onlineMachineResources.get(machine.id) : undefined,
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
   }, [
@@ -4809,6 +4814,7 @@ function WorkspaceChatLanding({
     machines,
     mobileProjectSelectedMachineId,
     mobileSheetOnlineMachines,
+    onlineMachineResources,
     t,
     visibleLocalProjectMap,
   ]);
@@ -7114,7 +7120,12 @@ function WorkspaceChatLanding({
                     'chat.mobileNewChat.switchClearsRole',
                     'Changing machine clears the selected Role'
                   )
-                : undefined),
+                : machine.resources
+                  ? formatMachineResourceText(
+                      machine.resources,
+                      t('chat.machineSelector.diskFreeSuffix', 'free')
+                    )
+                  : undefined),
           }))}
           onChange={(id) => {
             setRestoreMobileProject(false);
