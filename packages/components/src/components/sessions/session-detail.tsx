@@ -66,6 +66,7 @@ import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
+  resolveSessionPullRequestViews,
   SessionForkOperationSchema,
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsProtocolCapability,
@@ -2323,13 +2324,84 @@ const SessionDetail = ({
     sourceSessionId: prSessionId,
     latestPr,
     repoFullName,
-    canShowGitHubActions,
   } = useMemo(
     () => getSessionGitHubState(activeTabSession, workspaceOwnerSession, activeProjectRepository),
     [activeProjectRepository, activeTabSession, workspaceOwnerSession]
   );
   const latestPrNumber = getPullRequestNumber(latestPr);
   const latestPrRepoFullName = getPullRequestRepoFullName(latestPr) ?? repoFullName;
+  const [selectedPrTab, setSelectedPrTab] = useState<{
+    sessionId: SessionId;
+    repoFullName: string;
+    prNumber: number;
+    headCommitSha?: string;
+  } | null>(null);
+  const prOwnerSession = workspaceOwnerSession ?? activeTabSession;
+  const associatedPrViews = useMemo(
+    () => resolveSessionPullRequestViews(prOwnerSession),
+    [prOwnerSession]
+  );
+  const activePrTab = useMemo(() => {
+    const selected = selectedPrTab && selectedPrTab.sessionId === sessionId ? selectedPrTab : null;
+    if (selected) {
+      const match = associatedPrViews.find(
+        (view) =>
+          view.number === selected.prNumber &&
+          view.repoFullName?.toLowerCase() === selected.repoFullName.toLowerCase()
+      );
+      if (match && match.repoFullName && match.number != null) {
+        return {
+          repoFullName: match.repoFullName,
+          prNumber: match.number,
+          headCommitSha:
+            selected.headCommitSha ?? getSessionPullRequestLegacyFields(match.pr).headCommitSha,
+        };
+      }
+    }
+    if (urlPrNumber != null) {
+      if (latestPr && latestPrNumber === urlPrNumber && latestPrRepoFullName) {
+        return {
+          repoFullName: latestPrRepoFullName,
+          prNumber: latestPrNumber,
+          headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
+        };
+      }
+      const byNumber = associatedPrViews.find(
+        (view) => view.number === urlPrNumber && view.repoFullName
+      );
+      if (byNumber && byNumber.repoFullName && byNumber.number != null) {
+        return {
+          repoFullName: byNumber.repoFullName,
+          prNumber: byNumber.number,
+          headCommitSha: getSessionPullRequestLegacyFields(byNumber.pr).headCommitSha,
+        };
+      }
+    }
+    if (latestPr && latestPrRepoFullName && latestPrNumber != null) {
+      return {
+        repoFullName: latestPrRepoFullName,
+        prNumber: latestPrNumber,
+        headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
+      };
+    }
+    const fallback = associatedPrViews.find((view) => view.repoFullName && view.number != null);
+    if (fallback && fallback.repoFullName && fallback.number != null) {
+      return {
+        repoFullName: fallback.repoFullName,
+        prNumber: fallback.number,
+        headCommitSha: getSessionPullRequestLegacyFields(fallback.pr).headCommitSha,
+      };
+    }
+    return null;
+  }, [
+    associatedPrViews,
+    latestPr,
+    latestPrNumber,
+    latestPrRepoFullName,
+    selectedPrTab,
+    sessionId,
+    urlPrNumber,
+  ]);
 
   const writeSessionUrlTab = useCallback(
     (nextTab: string | undefined, { push = false }: { push?: boolean } = {}) => {
@@ -3608,10 +3680,10 @@ const SessionDetail = ({
   );
 
   useEffect(() => {
-    if (activeSidebarTab === 'pr' && (!latestPr || !repoFullName)) {
+    if (activeSidebarTab === 'pr' && !activePrTab) {
       setActiveSidebarTab(null);
     }
-  }, [activeSidebarTab, latestPr, repoFullName]);
+  }, [activePrTab, activeSidebarTab]);
 
   useEffect(() => {
     if (activeSidebarTab === 'browser' && !activeBrowserSession) {
@@ -3666,9 +3738,8 @@ const SessionDetail = ({
      reopen a panel the user had closed. */
   if (!isMobile && urlPrNumber !== undefined) {
     if (
-      latestPr &&
-      repoFullName &&
-      urlPrNumber === latestPrNumber &&
+      activePrTab &&
+      urlPrNumber === activePrTab.prNumber &&
       (restoredPrSidebar?.sessionId !== sessionId || restoredPrSidebar.prNumber !== urlPrNumber)
     ) {
       setRestoredPrSidebar({ sessionId, prNumber: urlPrNumber });
@@ -3694,18 +3765,16 @@ const SessionDetail = ({
   useEffect(() => {
     if (isMobile) return;
     if (urlPrNumber === undefined) return;
-    if (!latestPr || !repoFullName || urlPrNumber !== latestPrNumber) return;
+    if (!activePrTab || urlPrNumber !== activePrTab.prNumber) return;
     if (!isSidebarOpen || activeSidebarTab !== 'pr' || activeViewerTabId !== null) {
       replaceSessionUrlPr(undefined);
     }
   }, [
+    activePrTab,
     activeSidebarTab,
     activeViewerTabId,
     isMobile,
     isSidebarOpen,
-    latestPr,
-    latestPrNumber,
-    repoFullName,
     replaceSessionUrlPr,
     urlPrNumber,
   ]);
@@ -4111,6 +4180,12 @@ const SessionDetail = ({
 
   const handleOpenPrTab = useCallback(
     (args: { prNumber: number; repoFullName: string; headCommitSha?: string }) => {
+      setSelectedPrTab({
+        sessionId,
+        repoFullName: args.repoFullName,
+        prNumber: args.prNumber,
+        headCommitSha: args.headCommitSha,
+      });
       replaceSessionUrlPr(args.prNumber, { push: true });
       if (!isMobile) {
         /* Expanding a collapsed sidebar restores the default/last panel size,
@@ -4145,6 +4220,7 @@ const SessionDetail = ({
       isSidebarOpen,
       replaceSessionUrlPr,
       revealRightSidebar,
+      sessionId,
     ]
   );
 
@@ -4629,8 +4705,8 @@ const SessionDetail = ({
       }
       activateSidebarTab(tabId);
       semanticRouterRef.current?.activate('side-panel');
-      if (tabId === 'pr' && latestPrNumber != null) {
-        replaceSessionUrlPr(latestPrNumber, { push: true });
+      if (tabId === 'pr' && activePrTab) {
+        replaceSessionUrlPr(activePrTab.prNumber, { push: true });
       }
       captureSessionDetailEvent('session/sidebar_tab_selected', {
         sidebar_tab: tabId,
@@ -4639,10 +4715,10 @@ const SessionDetail = ({
     },
     [
       activateSidebarTab,
+      activePrTab,
       captureSessionDetailEvent,
       changeEntries.length,
       isMobile,
-      latestPrNumber,
       replaceSessionUrlPr,
     ]
   );
@@ -4684,7 +4760,7 @@ const SessionDetail = ({
         kind: 'android-emulator',
       });
     }
-    if (latestPr && repoFullName && latestPrNumber != null) {
+    if (activePrTab) {
       options.push({
         id: 'pr',
         label: t('sessions.detailTabs.pr', 'PR'),
@@ -4696,9 +4772,7 @@ const SessionDetail = ({
     activeBrowserSession,
     activeIosSimulatorSession,
     activeAndroidEmulatorSession,
-    latestPr,
-    latestPrNumber,
-    repoFullName,
+    activePrTab,
     t,
   ]);
   const sideChatOption = useMemo<SessionSidePanelOption | null>(() => {
@@ -5650,10 +5724,10 @@ const SessionDetail = ({
         active: false,
       });
     }
-    if (canShowGitHubActions && latestPr && latestPrNumber != null && latestPrRepoFullName) {
+    if (activePrTab) {
       list.push({
         id: MOBILE_PR_VIEWER_ID,
-        label: `#${latestPrNumber}`,
+        label: `#${activePrTab.prNumber}`,
         kind: 'pr',
         active: false,
       });
@@ -5671,10 +5745,7 @@ const SessionDetail = ({
     }
     return list;
   }, [
-    canShowGitHubActions,
-    latestPr,
-    latestPrNumber,
-    latestPrRepoFullName,
+    activePrTab,
     activeBrowserSession,
     activeIosSimulatorSession,
     activeAndroidEmulatorSession,
@@ -5722,11 +5793,11 @@ const SessionDetail = ({
   const handleMobileViewerSelect = useCallback(
     (id: string) => {
       if (id === MOBILE_PR_VIEWER_ID) {
-        if (latestPrNumber != null && latestPrRepoFullName) {
+        if (activePrTab) {
           handleOpenPrTab({
-            prNumber: latestPrNumber,
-            repoFullName: latestPrRepoFullName,
-            headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
+            prNumber: activePrTab.prNumber,
+            repoFullName: activePrTab.repoFullName,
+            headCommitSha: activePrTab.headCommitSha,
           });
         }
         return;
@@ -5757,9 +5828,7 @@ const SessionDetail = ({
       handleViewerTabSelect(id);
     },
     [
-      latestPr,
-      latestPrNumber,
-      latestPrRepoFullName,
+      activePrTab,
       activeBrowserSession,
       activeIosSimulatorSession,
       activeAndroidEmulatorSession,
@@ -6934,7 +7003,7 @@ const SessionDetail = ({
         <Drawer
           direction="right"
           repositionInputs={isNativeAppShell()}
-          open={Boolean(urlPrNumber && latestPr && repoFullName && urlPrNumber === latestPrNumber)}
+          open={Boolean(urlPrNumber && activePrTab && urlPrNumber === activePrTab.prNumber)}
           onOpenChange={(open) => {
             if (!open) handleClosePrTab();
           }}
@@ -6949,13 +7018,14 @@ const SessionDetail = ({
               {t('sessions.detailTabs.pullRequest', 'Pull Request')}
             </DrawerTitle>
             <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
-              {latestPr && repoFullName && urlPrNumber === latestPrNumber && latestPrNumber && (
+              {activePrTab && urlPrNumber === activePrTab.prNumber && (
                 <PrTabContainer
+                  key={`${activePrTab.repoFullName}#${activePrTab.prNumber}`}
                   sessionId={prSessionId}
                   actionSessionId={activeSessionTabId}
-                  repoFullName={latestPrRepoFullName}
-                  prNumber={latestPrNumber}
-                  headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}
+                  repoFullName={activePrTab.repoFullName}
+                  prNumber={activePrTab.prNumber}
+                  headCommitSha={activePrTab.headCommitSha}
                   className={stylex.props(detailStyles.rootFill).className}
                   leadingSlot={
                     <Button
@@ -7202,13 +7272,14 @@ const SessionDetail = ({
         // its expanded folders per session so returning to Files restores them.
         viewStateKey={`session-files:${activeSession.id}`}
       />
-    ) : activeSidebarTab === 'pr' && latestPr && repoFullName && latestPrNumber ? (
+    ) : activeSidebarTab === 'pr' && activePrTab ? (
       <PrTabContainer
+        key={`${activePrTab.repoFullName}#${activePrTab.prNumber}`}
         sessionId={prSessionId}
         actionSessionId={activeSessionTabId}
-        repoFullName={latestPrRepoFullName}
-        prNumber={latestPrNumber}
-        headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}
+        repoFullName={activePrTab.repoFullName}
+        prNumber={activePrTab.prNumber}
+        headCommitSha={activePrTab.headCommitSha}
         className={stylex.props(detailStyles.background).className}
         // The side panel stays mounted while collapsed, so GitHub polling has
         // to be paused explicitly — same signal SessionBrowserPanel takes.

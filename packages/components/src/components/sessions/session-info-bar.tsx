@@ -319,7 +319,9 @@ export function SessionInfoBar({
 }: SessionInfoBarProps) {
   const { t } = useTranslation();
   const hasDiff = hasWorkspaceChanges(diffStat);
-  const hasContext = !!pr || !!projectName || !!branch || hasDiff || !!contextActions?.length;
+  const hasPrLinks = Boolean(prLinks && prLinks.items.length > 0);
+  const hasContext =
+    !!pr || hasPrLinks || !!projectName || !!branch || hasDiff || !!contextActions?.length;
   const goalObjective = goal ? sanitizeGoalObjective(goal.objective) : '';
   const hasGoal = !!goal && !!goalObjective;
   const scheduleSignature = useScheduledTaskSignature(scheduledTasks);
@@ -349,6 +351,7 @@ export function SessionInfoBar({
   const contextSignature = hasContext
     ? [
         pr?.url ?? '',
+        prLinks?.items.map((item) => item.url).join(',') ?? '',
         projectName ?? '',
         branch ?? '',
         diffStat ? `${diffStat.add}:${diffStat.del}:${diffStat.files ?? ''}` : '',

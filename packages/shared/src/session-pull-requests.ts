@@ -227,7 +227,6 @@ function resolveDescribedRepository(
 ): string | null | undefined {
   if (activeRepository !== undefined) return activeRepository?.trim() || null;
   const project = (resolveProjectGitHubRepo(meta?.project) ?? meta?.repoFullName)?.trim() || null;
-  if (meta?.projectRun) return project;
   return project && views.some((view) => view.repoFullName?.toLowerCase() === project.toLowerCase())
     ? project
     : undefined;

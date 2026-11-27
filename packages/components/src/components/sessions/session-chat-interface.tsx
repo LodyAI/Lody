@@ -3139,8 +3139,17 @@ export const SessionChatInterface = memo(
     });
     const prLinkHandler = latestPr ? openLatestPr : undefined;
     const launcherPillRef = useRef<HTMLDivElement>(null);
-    // The PR tab follows the current PR, so an earlier PR opens on GitHub.
+    // Open any associated PR in the in-app PR tab when hosted GitHub is available;
+    // otherwise fall back to opening on GitHub.
     const openHistoryPr = useStableCallback((view: SessionPullRequestView) => {
+      if (hasHostedGitHub && onOpenPrTab && view.repoFullName && view.number != null) {
+        onOpenPrTab({
+          prNumber: view.number,
+          repoFullName: view.repoFullName,
+          headCommitSha: getSessionPullRequestLegacyFields(view.pr).headCommitSha,
+        });
+        return;
+      }
       void openExternalUrl(view.url);
     });
     const preferredMergeMethod = usePreferredPrMergeMethod();
@@ -3150,7 +3159,7 @@ export const SessionChatInterface = memo(
       repoFullName: latestPrRepoFullName,
       prNumber: latestPrNumber,
       headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-      enabled: hasHostedGitHub && canShowGitHubActions && hasExistingPr,
+      enabled: hasHostedGitHub && Boolean(latestPrRepoFullName && latestPrNumber),
     });
     const {
       data: activePrData,
@@ -3322,8 +3331,21 @@ export const SessionChatInterface = memo(
       );
     });
     const openLinkedPr = useStableCallback((item: SessionPullRequestLinkListItem) => {
-      if (item.kind === 'associated' && item.primary && prLinkHandler) prLinkHandler();
-      else void openExternalUrl(item.url);
+      if (
+        item.kind === 'associated' &&
+        hasHostedGitHub &&
+        onOpenPrTab &&
+        item.view.repoFullName &&
+        item.view.number != null
+      ) {
+        onOpenPrTab({
+          prNumber: item.view.number,
+          repoFullName: item.view.repoFullName,
+          headCommitSha: getSessionPullRequestLegacyFields(item.view.pr).headCommitSha,
+        });
+        return;
+      }
+      void openExternalUrl(item.url);
     });
     const prLinks = useMemo<SessionPullRequestLinksProps>(
       () => ({
@@ -8103,11 +8125,11 @@ export const SessionChatInterface = memo(
                         projectName={infoBarProjectName}
                         branch={isMobile ? null : infoBarBranch}
                         workspaceLocation={infoBarWorkspaceLocation}
-                        pr={canShowGitHubActions ? latestPr : null}
+                        pr={latestPr}
                         onOpenPr={prLinkHandler}
-                        prHistory={canShowGitHubActions ? pullRequestHistory : undefined}
+                        prHistory={pullRequestHistory.length > 0 ? pullRequestHistory : undefined}
                         onOpenHistoryPr={openHistoryPr}
-                        prLinks={canShowGitHubActions ? prLinks : undefined}
+                        prLinks={prLinkItems.length > 0 ? prLinks : undefined}
                         contextActions={infoBarContextActions}
                         onOpenAllChanges={onOpenAllChanges}
                         // Opener + every Session/Tab created here: the in-stream
