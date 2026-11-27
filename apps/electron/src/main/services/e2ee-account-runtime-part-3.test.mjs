@@ -1989,6 +1989,71 @@ void test('senderEpoch prevents a stale reload cleanup from removing a reloaded 
   assert.equal(await ipc.status('team'), 'ready')
 })
 
+void test('navigation during in-flight host.open drains the newly opened entry outside the lock without leaving an orphan', async () => {
+  const sender = Object.assign(new EventEmitter(), {
+    id: 44,
+    isDestroyed: () => false,
+    send: () => {}
+  })
+  let inLock = false
+  let beginInLock = false
+  let drainInLock = null
+  const events = []
+  const openEntered = Promise.withResolvers()
+  const releaseOpen = Promise.withResolvers()
+  const owner = {
+    accountId: 'A',
+    readers: new Map(),
+    readerEpochs: new Map(),
+    bootstrap: { removedReason: () => Effect.succeed(null) },
+    host: {
+      pendingClose: () => Effect.succeed(undefined),
+      open: () =>
+        Effect.promise(async () => {
+          openEntered.resolve()
+          await releaseOpen.promise
+          return { workspaceId: 'team', genesisHash: '11'.repeat(32) }
+        }),
+      beginCloseWorkspace: () =>
+        Effect.sync(() => {
+          beginInLock = inLock
+          events.push('begin')
+          return Effect.sync(() => {
+            drainInLock = inLock
+            events.push('drain')
+          })
+        })
+    }
+  }
+  const { E2eeIpc } = await load(
+    '../ipc/services/e2ee-ipc.ts',
+    e2eeIpcDependencies(
+      {
+        withDesktopE2eeAccount: async (work) => {
+          inLock = true
+          try {
+            return await Effect.runPromise(work(owner))
+          } finally {
+            inLock = false
+          }
+        },
+        releaseDesktopE2eeReader: () => {}
+      },
+      sender
+    )
+  )
+  const ipc = new E2eeIpc()
+  const opening = ipc.open('team')
+  await openEntered.promise
+  sender.emit('did-start-navigation', {}, 'synthetic-reload', false, true)
+  releaseOpen.resolve()
+  await assert.rejects(opening, /^Error: e2ee_closed$/)
+  assert.equal(owner.readers.size, 0)
+  assert.equal(beginInLock, true)
+  assert.equal(drainInLock, false)
+  assert.deepEqual(events, ['begin', 'drain'])
+})
+
 void test('account pairing release detaches via beginCloseWorkspace inside the lock and drains outside it', async () => {
   const { makeDesktopAccountPairingWorkspaces } = await import('./e2ee-account-pairing-host.mts')
   let inLock = false
@@ -2063,16 +2128,24 @@ void test('account pairing release detaches via beginCloseWorkspace inside the l
   assert.deepEqual(events, ['begin', 'drain'])
 })
 
-void test('keyDelivery.wake reschedules overdue retries immediately and interrupts hung pre-sleep passes', async () => {
+void test('keyDelivery.wake aborts hung pre-sleep keyRound via signal, serializes retry, and coalesces resume->unlock-screen', async () => {
   const { makeDesktopKeyDelivery } = await import('./e2ee-key-delivery.mts')
   let now = 1_000
   const clock = fakeKeyDeliveryTimers()
   let attempts = 0
-  let hangFirst = true
+  let roundInFlight = false
+  let overlappedRound = false
   let hungStarted
   const firstHung = new Promise((resolve) => {
     hungStarted = resolve
   })
+  let healthyStarted
+  const thirdStarted = new Promise((resolve) => {
+    healthyStarted = resolve
+  })
+  const releaseThird = Promise.withResolvers()
+  const windowReaders = new Map([['team', new Map([[99, 1]])]])
+  const networkAbort = new AbortController()
   let failSecond = true
   const delivery = makeDesktopKeyDelivery({
     identity: () => ({ userId: 'A', generation: 1 }),
@@ -2084,26 +2157,42 @@ void test('keyDelivery.wake reschedules overdue retries immediately and interrup
       Effect.runPromise(
         work({
           accountId: 'A',
-          readers: new Map(),
+          readers: windowReaders,
           bootstrap: { deviceCredential: () => Effect.succeed('cred') },
           host: {
             open: () => Effect.void,
             beginCloseWorkspace: () => Effect.succeed(Effect.void),
             status: () => Effect.succeed({ hasCurrentKey: true, position: 'p1' }),
             keyDeliveryTarget: () => Effect.succeed(true),
-            distributeKeys: () =>
-              Effect.suspend(() => {
-                attempts += 1
-                if (hangFirst) {
-                  hangFirst = false
-                  hungStarted()
-                  return Effect.never
-                }
-                if (failSecond) {
-                  failSecond = false
-                  return Effect.fail(new Error('e2ee_network'))
-                }
-                return Effect.void
+            distributeKeys: (_ws, mailbox) =>
+              Effect.tryPromise({
+                try: async () => {
+                  if (roundInFlight) overlappedRound = true
+                  roundInFlight = true
+                  try {
+                    const attempt = ++attempts
+                    const box = mailbox(networkAbort.signal)
+                    if (attempt === 1) {
+                      hungStarted()
+                      await box.waitForAbort()
+                      throw new Error('AbortError')
+                    }
+                    if (attempt === 2 && failSecond) {
+                      failSecond = false
+                      throw new Error('e2ee_network')
+                    }
+                    healthyStarted()
+                    await Promise.race([
+                      releaseThird.promise,
+                      box.waitForAbort().then(() => {
+                        throw new Error('healthy pass must not be aborted by unlock-screen')
+                      })
+                    ])
+                  } finally {
+                    roundInFlight = false
+                  }
+                },
+                catch: (error) => error
               }),
             keyDeliveryEvidence: () => Effect.succeed('delivered')
           }
@@ -2112,7 +2201,13 @@ void test('keyDelivery.wake reschedules overdue retries immediately and interrup
     cloud: async () => ({
       accountId: 'A',
       client: {
-        mailbox: () => ({}),
+        mailbox: (_access, signal) => ({
+          waitForAbort: () =>
+            new Promise((resolve) => {
+              if (signal.aborted) resolve()
+              else signal.addEventListener('abort', () => resolve(), { once: true })
+            })
+        }),
         staging: () => ({}),
         history: () => Effect.succeed({ recordsHex: [], nextCursor: null })
       }
@@ -2121,19 +2216,28 @@ void test('keyDelivery.wake reschedules overdue retries immediately and interrup
   })
   delivery.track('A', 'team', approvalRequest, approvalDevice)
   await firstHung
-  // Wake interrupts the hung pre-sleep pass and schedules an immediate retry.
+  // Sleep occurs while pass #1 is hung; wake aborts pass #1 via its AbortSignal even with a live window reader.
+  delivery.noteSuspend()
+  now += 30_000
   delivery.wake()
   await delivery.idle('A', 'team')
+  assert.equal(roundInFlight, false)
   assert.equal(clock.pending.length, 1)
   assert.equal(clock.pending[0].ms, 0)
   clock.pending.shift().run()
   await delivery.idle('A', 'team')
   assert.equal(attempts, 2)
   assert.equal(delivery.slots.get('A\nteam')?.requests.get(approvalRequest)?.state, 'failed')
-  // Advance wall clock past retryAt (simulating sleep) without firing the stale timer; wake runs now.
+  // Advance wall clock past retryAt (simulating sleep); resume starts pass #3, then unlock-screen 100ms later is coalesced.
+  delivery.noteSuspend()
   now += KEY_DELIVERY_RETRY_DELAYS[0] + 60_000
   delivery.wake()
+  await thirdStarted
+  now += 100
+  delivery.wake()
+  releaseThird.resolve()
   await delivery.idle('A', 'team')
+  assert.equal(overlappedRound, false)
   assert.equal(attempts, 3)
   assert.equal(delivery.slots.get('A\nteam')?.requests.get(approvalRequest)?.state, 'delivered')
 })
@@ -2183,4 +2287,65 @@ void test('makeDesktopIrohClient.reset closes stale pre-sleep endpoint so next p
     )
   )
   assert.equal(closed, 2)
+})
+
+void test('Electron 44.9.3 safeStorage temporary unavailability maps end-to-end to e2ee_custody_locked', async () => {
+  const { isDesktopE2eeCustodyLocked, makeDesktopE2eeCustody } = await import('../e2ee-custody.mts')
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const dir = await mkdtemp(join(tmpdir(), 'lody-custody-locked-e2e-'))
+  try {
+    const failed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.result(
+          makeDesktopE2eeCustody({
+            directory: dir,
+            platform: 'darwin',
+            safeStorage: {
+              isEncryptionAvailable: () => true,
+              isAsyncEncryptionAvailable: async () => true,
+              encryptStringAsync: async () => {
+                throw new Error(
+                  'Error while decrypting the ciphertext provided to safeStorage.decryptStringAsync. Decryption is not available.'
+                )
+              },
+              decryptStringAsync: async () => {
+                throw new Error(
+                  'Error while decrypting the ciphertext provided to safeStorage.decryptStringAsync. Decryption is not available.'
+                )
+              }
+            }
+          })
+        )
+      )
+    )
+    assert.equal(failed._tag, 'Failure')
+    assert.equal(isDesktopE2eeCustodyLocked(failed.failure), true)
+    const runtime = await load('./e2ee-account-runtime.ts', {
+      '@lody/shared/node/e2ee-clock': { withE2eeTestClock: (e) => e },
+      '@lody/shared/node/e2ee-identity': {
+        leaseE2eeIdentity: () => Effect.void,
+        archiveE2eeIdentity: () => Effect.die('unused'),
+        completedE2eeIdentityReset: () => Effect.die('unused')
+      },
+      electron: { app: { getPath: () => dir, isPackaged: false, getAppPath: () => dir }, net: {} },
+      '../auth-fetch': { createDesktopAuthFetch: () => fetch },
+      '../e2ee-custody-electron': {
+        makeElectronE2eeCustody: () => Effect.fail(failed.failure)
+      },
+      '../e2ee-custody.mjs': { isDesktopE2eeCustodyLocked },
+      './e2ee-bootstrap.mjs': { makeDesktopE2eeBootstrap: () => Effect.die('unused') },
+      '../ipc/ipc-service-deps': {
+        getIpcServiceDeps: () => ({
+          authService: { getCachedSessionIdentity: () => ({ userId: 'A', generation: 1 }) }
+        })
+      }
+    })
+    await assert.rejects(
+      runtime.withDesktopE2eeAccount(() => Effect.void, 'team', true),
+      /^Error: e2ee_custody_locked$/
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })

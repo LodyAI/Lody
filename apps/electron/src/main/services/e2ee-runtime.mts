@@ -1117,6 +1117,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               return { id: prepared.id, frameHex: hex(prepared.frame) }
             })
           )
+        let currentRoundMailbox: KeyMailbox['Service'] | undefined
         const keyRound = Effect.fnUntraced(function* (
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
           staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
@@ -1145,16 +1146,27 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           round = done
           roundMode = mode
           roundRecipients = recipients ? new Set(recipients) : undefined
+          currentRoundMailbox = mailbox(networkAbort.signal)
           const result = yield* Effect.exit(
             Effect.uninterruptible(
               Effect.gen(function* () {
-                // Ports are bound once per entry, to the first round's mailbox, as before;
-                // each capability then opens only its own journals on first use.
+                // Delegate mailbox calls to the active round so per-round abort signals
+                // take effect without rebuilding journals across rounds.
                 const ports = Effect.fnUntraced(function* () {
                   if (!maintenancePorts)
                     maintenancePorts = yield* Layer.buildWithScope(
                       Layer.mergeAll(
-                        Layer.succeed(KeyMailbox, mailbox(networkAbort.signal)),
+                        Layer.succeed(KeyMailbox, {
+                          status: (slot) => currentRoundMailbox!.status(slot),
+                          report: (report, publication) =>
+                            currentRoundMailbox!.report(report, publication),
+                          fetch: (epoch, cursor, limit) =>
+                            currentRoundMailbox!.fetch(epoch, cursor, limit),
+                          repair: (slot, id, rejectedDigest) =>
+                            currentRoundMailbox!.repair(slot, id, rejectedDigest),
+                          put: (id, frame) => currentRoundMailbox!.put(id, frame),
+                          read: (id) => currentRoundMailbox!.read(id)
+                        }),
                         Layer.succeed(VerifiedLedger, verified),
                         Layer.succeed(InstalledEpochKeys, keys),
                         publicationSource,

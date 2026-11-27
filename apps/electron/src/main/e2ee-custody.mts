@@ -20,25 +20,35 @@ export interface DesktopSafeStorage {
 const SAFE_STORAGE_UNAVAILABLE =
   /keychain|lock|unlock|cancel|denied|deny|permission|interaction not allowed|auth(?:entication)? failed|errsec|secret service|kwallet|safe storage|not available|unavailable/i
 
+const custodyLockedErrors = new WeakSet<object>()
+
+export function isDesktopE2eeCustodyLocked(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && custodyLockedErrors.has(error)
+}
+
+function custodyLockedError(): NodeE2eeCustodyError {
+  const error = new NodeE2eeCustodyError({ code: 'unavailable' })
+  custodyLockedErrors.add(error)
+  return error
+}
+
 function classifySafeStorageError(
   error: unknown,
   storage: DesktopSafeStorage
 ): NodeE2eeCustodyError {
   if (error instanceof NodeE2eeCustodyError) return error
   try {
-    if (!storage.isEncryptionAvailable()) return new NodeE2eeCustodyError({ code: 'unavailable' })
+    if (!storage.isEncryptionAvailable()) return custodyLockedError()
   } catch {
-    return new NodeE2eeCustodyError({ code: 'unavailable' })
+    return custodyLockedError()
   }
   const errCode =
     error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
       ? error.code
       : ''
-  if (errCode === 'EACCES' || errCode === 'EPERM')
-    return new NodeE2eeCustodyError({ code: 'unavailable' })
+  if (errCode === 'EACCES' || errCode === 'EPERM') return custodyLockedError()
   const message = error instanceof Error ? error.message : String(error ?? '')
-  if (SAFE_STORAGE_UNAVAILABLE.test(message))
-    return new NodeE2eeCustodyError({ code: 'unavailable' })
+  if (SAFE_STORAGE_UNAVAILABLE.test(message)) return custodyLockedError()
   return new NodeE2eeCustodyError({ code: 'storage' })
 }
 

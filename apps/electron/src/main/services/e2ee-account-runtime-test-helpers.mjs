@@ -71,7 +71,7 @@ import {
   signLedgerRecord
 } from '@lody/e2ee-core/protocol'
 
-import { makeDesktopE2eeCustody } from '../e2ee-custody.mts'
+import { isDesktopE2eeCustodyLocked, makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 
@@ -152,6 +152,8 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
     Buffer,
     URL,
     Request,
+    AbortController,
+    AbortSignal,
     setTimeout,
     clearTimeout,
     console,
@@ -198,20 +200,22 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
                                       work
                                     ) => work()
                                   }
-                                : id === '../../power-state-broadcast'
-                                  ? {
-                                      subscribePowerState: () => () => {},
-                                      notifyPowerState: () => {}
-                                    }
-                                  : id === '../auth-fetch'
-                                    ? loadSync(
-                                        '../auth-fetch.ts',
-                                        dependencies,
-                                        console,
-                                        env,
-                                        globals
-                                      )
-                                    : require(id)
+                                : id === '../e2ee-custody.mjs'
+                                  ? { isDesktopE2eeCustodyLocked, makeDesktopE2eeCustody }
+                                  : id === '../../power-state-broadcast'
+                                    ? {
+                                        subscribePowerState: () => () => {},
+                                        notifyPowerState: () => {}
+                                      }
+                                    : id === '../auth-fetch'
+                                      ? loadSync(
+                                          '../auth-fetch.ts',
+                                          dependencies,
+                                          console,
+                                          env,
+                                          globals
+                                        )
+                                      : require(id)
   })
   return exports
 }

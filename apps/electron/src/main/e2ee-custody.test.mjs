@@ -9,7 +9,7 @@ import test from 'node:test'
 import { Effect, Exit, Fiber, Scope } from 'effect'
 import { Bytes, verifySignature } from '@lody/e2ee-core/protocol'
 import { signGenesisRecord } from '@lody/e2ee-core/protocol'
-import { makeDesktopE2eeCustody } from './e2ee-custody.mts'
+import { isDesktopE2eeCustodyLocked, makeDesktopE2eeCustody } from './e2ee-custody.mts'
 
 // An authenticated synthetic native boundary, never a real OS keychain claim.
 const wrapping = Buffer.alloc(32, 72)
@@ -928,6 +928,9 @@ void test('safeStorage lock or permission denial reports unavailable without mod
   await execute(makeDesktopE2eeCustody({ directory, platform: 'darwin', safeStorage: backend() }))
   const wrapped = await readFile(join(directory, 'kek.safe-storage'))
   for (const error of [
+    new Error(
+      'Error while decrypting the ciphertext provided to safeStorage.decryptStringAsync. Decryption is not available.'
+    ),
     new Error('Keychain is locked (errSecInteractionNotAllowed)'),
     new Error('User denied access to safe storage'),
     Object.assign(new Error('access denied'), { code: 'EACCES' })
@@ -947,6 +950,7 @@ void test('safeStorage lock or permission denial reports unavailable without mod
     )
     assert.equal(locked._tag, 'Failure')
     assert.equal(locked.failure?.code, 'unavailable')
+    assert.equal(isDesktopE2eeCustodyLocked(locked.failure), true)
     assert.deepEqual(await readFile(join(directory, 'kek.safe-storage')), wrapped)
   }
 })

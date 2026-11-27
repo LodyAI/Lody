@@ -13,6 +13,7 @@ import { app, net } from 'electron'
 import { createDesktopAuthFetch } from '../auth-fetch'
 import { Effect, Exit, Scope, Semaphore, Deferred } from 'effect'
 import { makeElectronE2eeCustody } from '../e2ee-custody-electron'
+import { isDesktopE2eeCustodyLocked } from '../e2ee-custody.mjs'
 import { makeDesktopE2eeBootstrap, type DesktopE2eeCreationIntent } from './e2ee-bootstrap.mjs'
 import type { E2eeCloudClient } from './e2ee-cloud-client.mjs'
 import type { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mjs'
@@ -385,9 +386,11 @@ function runAccountOperation<A>(
                 yield* leaseE2eeIdentity(directory)
                 const custody = yield* makeElectronE2eeCustody(join(directory, 'custody')).pipe(
                   Effect.mapError((error) =>
-                    error.code === 'unavailable' || error.code === 'basic-text'
-                      ? accountFailure('custody_unavailable')
-                      : error
+                    isDesktopE2eeCustodyLocked(error)
+                      ? accountFailure('custody_locked')
+                      : error.code === 'unavailable' || error.code === 'basic-text'
+                        ? accountFailure('custody_unavailable')
+                        : error
                   )
                 )
                 const bootstrap = yield* makeDesktopE2eeBootstrap({ directory, accountId, custody })
@@ -615,8 +618,19 @@ export function releaseDesktopE2eeReader(senderId: number, maxEpoch?: number): v
   })
 }
 
-/** Resets pre-sleep iroh endpoints across open owners after OS resume/unlock. */
-export function resetDesktopE2eeIrohOnWake(): void {
+const IROH_WAKE_COALESCE_MS = 2_000
+let lastIrohWakeResetAt: number | undefined
+
+/** Resets pre-sleep iroh endpoints across open owners after OS resume/unlock.
+ * Coalesces rapid `resume` -> `unlock-screen` pairs so a freshly rebuilt endpoint survives. */
+export function resetDesktopE2eeIrohOnWake(now = Date.now()): void {
+  if (
+    lastIrohWakeResetAt !== undefined &&
+    now >= lastIrohWakeResetAt &&
+    now - lastIrohWakeResetAt < IROH_WAKE_COALESCE_MS
+  )
+    return
+  lastIrohWakeResetAt = now
   const active = [...owners.values()].filter((owner) => !owner.closeFailed)
   if (active.length === 0) return
   void Effect.runPromise(
@@ -1067,7 +1081,7 @@ function publicE2eeFailure(error: unknown): Error {
     return Object.assign(
       new Error(
         retryAt !== undefined
-          ? `e2ee_self_service_rate_limited:${retryAt}`
+          ? `retryAt=${retryAt}: e2ee_self_service_rate_limited`
           : 'e2ee_self_service_rate_limited'
       ),
       retryAt !== undefined ? { code, retryAt } : { code }

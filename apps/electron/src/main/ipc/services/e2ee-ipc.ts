@@ -432,12 +432,25 @@ export class E2eeIpc extends ProductWindowIpcService {
     cloud: desktopE2eeCloudClient,
     run: runDesktopE2eeOperation
   })
+  private lastPowerWakeAt: number | undefined
   constructor() {
     super()
     subscribePowerState?.((state) => {
+      if (state === 'suspend' || state === 'lock-screen') {
+        this.keyDelivery.noteSuspend?.()
+        return
+      }
       if (state !== 'resume' && state !== 'unlock-screen') return
+      const now = this.keyDeliveryNow()
+      if (
+        this.lastPowerWakeAt !== undefined &&
+        now >= this.lastPowerWakeAt &&
+        now - this.lastPowerWakeAt < 2_000
+      )
+        return
+      this.lastPowerWakeAt = now
       this.keyDelivery.wake()
-      resetDesktopE2eeIrohOnWake?.()
+      resetDesktopE2eeIrohOnWake?.(now)
     })
   }
   private readonly agentPairing = makeDesktopAgentPairing({
@@ -2724,8 +2737,12 @@ export class E2eeIpc extends ProductWindowIpcService {
                   latest?.generation !== proofIdentity.generation)
               )
                 return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-              if (window && (window.isDestroyed() || (senderEpochs.get(window) ?? 1) !== epoch))
-                return yield* Effect.fail(new Error('e2ee_closed'))
+              if (window && (window.isDestroyed() || (senderEpochs.get(window) ?? 1) !== epoch)) {
+                const drain = owner.readers.get(workspaceId)?.size
+                  ? Effect.void
+                  : yield* owner.host.beginCloseWorkspace(workspaceId)
+                return { kind: 'aborted', drain } as const
+              }
               const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
               const epochs = owner.readerEpochs?.get(workspaceId) ?? new Map<number, number>()
               const previousEpoch = epochs.get(id)
@@ -2753,6 +2770,10 @@ export class E2eeIpc extends ProductWindowIpcService {
     const openLocal = async (proof?: readonly E2eeWorkspaceHistoryPage[]) => {
       const first = await acquire(proof)
       if (first.kind === 'opened') return first.opened
+      if (first.kind === 'aborted') {
+        await Effect.runPromise(first.drain).catch(() => undefined)
+        throw new Error('e2ee_closed')
+      }
       drained = true
       await Effect.runPromise(first.closing).catch(() => {
         throw new Error(
@@ -2761,6 +2782,10 @@ export class E2eeIpc extends ProductWindowIpcService {
       })
       const second = await acquire(proof)
       if (second.kind === 'opened') return second.opened
+      if (second.kind === 'aborted') {
+        await Effect.runPromise(second.drain).catch(() => undefined)
+        throw new Error('e2ee_closed')
+      }
       throw new Error('e2ee_closed')
     }
     // Only a missing pre-snapshot proof requests history. A known conflict never retries.

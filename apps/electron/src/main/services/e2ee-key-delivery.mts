@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { Cause, Deferred, Effect, Fiber } from 'effect'
+import { Cause, Deferred, Effect } from 'effect'
 import { KEY_DELIVERY_RETRY_DELAYS } from '@lody/e2ee-client/account-requester'
 import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 import type {
@@ -58,6 +58,8 @@ export type MemberKeyDelivery = {
   attempts: number
   retryAt: number
 }
+/** Coalesces back-to-back OS wake transitions (`resume` followed by `unlock-screen`). */
+const WAKE_COALESCE_MS = 2_000
 type KeyDeliverySlot = {
   requests: Map<string, MemberKeyDelivery>
   /** Settles when the first pass covering the request ends, or the slot is dropped. */
@@ -65,7 +67,8 @@ type KeyDeliverySlot = {
   generation: number | undefined
   /** Settles when the slot's fiber ends; `idle` and reentry use it. */
   running?: Promise<void>
-  fiber?: Fiber.Fiber<void, never>
+  startedAt?: number
+  abort?: () => void
   waking?: boolean
   again: boolean
   timer?: unknown
@@ -122,6 +125,8 @@ export interface DesktopKeyDeliveryPorts {
 
 export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
   const slots = new Map<string, KeyDeliverySlot>()
+  let lastSuspendAt: number | undefined
+  let lastWakeAt: number | undefined
   const keyOf = (accountId: string, workspaceId: string) => `${accountId}\n${workspaceId}`
   const identity = () => {
     try {
@@ -305,6 +310,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
       ports.remember(outcome.cause)
       if (!current(accountId, slot) && owned()) drop(accountId, workspaceId)
       if (slot.aborted) return true
+      if (slot.waking) return true
       const code = ports.code(outcome.cause)
       // Terminal: this device can no longer deliver; drop the slot, never retry.
       if (TERMINAL_KEY_DELIVERY.has(code)) {
@@ -354,15 +360,20 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
           delete delivery.code
           logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'delivering' })
         }
+        const roundAbort = new AbortController()
+        slot.abort = () => roundAbort.abort()
         const delivered = yield* Effect.result(
           deliver(
             accountId,
             workspaceId,
             new Set(covered.map((delivery) => delivery.device)),
-            () => slot.aborted === true || !current(accountId, slot),
-            covered.every((delivery) => delivery.attempts === 0)
+            () => slot.aborted === true || roundAbort.signal.aborted || !current(accountId, slot),
+            covered.every((delivery) => delivery.attempts === 0),
+            roundAbort.signal
           )
         )
+        slot.abort = undefined
+        if (slot.waking) return
         const done = recordPass(
           accountId,
           workspaceId,
@@ -380,7 +391,8 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
   /** After the slot's fiber ends, however it ends. */
   function finish(accountId: string, workspaceId: string, slot: KeyDeliverySlot) {
     slot.running = undefined
-    slot.fiber = undefined
+    slot.startedAt = undefined
+    slot.abort = undefined
     const waking = slot.waking === true
     slot.waking = false
     // An unexpected exception must not leave a request shown as sending forever:
@@ -425,7 +437,8 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     let settle!: () => void
     const running = new Promise<void>((resolve) => (settle = resolve))
     slot.running = running
-    slot.fiber = Effect.runFork(
+    slot.startedAt = nowOrZero()
+    Effect.runFork(
       passes(accountId, workspaceId, slot).pipe(
         Effect.catchCause((cause) => remembering(Cause.squash(cause))),
         Effect.ensuring(
@@ -441,9 +454,16 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     )
     return running
   }
-  /** Re-evaluates due retries and interrupts pre-sleep in-flight passes on OS wake. */
+  /** Records sleep/lock time so wake cancels only passes that started before sleep. */
+  function noteSuspend() {
+    lastSuspendAt = nowOrZero()
+  }
+  /** Re-evaluates due retries and aborts pre-sleep in-flight passes on OS wake.
+   * Coalesces back-to-back `resume` -> `unlock-screen` events so fresh passes survive. */
   function wake() {
     const now = nowOrZero()
+    if (lastWakeAt !== undefined && now >= lastWakeAt && now - lastWakeAt < WAKE_COALESCE_MS) return
+    lastWakeAt = now
     for (const [key, slot] of [...slots.entries()]) {
       const [accountId, workspaceId] = key.split('\n') as [string, string]
       if (!current(accountId, slot)) {
@@ -451,9 +471,14 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
         continue
       }
       if (slot.running) {
+        const startedBeforeSleep =
+          lastSuspendAt !== undefined
+            ? (slot.startedAt ?? 0) <= lastSuspendAt
+            : (slot.startedAt ?? 0) <= now
+        if (!startedBeforeSleep) continue
         slot.waking = true
         slot.again = true
-        if (slot.fiber) Effect.runFork(Fiber.interrupt(slot.fiber))
+        slot.abort?.()
         continue
       }
       if (slot.timer !== undefined) {
@@ -483,9 +508,12 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     workspaceId: string,
     devices: Set<string>,
     aborted: () => boolean = () => false,
-    skipIngestIfAdmitted = false
+    skipIngestIfAdmitted = false,
+    abortSignal?: AbortSignal
   ) =>
     Effect.gen(function* () {
+      const bindSignal = (signal: AbortSignal) =>
+        abortSignal ? AbortSignal.any([signal, abortSignal]) : signal
       const scope = ports.scope(workspaceId)
       const turn = <A extends unknown>(work: (owner: Owner) => Effect.Effect<A, unknown>) =>
         promised(() => scope(work))
@@ -540,7 +568,9 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
               break
             }
         if (needsIngest) {
-          const ingested = yield* Effect.result(ingestEffect(accountId, workspaceId, scope, cloud))
+          const ingested = yield* Effect.result(
+            ingestEffect(accountId, workspaceId, scope, cloud, abortSignal)
+          )
           // A lagging relay leaves targets unconfirmed below; only terminal causes stop here.
           if (ingested._tag === 'Failure') {
             if (TERMINAL_KEY_DELIVERY.has(ports.code(ingested.failure)))
@@ -559,7 +589,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
         const mailbox = (signal: AbortSignal) => {
           let instance = roundMailboxes.get(signal)
           if (!instance) {
-            instance = cloud.client.mailbox({ workspaceId, credential }, signal)
+            instance = cloud.client.mailbox({ workspaceId, credential }, bindSignal(signal))
             roundMailboxes.set(signal, instance)
           }
           return instance
@@ -572,7 +602,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
             Effect.succeed(
               owner.host
                 .receiveKeys(workspaceId, mailbox, (signal) =>
-                  cloud.client.staging({ workspaceId, credential }, signal)
+                  cloud.client.staging({ workspaceId, credential }, bindSignal(signal))
                 )
                 .pipe(Effect.mapError((error) => terminalKeyRoundCause(error) ?? error))
             )
@@ -615,7 +645,8 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     accountId: string,
     workspaceId: string,
     scope: KeyDeliveryScope,
-    cloud: Cloud
+    cloud: Cloud,
+    signal?: AbortSignal
   ) =>
     Effect.gen(function* () {
       const status = yield* promised(() => scope((owner) => owner.host.status(workspaceId)))
@@ -623,10 +654,13 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
       let cursor: string | undefined
       let checkpoint: import('@lody/cloud-api').E2eeLedgerCheckpoint | undefined
       for (let index = 0; index < 256; index++) {
-        const page = yield* cloud.client.history({
-          workspaceId,
-          ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
-        })
+        const page = yield* cloud.client.history(
+          {
+            workspaceId,
+            ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
+          },
+          signal
+        )
         checkpoint ??= page.checkpoint
         const ingested = yield* promised(() =>
           scope((owner) => Effect.succeed(owner.host.ingestLedgerRecords(workspaceId, page)))
@@ -713,6 +747,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     dropWorkspace,
     ingest,
     idle,
+    noteSuspend,
     wake,
     prepareInline
   }

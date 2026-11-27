@@ -40,6 +40,7 @@ import {
   e2eeControlDiagnostics,
 } from '../src/lib/e2ee-control-failure';
 import { withAccountPairingCode } from '../src/lib/e2ee-account-pairing-ipc';
+import { requestFailureCode } from '../src/lib/e2ee-actionable-failure';
 import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
 
 class MemoryStorage implements Storage {
@@ -843,7 +844,7 @@ it.each([
   }
 );
 
-it('classifies desktop e2ee_storage and custody_locked as local/custody failures, never server', () => {
+it('classifies desktop e2ee_storage as local-identity and custody_locked as custody-locked, never server', () => {
   expect(classifyE2eeControlFailure(new Error('e2ee_storage'))).toEqual({
     kind: 'local-identity',
     code: 'e2ee_storage',
@@ -856,6 +857,13 @@ it('classifies desktop e2ee_storage and custody_locked as local/custody failures
     kind: 'custody-locked',
     code: 'e2ee_custody_locked',
   });
+  expect(
+    requestFailureCode(
+      new Error(
+        "Error invoking remote method 'e2ee.revokeDevice': Error: retryAt=1800000000000: e2ee_self_service_rate_limited"
+      )
+    )
+  ).toBe('e2ee_self_service_rate_limited');
 });
 
 it('restores account pairing refusal codes and attemptsLeft across Electron IPC', async () => {
