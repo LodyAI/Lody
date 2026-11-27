@@ -18,7 +18,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { MessageQueueItem, SessionId } from '@lody/shared';
+import type { MessageQueueItem, SessionId, SessionInputBlock } from '@lody/shared';
+import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { normalizeSessionInputBlocks } from '@lody/shared';
 import { Menu } from '@lody/ui/menu';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -539,7 +540,7 @@ function RowBody(props: MessageQueueRowProps & { imageBlocks: QueuedImageBlock[]
             </span>
           ) : null}
           {props.footerPosition === 'inline' && props.footer ? <>{props.footer} </> : null}
-          {item.task}
+          <QueuedRowText item={item} />
         </div>
         {failure ? (
           <div role="alert" title={failure} {...stylex.props(queueRowStyles.heldFailure)}>
@@ -604,6 +605,20 @@ function CompactHeldStatus({ props }: { props: MessageQueueRowProps }) {
       <Pencil size={fine ? 13 : 15} strokeWidth={2} aria-hidden="true" />
     </button>
   );
+}
+
+/** The row's preview; a single mentioned text shows its mentions as chips. */
+function QueuedRowText({ item }: { item: MessageQueueItem }) {
+  const text = useMemo(() => {
+    const blocks = normalizeSessionInputBlocks(item.acpSessionConfig?.inputBlocks, '');
+    const texts = blocks.filter(
+      (block): block is Extract<SessionInputBlock, { type: 'text' }> => block.type === 'text'
+    );
+    const only = texts.length === 1 ? texts[0] : undefined;
+    return only?.spans?.length && only.text.trim() === item.task.trim() ? only : undefined;
+  }, [item.acpSessionConfig?.inputBlocks, item.task]);
+  if (!text) return <>{item.task}</>;
+  return <MessageTextWithChips text={text.text} spans={text.spans} />;
 }
 
 function HeldStatus({ props }: { props: MessageQueueRowProps }) {

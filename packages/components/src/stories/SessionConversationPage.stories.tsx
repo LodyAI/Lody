@@ -61,6 +61,7 @@ import {
   type MessageQueueItem,
   type SessionDoc,
   type SessionHistoryParsed,
+  type MessageTextSpan,
   type SessionHistory,
   type SessionId,
   type SessionMeta,
@@ -1754,18 +1755,57 @@ const storyTeam: Record<string, string> = {
   [STORY_TEAMMATE_ID]: 'Leo Park',
 };
 
+const STORY_LONG_QUEUED_MESSAGE = [
+  'Refactor the message queue to support priority ordering and cancellation tokens.',
+  'Keep the existing drag order as the tie-breaker when two rows share a priority, and make sure a cancelled head item never blocks the rows behind it while the agent is still running. Cover both cases with deterministic tests that use an injected clock instead of real timers.',
+  'Do not change the stored queue format: older daemons still read these rows, and the encrypted signature covers the input configuration. Leave packages/components/src/components/sessions/message-queue/queued-message-edit.ts as the single owner of the save rules.',
+].join('\n\n');
+
+/** A message that mentions a file, a folder, a Session, an Agent Role and pasted text. */
+function storyMentionMessage() {
+  const parts: Array<[string, Omit<MessageTextSpan, 'start' | 'end'>?]> = [
+    ['Compare '],
+    ['@src/lib/session-send-delivery.ts', { kind: 'file', label: 'session-send-delivery.ts' }],
+    [' with everything under '],
+    ['@src/components/sessions/message-queue', { kind: 'dir', label: 'message-queue' }],
+    [', reuse what we decided in '],
+    [
+      '[@Review mobile layout](lody://session/story-session-review?workspace=story)',
+      { kind: 'session', label: 'Review mobile layout', target: 'story-session-review' },
+    ],
+    [', then hand the result to '],
+    ['@reviewer', { kind: 'agent_role', label: 'Reviewer', mark: '🧐' }],
+    [' together with this log: '],
+    [
+      'Error: queue replace failed (row missing)\n    at writeUserTurn (session-send-delivery.ts:143)',
+      { kind: 'pasted_text', label: 'Pasted 2 lines' },
+    ],
+    ['.'],
+  ];
+  let text = '';
+  const spans: MessageTextSpan[] = [];
+  for (const [chunk, span] of parts) {
+    if (span) spans.push({ ...span, start: text.length, end: text.length + chunk.length });
+    text += chunk;
+  }
+  return { text, spans };
+}
+
 const storyEditQueueItems = (): MessageQueueItem[] => {
   const altModel = selectorOptions.modelOptions[1]?.value ?? selectorOptions.modelOptions[0]?.value;
-  const rows = [
+  const mention = storyMentionMessage();
+  const rows: Array<{
+    task: string;
+    userId: string;
+    modelId?: string;
+    spans?: MessageTextSpan[];
+  }> = [
     {
       task: 'After the permission flow lands, tighten the mobile composer spacing.',
       userId: STORY_USER_ID,
     },
-    {
-      task: 'Refactor the message queue to support priority ordering and cancellation tokens.',
-      userId: STORY_TEAMMATE_ID,
-      modelId: altModel,
-    },
+    { task: STORY_LONG_QUEUED_MESSAGE, userId: STORY_TEAMMATE_ID, modelId: altModel },
+    { task: mention.text, userId: STORY_USER_ID, spans: mention.spans },
     { task: 'Then run the Storybook render budgets again.', userId: STORY_USER_ID },
   ];
   return rows.map((row, i) => ({
@@ -1774,11 +1814,12 @@ const storyEditQueueItems = (): MessageQueueItem[] => {
     userId: row.userId,
     userName: storyTeam[row.userId],
     userTurnId: `story-edit-turn-${i}`,
-    timestamp: new Date(getServerNow() - (3 - i) * 60_000).toISOString(),
+    timestamp: new Date(getServerNow() - (4 - i) * 60_000).toISOString(),
     acpSessionConfig: {
       prompt: row.task,
       cliType: 'builtin',
       agentType: 'codex',
+      inputBlocks: [{ type: 'text', text: row.task, ...(row.spans ? { spans: row.spans } : {}) }],
       ...(row.modelId ? { modelId: row.modelId } : {}),
     },
   })) as unknown as MessageQueueItem[];
@@ -3109,6 +3150,12 @@ export const MobileQueuedMessages: Story = {
 export const DesktopQueueEdit: Story = {
   args: { state: 'working', queued: 'with-info-bar', queueEdit: 'idle' },
   globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopQueueEditDark: Story = {
+  args: { state: 'working', queued: 'with-info-bar', queueEdit: 'idle' },
+  globals: { theme: 'dark' },
   decorators: [withDesktopViewport],
 };
 

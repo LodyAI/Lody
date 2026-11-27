@@ -1,8 +1,16 @@
 import * as stylex from '@stylexjs/stylex';
-import { useMemo, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
+import {
+  NO_SCROLL_EDGE_OVERFLOW,
+  buildScrollEdgeFadeMask,
+  readScrollEdgeOverflow,
+  scrollEdgeOverflowEquals,
+} from '@/lib/scroll-edge-fade';
 import { File as FileIcon, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { MessageQueueItem, SessionId } from '@lody/shared';
+import type { MessageQueueItem, SessionId, SessionInputBlock } from '@lody/shared';
+import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
@@ -25,6 +33,13 @@ export type QueuedRunConfigSummary = {
 
 const styles = stylex.create({
   root: { display: 'flex', flexDirection: 'column', gap: space[3], minWidth: 0 },
+  // The well is the rounded tray; its inner scroller carries the text. The fade
+  // mask sits on a non-scrolling wrapper: on the scroller WKWebView paints black.
+  messageWell: {
+    borderRadius: radius.small,
+    backgroundColor: colors.trayBackground,
+    overflow: 'hidden',
+  },
   message: {
     maxHeight: 220,
     overflowY: 'auto',
@@ -35,10 +50,9 @@ const styles = stylex.create({
     color: colors.label,
     paddingInline: space[3],
     paddingBlock: space[2],
-    borderRadius: radius.small,
-    backgroundColor: colors.trayBackground,
     userSelect: 'text',
   },
+  paragraph: { margin: 0, marginBottom: { default: space[2], ':last-child': 0 } },
   attachments: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[1.5] },
   file: {
     display: 'inline-flex',
@@ -87,6 +101,41 @@ function useQueuedTime(timestamp: string | undefined): string | null {
   }, [i18n.language, i18n.resolvedLanguage, timestamp]);
 }
 
+const MESSAGE_FADE_PX = 24;
+
+/** A long message scrolls inside its well, fading at whichever edge has more. */
+function FadingMessage({ children }: { children: ReactNode }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = useState(NO_SCROLL_EDGE_OVERFLOW);
+  const update = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const next = readScrollEdgeOverflow(element);
+    setOverflow((current) => (scrollEdgeOverflowEquals(current, next) ? current : next));
+  }, []);
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return undefined;
+    update();
+    element.addEventListener('scroll', update, { passive: true });
+    const stop = observeResizeOnAnimationFrame(element, update);
+    return () => {
+      element.removeEventListener('scroll', update);
+      stop();
+    };
+  }, [update]);
+  const mask = buildScrollEdgeFadeMask(overflow, MESSAGE_FADE_PX);
+  return (
+    <div {...stylex.props(styles.messageWell)}>
+      <div style={{ maskImage: mask, WebkitMaskImage: mask }}>
+        <div ref={scrollRef} {...stylex.props(styles.message)} data-text-selectable="">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Read-only details of one queued message: what it says and how it will run. */
 export function QueuedMessageDetails({
   sessionId,
@@ -105,10 +154,10 @@ export function QueuedMessageDetails({
 }) {
   const { t } = useTranslation();
   const blocks = useMemo(() => queuedInputBlocksOf(item), [item]);
-  const messageText = blocks
-    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-    .join('\n\n')
-    .trim();
+  const textBlocks = blocks.filter(
+    (block): block is Extract<SessionInputBlock, { type: 'text' }> =>
+      block.type === 'text' && block.text.trim().length > 0
+  );
   const images = blocks.filter((block): block is QueuedImageBlock => block.type === 'image');
   const files = blocks.flatMap((block) =>
     block.type === 'file' || (block.type === 'local_attachment' && block.kind === 'file')
@@ -156,10 +205,15 @@ export function QueuedMessageDetails({
 
   return (
     <div {...stylex.props(styles.root)} data-queued-message-details="">
-      {messageText ? (
-        <div {...stylex.props(styles.message)} data-text-selectable="">
-          {messageText}
-        </div>
+      {textBlocks.length > 0 ? (
+        <FadingMessage>
+          {/* Mentions read as the conversation shows them: chips, not their expansions. */}
+          {textBlocks.map((block, index) => (
+            <p key={index} {...stylex.props(styles.paragraph)}>
+              <MessageTextWithChips text={block.text} spans={block.spans} />
+            </p>
+          ))}
+        </FadingMessage>
       ) : null}
       {images.length > 0 || files.length > 0 ? (
         <div {...stylex.props(styles.attachments)}>
