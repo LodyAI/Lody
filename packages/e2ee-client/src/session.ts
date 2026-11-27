@@ -343,18 +343,16 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       const versionBefore = invalidationVersion;
       let view = yield* verified.current();
       yield* Effect.fromResult(requireLedgerContinuation(approval.view, view));
-      if (invalidationVersion !== versionBefore) {
-        for (let attempt = 0; ; attempt++) {
-          const stable = invalidationVersion;
-          view = yield* rawVerified.current();
-          yield* Effect.fromResult(requireLedgerContinuation(approval.view, view));
-          yield* guard;
-          if (invalidationVersion === stable) return view;
-          if (attempt >= 15) return yield* fail('conflict');
-        }
-      }
       yield* guard;
-      return view;
+      if (invalidationVersion === versionBefore) return view;
+      for (let attempt = 0; ; attempt++) {
+        const stable = invalidationVersion;
+        view = yield* rawVerified.current();
+        yield* Effect.fromResult(requireLedgerContinuation(approval.view, view));
+        yield* guard;
+        if (invalidationVersion === stable) return view;
+        if (attempt >= 15) return yield* fail('conflict');
+      }
     });
     const admitted = Effect.fnUntraced(function* () {
       const view = yield* ledger();

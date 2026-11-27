@@ -349,47 +349,48 @@ export class InstalledEpochHistory extends Context.Service<
         }
         cache.set(epoch, copyEpochKeyBytes(key));
       };
-      const finalizeRead = Effect.fnUntraced(function* (
+      const finalizeRead = (
         startGeneration: number,
         view: LedgerView,
         epoch: number,
         key: Bytes.EpochKey
-      ) {
-        if (gate.isClosed()) {
-          disposeEpochKey(key);
-          wipeCache();
-          return yield* fail('closed');
-        }
-        if (startGeneration !== cacheGeneration) {
-          for (let attempt = 0; ; attempt++) {
-            const stable = cacheGeneration;
-            const rechecked = yield* Effect.result(installed.check(epoch));
-            if (Result.isFailure(rechecked)) {
-              disposeEpochKey(key);
-              if (
-                rechecked.failure.reason === 'unauthorized' ||
-                rechecked.failure.reason === 'rollback' ||
-                rechecked.failure.reason === 'closed'
-              )
+      ) =>
+        Effect.gen(function* () {
+          if (gate.isClosed()) {
+            wipeCache();
+            return yield* fail('closed');
+          }
+          if (startGeneration !== cacheGeneration) {
+            for (let attempt = 0; ; attempt++) {
+              const stable = cacheGeneration;
+              const rechecked = yield* Effect.result(installed.check(epoch));
+              if (Result.isFailure(rechecked)) {
+                if (
+                  rechecked.failure.reason === 'unauthorized' ||
+                  rechecked.failure.reason === 'rollback' ||
+                  rechecked.failure.reason === 'closed'
+                )
+                  wipeCache();
+                return yield* rechecked.failure;
+              }
+              if (gate.isClosed()) {
                 wipeCache();
-              return yield* rechecked.failure;
-            }
-            if (gate.isClosed()) {
-              disposeEpochKey(key);
-              wipeCache();
-              return yield* fail('closed');
-            }
-            if (cacheGeneration === stable) return key;
-            if (attempt >= 15) {
-              disposeEpochKey(key);
-              wipeCache();
-              return yield* fail('unauthorized');
+                return yield* fail('closed');
+              }
+              if (cacheGeneration === stable) return key;
+              if (attempt >= 15) {
+                wipeCache();
+                return yield* fail('unauthorized');
+              }
             }
           }
-        }
-        putCached(startGeneration, view, epoch, key);
-        return key;
-      });
+          putCached(startGeneration, view, epoch, key);
+          return key;
+        }).pipe(
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit) ? Effect.void : Effect.sync(() => disposeEpochKey(key))
+          )
+        );
       yield* Effect.addFinalizer(() => Effect.sync(wipeCache));
       const gate = yield* makeAdmissionGate(() => fail('closed'));
       yield* Effect.addFinalizer(() => Effect.sync(wipeCache));
