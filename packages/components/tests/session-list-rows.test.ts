@@ -50,6 +50,37 @@ test('lists only the chosen owners tasks when the team view filters by people', 
   expect(rows.map((row) => row.sessionId)).toEqual(['alice-task', 'bob-task']);
 });
 
+test('surfaces cross-repo linked PR info on sidebar rows for sessions without a GitHub remote', () => {
+  const chatWithPr = makeSession({
+    id: 'chat-with-pr',
+    pullRequests: [{ url: 'https://github.com/other/repo/pull/42', status: 'open' }],
+  });
+  const localWithPr = makeSession({
+    id: 'local-with-pr',
+    project: { kind: 'local', localProjectId: 'local-1' as never },
+    pullRequests: [{ url: 'https://github.com/other/repo/pull/99', status: 'draft' }],
+  });
+  const rows = buildSessionListRows([chatWithPr, localWithPr], {
+    scope: 'my',
+    currentUserId: 'user-1',
+    defaultTitle: 'Untitled',
+  });
+  expect(rows[0]).toMatchObject({
+    sessionId: 'chat-with-pr',
+    repoFullName: null,
+    prUrl: 'https://github.com/other/repo/pull/42',
+    prNumber: 42,
+    prStatus: 'open',
+  });
+  expect(rows[1]).toMatchObject({
+    sessionId: 'local-with-pr',
+    repoFullName: null,
+    prUrl: 'https://github.com/other/repo/pull/99',
+    prNumber: 99,
+    prStatus: 'draft',
+  });
+});
+
 function makeSession(overrides: Partial<SessionMeta> & { id: string }): SessionMeta {
   return {
     id: overrides.id as SessionId,

@@ -2,8 +2,13 @@
 import { act, createElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
-import { resolveSessionPullRequestLinkList, type SessionMeta } from '@lody/shared';
+import {
+  resolveSessionPullRequestLinkList,
+  type SessionMeta,
+  type SessionPullRequestLinkListItem,
+} from '@lody/shared';
 
+import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import {
   SessionPullRequestLinksPanel,
   unlinkSessionPullRequestFromUi,
@@ -90,5 +95,40 @@ describe('linked pull requests panel', () => {
     expect(text).toContain('Checking');
     expect(text).toContain('GitHub did not return this pull request');
     expect(text).toContain('This provider is not supported yet.');
+  });
+
+  it('shows linked PRs in the Info Bar even when the session has no GitHub remote or primary PR', async () => {
+    await initI18n();
+    const opened: SessionPullRequestLinkListItem[] = [];
+    const items = resolveSessionPullRequestLinkList({
+      'prLink:https://github.com/other/repo/pull/42': { k: 'l', o: 'a', t: 1 },
+    } as unknown as SessionMeta);
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        createElement(SessionInfoBar, {
+          pr: null,
+          prLinks: { items, onOpen: (item) => opened.push(item) },
+        })
+      );
+    });
+    expect(container.textContent).toContain('#42');
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Linked pull requests"]'
+    )!;
+    expect(trigger).not.toBeNull();
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      trigger.click();
+    });
+    expect(document.body.textContent).toContain('other/repo#42');
+    const rowButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.title === 'https://github.com/other/repo/pull/42'
+    )!;
+    await act(async () => rowButton.click());
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.url).toBe('https://github.com/other/repo/pull/42');
   });
 });
