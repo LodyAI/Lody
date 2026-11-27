@@ -34,103 +34,115 @@ import { verifyPersonalApproval, type PersonalPairingOffer } from '../src/pairin
 const hex = (a: Uint8Array) => Buffer.from(a).toString('hex');
 const ok = Result.getOrThrow;
 
-describe('personalLedgerControl suffix readFrom', () => {
-  it('synthesizes incremental readFrom over LedgerFeedSource when LedgerLog omits readFrom and forwards injected readFrom', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'e2ee-ledger-control-'));
-    const f = envelopeFixture();
-    const rotatedKey = ok(Bytes.epochKey(new Uint8Array(32).fill(0x51)));
-    try {
-      const records: Uint8Array[] = f.records();
-      const offer: PersonalPairingOffer = {
-        version: 1,
-        workspaceId: 'workspace-A',
-        genesisHash: hex(f.context.genesis.toBytes()),
-        genesisRecordHex: hex(f.genesisRecord),
-        endorser: hex(f.owner.raw),
-        membershipId: '0a'.repeat(16),
-        pairingSessionId: '11'.repeat(16),
-      };
-      const invitation = {
-        workspaceId: offer.workspaceId,
-        ...(await Effect.runPromise(
-          signLedgerSnapshot({ signer: f.owner.signer, ledger: f.ledger })
-        )),
-        offset: `opaque/${records.length}`,
-      };
-      const verified = ok(verifyPersonalApproval(offer, invitation));
-      const approval = {
-        kind: 'snapshot' as const,
-        offer,
-        invitation,
-        view: verified.view,
-      };
-      const nextBody = ok(
-        encodeCbor([
-          verified.view.head.toBytes(),
-          f.owner.raw,
-          [
-            7,
-            1,
-            ok(commitEpochKey(f.context.genesis, 1, rotatedKey)).toBytes(),
-            ok(
-              sealHistoryPacket({
-                genesis: f.context.genesis,
-                epoch: 1,
-                currentKey: rotatedKey,
-                previousKey: f.secret,
-              })
-            ),
-          ],
-        ])
-      );
-      const nextRecord = await Effect.runPromise(
-        signLedgerRecord(ok(prepareLedgerRecord(verified.view, nextBody)), f.owner.signer)
-      );
+async function setupLedgerControlFixture(workspaceId: string) {
+  const dir = await mkdtemp(join(tmpdir(), 'e2ee-ledger-control-'));
+  const f = envelopeFixture();
+  const rotatedKey = ok(Bytes.epochKey(new Uint8Array(32).fill(0x51)));
+  const records: Uint8Array[] = f.records();
+  const initialOffset = `opaque/${records.length}`;
+  const offer: PersonalPairingOffer = {
+    version: 1,
+    workspaceId,
+    genesisHash: hex(f.context.genesis.toBytes()),
+    genesisRecordHex: hex(f.genesisRecord),
+    endorser: hex(f.owner.raw),
+    membershipId: '0a'.repeat(16),
+    pairingSessionId: '11'.repeat(16),
+  };
+  const invitation = {
+    workspaceId: offer.workspaceId,
+    ...(await Effect.runPromise(signLedgerSnapshot({ signer: f.owner.signer, ledger: f.ledger }))),
+    offset: initialOffset,
+  };
+  const verified = ok(verifyPersonalApproval(offer, invitation));
+  const approval = {
+    kind: 'snapshot' as const,
+    offer,
+    invitation,
+    view: verified.view,
+  };
+  const nextBody = ok(
+    encodeCbor([
+      verified.view.head.toBytes(),
+      f.owner.raw,
+      [
+        7,
+        1,
+        ok(commitEpochKey(f.context.genesis, 1, rotatedKey)).toBytes(),
+        ok(
+          sealHistoryPacket({
+            genesis: f.context.genesis,
+            epoch: 1,
+            currentKey: rotatedKey,
+            previousKey: f.secret,
+          })
+        ),
+      ],
+    ])
+  );
+  const nextRecord = await Effect.runPromise(
+    signLedgerRecord(ok(prepareLedgerRecord(verified.view, nextBody)), f.owner.signer)
+  );
+  const ws = Layer.succeed(WorkspaceScope, { genesis: f.context.genesis });
+  const stores = (suffix: string) =>
+    Layer.mergeAll(
+      ws,
+      sqliteLedgerFeedStore({ path: join(dir, `feed-${suffix}.sqlite`), mode: 'create' }).pipe(
+        Layer.provide(ws)
+      ),
+      sqliteLedgerPinStore({ path: join(dir, `pins-${suffix}.sqlite`), mode: 'create' }).pipe(
+        Layer.provide(ws)
+      ),
+      sqliteSubmissionJournal({ path: join(dir, `journal-${suffix}.sqlite`) }).pipe(
+        Layer.provide(ws)
+      )
+    );
+  const cleanup = async () => {
+    disposeEpochKey(rotatedKey);
+    disposeEpochKey(f.secret);
+    await rm(dir, { recursive: true, force: true });
+  };
+  return { f, records, initialOffset, verified, approval, nextRecord, stores, cleanup };
+}
 
+describe('personalLedgerControl suffix readFrom', () => {
+  it('synthesizes incremental readFrom over LedgerFeedSource when LedgerLog omits readFrom and respects preferFeedSuffix', async () => {
+    const fx = await setupLedgerControlFixture('workspace-A');
+    try {
       let fullReads = 0;
       const afterOffsets: string[] = [];
-      const ws = Layer.succeed(WorkspaceScope, { genesis: f.context.genesis });
-      const stores = Layer.mergeAll(
-        ws,
-        sqliteLedgerFeedStore({ path: join(dir, 'feed.sqlite'), mode: 'create' }).pipe(
-          Layer.provide(ws)
-        ),
-        sqliteLedgerPinStore({ path: join(dir, 'pins.sqlite'), mode: 'create' }).pipe(
-          Layer.provide(ws)
-        ),
-        sqliteSubmissionJournal({ path: join(dir, 'journal.sqlite') }).pipe(Layer.provide(ws))
-      );
+      const feedSource = Layer.succeed(LedgerFeedSource, {
+        readAfter: (offset) =>
+          Effect.sync(() => {
+            afterOffsets.push(offset);
+            const start = Number(offset.split('/')[1] ?? '0');
+            return {
+              requestOffset: offset,
+              nextOffset: `opaque/${fx.records.length}`,
+              records: fx.records.slice(start),
+              upToDate: true,
+            };
+          }),
+      });
 
       await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
             const ctx = yield* Layer.build(
-              personalLedgerControl({ approval }).pipe(
+              personalLedgerControl({ approval: fx.approval }).pipe(
                 Layer.provide(
                   Layer.mergeAll(
-                    stores,
-                    Layer.succeed(LedgerFeedSource, {
-                      readAfter: (offset) =>
-                        Effect.sync(() => {
-                          afterOffsets.push(offset);
-                          const start = Number(offset.split('/')[1] ?? '0');
-                          return {
-                            requestOffset: offset,
-                            nextOffset: `opaque/${records.length}`,
-                            records: records.slice(start),
-                            upToDate: true,
-                          };
-                        }),
-                    }),
+                    fx.stores('1'),
+                    feedSource,
                     Layer.succeed(LedgerLog, {
                       read: () =>
                         Effect.sync(() => {
                           fullReads++;
                           return {
-                            records: records.slice(),
+                            records: fx.records.slice(),
                             checkpoint: {
-                              head: hashRecordBytes(records.at(-1)!),
-                              length: records.length,
+                              head: hashRecordBytes(fx.records.at(-1)!),
+                              length: fx.records.length,
                             },
                           };
                         }),
@@ -144,202 +156,65 @@ describe('personalLedgerControl suffix readFrom', () => {
             const sync = Context.get(ctx, LedgerSync);
             expect(log.readFrom).toBeDefined();
 
-            records.push(nextRecord);
-            const suffix = yield* log.readFrom!(f.context.genesis, verified.view);
+            fx.records.push(fx.nextRecord);
+            const suffix = yield* log.readFrom!(fx.f.context.genesis, fx.verified.view);
             expect(fullReads).toBe(0);
-            expect(afterOffsets).toEqual([`opaque/${records.length - 1}`]);
-            expect(suffix.records.map(hex)).toEqual([hex(nextRecord)]);
-            expect(suffix.checkpoint.length).toBe(records.length);
-            expect((yield* sync.current()).view.length).toBe(records.length);
+            expect(afterOffsets).toEqual([fx.initialOffset]);
+            expect(suffix.records.map(hex)).toEqual([hex(fx.nextRecord)]);
+            expect(suffix.checkpoint.length).toBe(fx.records.length);
+            expect((yield* sync.current()).view.length).toBe(fx.records.length);
           })
         )
       );
 
-      let injectedCalls = 0;
       const allView = ok(
         verifyLedger({
-          anchor: f.context.genesis,
-          records,
-          checkpoint: { head: hashRecordBytes(records.at(-1)!), length: records.length },
+          anchor: fx.f.context.genesis,
+          records: fx.records,
+          checkpoint: { head: hashRecordBytes(fx.records.at(-1)!), length: fx.records.length },
         })
       );
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const ctx = yield* Layer.build(
-              personalLedgerControl({ approval }).pipe(
-                Layer.provide(
-                  Layer.mergeAll(
-                    ws,
-                    sqliteLedgerFeedStore({
-                      path: join(dir, 'feed-2.sqlite'),
-                      mode: 'create',
-                    }).pipe(Layer.provide(ws)),
-                    sqliteLedgerPinStore({
-                      path: join(dir, 'pins-2.sqlite'),
-                      mode: 'create',
-                    }).pipe(Layer.provide(ws)),
-                    sqliteSubmissionJournal({ path: join(dir, 'journal-2.sqlite') }).pipe(
-                      Layer.provide(ws)
-                    ),
-                    Layer.succeed(LedgerFeedSource, {
-                      readAfter: (offset) =>
-                        Effect.succeed({
-                          requestOffset: offset,
-                          nextOffset: offset,
-                          records: [],
-                          upToDate: true,
-                        }),
-                    }),
-                    Layer.succeed(LedgerLog, {
-                      readFrom: (_anchor, base) =>
-                        Effect.sync(() => {
-                          injectedCalls++;
-                          return {
-                            records: records.slice(base.length),
-                            checkpoint: { head: allView.head, length: records.length },
-                          };
-                        }),
-                      read: () => Effect.fail(new LedgerLogError({})),
-                      appendCas: () => Effect.fail(new LedgerLogError({})),
-                    })
+      for (const preferFeedSuffix of [false, true]) {
+        let injectedCalls = 0;
+        afterOffsets.length = 0;
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const ctx = yield* Layer.build(
+                personalLedgerControl({ approval: fx.approval, preferFeedSuffix }).pipe(
+                  Layer.provide(
+                    Layer.mergeAll(
+                      fx.stores(preferFeedSuffix ? '3' : '2'),
+                      feedSource,
+                      Layer.succeed(LedgerLog, {
+                        readFrom: (_anchor, base) =>
+                          Effect.sync(() => {
+                            injectedCalls++;
+                            return {
+                              records: fx.records.slice(base.length),
+                              checkpoint: { head: allView.head, length: fx.records.length },
+                            };
+                          }),
+                        read: () => Effect.fail(new LedgerLogError({})),
+                        appendCas: () => Effect.fail(new LedgerLogError({})),
+                      })
+                    )
                   )
                 )
-              )
-            );
-            const suffix = yield* Context.get(ctx, LedgerLog).readFrom!(
-              f.context.genesis,
-              verified.view
-            );
-            expect(injectedCalls).toBe(1);
-            expect(suffix.records.map(hex)).toEqual([hex(nextRecord)]);
-          })
-        )
-      );
+              );
+              const suffix = yield* Context.get(ctx, LedgerLog).readFrom!(
+                fx.f.context.genesis,
+                fx.verified.view
+              );
+              expect(suffix.records.map(hex)).toEqual([hex(fx.nextRecord)]);
+              expect(injectedCalls).toBe(preferFeedSuffix ? 0 : 1);
+              expect(afterOffsets).toEqual(preferFeedSuffix ? [fx.initialOffset] : []);
+            })
+          )
+        );
+      }
     } finally {
-      disposeEpochKey(rotatedKey);
-      disposeEpochKey(f.secret);
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('prefers incremental readSuffix over injected readFrom when feed has a p1: offset', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'e2ee-ledger-p1-'));
-    const f = envelopeFixture();
-    const rotatedKey = ok(Bytes.epochKey(new Uint8Array(32).fill(0x52)));
-    try {
-      const records: Uint8Array[] = f.records();
-      const offer: PersonalPairingOffer = {
-        version: 1,
-        workspaceId: 'workspace-P1',
-        genesisHash: hex(f.context.genesis.toBytes()),
-        genesisRecordHex: hex(f.genesisRecord),
-        endorser: hex(f.owner.raw),
-        membershipId: '0a'.repeat(16),
-        pairingSessionId: '12'.repeat(16),
-      };
-      const initialPos = `p1:workspace-P1:${records.length}:tail:0`;
-      const invitation = {
-        workspaceId: offer.workspaceId,
-        ...(await Effect.runPromise(
-          signLedgerSnapshot({ signer: f.owner.signer, ledger: f.ledger })
-        )),
-        offset: initialPos,
-      };
-      const verified = ok(verifyPersonalApproval(offer, invitation));
-      const approval = {
-        kind: 'snapshot' as const,
-        offer,
-        invitation,
-        view: verified.view,
-      };
-      const nextBody = ok(
-        encodeCbor([
-          verified.view.head.toBytes(),
-          f.owner.raw,
-          [
-            7,
-            1,
-            ok(commitEpochKey(f.context.genesis, 1, rotatedKey)).toBytes(),
-            ok(
-              sealHistoryPacket({
-                genesis: f.context.genesis,
-                epoch: 1,
-                currentKey: rotatedKey,
-                previousKey: f.secret,
-              })
-            ),
-          ],
-        ])
-      );
-      const nextRecord = await Effect.runPromise(
-        signLedgerRecord(ok(prepareLedgerRecord(verified.view, nextBody)), f.owner.signer)
-      );
-
-      let injectedCalls = 0;
-      const afterOffsets: string[] = [];
-      const ws = Layer.succeed(WorkspaceScope, { genesis: f.context.genesis });
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const ctx = yield* Layer.build(
-              personalLedgerControl({ approval }).pipe(
-                Layer.provide(
-                  Layer.mergeAll(
-                    ws,
-                    sqliteLedgerFeedStore({ path: join(dir, 'feed.sqlite'), mode: 'create' }).pipe(
-                      Layer.provide(ws)
-                    ),
-                    sqliteLedgerPinStore({ path: join(dir, 'pins.sqlite'), mode: 'create' }).pipe(
-                      Layer.provide(ws)
-                    ),
-                    sqliteSubmissionJournal({ path: join(dir, 'journal.sqlite') }).pipe(
-                      Layer.provide(ws)
-                    ),
-                    Layer.succeed(LedgerFeedSource, {
-                      readAfter: (offset) =>
-                        Effect.sync(() => {
-                          afterOffsets.push(offset);
-                          const start = Number(offset.split(':')[2] ?? '0');
-                          return {
-                            requestOffset: offset,
-                            nextOffset: `p1:workspace-P1:${records.length}:tail:0`,
-                            records: records.slice(start),
-                            upToDate: true,
-                          };
-                        }),
-                    }),
-                    Layer.succeed(LedgerLog, {
-                      readFrom: () =>
-                        Effect.sync(() => {
-                          injectedCalls++;
-                          return {
-                            records: [],
-                            checkpoint: { head: verified.view.head, length: verified.view.length },
-                          };
-                        }),
-                      read: () => Effect.fail(new LedgerLogError({})),
-                      appendCas: () => Effect.fail(new LedgerLogError({})),
-                    })
-                  )
-                )
-              )
-            );
-            records.push(nextRecord);
-            const suffix = yield* Context.get(ctx, LedgerLog).readFrom!(
-              f.context.genesis,
-              verified.view
-            );
-            expect(injectedCalls).toBe(0);
-            expect(afterOffsets).toEqual([initialPos]);
-            expect(suffix.records.map(hex)).toEqual([hex(nextRecord)]);
-          })
-        )
-      );
-    } finally {
-      disposeEpochKey(rotatedKey);
-      disposeEpochKey(f.secret);
-      await rm(dir, { recursive: true, force: true });
+      await fx.cleanup();
     }
   });
 });

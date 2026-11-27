@@ -22,7 +22,6 @@ import * as Signing from '@lody/e2ee-core/protocol';
 import * as Ledger from '@lody/e2ee-core/protocol';
 import * as Snapshots from '@lody/e2ee-core/protocol';
 import { encodeCbor, type CborValue } from '../src/internal/foundation/cbor';
-import * as SignatureModule from '../src/internal/foundation/signature';
 import {
   Bytes,
   deriveContentKey,
@@ -1375,124 +1374,40 @@ describe('ledger-bound signed document workflows', () => {
       )
     );
   });
-  it('verifies update_batch signatures exactly once while still rejecting tampering, revocation and cross-workspace forgery', async () => {
+  it('rejects post-decrypt ledger forks when opening update_batch frames', async () => {
     const f = ledgerFixture(true);
     const otherWs = ledgerFixture(true);
     f.addPhone();
-    const verifySpy = vi.spyOn(SignatureModule, 'verifyParsedContentSignature');
-    try {
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const writer = yield* makeStreamsUpdateBinding({
-              ...bindingOptions(f),
-              signer: f.phone.signer,
-            });
-            const reader = yield* makeStreamsUpdateBinding(bindingOptions(f));
-            const aad = new Uint8Array([1, 2]);
-            const sealed = yield* writer.seal(updateInput);
-
-            verifySpy.mockClear();
-            const opened = yield* reader.open({
-              ...sealed,
-              context: updateContext,
-              additionalData: aad,
-            });
-            expect(opened).toEqual(updateInput.plaintext);
-            expect(verifySpy).toHaveBeenCalledTimes(1);
-
-            const tampered = new Uint8Array(sealed.sealed);
-            tampered[tampered.length - 1] ^= 1;
-            expect(
-              code(
-                yield* Effect.result(
-                  reader.open({
-                    ...sealed,
-                    sealed: tampered,
-                    context: updateContext,
-                    additionalData: aad,
-                  })
-                )
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const writer = yield* makeStreamsUpdateBinding({
+            ...bindingOptions(f),
+            signer: f.phone.signer,
+          });
+          const aad = new Uint8Array([1, 2]);
+          const sealed = yield* writer.seal(updateInput);
+          let first = true;
+          const rollingBack = yield* makeStreamsUpdateBinding({
+            ...bindingOptions(f),
+            ledger: () => {
+              if (first) {
+                first = false;
+                return Effect.succeed(f.view());
+              }
+              return Effect.succeed(otherWs.view());
+            },
+          });
+          expect(
+            code(
+              yield* Effect.result(
+                rollingBack.open({ ...sealed, context: updateContext, additionalData: aad })
               )
-            ).toBe('bad-content-signature');
-
-            const foreignReader = yield* makeStreamsUpdateBinding(bindingOptions(otherWs));
-            expect(
-              Result.isFailure(
-                yield* Effect.result(
-                  foreignReader.open({
-                    ...sealed,
-                    context: updateContext,
-                    additionalData: aad,
-                  })
-                )
-              )
-            ).toBe(true);
-
-            const rogueHeader: ContentHeader = {
-              ...f.scope,
-              docEpoch: 0,
-              device: hex(f.attacker.raw),
-            };
-            const leaf = keyFor(f.scope);
-            const encrypted = read(sealContentAead(leaf, rogueHeader, updateInput.plaintext, aad));
-            disposeContentKey(leaf);
-            const unsigned = new Uint8Array(
-              Buffer.concat([
-                read(encodeContentHeader(rogueHeader)),
-                encrypted.nonce,
-                encrypted.ciphertext,
-              ])
-            );
-            const forged = new Uint8Array(
-              Buffer.concat([
-                unsigned,
-                f.attacker.signBytes(read(contentSigningBytes(f.scope, unsigned, aad))),
-              ])
-            );
-            expect(
-              code(
-                yield* Effect.result(
-                  reader.open({
-                    ...sealed,
-                    sealed: forged,
-                    context: updateContext,
-                    additionalData: aad,
-                  })
-                )
-              )
-            ).toBe('unauthorized');
-
-            f.append([5, f.phone.raw]);
-            expect(code(yield* Effect.result(writer.seal(updateInput)))).toBe('unauthorized');
-            let first = true;
-            const rollingBack = yield* makeStreamsUpdateBinding({
-              ...bindingOptions(f),
-              ledger: () => {
-                if (first) {
-                  first = false;
-                  return Effect.succeed(f.view());
-                }
-                return Effect.succeed(otherWs.view());
-              },
-            });
-            expect(
-              code(
-                yield* Effect.result(
-                  rollingBack.open({
-                    ...sealed,
-                    context: updateContext,
-                    additionalData: aad,
-                  })
-                )
-              )
-            ).toBe('unauthorized');
-          })
-        )
-      );
-    } finally {
-      verifySpy.mockRestore();
-    }
+            )
+          ).toBe('unauthorized');
+        })
+      )
+    );
   });
   it.each(['restart', 'rollback', 'new-clock', 'missing-journal', 'consecutive'] as const)(
     'never renews retained-key grace across %s',

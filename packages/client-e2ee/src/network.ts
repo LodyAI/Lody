@@ -592,6 +592,17 @@ export function makePersonalCloudNetwork(
           Effect.gen(function* () {
             yield* guard();
             if (!anchor.equals(scope.genesis)) return yield* failure();
+            const isMatchingSuffixPage = (
+              page: z.infer<typeof historyPage>,
+              expectedStartIndex: number,
+              expectedCheckpoint?: z.infer<typeof checkpoint>
+            ) =>
+              page.workspaceId === scope.workspaceId &&
+              page.genesisHash === genesisHash &&
+              page.startIndex === expectedStartIndex &&
+              (!expectedCheckpoint ||
+                (page.checkpoint.length === expectedCheckpoint.length &&
+                  page.checkpoint.headHash === expectedCheckpoint.headHash));
             const previous = lastRead;
             if (
               !previous ||
@@ -601,9 +612,7 @@ export function makePersonalCloudNetwork(
             ) {
               if (
                 inline &&
-                inline.workspaceId === scope.workspaceId &&
-                inline.genesisHash === genesisHash &&
-                inline.startIndex === base.length &&
+                isMatchingSuffixPage(inline, base.length) &&
                 inline.nextCursor === null &&
                 inline.startIndex + inline.recordsHex.length === inline.checkpoint.length
               ) {
@@ -648,13 +657,7 @@ export function makePersonalCloudNetwork(
                   credential
                 ));
               fixed ??= page.checkpoint;
-              if (
-                page.workspaceId !== scope.workspaceId ||
-                page.genesisHash !== genesisHash ||
-                page.startIndex !== base.length + records.length ||
-                page.checkpoint.length !== fixed.length ||
-                page.checkpoint.headHash !== fixed.headHash
-              )
+              if (!isMatchingSuffixPage(page, base.length + records.length, fixed))
                 return yield* failure();
               for (const record of page.recordsHex) {
                 size += record.length / 2;

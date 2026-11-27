@@ -987,6 +987,19 @@ describe('protected store repair and read-only authority pins', () => {
     repaired.close();
   });
 
+  const appendEpoch = (
+    f: ReturnType<typeof envelopeFixture>,
+    epoch: number,
+    previousKey: Bytes.EpochKey,
+    currentKey: Bytes.EpochKey
+  ) =>
+    f.append([
+      7,
+      epoch,
+      ok(commitEpochKey(f.context.genesis, epoch, currentKey)).toBytes(),
+      ok(sealHistoryPacket({ genesis: f.context.genesis, epoch, currentKey, previousKey })),
+    ]);
+
   it('caches installed epoch keys in memory and synchronously wipes on invalidate, epoch advance, revocation, and close', async () => {
     const f = envelopeFixture(),
       native = synthetic(),
@@ -1026,24 +1039,12 @@ describe('protected store repair and read-only authority pins', () => {
             }
             expect(unprotectCalls).toBe(1);
 
-            history.invalidate?.();
+            history.invalidate();
             const afterInvalidate = yield* history.read(0);
             disposeEpochKey(afterInvalidate);
             expect(unprotectCalls).toBe(2);
 
-            f.append([
-              7,
-              1,
-              ok(commitEpochKey(f.context.genesis, 1, key1)).toBytes(),
-              ok(
-                sealHistoryPacket({
-                  genesis: f.context.genesis,
-                  epoch: 1,
-                  currentKey: key1,
-                  previousKey: f.secret,
-                })
-              ),
-            ]);
+            appendEpoch(f, 1, f.secret, key1);
             const afterEpochAdvance = yield* history.read(0);
             disposeEpochKey(afterEpochAdvance);
             expect(unprotectCalls).toBe(3);
@@ -1066,32 +1067,8 @@ describe('protected store repair and read-only authority pins', () => {
       dbPath = file();
     const key1 = ok(Bytes.epochKey(new Uint8Array(32).fill(181)));
     const key2 = ok(Bytes.epochKey(new Uint8Array(32).fill(182)));
-    f.append([
-      7,
-      1,
-      ok(commitEpochKey(f.context.genesis, 1, key1)).toBytes(),
-      ok(
-        sealHistoryPacket({
-          genesis: f.context.genesis,
-          epoch: 1,
-          currentKey: key1,
-          previousKey: f.secret,
-        })
-      ),
-    ]);
-    f.append([
-      7,
-      2,
-      ok(commitEpochKey(f.context.genesis, 2, key2)).toBytes(),
-      ok(
-        sealHistoryPacket({
-          genesis: f.context.genesis,
-          epoch: 2,
-          currentKey: key2,
-          previousKey: key1,
-        })
-      ),
-    ]);
+    appendEpoch(f, 1, f.secret, key1);
+    appendEpoch(f, 2, key1, key2);
     let protectCalls = 0;
     const countingProtector: NativeEpochProtector = {
       ...native.protector,
@@ -1188,7 +1165,7 @@ describe('protected store repair and read-only authority pins', () => {
           pauseFirst = true;
           const fiberA = yield* Effect.forkChild(history.read(0));
           yield* Effect.promise(() => pEntered1);
-          history.invalidate?.();
+          history.invalidate();
           releaseA();
           const keyA = yield* Fiber.join(fiberA);
           disposeEpochKey(keyA);
@@ -1198,7 +1175,7 @@ describe('protected store repair and read-only authority pins', () => {
           disposeEpochKey(keyAfter);
           expect(unprotectCalls).toBe(callsBeforeSubsequent + 1);
 
-          history.invalidate?.();
+          history.invalidate();
           const pEntered2 = waitEnteredA();
           gateA = new Promise<void>((resolve) => {
             releaseA = resolve;
@@ -1207,7 +1184,7 @@ describe('protected store repair and read-only authority pins', () => {
           const fiberRevoked = yield* Effect.forkChild(history.read(0));
           yield* Effect.promise(() => pEntered2);
           f.append([5, f.phone.raw]);
-          history.invalidate?.();
+          history.invalidate();
           releaseA();
           const revokedExit = yield* Fiber.await(fiberRevoked);
           expect(Exit.isFailure(revokedExit)).toBe(true);

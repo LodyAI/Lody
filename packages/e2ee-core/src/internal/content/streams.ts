@@ -23,9 +23,13 @@ import {
   contentSigningBytes,
   type ContentScope,
 } from '../foundation/content-format';
-import { documentKeyForScope, scopedDocumentKey } from './document-key';
-import { openContentAead } from '../crypto/content';
-import { admitDocument, authenticateDocument, sealDocument } from './index';
+import { scopedDocumentKey } from './document-key';
+import {
+  admitDocument,
+  authenticateDocument,
+  openAuthenticatedDocument,
+  sealDocument,
+} from './index';
 import { verifySignatureEffect, NativeSignatureError } from '../foundation/signature';
 import { bytesEqual } from '../foundation/cbor';
 
@@ -261,19 +265,7 @@ export function makeStreamsUpdateBinding(input: {
           return yield* withKey(view, metadata.epoch, selected.kind, (key) =>
             Effect.gen(function* () {
               const opened = yield* Effect.fromResult(
-                Result.gen(function* () {
-                  // frame and binding are owned copies already authenticated above.
-                  const parsed = yield* parseContentFrame(frame, frameScope.purpose);
-                  const leaf = yield* documentKeyForScope(key, frameScope);
-                  const plaintext = yield* openContentAead(
-                    leaf,
-                    authenticated.header,
-                    parsed.nonce,
-                    parsed.ciphertext,
-                    binding
-                  );
-                  return { header: authenticated.header, plaintext };
-                })
+                openAuthenticatedDocument(authenticated, key)
               );
               return yield* Effect.acquireUseRelease(
                 Effect.succeed(opened.plaintext),

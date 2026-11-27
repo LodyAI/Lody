@@ -62,28 +62,39 @@ const parse = (raw: unknown, accountId: string, workspaceId: string): Pin | null
     ...('kind' in raw ? { kind: 'member' as const } : {}),
   };
 };
-/** Public desktop pins only; neither this routing index nor its phase grants approval. */
-export function personalEntryPins(databaseName: string) {
+interface CachedIdbHandle {
+  readonly withDatabase: <A>(
+    work: (db: IDBDatabase) => Promise<A>
+  ) => Effect.Effect<A, PersonalHostError>;
+  readonly close: () => void;
+}
+function makeCachedIdbHandle(databaseName: string): CachedIdbHandle {
   let cachedDb: IDBDatabase | null = null;
   let opening: Promise<IDBDatabase> | null = null;
   let cachedFactory: IDBFactory | null = null;
+  let epoch = 0;
+
+  const close = () => {
+    epoch++;
+    opening = null;
+    const db = cachedDb;
+    cachedDb = null;
+    if (db) {
+      try {
+        db.close();
+      } catch {}
+    }
+  };
 
   const openDatabase = (): Promise<IDBDatabase> => {
     const factory = indexedDB;
     if (cachedFactory !== factory) {
-      if (cachedDb) {
-        try {
-          cachedDb.close();
-        } catch {
-          /* ignore */
-        }
-      }
-      cachedDb = null;
-      opening = null;
+      close();
       cachedFactory = factory;
     }
     if (cachedDb) return Promise.resolve(cachedDb);
     if (opening) return opening;
+    const startEpoch = epoch;
     const pending = new Promise<IDBDatabase>((resolve, reject) => {
       let finished = false;
       const request = factory.open(databaseName, 1);
@@ -107,7 +118,12 @@ export function personalEntryPins(databaseName: string) {
           return;
         }
         finished = true;
-        if (value.objectStoreNames.length !== 1 || !value.objectStoreNames.contains('pins')) {
+        if (
+          epoch !== startEpoch ||
+          cachedFactory !== factory ||
+          value.objectStoreNames.length !== 1 ||
+          !value.objectStoreNames.contains('pins')
+        ) {
           value.close();
           reject(failure());
           return;
@@ -119,12 +135,7 @@ export function personalEntryPins(databaseName: string) {
         value.onclose = () => {
           if (cachedDb === value) cachedDb = null;
         };
-        if (cachedFactory === factory) cachedDb = value;
-        else {
-          value.close();
-          reject(failure());
-          return;
-        }
+        cachedDb = value;
         resolve(value);
       };
     });
@@ -154,6 +165,12 @@ export function personalEntryPins(databaseName: string) {
       },
       catch: (cause) => (cause instanceof PersonalHostError ? cause : failure()),
     });
+
+  return { withDatabase, close };
+}
+/** Public desktop pins only; neither this routing index nor its phase grants approval. */
+export function personalEntryPins(databaseName: string) {
+  const { withDatabase, close } = makeCachedIdbHandle(databaseName);
 
   const transact = <A>(
     accountId: string,
@@ -204,21 +221,15 @@ export function personalEntryPins(databaseName: string) {
           };
         })
     );
-  return {
-    read: (accountId: string, workspaceId: string) =>
-      transact(accountId, workspaceId, false, (old) => ({ result: old })),
-    /**
-     * Every `ready` pin of this account, for an approving device that has not opened
-     * all of its workspaces in this process. A malformed pin is skipped here; reading
-     * that workspace still refuses it.
-     */
-    listReady: (accountId: string) =>
-      withDatabase(
-        (db) =>
-          new Promise<Pin[]>((resolve, reject) => {
+  const listAccountPins = (accountId: string) =>
+    withDatabase(
+      (db) =>
+        new Promise<{ readonly ready: Pin[]; readonly corruptWorkspaceIds: ReadonlySet<string> }>(
+          (resolve, reject) => {
             const tx = db.transaction('pins', 'readonly'),
               store = tx.objectStore('pins'),
-              ready: Pin[] = [];
+              ready: Pin[] = [],
+              corruptWorkspaceIds = new Set<string>();
             const cursor = store.openCursor();
             cursor.onsuccess = () => {
               const row = cursor.result;
@@ -239,15 +250,27 @@ export function personalEntryPins(databaseName: string) {
                   const pin = parse(row.value, accountId, key[1]);
                   if (pin?.phase === 'ready') ready.push(pin);
                 } catch {
-                  /* Skipped; `read` keeps refusing it. */
+                  corruptWorkspaceIds.add(key[1]);
                 }
               }
               row.continue();
             };
-            tx.oncomplete = () => resolve(ready);
+            tx.oncomplete = () => resolve({ ready, corruptWorkspaceIds });
             tx.onabort = tx.onerror = () => reject(failure());
-          })
-      ),
+          }
+        )
+    );
+  return {
+    read: (accountId: string, workspaceId: string) =>
+      transact(accountId, workspaceId, false, (old) => ({ result: old })),
+    /**
+     * Every `ready` pin of this account, for an approving device that has not opened
+     * all of its workspaces in this process. A malformed pin is skipped here; reading
+     * that workspace still refuses it.
+     */
+    listReady: (accountId: string) => Effect.map(listAccountPins(accountId), ({ ready }) => ready),
+    listAccountPins,
+    close,
     prepare: (accountId: string, offer: PersonalPairingOffer, kind?: 'member') =>
       transact(accountId, offer.workspaceId, true, (old) => {
         if (Result.isFailure(verifyPersonalOffer(offer)))

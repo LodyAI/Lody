@@ -38,6 +38,9 @@
   Retrying the same intent never signs a second genesis.
 - Entry pins route an exact desktop offer; they grant no approval. Never clear a
   ready/pending pin to bypass replacement or missing native protection.
+  `personalEntry` restricts `reuse-active` strictly to `seal` and `openContent`;
+  open, join and pairing always reconcile pins, and teardown closes the cached
+  `personalEntryPins` `IDBDatabase` handle.
 - Access loss (`e2ee_device_revoked`/`e2ee_member_removed`, exact plain messages) comes
   only from an `E2eeAccessRefusal` (credential-bound call, account unchanged), the runtime's
   verified-ledger `revoked` or its exact plain `Error(code)` rejection, or a status without

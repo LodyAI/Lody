@@ -166,7 +166,7 @@ export function personalCloudHostPorts(
               );
               const remote = network.ledger(hex(credential));
               return yield* Layer.build(
-                personalLedgerControl({ approval }).pipe(
+                personalLedgerControl({ approval, preferFeedSuffix: true }).pipe(
                   Layer.provide(
                     Layer.mergeAll(
                       ws,

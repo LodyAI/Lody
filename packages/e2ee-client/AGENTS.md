@@ -123,4 +123,10 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - Management exposes last-personal-device risk from the verified ledger and requires
   explicit recovery-only confirmation before signing its revocation.
 
+- Content `openContent` uses `'admitted-on-delivery'` to run post-decrypt
+  `verifiedLoss` and wipe plaintext on refusal. `SessionReadCycle` fences
+  in-cycle reads via `untilStable` and triggers `InstalledEpochHistory.invalidate()`.
+  Cold `open` hands off its preopened identity scope once and never reuses it
+  across replacement.
+
 [Recovery scheduling](src/AGENTS.md) owns workspace concurrency and joins.

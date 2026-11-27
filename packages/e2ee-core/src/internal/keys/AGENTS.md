@@ -58,6 +58,10 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
   Recovering a missing key requires a starting epoch above the requested one. It verifies the
   whole chain before writes, wipes copies on every exit and retries only genuinely
   missing keys. It restores no envelopes, publishes nothing, selects no vault.
+  Its bounded RAM epoch-key cache binds to `(length, head)` and a monotonic
+  `CacheGeneration`, wipes synchronously via `.fill(0)` on `invalidate()`, close,
+  head change, revocation or rollback, and disposes borrowed keys via
+  `acquireUseRelease` on any non-success exit.
 
 - Envelopes keep `AAD || enc32 || ct48 || signature64` and `lody-e2ee/epoch-env/v1\0`;
   context comes from the caller, never the frame. Check the outer signature before

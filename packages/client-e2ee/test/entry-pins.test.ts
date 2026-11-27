@@ -307,3 +307,50 @@ it('retires stale entry.offer when another tab replaces a cancelled offer before
     await owner.close();
   }
 });
+
+it('reports corrupt pins in listAccountPins and closes its cached IDBDatabase on close()', async () => {
+  const dbName = 'corrupt-and-close-pins';
+  const pins = personalEntryPins(dbName);
+  const offer = await offerFor('ws-healthy', 41);
+  await Effect.runPromise(pins.prepare('acc-1', offer));
+  await Effect.runPromise(pins.finish('acc-1', offer, 'ready'));
+
+  await new Promise<void>((resolve, reject) => {
+    const req = indexedDB.open(dbName, 1);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('pins', 'readwrite');
+      tx.objectStore('pins').put(
+        { version: 1, corrupt: true },
+        JSON.stringify(['acc-1', 'ws-bad'])
+      );
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onabort = tx.onerror = () => reject(tx.error);
+    };
+  });
+
+  const listed = await Effect.runPromise(pins.listAccountPins('acc-1'));
+  expect(listed.ready.map((p) => p.offer.workspaceId)).toEqual(['ws-healthy']);
+  expect([...listed.corruptWorkspaceIds]).toEqual(['ws-bad']);
+
+  let openCount = 0;
+  const origOpen = indexedDB.open.bind(indexedDB);
+  const openSpy = vi.spyOn(indexedDB, 'open').mockImplementation((...args) => {
+    openCount++;
+    return origOpen(...args);
+  });
+  try {
+    expect((await Effect.runPromise(pins.read('acc-1', 'ws-healthy')))?.phase).toBe('ready');
+    expect(openCount).toBe(0);
+    pins.close();
+    expect((await Effect.runPromise(pins.read('acc-1', 'ws-healthy')))?.phase).toBe('ready');
+    expect(openCount).toBe(1);
+    pins.close();
+  } finally {
+    openSpy.mockRestore();
+  }
+});

@@ -87,10 +87,10 @@ key read must transfer a fresh owned opaque epoch key; the codec verifies its re
 ledger commitment before deriving a scoped leaf and clears both after use.
 Historical signatures are checked before untrusted frame epochs can request keys.
 Content snapshots also require a current non-Guest personal/machine writer before
-key lookup and after decryption. Snapshot opens reuse their owned authenticated
-frame for AEAD and recheck current permission against a genuine extending ledger;
-they do not repeat signature verification on unchanged bytes. Historical update
-reads retain their previous verification path. The product's native-snapshot MVP
+key lookup and after decryption. Both snapshot and update opens reuse their owned
+authenticated frame for AEAD via `openAuthenticatedDocument` and recheck continuation
+against a genuine extending ledger (`requireLedgerContinuation`); they do not repeat
+signature verification on unchanged bytes. The product's native-snapshot MVP
 and replay/trim recovery policy are recorded in the
 [PR-17 note](../../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-native-content-snapshots.md).
 It contains no Promise runner, production protector or SDK transport. Lab owns the

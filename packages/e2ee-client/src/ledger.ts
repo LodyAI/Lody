@@ -65,7 +65,10 @@ export const qualifyPersonalLedgerOrigin = Effect.fnUntraced(function* (
   };
 });
 /** Feed and submission composition over injected ports, preserving a single origin and rollback pin across local identity replacement. */
-export const personalLedgerControl = (input: { readonly approval: PersonalApproval }) =>
+export const personalLedgerControl = (input: {
+  readonly approval: PersonalApproval;
+  readonly preferFeedSuffix?: boolean;
+}) =>
   Layer.effectContext(
     Effect.gen(function* () {
       const approval = input.approval,
@@ -90,7 +93,6 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         origin = { kind: 'snapshot', snapshot: verified.snapshot };
         originView = verified.view;
       } else {
-        // approval.view is already a verified LedgerView; avoid replaying approval.pages again.
         yield* Effect.fromResult(requireLedgerContinuation(approval.view, approval.view));
         if (approval.originalOrigin) {
           const qualified = yield* qualifyPersonalLedgerOrigin(approval);
@@ -178,15 +180,16 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
       });
       const readFrom = Effect.fnUntraced(function* (anchor: Bytes.GenesisHash, base: LedgerView) {
         if (!injectedReadFrom) return yield* readSuffix(anchor, base);
-        const start = yield* Effect.result(feed.current());
-        if (
-          Result.isSuccess(start) &&
-          !start.success.bootstrap &&
-          start.success.offset.startsWith('p1:') &&
-          start.success.view.length === base.length &&
-          start.success.view.head.equals(base.head)
-        ) {
-          return yield* readSuffix(anchor, base);
+        if (input.preferFeedSuffix) {
+          const start = yield* Effect.result(feed.current());
+          if (
+            Result.isSuccess(start) &&
+            !start.success.bootstrap &&
+            start.success.view.length === base.length &&
+            start.success.view.head.equals(base.head)
+          ) {
+            return yield* readSuffix(anchor, base);
+          }
         }
         return yield* injectedReadFrom(anchor, base);
       });

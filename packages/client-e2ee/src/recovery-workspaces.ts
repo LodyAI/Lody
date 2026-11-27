@@ -518,14 +518,15 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           : [];
         const covered: RecoveryWorkspacePlan['covered'][number][] = [];
         const uncovered: { id: string; name: string }[] = [];
-        const readyPins = yield* Effect.exit(pins.listReady(options.accountId));
-        const readyIds = Exit.isSuccess(readyPins)
-          ? new Set(readyPins.value.map((pin) => pin.offer.workspaceId))
+        const listed = yield* Effect.exit(pins.listAccountPins(options.accountId));
+        const readyIds = Exit.isSuccess(listed)
+          ? new Set(listed.value.ready.map((pin) => pin.offer.workspaceId))
           : null;
+        const corruptIds = Exit.isSuccess(listed) ? listed.value.corruptWorkspaceIds : null;
         for (const workspace of visible) {
           const row = { id: workspace.id, name: workspace.name };
-          if (readyIds === null) {
-            // A pin store that cannot be read leaves workspaces unknown rather than acting on them.
+          if (readyIds === null || corruptIds?.has(workspace.id)) {
+            // A pin store or workspace pin that cannot be read leaves it unknown rather than acting on it.
             covered.push({ ...row, status: { kind: 'unknown' } });
             continue;
           }
@@ -603,6 +604,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
       batch('setup', unlock, [...selected], observe),
     dispose: () => {
       disposed = true;
+      pins.close();
       recovery.dispose();
     },
   };

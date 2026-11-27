@@ -143,12 +143,33 @@ export function authenticateDocument(
   );
 }
 
+declare const authenticatedContentBrand: unique symbol;
+/** Branded evidence returned by `authenticateDocument`, required by `openAuthenticatedDocument`. */
+export type AuthenticatedContent = Readonly<{
+  readonly [authenticatedContentBrand]: true;
+  readonly header: Readonly<ContentHeader>;
+  readonly author: ReturnType<typeof historicalContentIdentity> extends Result.Result<
+    infer A,
+    unknown
+  >
+    ? A
+    : never;
+}>;
+const authenticatedProofs = new WeakMap<
+  object,
+  {
+    readonly scope: Readonly<ContentScope>;
+    readonly parsed: ParsedContentFrame;
+    readonly additionalData: Uint8Array | undefined;
+  }
+>();
+
 function authenticateParsed(
   view: LedgerView,
   scope: ContentScope,
   parsed: ParsedContentFrame,
   additionalData?: Uint8Array
-) {
+): Result.Result<AuthenticatedContent, ContentError> {
   return Result.gen(function* () {
     const signer = yield* Result.mapError(
       Bytes.signingPublicKey(parsed.unsigned.subarray(7, 39)),
@@ -156,7 +177,7 @@ function authenticateParsed(
     );
     const author = yield* boundAuthority(view, scope, signer, 'authenticate');
     const metadata = yield* verifyParsedContentSignature(parsed, scope, signer, additionalData);
-    return Object.freeze({
+    const result = Object.freeze({
       header: Object.freeze({
         ...scope,
         device: metadata.device,
@@ -166,7 +187,32 @@ function authenticateParsed(
           : { continuationOffset: metadata.continuationOffset }),
       }),
       author,
+    }) as AuthenticatedContent;
+    authenticatedProofs.set(result, {
+      scope: Object.freeze({ ...scope }),
+      parsed,
+      additionalData,
     });
+    return result;
+  });
+}
+/** Open an already authenticated document frame without repeating signature verification. */
+export function openAuthenticatedDocument(
+  authenticated: AuthenticatedContent,
+  documentKey: DocumentKey
+) {
+  return Result.gen(function* () {
+    const proof = authenticatedProofs.get(authenticated);
+    if (!proof) return yield* fail('unauthorized');
+    const key = yield* documentKeyForScope(documentKey, proof.scope);
+    const plaintext = yield* openContentAead(
+      key,
+      authenticated.header,
+      proof.parsed.nonce,
+      proof.parsed.ciphertext,
+      proof.additionalData
+    );
+    return { ...authenticated, plaintext };
   });
 }
 /** Host upload admission, distinct from new sealing, historical authentication and AEAD open.
@@ -196,17 +242,7 @@ export function openDocument(
   frame: Uint8Array,
   additionalData?: Uint8Array
 ) {
-  return Result.gen(function* () {
-    const parsed = yield* parseContentFrame(frame, scope.purpose);
-    const authenticated = yield* authenticateParsed(view, scope, parsed, additionalData);
-    const key = yield* documentKeyForScope(documentKey, scope);
-    const plaintext = yield* openContentAead(
-      key,
-      authenticated.header,
-      parsed.nonce,
-      parsed.ciphertext,
-      additionalData
-    );
-    return { ...authenticated, plaintext };
-  });
+  return Result.flatMap(authenticateDocument(view, scope, frame, additionalData), (authenticated) =>
+    openAuthenticatedDocument(authenticated, documentKey)
+  );
 }
