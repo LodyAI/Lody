@@ -142,10 +142,8 @@ const styles = stylex.create({
   /** Muted until reached for; the confirmation carries the warning. */
   stop: {
     gap: space[1],
-    color: {
-      default: colors.secondaryLabel,
-      '@media (hover: hover)': { ':hover': colors.destructive },
-    },
+    // Button's `xstyle` accepts only flat conditions, not nested `@media`.
+    color: { default: colors.secondaryLabel, ':hover': colors.destructive },
   },
   stopIcon: { width: 12, height: 12, flexShrink: 0 },
   confirmation: { display: 'flex', flexDirection: 'column', gap: space[3], maxWidth: 320 },
