@@ -46,7 +46,8 @@ export const field = stylex.defineVars({
   // The family API shares the system state, including the label and help.
   disabledOpacity: control.disabledOpacity,
   background: colors.wellBackground,
-  well: shadow.inset,
+  // Flat 1px neutral hairline (no inset bevel shadow or bottom lit lip).
+  well: `inset 0 0 0 1px color-mix(in oklab, ${colors.label} 10%, transparent)`,
   value: colors.label,
   label: colors.label,
   placeholder: colors.tertiaryLabel,
@@ -79,7 +80,8 @@ export const field = stylex.defineVars({
  */
 export const fieldPaletteTheme = stylex.createTheme(field, {
   background: colors.wellBackground,
-  well: shadow.inset,
+  // Flat 1px neutral hairline (no inset bevel shadow or bottom lit lip).
+  well: `inset 0 0 0 1px color-mix(in oklab, ${colors.label} 10%, transparent)`,
   value: colors.label,
   label: colors.label,
   placeholder: colors.tertiaryLabel,

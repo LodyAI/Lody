@@ -73,14 +73,12 @@ changes describe the interface, not the pixels of an external image.
 
 ## Fields
 
-**Everything that holds a value is one recessed material.** Input, textarea,
+**Everything that holds a value is one flat, clean material.** Input, textarea,
 Select and Combobox triggers, a number, a password, and the tracks a checkbox,
-radio or switch sits in all take the well: `wellBackground` under
-`shadow.inset`. In a system where cards lift and buttons stand up, the fields
-are material too, and they are all the same material — a column that mixes a
-recess with a raised or a flat field reads as two kinds of thing. The recess is
-shallow and lit from the same light as everything raised: a short shadow inside
-the top edge, one inner hairline, the light catching the lower lip. Its fill is
+radio or switch sits in all take `field.background` (`wellBackground`) with a
+single flat `1px` neutral hairline (`field.well`, no inner drop-shadow or lit
+lower lip). On focus, the hairline swaps cleanly to the `1px` neutral
+`field.ring` (`colors.label` tint) without stacking a second border. Its fill is
 a translucent darkening of whatever it sits on (`wellBackground` is ink or black
 at a few percent), so a field is the same small step under a card, a dialog or
 the page — never a fixed mid-gray, which read as a hole on white and as a deep
