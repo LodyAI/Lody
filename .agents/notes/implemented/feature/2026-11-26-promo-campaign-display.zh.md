@@ -11,7 +11,7 @@ Translation: current
 
 ## 决策与职责
 
-`@lody/cloud-api` 在 `Pricing` 上新增可选的 `PromoCheckoutOffer`，在 `previewSubscriptionIntervalChange` 上新增 `promoKind`（`early_bird_forever` 或 `campaign_once`）与 `promoDiscountPercent`，并在 `SeatInvitePreviewSchema` 的 `billed` 分支新增 `promoDiscountPercent`、`promoEndsAt`、`regularProratedAmount` 与 `policyNextChangeAt`。`getBillingOverview`、`getMyNewWorkspacePricing` 与 `getWorkspaceSeatInvitePreview` 接受可选的 `policyRefreshKey`，客户端在值为 `0` 时省略该字段，保证前后端按任意顺序滚动发布均可兼容。客户端不接收 Coupon ID，也不在本地计算升级差额折算。
+`@lody/cloud-api` 在 `Pricing` 上新增可选的 `PromoCheckoutOffer`（含可选的字符串或多语言映射活动名称 `PromoCampaignName`），在 `previewSubscriptionIntervalChange` 上新增 `promoKind`（`early_bird_forever` 或 `campaign_once`）、`promoDiscountPercent` 与 `promoName`，并在 `SeatInvitePreviewSchema` 的 `billed` 分支新增 `promoDiscountPercent`、`promoName`、`promoEndsAt`、`regularProratedAmount` 与 `policyNextChangeAt`。`getBillingOverview`、`getMyNewWorkspacePricing` 与 `getWorkspaceSeatInvitePreview` 接受可选的 `policyRefreshKey`，客户端在值为 `0` 时省略该字段，保证前后端按任意顺序滚动发布均可兼容。客户端不接收 Coupon ID，也不在本地计算升级差额折算；未配置自定义活动名称时自动回退至本地化通用文案。
 
 创建工作区与账单页复用[推荐活动展示](2026-10-23-referral-campaign-display.zh.md)的边界刷新机制，同时追踪推荐与促销的 `nextChangeAt` 及保留 Checkout 的过期时间。首期促销优惠同样展示在赠送期结束后续订预约卡片（`canScheduleAfterGift`）上，而推荐折扣不适用于赠送续订设置。当推荐归因与首单促销在普通新订场景同时存在时，界面展示更高的买方折扣（`max(promo, referral)`，相同时保留推荐提示），并在百分比折扣生效时隐藏推荐余额抵扣预览，推荐人返现归因仍由服务端独立维护。月转年确认弹窗将单次净差额促销（`campaign_once`，明确提示下期按每席位每年 $96 标准价续费）与历史永久早鸟账户区分展示；成员邀请提示在 `promoEndsAt` 前展示当期折后按日计费金额与划线的原价按日金额。
 

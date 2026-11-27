@@ -23,6 +23,10 @@ export const SeatInvitePreviewSchema = z.discriminatedUnion('status', [
     paymentAction: z.enum(['method_required', 'payment_required', 'refresh']).optional(),
     invoiceAt: z.number().nullable().optional(),
     promoDiscountPercent: z.number().optional(),
+    promoName: z
+      .union([z.string(), z.record(z.string(), z.string())])
+      .nullable()
+      .optional(),
     promoEndsAt: z.number().optional(),
     regularProratedAmount: z.number().nullable().optional(),
     policyNextChangeAt: z.number().optional(),

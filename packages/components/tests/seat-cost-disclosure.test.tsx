@@ -192,6 +192,7 @@ it('discloses promotional seat-expansion discount before deadline and reverts im
       proratedAmount: 2496,
       regularProratedAmount: 3120,
       promoDiscountPercent: 20,
+      promoName: { zh: '黑五扩席优惠', en: 'Black Friday' },
       promoEndsAt,
       policyNextChangeAt: promoEndsAt,
       currentPeriodEnd: Date.UTC(2027, 1, 14),
@@ -201,7 +202,7 @@ it('discloses promotional seat-expansion discount before deadline and reverts im
     });
 
     await act(async () => root.render(createElement(SeatCostNotice, { preview })));
-    expect(container.textContent).toContain('20% off');
+    expect(container.textContent).toContain('Black Friday · 20% off');
     expect(container.querySelector('s')?.textContent).toContain('31.20');
     expect(container.textContent).toContain('24.96');
     expect(container.textContent).toContain('Renews at standard rate');
@@ -210,6 +211,7 @@ it('discloses promotional seat-expansion discount before deadline and reverts im
     await act(async () => {
       vi.advanceTimersByTime(60_000);
     });
+    expect(container.textContent).not.toContain('Black Friday');
     expect(container.textContent).not.toContain('20% off');
     expect(container.querySelector('s')).toBeNull();
     expect(container.textContent).toContain('31.20');

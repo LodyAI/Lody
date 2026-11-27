@@ -241,4 +241,32 @@ it('discloses one-time upgrade discount on the net upgrade amount and standard r
   expect(document.body.textContent).toContain('-$18.20');
   expect(document.body.textContent).toContain('$72.80');
   expect(document.body.textContent).toContain('at the standard rate ($96.00/year)');
+
+  await act(async () =>
+    root.render(
+      createElement(BillingIntervalDialog, {
+        ...props,
+        interval: 'year',
+        preview: {
+          quoteId: 'q_promo_named',
+          currency: 'usd',
+          interval: 'year',
+          quantity: 1,
+          unitAmount: 9600,
+          subtotalAmount: 9600,
+          promoDiscountAmount: -1820,
+          creditAmount: -500,
+          deferredToBalanceAmount: 0,
+          amountDueNow: 7280,
+          remainingCredit: 0,
+          nextRenewalAt: Date.UTC(2027, 10, 26),
+          promoApplied: true,
+          promoKind: 'campaign_once',
+          promoDiscountPercent: 20,
+          promoName: { zh: '感恩节特惠', en: 'Thanksgiving Special' },
+        },
+      })
+    )
+  );
+  expect(document.body.textContent).toContain('Thanksgiving Special (20% off)');
 });

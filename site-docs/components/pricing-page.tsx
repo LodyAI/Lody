@@ -19,6 +19,7 @@ import {
   computeDiscountedPlusPricing,
   formatPublicPromoBadge,
   formatPublicPromoNote,
+  resolvePublicPromoName,
   type PublicPromoActive,
 } from '@site/lib/public-promo';
 import NumberFlow from '@number-flow/react';
@@ -268,8 +269,14 @@ function PricingCard({
   const promoNote =
     promo && activePromoPercent > 0 ? formatPublicPromoNote({ isYearly, promo, locale }) : null;
   const note = promoNote ?? (isYearly ? plan.yearlyNote : plan.monthlyNote);
+  const customPromoName =
+    promo && activePromoPercent > 0 ? resolvePublicPromoName(promo, locale) : null;
   const promoBadge =
-    activePromoPercent > 0 ? formatPublicPromoBadge(activePromoPercent, locale) : null;
+    activePromoPercent > 0
+      ? customPromoName
+        ? `${customPromoName} · ${formatPublicPromoBadge(activePromoPercent, locale)}`
+        : formatPublicPromoBadge(activePromoPercent, locale)
+      : null;
   const isMailto = plan.href.startsWith('mailto:');
   return (
     <article

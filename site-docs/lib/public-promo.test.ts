@@ -9,6 +9,7 @@ import {
   formatPublicPromoNote,
   parsePublicPromoSnapshot,
   resolvePublicPromoEndpoint,
+  resolvePublicPromoName,
   selectLivePublicPromo,
 } from './public-promo.ts';
 
@@ -178,5 +179,61 @@ test('boundary refresh delay uses exact future deadline and bounded backoff afte
       consecutiveRetryCount: 10,
     }),
     PUBLIC_PROMO_RETRY_MAX_MS
+  );
+});
+
+test('supports optional custom string and localized campaign names with locale fallback', () => {
+  const localized = parsePublicPromoSnapshot({
+    active: {
+      id: 'bf-2026',
+      name: { zh: '黑五特惠', en: 'Black Friday' },
+      startsAt: Date.parse('2026-11-26T00:00:00+08:00'),
+      endsAt: Date.parse('2026-12-01T00:00:00+08:00'),
+      monthlyDiscountPercent: 20,
+      yearlyDiscountPercent: 20,
+      upgradeToYearly: true,
+      seatExpansion: true,
+    },
+    serverNow: Date.parse('2026-11-26T12:00:00+08:00'),
+    nextChangeAt: Date.parse('2026-12-01T00:00:00+08:00'),
+  });
+  assert.equal(resolvePublicPromoName(localized.active, 'zh'), '黑五特惠');
+  assert.equal(resolvePublicPromoName(localized.active, 'zh-hant'), '黑五特惠');
+  assert.equal(resolvePublicPromoName(localized.active, 'en'), 'Black Friday');
+  assert.equal(resolvePublicPromoName(localized.active, 'ja'), 'Black Friday');
+  assert.match(formatLandingPromoBannerCopy(localized.active!, 'zh').message, /^黑五特惠 · Lody Plus：/);
+  assert.match(formatLandingPromoBannerCopy(localized.active!, 'en').message, /^Black Friday: 20% off/);
+
+  const plain = parsePublicPromoSnapshot({
+    active: {
+      id: 'spring-2027',
+      name: 'Spring Launch',
+      startsAt: 1_000,
+      endsAt: 5_000,
+      monthlyDiscountPercent: 15,
+      yearlyDiscountPercent: 15,
+      upgradeToYearly: false,
+      seatExpansion: false,
+    },
+    serverNow: 2_000,
+    nextChangeAt: 5_000,
+  });
+  assert.equal(resolvePublicPromoName(plain.active, 'zh'), 'Spring Launch');
+
+  assert.throws(() =>
+    parsePublicPromoSnapshot({
+      active: {
+        id: 'bad',
+        name: 'bad\u0007name',
+        startsAt: 1_000,
+        endsAt: 5_000,
+        monthlyDiscountPercent: 20,
+        yearlyDiscountPercent: null,
+        upgradeToYearly: false,
+        seatExpansion: false,
+      },
+      serverNow: 2_000,
+      nextChangeAt: 5_000,
+    })
   );
 });
