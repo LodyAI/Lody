@@ -2848,6 +2848,131 @@ it('erases custody and roost on member removal even when the ledger already refr
   }
 });
 
+it('erases roost and custody on cold-start removal even when pairings.sqlite is corrupt and replays removal before remote bootstrap', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-cold-removed-corrupt-journal-'));
+  vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+  const { loadCliE2eeMachineBootstrapLegacy } = await import('../src/lib/e2ee/workspace-legacy');
+  let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+  try {
+    const accountId = 'cold-removed-account';
+    const root = join(
+      getLodyDataDir(),
+      'e2ee',
+      createHash('sha256').update(accountId).digest('hex'),
+      'workspace'
+    );
+    const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+    const binding = {
+      workspaceId: 'workspace',
+      genesisHash: hex(fixture.genesis.toBytes()),
+      genesisRecordHex: hex(fixture.genesisRecord),
+    };
+    await retainCliE2eeWorkspaceBinding(accountId, binding);
+    const { machinePublicKey, revokedRecord } = await execute(
+      Effect.gen(function* () {
+        const custody = yield* makeCliE2eeCustody({
+          directory: join(root, 'custody'),
+          keyring: noKeyring,
+        });
+        const device = yield* custody.openDevice(fixture.genesis);
+        const ownerCustody = yield* makeNodeE2eeCustody({
+          directory: join(directory, 'owner'),
+          wrapper,
+        });
+        const ownerDevice = yield* ownerCustody.openDevice(fixture.genesis);
+        const record = yield* signLedgerRecord(
+          Result.getOrThrow(
+            prepareLedgerCommand(fixture.current, ownerDevice.publicKey, {
+              _tag: 'RevokeDevice',
+              target: device.publicKey,
+            })
+          ),
+          ownerDevice
+        );
+        return {
+          machinePublicKey: hex(device.publicKey.toBytes()),
+          revokedRecord: record,
+        };
+      })
+    );
+    await fs.writeFile(
+      join(root, 'activation.json'),
+      JSON.stringify({ genesisHash: binding.genesisHash, signingPublicKey: machinePublicKey })
+    );
+    let removed = false;
+    const cloud = {
+      getHistory: async () => {
+        if (removed) throw new Error('unauthorized');
+        return page([...fixture.records, revokedRecord]);
+      },
+      getContentToken: async () => {
+        if (removed) throw new CloudE2eeMemberRemoved();
+        return {
+          token: 'synthetic-token',
+          expiresIn: 900,
+          expiresAt: Date.now() + 900_000,
+          gatewayBaseUrl: 'https://synthetic.invalid',
+          bucketId: 'synthetic-bucket',
+        };
+      },
+      mailboxCall: async (method: string) => {
+        if (method === 'fetch') return { items: [], next: null };
+        throw new Error('unavailable');
+      },
+    } as unknown as CloudE2eePort;
+    const options = {
+      accountId,
+      ...binding,
+      cloud,
+      keyring: noKeyring,
+      onUnavailable: () => {},
+    };
+    host = await openCliE2eeWorkspaceLegacy(options);
+    await host.refresh();
+    await host.close();
+
+    await fs.writeFile(join(root, 'pairings.sqlite'), 'corrupt-sqlite-bytes');
+
+    host = await openCliE2eeWorkspaceLegacy(options);
+    expect((await host.status()).membershipId).toBeNull();
+    const roost = join(host.repositoryDirectory, 'roost');
+    await fs.mkdir(roost, { recursive: true });
+    await fs.writeFile(join(roost, 'history.sqlite3'), 'synthetic-roost');
+
+    removed = true;
+    await host.refresh();
+    await host.removalCleanup();
+
+    const receipt = JSON.parse(await fs.readFile(join(root, 'removed.json'), 'utf8')) as {
+      genesisHash: string;
+      signingPublicKey: string;
+      membershipId: string | null;
+    };
+    expect(receipt).toEqual({
+      genesisHash: binding.genesisHash,
+      signingPublicKey: machinePublicKey,
+      membershipId: null,
+    });
+    await expect(fs.stat(roost)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(join(root, 'custody'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(join(root, 'activation.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+
+    await fs.mkdir(roost, { recursive: true });
+    await fs.writeFile(join(roost, 'leftover.sqlite3'), 'interrupted-roost');
+    await expect(
+      loadCliE2eeMachineBootstrapLegacy(`${accountId}/workspace`, 'machine', noKeyring)
+    ).rejects.toThrow('e2ee_member_removed');
+    await expect(fs.stat(roost)).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    await host?.removalCleanup().catch(() => undefined);
+    await host?.close().catch(() => undefined);
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 describe('remote machine command', () => {
   it('keeps waiting after admission until the approving desktop delivers the current key', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remote-machine-key-wait-'));
@@ -2931,7 +3056,10 @@ describe('remote machine command', () => {
         keyring: noKeyring,
         claim: async (body) => {
           claimCalls += 1;
-          if (claimCalls === 1) throw new Error('e2ee_pairing_unavailable_retry_same_command');
+          if (claimCalls === 1)
+            throw Object.assign(new Error('e2ee_pairing_unavailable_retry_same_command'), {
+              status: 503,
+            });
           if (claimCalls === 2) throw new TypeError('fetch failed');
           if (claimCalls === 3) {
             return {
@@ -2987,7 +3115,9 @@ describe('remote machine command', () => {
           keyring: noKeyring,
           claim: async () => {
             claimCalls += 1;
-            throw new Error('e2ee_pairing_unavailable_retry_same_command');
+            throw Object.assign(new Error('e2ee_pairing_unavailable_retry_same_command'), {
+              status: 503,
+            });
           },
           show: () => {},
           wait: async (_signal, delayMs) => {
@@ -2999,6 +3129,150 @@ describe('remote machine command', () => {
       expect(claimCalls).toBeGreaterThan(1);
       expect(claimCalls).toBeLessThanOrEqual(8);
     } finally {
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([401, 403, 409, 410] as const)(
+    'does not retry permanent HTTP %i from the real claim adapter, while retrying HTTP 503',
+    async (permanentStatus) => {
+      const directory = await mkdtemp(join(tmpdir(), `remote-machine-http-${permanentStatus}-`));
+      vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+      const legacy = await import('../src/lib/e2ee/workspace-legacy');
+      const { pairRemoteMachineLegacy } = await import('../src/lib/e2ee/remote-pairing');
+      const { createCloudRemoteMachinePairingClaim } = await import('../src/lib/cloud-cli-port');
+      const activation = vi
+        .spyOn(legacy, 'activateCliE2eeWorkspaceLegacy')
+        .mockResolvedValue(undefined as never);
+      const retained = vi
+        .spyOn(legacy, 'retainCliE2eeMachineBootstrapLegacy')
+        .mockResolvedValue(undefined as never);
+      const originalFetch = globalThis.fetch;
+      try {
+        const { offer, encoded } = await admittedBeforeKey(directory);
+        let fetchCalls = 0;
+        let waitCalls = 0;
+        globalThis.fetch = (async () => {
+          fetchCalls += 1;
+          return new Response(JSON.stringify({ code: `http_${permanentStatus}` }), {
+            status: permanentStatus,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }) as typeof fetch;
+
+        await expect(
+          pairRemoteMachineLegacy({
+            encodedOffer: encoded,
+            machineId: 'machine',
+            cloud: {} as CloudE2eePort,
+            signal: new AbortController().signal,
+            keyring: noKeyring,
+            claim: createCloudRemoteMachinePairingClaim({
+              ingressUrl: offer.ingressUrl,
+              logger: getLogger('test'),
+            }),
+            show: () => {},
+            wait: async () => {
+              waitCalls += 1;
+            },
+            now: () => 0,
+          })
+        ).rejects.toThrow(`http_${permanentStatus}`);
+        expect(fetchCalls).toBe(1);
+        expect(waitCalls).toBe(0);
+
+        if (permanentStatus === 401) {
+          fetchCalls = 0;
+          waitCalls = 0;
+          globalThis.fetch = (async (_url, init) => {
+            fetchCalls += 1;
+            if (fetchCalls === 1) return new Response('unavailable', { status: 503 });
+            const body = JSON.parse(String(init?.body ?? '{}'));
+            return Response.json({
+              pairingSessionId: offer.pairingSessionId,
+              status: 'admitted',
+              expiresAt: offer.expiresAt,
+              material: body.material,
+              location: null,
+            });
+          }) as typeof fetch;
+          const result = await pairRemoteMachineLegacy({
+            encodedOffer: encoded,
+            machineId: 'machine',
+            cloud: {} as CloudE2eePort,
+            signal: new AbortController().signal,
+            keyring: noKeyring,
+            claim: createCloudRemoteMachinePairingClaim({
+              ingressUrl: offer.ingressUrl,
+              logger: getLogger('test'),
+            }),
+            show: () => {},
+            wait: async () => {
+              waitCalls += 1;
+            },
+            now: () => 0,
+          });
+          expect(result.ready).toBe(true);
+          expect(fetchCalls).toBe(2);
+          expect(waitCalls).toBe(1);
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+        activation.mockRestore();
+        retained.mockRestore();
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('aborts in-flight activation and stops before calling activation again after the 10-minute deadline', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-machine-abort-deadline-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    const legacy = await import('../src/lib/e2ee/workspace-legacy');
+    const { pairRemoteMachineLegacy } = await import('../src/lib/e2ee/remote-pairing');
+    const retained = vi
+      .spyOn(legacy, 'retainCliE2eeMachineBootstrapLegacy')
+      .mockResolvedValue(undefined as never);
+    let activationCalls = 0;
+    const controller = new AbortController();
+    const activation = vi
+      .spyOn(legacy, 'activateCliE2eeWorkspaceLegacy')
+      .mockImplementation(async (opts) => {
+        activationCalls += 1;
+        expect(opts.signal).toBe(controller.signal);
+        expect(opts.timeoutMs).toBeGreaterThan(0);
+        controller.abort(new Error('user_cancelled'));
+        opts.signal?.throwIfAborted();
+      });
+    try {
+      const { offer, encoded } = await admittedBeforeKey(directory);
+      await expect(
+        pairRemoteMachineLegacy({
+          encodedOffer: encoded,
+          machineId: 'machine',
+          cloud: {} as CloudE2eePort,
+          signal: controller.signal,
+          keyring: noKeyring,
+          claim: async (body) => ({
+            pairingSessionId: offer.pairingSessionId,
+            status: 'admitted',
+            expiresAt: offer.expiresAt,
+            material: JSON.parse(body).material,
+            location: null,
+          }),
+          show: () => {},
+          wait: async () => {},
+          now: () => 0,
+        })
+      ).rejects.toThrow('user_cancelled');
+      expect(activationCalls).toBe(1);
+      expect(retained).not.toHaveBeenCalled();
+    } finally {
+      activation.mockRestore();
+      retained.mockRestore();
       vi.unstubAllEnvs();
       await rm(directory, { recursive: true, force: true });
     }

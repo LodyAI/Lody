@@ -37,19 +37,20 @@ const TRANSIENT_NETWORK_CODES = new Set([
   'UND_ERR_SOCKET',
 ]);
 
+const TRANSIENT_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
+
 function isTransientClaimError(error: unknown, signal: AbortSignal): boolean {
   if (signal.aborted) return false;
   if (typeof error === 'object' && error !== null && 'status' in error) {
     const status = (error as { status?: unknown }).status;
-    if (typeof status === 'number') return status >= 500 || status === 429;
+    if (typeof status === 'number') return TRANSIENT_HTTP_STATUSES.has(status);
   }
   if (!(error instanceof Error)) return false;
-  if (error.message === 'e2ee_pairing_unavailable_retry_same_command') return true;
   if (error instanceof TypeError) return true;
   if (error.name === 'TimeoutError' || error.name === 'AbortError') return true;
   const code = (error as NodeJS.ErrnoException).code;
   if (typeof code === 'string' && TRANSIENT_NETWORK_CODES.has(code)) return true;
-  return /(?:^|\b)(?:50[0-9]|429|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|fetch failed|network)/i.test(
+  return /(?:^|\b)(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|fetch failed|network)/i.test(
     error.message
   );
 }
@@ -91,7 +92,6 @@ export async function pairRemoteMachineLegacy(options: {
 }) {
   const wait = options.wait ?? ((signal, delayMs) => pause(delayMs, undefined, { signal }));
   const now = options.now ?? Date.now;
-  let keyWaitStartedAt: number | undefined;
   let keyRetryMs = POLL_MS;
   let claimRetryStartedAt: number | undefined;
   let claimRetryAttempts = 0;
@@ -157,8 +157,11 @@ export async function pairRemoteMachineLegacy(options: {
     if (['cancelled', 'expired', 'conflict'].includes(status.status))
       throw new Error(`e2ee_pairing_${status.status}_create_new_command`);
     if (status.status === 'admitted' || status.status === 'ready') {
+      const keyWaitDeadline = now() + KEY_WAIT_MS;
       for (;;) {
         options.signal.throwIfAborted();
+        const remainingMs = keyWaitDeadline - now();
+        if (remainingMs <= 0) throw new Error('e2ee_waiting_for_key');
         try {
           await activateCliE2eeWorkspaceLegacy({
             accountId: offer.accountId,
@@ -170,22 +173,25 @@ export async function pairRemoteMachineLegacy(options: {
             cloud: options.cloud,
             onUnavailable: () => undefined,
             keyring: options.keyring,
+            signal: options.signal,
+            timeoutMs: remainingMs,
           });
           break;
         } catch (error) {
+          options.signal.throwIfAborted();
           if (!(error instanceof Error && error.message === 'e2ee_waiting_for_key')) throw error;
-          keyWaitStartedAt ??= now();
-          if (now() - keyWaitStartedAt >= KEY_WAIT_MS) throw error;
+          if (now() >= keyWaitDeadline) throw error;
           options.show({
             summary,
             protection: material.protection,
             location: status.location,
             status: 'waiting-for-key',
           });
-          await wait(options.signal, keyRetryMs);
+          await wait(options.signal, Math.min(keyRetryMs, Math.max(1, keyWaitDeadline - now())));
           keyRetryMs = Math.min(keyRetryMs * 2, KEY_RETRY_MAX_MS);
         }
       }
+      options.signal.throwIfAborted();
       await retainCliE2eeMachineBootstrapLegacy(
         {
           accountId: offer.accountId,

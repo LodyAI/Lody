@@ -1322,7 +1322,18 @@ export function createCloudRemoteMachinePairingClaim(options: {
       body: originalBody,
       signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
     });
-    if (!response.ok) throw new Error('e2ee_pairing_unavailable_retry_same_command');
+    if (!response.ok) {
+      let code = 'e2ee_pairing_unavailable_retry_same_command';
+      const body = await response.json().catch(() => null);
+      if (body && typeof body === 'object' && 'code' in body && typeof body.code === 'string') {
+        code = body.code;
+      } else if (response.status === 409) {
+        code = 'e2ee_pairing_conflict_create_new_command';
+      } else if (response.status === 410) {
+        code = 'e2ee_pairing_expired_create_new_command';
+      }
+      throw Object.assign(new Error(code), { status: response.status });
+    }
     return response.json();
   };
 }

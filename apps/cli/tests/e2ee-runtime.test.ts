@@ -562,6 +562,7 @@ describe('machine E2EE local runtime', () => {
       );
       let history = page(fixture.records);
       let keyDelivered = false;
+      const groupRead = Promise.withResolvers<void>();
       const encodedGroup = encodeEpochStagedGroup(fixture.stagedGroup!);
       const cloud = {
         getHistory: async () => history,
@@ -572,7 +573,11 @@ describe('machine E2EE local runtime', () => {
           gatewayBaseUrl: 'https://synthetic.invalid',
           bucketId: 'synthetic-bucket',
         }),
-        readEpochGroup: async () => (keyDelivered ? encodedGroup : null),
+        readEpochGroup: async () => {
+          if (!keyDelivered) return null;
+          groupRead.resolve();
+          return encodedGroup;
+        },
         mailboxCall: async (
           method: keyof E2eeMailboxRequests,
           input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
@@ -618,10 +623,8 @@ describe('machine E2EE local runtime', () => {
 
       keyDelivered = true;
       await vi.advanceTimersByTimeAsync(1_000);
-      for (let turn = 0; turn < 200; turn++) {
-        if ((await host.status()).epochPhase === 'ready') break;
-        await new Promise((resolve) => setImmediate(resolve));
-      }
+      await groupRead.promise;
+      await host.settleRefresh();
       expect(await host.status()).toMatchObject({
         epoch: 1,
         hasCurrentKey: true,
