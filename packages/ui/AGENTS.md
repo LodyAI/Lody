@@ -14,7 +14,7 @@ StyleX rules must land in the initial renderer stylesheet: `index` for Web and
 - Depends on React, `@base-ui/react` and `@stylexjs/stylex` only; never on
   `@lody/components`, `@lody/platform` or a cloud package.
 - No border token. Disabled: `control.disabledOpacity` (45%).
-  `media` contrast is image-only. Read `../../DESIGN.md` and `src/tokens/RULES.md`.
+  `media` contrast is image-only. Read `src/tokens/RULES.md`.
 - Text sizes/leading derive from document `--ui-font-size` (14px fallback), not nested `em`.
 - A focus or invalid ring is a `box-shadow` composed with the control's own
   shadow, never an `outline` (the shell resets outlines with `!important`); a
