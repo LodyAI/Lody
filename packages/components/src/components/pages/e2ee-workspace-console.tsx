@@ -1265,11 +1265,7 @@ export function E2eeWorkspaceConsole({
       )}
       {port?.runtime && accountId && current?.history?.locallyPinned && (
         <E2eeConsoleSection tab="devices">
-          <E2eeAddDeviceCard
-            key={identity + ':account-pairing'}
-            runtime={port.runtime}
-            defaultShowQr={showPairingCode === true}
-          />
+          <E2eeAddDeviceCard key={identity + ':account-pairing'} runtime={port.runtime} />
         </E2eeConsoleSection>
       )}
       {!sections &&

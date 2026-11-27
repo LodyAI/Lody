@@ -1,6 +1,6 @@
 ---
-title: "Espaces de travail chiffrés de bout en bout"
-description: "Guide en langage clair des espaces de travail chiffrés de bout en bout de Lody : qui peut voir le contenu, comment inviter des coéquipiers et ajouter des appareils, et ce qui se passe en cas de perte de vos appareils."
+title: 'Espaces de travail chiffrés de bout en bout'
+description: 'Guide en langage clair des espaces de travail chiffrés de bout en bout de Lody : qui peut voir le contenu, comment inviter des coéquipiers et ajouter des appareils, et ce qui se passe en cas de perte de vos appareils.'
 ---
 
 # Espaces de travail chiffrés de bout en bout
@@ -8,17 +8,19 @@ description: "Guide en langage clair des espaces de travail chiffrés de bout en
 Dans un espace de travail chiffré de bout en bout, les conversations, les fichiers et les sorties des agents **ne peuvent être lus que sur les appareils que vous avez autorisés**. Les serveurs de Lody relaient et stockent les données, mais ne voient jamais que des données qu'ils ne peuvent pas lire.
 
 <Callout type="warn">
-Si vous perdez tous vos appareils autorisés et que vous ne disposez d'aucun fichier de récupération, l'espace de travail ne pourra plus jamais être rouvert et Lody ne pourra pas le récupérer. Configurez un fichier de récupération rapidement après avoir créé l'espace de travail.
+  Si vous perdez tous vos appareils autorisés et que vous ne disposez d'aucun fichier de
+  récupération, l'espace de travail ne pourra plus jamais être rouvert et Lody ne pourra pas le
+  récupérer. Configurez un fichier de récupération rapidement après avoir créé l'espace de travail.
 </Callout>
 
 ## Différences avec un espace de travail standard
 
-| | Espace de travail standard | Espace de travail chiffré de bout en bout |
-| --- | --- | --- |
-| Qui peut lire le contenu | Les membres ayant accès et les serveurs de Lody | Uniquement les appareils autorisés |
-| Utiliser un nouvel appareil | Se connecter | Se connecter, puis l'approuver depuis un appareil autorisé |
-| Application web | Fonctionne immédiatement | Le navigateur doit d'abord être autorisé |
-| Perte de tous les appareils | Se reconnecter | Nécessite un fichier de récupération ou une clé d'accès (passkey) |
+|                             | Espace de travail standard                      | Espace de travail chiffré de bout en bout                         |
+| --------------------------- | ----------------------------------------------- | ----------------------------------------------------------------- |
+| Qui peut lire le contenu    | Les membres ayant accès et les serveurs de Lody | Uniquement les appareils autorisés                                |
+| Utiliser un nouvel appareil | Se connecter                                    | Se connecter, puis l'approuver depuis un appareil autorisé        |
+| Application web             | Fonctionne immédiatement                        | Le navigateur doit d'abord être autorisé                          |
+| Perte de tous les appareils | Se reconnecter                                  | Nécessite un fichier de récupération ou une clé d'accès (passkey) |
 
 ## Tâches courantes
 
@@ -35,7 +37,7 @@ Si vous perdez tous vos appareils autorisés et que vous ne disposez d'aucun fic
 </Step>
 <Step>
 
-**L'ouvrir sur un nouvel appareil** : le nouvel appareil envoie automatiquement une demande. Votre ordinateur ou téléphone autorisé affiche une fenêtre d'approbation ; vérifiez que les numéros correspondent sur les deux écrans et choisissez Autoriser.
+**L'ouvrir sur un nouvel appareil** : le nouvel appareil envoie automatiquement une demande et affiche un code à 6 chiffres. Votre ordinateur ou téléphone autorisé affiche une fenêtre d'approbation ; saisissez ce code (un téléphone peut scanner l'écran du nouvel appareil), laissez cochés les espaces de travail qu'il doit rejoindre et choisissez Approuver.
 
 </Step>
 <Step>
@@ -53,8 +55,16 @@ Si vous perdez tous vos appareils autorisés et que vous ne disposez d'aucun fic
 ## En savoir plus
 
 <Cards>
-  <Card title="Fonctionnement du registre des permissions" href="/fr/docs/encrypted-workspaces-ledger" description="Qui peut ajouter des membres et des appareils, et pourquoi le serveur ne peut ajouter personne discrètement." />
-  <Card title="Ce que prouve le code de sécurité" href="/fr/docs/encrypted-workspaces-security-code" description="Comment le code est calculé et ce que signifie une concordance ou une divergence." />
+  <Card
+    title="Fonctionnement du registre des permissions"
+    href="/fr/docs/encrypted-workspaces-ledger"
+    description="Qui peut ajouter des membres et des appareils, et pourquoi le serveur ne peut ajouter personne discrètement."
+  />
+  <Card
+    title="Ce que prouve le code de sécurité"
+    href="/fr/docs/encrypted-workspaces-security-code"
+    description="Comment le code est calculé et ce que signifie une concordance ou une divergence."
+  />
 </Cards>
 
 ## Limites connues

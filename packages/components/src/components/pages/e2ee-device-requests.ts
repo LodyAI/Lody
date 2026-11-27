@@ -7,8 +7,6 @@ export type E2eeDeviceRequestsUi = {
   open: () => void;
   /** Opens the single waiting request directly, otherwise the inbox list. */
   review: () => void;
-  /** A device just joined through a shown QR code: its automatic request needs no popup. */
-  joinedByCode: () => void;
 };
 export const E2eeDeviceRequestsContext = createContext<E2eeDeviceRequestsUi | null>(null);
 /** Null outside the inbox (a host without automatic pairing). */

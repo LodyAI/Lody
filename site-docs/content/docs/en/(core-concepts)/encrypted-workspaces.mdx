@@ -8,17 +8,18 @@ description: A plain-language guide to Lody end-to-end encrypted workspaces - wh
 In an end-to-end encrypted workspace, conversations, files and agent output **can only be read on devices you have authorized**. Lody's servers relay and store the data, but only ever see data they cannot read.
 
 <Callout type="warn">
-If you lose every authorized device and have no recovery file, the workspace can never be opened again, and Lody cannot recover it. Set up a recovery file soon after you create the workspace.
+  If you lose every authorized device and have no recovery file, the workspace can never be opened
+  again, and Lody cannot recover it. Set up a recovery file soon after you create the workspace.
 </Callout>
 
 ## How it differs from a standard workspace
 
-| | Standard workspace | End-to-end encrypted workspace |
-| --- | --- | --- |
-| Who can read content | Members with access, and Lody's servers | Only authorized devices |
-| Using a new device | Sign in | Sign in, then approve it from an authorized device |
-| Web app | Works right away | The browser must be authorized first |
-| Losing every device | Sign in again | Needs a recovery file or passkey |
+|                      | Standard workspace                      | End-to-end encrypted workspace                     |
+| -------------------- | --------------------------------------- | -------------------------------------------------- |
+| Who can read content | Members with access, and Lody's servers | Only authorized devices                            |
+| Using a new device   | Sign in                                 | Sign in, then approve it from an authorized device |
+| Web app              | Works right away                        | The browser must be authorized first               |
+| Losing every device  | Sign in again                           | Needs a recovery file or passkey                   |
 
 ## Everyday tasks
 
@@ -35,7 +36,7 @@ If you lose every authorized device and have no recovery file, the workspace can
 </Step>
 <Step>
 
-**Open it on a new device**: the new device sends a request automatically. Your authorized computer or phone shows an approval window; check the numbers match on both screens and choose Authorize.
+**Open it on a new device**: the new device sends a request automatically and shows a 6-digit code. Your authorized computer or phone shows an approval window; enter that code (a phone can scan the new device's screen instead), keep ticked the workspaces it should join, and choose Approve.
 
 </Step>
 <Step>
@@ -53,8 +54,16 @@ If you lose every authorized device and have no recovery file, the workspace can
 ## Learn more
 
 <Cards>
-  <Card title="How the permission ledger works" href="/docs/encrypted-workspaces-ledger" description="Who can add members and devices, and why the server cannot quietly add anyone." />
-  <Card title="What the security code proves" href="/docs/encrypted-workspaces-security-code" description="How the code is computed and what a match or mismatch means." />
+  <Card
+    title="How the permission ledger works"
+    href="/docs/encrypted-workspaces-ledger"
+    description="Who can add members and devices, and why the server cannot quietly add anyone."
+  />
+  <Card
+    title="What the security code proves"
+    href="/docs/encrypted-workspaces-security-code"
+    description="How the code is computed and what a match or mismatch means."
+  />
 </Cards>
 
 ## Known limits

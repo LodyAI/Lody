@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { Camera, ChevronDown, ChevronLeft, CircleCheck, Smartphone } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Checkbox } from '@lody/ui/checkbox';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { Input } from '@lody/ui/input';
 import { accountPairingErrorCode } from '@lody/platform';
 import type {
@@ -956,14 +957,6 @@ export function E2eeAutomaticPairingInbox({
         if (ready.length === 1) setSelected(ready[0]!.id);
         else setInbox(true);
       },
-      joinedByCode: () => {
-        // The device that just scanned also has an automatic request; closing Settings
-        // or the console must not pop it up again.
-        for (const row of requestsRef.current)
-          if (row.phase === 'waiting' || row.phase === 'preparing') {
-            deferred.current.add(row.id);
-          }
-      },
     }),
     [requestCount]
   );
@@ -1067,30 +1060,39 @@ export function E2eeAutomaticPairingInbox({
                             const own = item.workspaceId === current.workspaceId;
                             return (
                               <li key={item.workspaceId}>
-                                <label {...stylex.props(themeStyles.workspaceRow)}>
-                                  <Checkbox
-                                    checked={own || !excluded.has(item.workspaceId)}
-                                    disabled={own || Boolean(busy)}
-                                    aria-label={item.name}
-                                    data-workspace-id={item.workspaceId}
-                                    onCheckedChange={(checked) =>
-                                      setExcluded((value) => {
-                                        const next = new Set(value);
-                                        if (checked) next.delete(item.workspaceId);
-                                        else next.add(item.workspaceId);
-                                        return next;
-                                      })
-                                    }
-                                  />
-                                  <span {...stylex.props(themeStyles.infoWorkspace)}>
-                                    {item.name}
-                                  </span>
-                                  {own && (
+                                {own ? (
+                                  // Always included: a fixed row, not a checkbox that cannot change.
+                                  <div
+                                    {...stylex.props(themeStyles.workspaceRow, themeStyles.ownRow)}
+                                  >
+                                    <span {...stylex.props(themeStyles.infoWorkspace)}>
+                                      {item.name}
+                                    </span>
                                     <span {...stylex.props(themeStyles.infoSecondary)}>
                                       {t('e2ee.auto.requestedHere')}
                                     </span>
-                                  )}
-                                </label>
+                                  </div>
+                                ) : (
+                                  <label {...stylex.props(themeStyles.workspaceRow)}>
+                                    <Checkbox
+                                      checked={!excluded.has(item.workspaceId)}
+                                      disabled={Boolean(busy)}
+                                      aria-label={item.name}
+                                      data-workspace-id={item.workspaceId}
+                                      onCheckedChange={(checked) =>
+                                        setExcluded((value) => {
+                                          const next = new Set(value);
+                                          if (checked) next.delete(item.workspaceId);
+                                          else next.add(item.workspaceId);
+                                          return next;
+                                        })
+                                      }
+                                    />
+                                    <span {...stylex.props(themeStyles.infoWorkspace)}>
+                                      {item.name}
+                                    </span>
+                                  </label>
+                                )}
                               </li>
                             );
                           })}
@@ -1286,6 +1288,11 @@ const themeStyles = stylex.create({
     gap: appSpace[1],
   },
   workspaceRow: { display: 'flex', alignItems: 'center', gap: appSpace[2] },
+  // Aligned with the names beside the checkboxes below it.
+  ownRow: {
+    minHeight: field.boxSize,
+    paddingInlineStart: `calc(${field.boxSize} + ${appSpace[2]})`,
+  },
   scanShortcut: { alignSelf: 'center' },
   hint: {
     marginBlock: appSpace[6],
