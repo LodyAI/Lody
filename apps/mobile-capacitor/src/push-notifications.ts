@@ -73,21 +73,30 @@ type SessionAtom = {
 const session = (authClient as { $store?: { atoms?: { session?: SessionAtom } } }).$store?.atoms
   ?.session;
 let tapped: { route: string; recipient: unknown } | undefined;
+/** The account `unregister()` is logging out; its session can outlive the call briefly. */
+let leaving: string | undefined;
+const signedInUser = () => {
+  const user = session?.get()?.data?.user?.id;
+  return typeof user === 'string' ? user : undefined;
+};
 /** Opens a tap for the signed-in recipient. Workspace admission stays the route's own check,
  * so a blocked startup workspace that never registers push cannot strand the tap. */
 function openTapped() {
   const tap = tapped;
-  const user = session?.get()?.data?.user?.id;
-  if (!tap || typeof user !== 'string') return;
+  const user = signedInUser();
+  if (!tap || !user) return;
   tapped = undefined;
-  if (tap.recipient !== user) return;
+  if (tap.recipient !== user || user === leaving) return;
   if (`${window.location.pathname}${window.location.search}${window.location.hash}` === tap.route)
     return;
   window.history.pushState(null, '', tap.route);
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 export function initPushBridge() {
-  session?.listen(openTapped);
+  session?.listen(() => {
+    if (signedInUser() !== leaving) leaving = undefined;
+    openTapped();
+  });
   void PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
     const route = event.notification.data?.route;
     if (typeof route !== 'string' || !route.startsWith('/') || route.startsWith('//')) return;
@@ -105,6 +114,7 @@ export function initPushBridge() {
     },
     async register(listener) {
       tokenWaiter?.finish(new Error('Native push registration replaced'));
+      leaving = undefined;
       notify = listener;
       const current = ++epoch;
       listeners ??= (async () => {
@@ -146,6 +156,7 @@ export function initPushBridge() {
       notify = undefined;
       token = undefined;
       tapped = undefined;
+      leaving = signedInUser();
       await nativeCommand(async () => {
         await Promise.allSettled([
           ...(Capacitor.getPlatform() === 'ios'

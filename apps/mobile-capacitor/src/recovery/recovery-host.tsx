@@ -7,7 +7,11 @@ import {
 } from '@lody/components/components/settings/e2ee/recovery-host';
 import { authClient } from '../auth';
 import { MobileRecoveryContext } from './recovery-context';
-import { mobileRecoveryPort, savedFilePrompt, type SavedFilePromptState } from './recovery-port';
+import {
+  mobileRecoveryPort,
+  recoveryFilePrompt,
+  type RecoveryFilePromptState,
+} from './recovery-port';
 import { AlertDialog } from '@lody/components/ui/dialog';
 import { Button } from '@lody/ui/button';
 import { useTranslation } from 'react-i18next';
@@ -19,8 +23,8 @@ import { mobileRecoveryCopy } from './recovery-copy';
  * recovery can be set up instead of an empty tab. The vault engine loads on first use. */
 export function MobileRecoveryHostProvider({ children }: { children: ReactNode }) {
   const { t, i18n } = useTranslation();
-  const [prompt, setPrompt] = useState<SavedFilePromptState>('closed');
-  const savedFile = useRef<ReturnType<typeof savedFilePrompt> | undefined>(undefined);
+  const [prompt, setPrompt] = useState<RecoveryFilePromptState>('closed');
+  const savedFile = useRef<ReturnType<typeof recoveryFilePrompt> | undefined>(undefined);
   const config = useContext(MobileRecoveryContext);
   const enabled = useAtomValue(e2eeRecoveryVaultFeatureEnabledAtom);
   const session = authClient.useSession();
@@ -43,14 +47,15 @@ export function MobileRecoveryHostProvider({ children }: { children: ReactNode }
       return;
     }
     // One port per login: a new account or session gets a new port and a reloaded section.
-    const confirm = savedFilePrompt(setPrompt);
+    const confirm = recoveryFilePrompt(setPrompt);
     savedFile.current = confirm;
     const owned = mobileRecoveryPort({
       config,
       accountId,
       sessionId,
       currentSession: () => live.current,
-      confirmSavedFile: confirm.request,
+      chooseFile: confirm.chooseFile,
+      confirmSavedFile: confirm.confirmSavedFile,
     });
     setHost({ key: `${accountId}:${sessionId}`, value: { port: owned.port } });
     return () => {
@@ -71,17 +76,23 @@ export function MobileRecoveryHostProvider({ children }: { children: ReactNode }
       >
         <AlertDialog.Content>
           <AlertDialog.Header>
-            <AlertDialog.Title>{t('mobileRecovery.verifyFile')}</AlertDialog.Title>
-            <AlertDialog.Description>
-              {t('mobileRecovery.verifyFileDescription')}
-            </AlertDialog.Description>
+            <AlertDialog.Title>
+              {t(prompt === 'opening' ? 'e2ee.recovery.file' : 'mobileRecovery.verifyFile')}
+            </AlertDialog.Title>
+            {prompt !== 'opening' && (
+              <AlertDialog.Description>
+                {t('mobileRecovery.verifyFileDescription')}
+              </AlertDialog.Description>
+            )}
           </AlertDialog.Header>
           <AlertDialog.Footer>
             <AlertDialog.Cancel onClick={() => savedFile.current?.cancel()}>
               {t('common.cancel')}
             </AlertDialog.Cancel>
             <Button onClick={() => savedFile.current?.pick()}>
-              {t('mobileRecovery.selectSavedFile')}
+              {t(
+                prompt === 'opening' ? 'mobileRecovery.openFile' : 'mobileRecovery.selectSavedFile'
+              )}
             </Button>
           </AlertDialog.Footer>
         </AlertDialog.Content>

@@ -266,3 +266,20 @@ await test('logout drops a parked notification tap, and another account never op
   t.signIn('alice');
   assert.deepEqual(t.visited, []);
 });
+await test('a tap after unregister() never opens for the account still finishing logout', async () => {
+  const t = await setup('ios');
+  await Promise.resolve();
+  const tap = (route, recipientUserId = 'alice') =>
+    t.listeners.get('pushNotificationActionPerformed')({
+      notification: { data: { route, recipientUserId } },
+    });
+  t.signIn('alice');
+  await t.bridge.unregister();
+  tap('/workspace/w1');
+  t.signIn('alice');
+  assert.deepEqual(t.visited, []);
+  t.signIn(null);
+  t.signIn('alice');
+  tap('/workspace/w2');
+  assert.deepEqual(t.visited, ['/workspace/w2']);
+});

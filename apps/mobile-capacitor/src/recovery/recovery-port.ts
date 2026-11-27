@@ -89,20 +89,25 @@ export function mobileRecoveryPort(options: {
   };
 }
 
-export type SavedFilePromptState = 'closed' | 'waiting' | 'choosing';
+export type RecoveryFilePromptState = 'closed' | 'waiting' | 'choosing' | 'opening';
 
 /**
- * The fresh-tap prompt that re-reads a just-exported file inside the creation command. The
- * prompt stays open while its chooser runs: WKWebView may close the picker without any
- * event, so Cancel must still release the command and Choose again replaces the chooser.
- * A dismissed chooser returns to `waiting`; only a file, an error or Cancel answers.
+ * The host's prompt around every recovery file chooser. WKWebView may close the picker
+ * without any event, so the prompt stays open while a chooser runs: Cancel answers its
+ * caller (releasing a command that waits on it) and Choose again replaces the chooser.
+ * After a dismissed verification chooser the prompt waits for another try; a dismissed
+ * file-action chooser answers null.
  */
-export function savedFilePrompt(
-  onState: (state: SavedFilePromptState) => void,
+export function recoveryFilePrompt(
+  onState: (state: RecoveryFilePromptState) => void,
   choose: typeof chooseRecoveryFile = chooseRecoveryFile
 ) {
   let answer:
-    | { resolve: (file: Uint8Array | null) => void; reject: (error: unknown) => void }
+    | {
+        resolve: (file: Uint8Array | null) => void;
+        reject: (error: unknown) => void;
+        direct: boolean;
+      }
     | undefined;
   let picking: AbortController | undefined;
   let disposed = false;
@@ -114,34 +119,39 @@ export function savedFilePrompt(
     onState('closed');
     if (to) reply(to);
   };
+  const ask = (direct: boolean) =>
+    new Promise<Uint8Array | null>((resolve, reject) => {
+      settle((to) => to.resolve(null));
+      if (disposed) return resolve(null);
+      answer = { resolve, reject, direct };
+      if (direct) pick();
+      else onState('waiting');
+    });
+  const pick = () => {
+    if (!answer) return;
+    picking?.abort();
+    const controller = new AbortController();
+    picking = controller;
+    onState(answer.direct ? 'opening' : 'choosing');
+    choose({ signal: controller.signal }).then(
+      (file) => {
+        if (picking !== controller) return file?.fill(0);
+        picking = undefined;
+        if (file || answer?.direct) settle((to) => to.resolve(file));
+        else onState('waiting');
+      },
+      (error: unknown) => {
+        if (picking !== controller) return;
+        picking = undefined;
+        settle((to) => to.reject(error));
+      }
+    );
+  };
   return {
-    request: () =>
-      new Promise<Uint8Array | null>((resolve, reject) => {
-        settle((to) => to.resolve(null));
-        if (disposed) return resolve(null);
-        answer = { resolve, reject };
-        onState('waiting');
-      }),
-    pick: () => {
-      if (!answer) return;
-      picking?.abort();
-      const controller = new AbortController();
-      picking = controller;
-      onState('choosing');
-      choose({ signal: controller.signal }).then(
-        (file) => {
-          if (picking !== controller) return file?.fill(0);
-          picking = undefined;
-          if (file) settle((to) => to.resolve(file));
-          else onState('waiting');
-        },
-        (error: unknown) => {
-          if (picking !== controller) return;
-          picking = undefined;
-          settle((to) => to.reject(error));
-        }
-      );
-    },
+    /** A file action's chooser; it opens synchronously, inside the tap. */
+    chooseFile: () => ask(true),
+    confirmSavedFile: () => ask(false),
+    pick,
     cancel: () => settle((to) => to.resolve(null)),
     dispose: () => {
       disposed = true;

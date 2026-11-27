@@ -16,8 +16,8 @@ import {
 } from '../../src/e2ee/recovery';
 import {
   mobileRecoveryPort,
-  savedFilePrompt,
-  type SavedFilePromptState,
+  recoveryFilePrompt,
+  type RecoveryFilePromptState,
 } from '../../src/recovery/recovery-port';
 
 beforeEach(() => {
@@ -865,12 +865,12 @@ function silentChooserPage() {
 }
 
 function promptStates() {
-  const states: SavedFilePromptState[] = [];
+  const states: RecoveryFilePromptState[] = [];
   const waiters: (() => void)[] = [];
   let seen = 0;
   return {
     states,
-    record: (state: SavedFilePromptState) => {
+    record: (state: RecoveryFilePromptState) => {
       states.push(state);
       if (state === 'waiting') for (const wake of waiters.splice(0)) wake();
     },
@@ -891,7 +891,7 @@ async function verifiedCreation() {
   f.empty();
   const page = silentChooserPage();
   const watched = promptStates();
-  const prompt = savedFilePrompt(watched.record);
+  const prompt = recoveryFilePrompt(watched.record);
   let saved = new Uint8Array();
   const owned = mobileRecoveryPort({
     config: {
@@ -907,7 +907,8 @@ async function verifiedCreation() {
       saved = bytes.slice();
       return true;
     },
-    confirmSavedFile: prompt.request,
+    chooseFile: prompt.chooseFile,
+    confirmSavedFile: prompt.confirmSavedFile,
   });
   return { f, page, watched, prompt, owned, saved: () => saved };
 }
@@ -998,5 +999,35 @@ it('logout settles an open verification prompt and every chooser the port opened
     expect(chooser.removed).toBe(true);
   } finally {
     t.saved().fill(0);
+  }
+}, 30_000);
+
+it('Cancel and Choose again also release a file action whose picker WebKit never answers', async () => {
+  const t = await verifiedCreation();
+  try {
+    const created = t.owned.port.create!();
+    await t.watched.waiting();
+    t.prompt.pick();
+    (await t.page.nth(1)).choose(t.saved());
+    expect(await created).toEqual({ outcome: 'created', vaultId: expect.any(String) });
+    const stuck = t.owned.port.checkFile!();
+    const silent = await t.page.nth(2);
+    expect(t.watched.states.at(-1)).toBe('opening');
+    t.prompt.cancel();
+    expect(await stuck).toEqual({ outcome: 'cancelled' });
+    expect(silent.removed).toBe(true);
+    const check = t.owned.port.checkFile!();
+    await t.page.nth(3);
+    t.prompt.pick();
+    (await t.page.nth(4)).choose(t.saved());
+    expect(await check).toMatchObject({ outcome: 'opened' });
+    expect(t.watched.states.at(-1)).toBe('closed');
+    const dismissed = t.owned.port.checkFile!();
+    (await t.page.nth(5)).dispatchEvent(new Event('cancel'));
+    expect(await dismissed).toEqual({ outcome: 'cancelled' });
+  } finally {
+    t.saved().fill(0);
+    t.prompt.dispose();
+    t.owned.dispose();
   }
 }, 30_000);
