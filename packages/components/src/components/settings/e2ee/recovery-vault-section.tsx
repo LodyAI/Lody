@@ -2,7 +2,18 @@ import { recoveryAvailabilityMessage } from '@/lib/e2ee-actionable-failure';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileKey2, KeyRound, Lock, MoreHorizontal, type LucideIcon } from 'lucide-react';
+import {
+  CircleAlert,
+  CircleCheck,
+  CircleMinus,
+  CircleX,
+  Clock,
+  FileKey2,
+  KeyRound,
+  Lock,
+  MoreHorizontal,
+  type LucideIcon,
+} from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
@@ -17,6 +28,7 @@ import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { CompactRow, CompactSection } from '../compact-layout';
 import { settingsMaterial } from '../material.stylex';
 import { SettingsInfo } from '../settings-info';
+import { settingsSurface } from '../surface';
 import {
   useRecoveryPort,
   type RecoveryPasskey,
@@ -120,18 +132,18 @@ const styles = stylex.create({
   methodHeader: {
     display: 'flex',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: space[1],
     minWidth: 0,
   },
   methodTitle: {
     margin: 0,
+    minWidth: 0,
     fontSize: text.bodySize,
     fontWeight: 500,
     lineHeight: 1.35,
     color: colors.label,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    overflowWrap: 'anywhere',
   },
   methodMeta: {
     display: 'inline-flex',
@@ -213,9 +225,84 @@ const styles = stylex.create({
   statusDotSuccess: { backgroundColor: colors.success },
   statusDotWarning: { backgroundColor: colors.warning },
   workspaceAction: { flexShrink: 0 },
-  stack: { display: 'flex', flexDirection: 'column', gap: space[6] },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[6], alignSelf: 'stretch' },
+  progressTitle: {
+    margin: 0,
+    paddingInline: space[4],
+    paddingTop: space[3],
+    paddingBottom: space[2],
+    fontSize: text.footnoteSize,
+    fontWeight: 500,
+    color: colors.secondaryLabel,
+  },
+  progressList: { margin: 0, padding: 0, listStyleType: 'none' },
+  progressRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minHeight: '44px',
+    justifyContent: 'center',
+    paddingInline: space[4],
+    paddingBlock: '10px',
+  },
+  progressLine: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+    minWidth: 0,
+  },
+  progressStatus: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: '6px',
+    fontSize: text.footnoteSize,
+    lineHeight: 1.35,
+    color: colors.secondaryLabel,
+    whiteSpace: 'nowrap',
+  },
+  progressStatusDanger: { color: colors.destructive },
   line: { display: 'block' },
 });
+
+type RestoreRowView = {
+  /** `null` while the workspace is still restoring: the row shows a spinner. */
+  icon: LucideIcon | null;
+  tone: 'neutral' | 'success' | 'warning' | 'danger';
+  status: string;
+  detail?: string;
+};
+
+/** One workspace's restore outcome as a status mark, a short label and, when it needs one, a next step. */
+function restoreRowView(row: RecoveryRestoreResult): RestoreRowView {
+  if (row.outcome === 'Restoring')
+    return { icon: null, tone: 'neutral', status: 'e2ee.recovery.restoreStatus.restoring' };
+  if (row.outcome === 'Committed')
+    return row.partialEpochKey
+      ? {
+          icon: CircleAlert,
+          tone: 'warning',
+          status: 'e2ee.recovery.restoreStatus.partial',
+          detail: 'e2ee.recovery.restoreStatus.partialHelp',
+        }
+      : { icon: CircleCheck, tone: 'success', status: 'e2ee.recovery.restoreStatus.restored' };
+  if (row.outcome === 'Pending' || row.outcome === 'Unconfirmed')
+    return {
+      icon: Clock,
+      tone: 'neutral',
+      status: 'e2ee.recovery.restoreStatus.waiting',
+      detail: 'e2ee.recovery.restoreStatus.waitingHelp',
+    };
+  if (row.outcome === 'not-backed-up')
+    return {
+      icon: CircleMinus,
+      tone: 'neutral',
+      status: 'e2ee.recovery.restoreStatus.notBackedUp',
+      detail: 'e2ee.recovery.restoreStatus.notBackedUpHelp',
+    };
+  return { icon: CircleX, tone: 'danger', status: 'e2ee.recovery.restoreStatus.failed' };
+}
 
 type Result =
   | {
@@ -723,6 +810,8 @@ export function RecoveryVaultSection({
   type MethodAction = {
     key: string;
     label: string;
+    /** The full name, shown in menus, when `label` is a short verb completed by the row title. */
+    ariaLabel?: string;
     variant?: 'primary' | 'secondary';
     tone?: 'destructive';
     onClick: () => void;
@@ -811,6 +900,7 @@ export function RecoveryVaultSection({
                 variant={visibleAction.variant ?? 'secondary'}
                 tone={visibleAction.tone}
                 disabled={busy}
+                aria-label={visibleAction.ariaLabel}
                 onClick={visibleAction.onClick}
               >
                 {visibleAction.label}
@@ -840,7 +930,7 @@ export function RecoveryVaultSection({
                       disabled={busy}
                       onClick={item.onClick}
                     >
-                      {item.label}
+                      {item.ariaLabel ?? item.label}
                     </Menu.Item>
                   ))}
                 </Menu.Content>
@@ -936,7 +1026,8 @@ export function RecoveryVaultSection({
   if (create && (mode === 'none' || mode === 'failed')) {
     fileLeadActions.push({
       key: 'create-file',
-      label: t('e2ee.recovery.create'),
+      label: t('e2ee.recovery.createShort'),
+      ariaLabel: t('e2ee.recovery.create'),
       variant: mode === 'none' && primaryCreate === 'file' ? 'primary' : 'secondary',
       onClick: () =>
         void run(async () => {
@@ -1001,7 +1092,8 @@ export function RecoveryVaultSection({
   if (mode === 'none' && canCreatePasskey) {
     passkeyLeadActions.push({
       key: 'create-passkey',
-      label: t('e2ee.recovery.createWithPasskey'),
+      label: t('e2ee.recovery.setUpShort'),
+      ariaLabel: t('e2ee.recovery.createWithPasskey'),
       variant: primaryCreate === 'passkey' ? 'primary' : 'secondary',
       onClick: openPasskeyCreate,
     });
@@ -1062,7 +1154,8 @@ export function RecoveryVaultSection({
   if (mode === 'none' && canCreatePassword) {
     passwordLeadActions.push({
       key: 'create-password',
-      label: t('e2ee.recovery.createWithPassword'),
+      label: t('e2ee.recovery.setUpShort'),
+      ariaLabel: t('e2ee.recovery.createWithPassword'),
       variant: primaryCreate === 'password' ? 'primary' : 'secondary',
       onClick: () => openPasswordDialog('create'),
     });
@@ -1161,27 +1254,50 @@ export function RecoveryVaultSection({
           <p aria-live="polite">{t('e2ee.recovery.restoreNone')}</p>
         ) : (
           <div {...stylex.props(styles.stack)}>
-            <ul aria-live="polite">
-              {restoreRows.map((row, index) => (
-                <li
-                  key={row.workspaceId ?? index}
-                  data-recovery-result={row.workspaceId}
-                  data-recovery-outcome={row.outcome}
-                >
-                  {row.outcome === 'Restoring'
-                    ? t('e2ee.recovery.restoreWorking', { name: row.name })
-                    : row.outcome === 'Committed'
-                      ? row.partialEpochKey
-                        ? t('e2ee.recovery.restorePartial', { name: row.name })
-                        : t('e2ee.recovery.restoreDone', { name: row.name })
-                      : row.outcome === 'Pending' || row.outcome === 'Unconfirmed'
-                        ? t('e2ee.recovery.restoreWaiting', { name: row.name })
-                        : row.outcome === 'not-backed-up'
-                          ? t('e2ee.recovery.restoreNotBackedUp', { name: row.name })
-                          : t('e2ee.recovery.restoreFailed', { name: row.name })}
-                </li>
-              ))}
-            </ul>
+            <section
+              aria-labelledby="e2ee-recovery-restore-progress"
+              data-testid="e2ee-recovery-restore-progress"
+              {...stylex.props(settingsSurface.card)}
+            >
+              <p id="e2ee-recovery-restore-progress" {...stylex.props(styles.progressTitle)}>
+                {t('e2ee.recovery.restoreProgressTitle')}
+              </p>
+              <ul aria-live="polite" {...stylex.props(styles.progressList)}>
+                {restoreRows.map((row, index) => {
+                  const view = restoreRowView(row);
+                  const Mark = view.icon;
+                  return (
+                    <li
+                      key={row.workspaceId ?? index}
+                      data-recovery-result={row.workspaceId}
+                      data-recovery-outcome={row.outcome}
+                      {...stylex.props(styles.progressRow, settingsSurface.lineRuled)}
+                    >
+                      <div {...stylex.props(styles.progressLine)}>
+                        <p {...stylex.props(styles.workspaceName)}>{row.name}</p>
+                        <span
+                          data-recovery-status=""
+                          {...stylex.props(
+                            styles.progressStatus,
+                            view.tone === 'success' && styles.workspaceStatusSuccess,
+                            view.tone === 'warning' && styles.workspaceStatusWarning,
+                            view.tone === 'danger' && styles.progressStatusDanger
+                          )}
+                        >
+                          {Mark === null ? (
+                            <Spinner size="small" />
+                          ) : (
+                            <Mark size={14} aria-hidden="true" />
+                          )}
+                          {t(view.status)}
+                        </span>
+                      </div>
+                      {view.detail && <p {...stylex.props(styles.methodNote)}>{t(view.detail)}</p>}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
             {hasRestoredWorkspace && (onOpenWorkspace || onBackToWorkspaces) && (
               <div {...stylex.props(styles.actions)}>
                 {onOpenWorkspace && (

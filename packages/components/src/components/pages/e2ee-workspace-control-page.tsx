@@ -1,6 +1,7 @@
 import { managementFailureKind } from '@/lib/e2ee-actionable-failure';
 import { E2eeDiagnosticCode } from '@/components/e2ee-diagnostic-code';
 import { E2eeMemberActions, type E2eeMemberManagement } from './e2ee-member-actions';
+import { E2eeShieldKeyArt } from '../e2ee/e2ee-illustrations';
 import * as stylex from '@stylexjs/stylex';
 import { Accordion } from '@lody/ui/accordion';
 import { Alert } from '@lody/ui/alert';
@@ -428,6 +429,31 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     gap: space[4],
+  },
+  mobileIdentity: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    paddingInline: space[1],
+  },
+  mobileIdentityText: { display: 'flex', flexDirection: 'column', minWidth: 0, gap: '2px' },
+  mobileIdentityName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: type.bodySize,
+    fontWeight: 600,
+    color: colors.label,
+  },
+  mobileIdentityCaption: {
+    fontSize: type.footnoteSize,
+    lineHeight: type.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  mobileOpen: {
+    display: 'flex',
+    flexDirection: 'column',
+    marginTop: space[2],
   },
   mobileMenuRow: {
     boxSizing: 'border-box',
@@ -1371,9 +1397,7 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           <ChevronLeft size={18} aria-hidden="true" />
         </button>
         <h1 data-testid="e2ee-workspace-control" {...stylex.props(styles.mobileHeaderTitle)}>
-          {mobileView === 'detail'
-            ? tabLabel(tab)
-            : (props.workspaceName ?? t('e2ee.control.title'))}
+          {mobileView === 'detail' ? tabLabel(tab) : t('e2ee.control.title')}
         </h1>
         <div {...stylex.props(styles.mobileHeaderActions)}>{headerActionButtons}</div>
       </header>
@@ -1381,15 +1405,17 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
         {statusNotices}
         {mobileView === 'menu' ? (
           <>
-            {props.onOpen && (
-              <Button
-                variant="primary"
-                disabled={props.loading || Boolean(props.failure) || props.openDisabled}
-                onClick={props.onOpen}
-              >
-                {t('e2ee.control.openWorkspace')}
-              </Button>
-            )}
+            <div data-testid="e2ee-mobile-identity" {...stylex.props(styles.mobileIdentity)}>
+              <E2eeShieldKeyArt size={40} />
+              <div {...stylex.props(styles.mobileIdentityText)}>
+                <span {...stylex.props(styles.mobileIdentityName)}>
+                  {props.workspaceName ?? t('e2ee.control.title')}
+                </span>
+                <span {...stylex.props(styles.mobileIdentityCaption)}>
+                  {t('e2ee.control.identityCaption')}
+                </span>
+              </div>
+            </div>
             <nav
               aria-label={t('e2ee.console.navigation')}
               data-testid="e2ee-mobile-menu"
@@ -1426,6 +1452,19 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
                 );
               })}
             </nav>
+            {props.onOpen && (
+              <div {...stylex.props(styles.mobileOpen)}>
+                <Button
+                  variant="primary"
+                  size="large"
+                  shape="pill"
+                  disabled={props.loading || Boolean(props.failure) || props.openDisabled}
+                  onClick={props.onOpen}
+                >
+                  {t('e2ee.control.openWorkspace')}
+                </Button>
+              </div>
+            )}
           </>
         ) : (
           panels[tab]

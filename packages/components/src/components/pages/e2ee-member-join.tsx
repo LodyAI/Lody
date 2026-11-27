@@ -17,6 +17,7 @@ import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Check } from 'lucide-react';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useStableSession } from '@/hooks/useStableSession';
+import { E2eeMemberWaitingArt } from '../e2ee/e2ee-illustrations';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { desktopMemberJoinLink, sameMemberOffer } from '@/lib/e2ee-member-offer';
 import {
@@ -84,19 +85,15 @@ const styles = stylex.create({
   stepTextLast: { paddingBottom: 0 },
   stepTextActive: { color: colors.label },
   stepTextCurrent: { fontWeight: 600 },
-  signedInBar: {
+  signedInNote: {
     margin: 0,
-    paddingBlock: space[2],
-    paddingInline: space[3],
-    borderRadius: radius.small,
-    backgroundColor: colors.secondaryBackground,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: colors.separator,
-    color: colors.secondaryLabel,
+    color: colors.tertiaryLabel,
     fontSize: text.footnoteSize,
     lineHeight: text.footnoteLeading,
+    overflowWrap: 'anywhere',
   },
+  signedInNoteEmphasis: { color: colors.secondaryLabel },
+  art: { marginBottom: space[2] },
   waitingPanel: {
     display: 'flex',
     flexDirection: 'column',
@@ -508,6 +505,11 @@ function JoinSession({
       <div {...stylex.props(styles.card)}>
         <Card.Root>
           <Card.Header>
+            {request && !ready && !terminal && (
+              <div {...stylex.props(styles.art)}>
+                <E2eeMemberWaitingArt />
+              </div>
+            )}
             <Card.Title as="h1">
               {available?.workspaceName
                 ? t('e2ee.team.joinTitle', { workspace: available.workspaceName })
@@ -540,9 +542,6 @@ function JoinSession({
                   {t('e2ee.team.downloadDesktop')}
                 </a>
               </p>
-            )}
-            {email && (
-              <p {...stylex.props(styles.signedInBar)}>{t('e2ee.team.signedInAs', { email })}</p>
             )}
             {message === 'e2ee.team.waitingKey' ? (
               <div {...stylex.props(styles.waitingPanel)}>
@@ -658,6 +657,17 @@ function JoinSession({
                 {t('e2ee.team.home')}
               </Button>
             </div>
+            {email && (
+              <p
+                data-testid="e2ee-invitation-account"
+                {...stylex.props(
+                  styles.signedInNote,
+                  message === 'e2ee.team.wrongEmail' && styles.signedInNoteEmphasis
+                )}
+              >
+                {t('e2ee.team.signedInAs', { email })}
+              </p>
+            )}
           </div>
         </Card.Root>
       </div>

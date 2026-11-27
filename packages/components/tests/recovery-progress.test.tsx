@@ -84,12 +84,10 @@ it('shows each installed workspace while its peer is waiting and ignores results
     await act(async () =>
       observe!({ workspaceId: 'first', name: 'Same name', outcome: 'Committed' })
     );
-    expect(container.querySelector('[data-recovery-result="first"]')?.textContent).toBe(
-      'e2ee.recovery.restoreDone'
-    );
-    expect(container.querySelector('[data-recovery-result="second"]')?.textContent).toBe(
-      'e2ee.recovery.restoreWorking'
-    );
+    const status = (id: string) =>
+      container.querySelector(`[data-recovery-result="${id}"] [data-recovery-status]`)?.textContent;
+    expect(status('first')).toBe('e2ee.recovery.restoreStatus.restored');
+    expect(status('second')).toBe('e2ee.recovery.restoreStatus.restoring');
     await act(async () => render('account-b'));
     expect(observedSignal?.aborted).toBe(true);
     await act(async () => {

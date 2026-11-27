@@ -19,7 +19,6 @@ import { useTranslation } from 'react-i18next';
 import { Camera, ChevronDown, ChevronLeft, CircleCheck, QrCode, Smartphone } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
-import { Spinner } from '@lody/ui/spinner';
 import { Tabs } from '@lody/ui/tabs';
 import { accountPairingErrorCode } from '@lody/platform';
 import type {
@@ -51,6 +50,7 @@ import {
 } from './e2ee-device-requests';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
+import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
 /** Seconds left until `expiresAt`, ticking once a second; null without a deadline. */
 function useSecondsLeft(expiresAt: number | undefined) {
@@ -698,7 +698,12 @@ export function E2eeAutomaticPairingPage({
         <ChevronLeft size={16} />
         {t('e2ee.control.back')}
       </Button>
-      <section {...stylex.props(themeStyles.column)}>
+      <section {...stylex.props(themeStyles.column, receiving && themeStyles.receivingColumn)}>
+        {receiving && (
+          <div {...stylex.props(themeStyles.receivingArt)}>
+            <E2eeDevicePairArt width={196} transferring={!keyFailure} />
+          </div>
+        )}
         <h1 {...stylex.props(themeStyles.copy)}>
           {t(
             terminal
@@ -725,15 +730,12 @@ export function E2eeAutomaticPairingPage({
           </>
         ) : receiving ? (
           <>
-            <p {...stylex.props(themeStyles.hint4, themeStyles.syncRow)}>
-              {!keyFailure && <Spinner size="small" />}
-              <span>
-                {t(
-                  syncSlowHint && !syncTimedOut
-                    ? 'e2ee.auto.syncing.keepOpen'
-                    : 'e2ee.auto.syncing.help'
-                )}
-              </span>
+            <p role="status" {...stylex.props(themeStyles.hint3)}>
+              {t(
+                syncSlowHint && !syncTimedOut
+                  ? 'e2ee.auto.syncing.keepOpen'
+                  : 'e2ee.auto.syncing.help'
+              )}
             </p>
             {!keyFailure && syncTimedOut && (
               <div {...stylex.props(themeStyles.spaced2)} data-testid="e2ee-sync-timeout">
@@ -856,6 +858,9 @@ export function E2eeAutomaticPairingPage({
               </>
             ) : (
               <div data-testid="e2ee-awaiting-device" {...stylex.props(themeStyles.hint10)}>
+                <div {...stylex.props(themeStyles.cardArt)}>
+                  <E2eeDevicePairArt width={152} />
+                </div>
                 <p role="status" {...stylex.props(themeStyles.copy2)}>
                   {t('e2ee.auto.awaiting.title')}
                 </p>
@@ -1794,12 +1799,15 @@ const themeStyles = stylex.create({
     lineHeight: uiText.footnoteLeading,
     textAlign: 'start',
   },
-  syncRow: {
-    display: 'inline-flex',
-    alignItems: 'center',
+  /** Receiving keys is a wait with nothing to do: the column centres on the transfer. */
+  receivingColumn: {
     justifyContent: 'center',
-    gap: appSpace[2],
+    alignItems: 'center',
+    paddingTop: 0,
+    paddingBottom: appSpace[10],
   },
+  receivingArt: { display: 'flex', justifyContent: 'center', marginBottom: appSpace[8] },
+  cardArt: { display: 'flex', justifyContent: 'center', marginBottom: appSpace[4] },
   dialogBody: {
     flex: '1 1 auto',
     minHeight: 0,

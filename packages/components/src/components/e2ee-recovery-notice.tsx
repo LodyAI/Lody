@@ -2,9 +2,10 @@ import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
-import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { E2eeShieldKeyArt } from './e2ee/e2ee-illustrations';
 import { useWorkspaceRecoveryReady } from './settings/e2ee/recovery-vault-section';
 
 const DISMISS_STORAGE_PREFIX = 'lody.e2ee.recoveryNoticeDismissed.v1:';
@@ -30,22 +31,58 @@ function writeDismissed(accountId: string | null | undefined, workspaceId: strin
 }
 
 const styles = stylex.create({
-  row: {
+  card: {
+    position: 'relative',
+    boxSizing: 'border-box',
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space[2],
-    flexWrap: 'wrap',
+    alignItems: { default: 'center', '@media (max-width: 520px)': 'flex-start' },
+    gap: { default: space[4], '@media (max-width: 520px)': space[3] },
+    padding: space[4],
+    paddingInlineEnd: space[8],
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.card,
+    color: colors.label,
   },
-  actions: {
+  body: {
     display: 'flex',
+    flexGrow: 1,
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: space[1],
-    flexShrink: 0,
+    columnGap: space[4],
+    rowGap: space[2],
+    minWidth: 0,
+  },
+  copy: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    flexGrow: 1,
+    flexBasis: '16rem',
+    minWidth: 0,
+  },
+  title: {
+    margin: 0,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  message: {
+    margin: 0,
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    color: colors.secondaryLabel,
+  },
+  close: {
+    position: 'absolute',
+    top: space[2],
+    insetInlineEnd: space[2],
   },
 });
 
-/** Single-line dismissible reminder on encrypted chat landing when no recovery backup is verified yet. */
+/** Dismissible card on the encrypted chat landing while no recovery backup is verified yet. */
 export function E2eeRecoveryNotice({
   workspaceId,
   accountId,
@@ -62,33 +99,45 @@ export function E2eeRecoveryNotice({
   if (recoveryReady !== false || dismissed) return null;
 
   return (
-    <Alert.Root tone="warning" data-testid="e2ee-chat-recovery-notice">
-      <div {...stylex.props(styles.row)}>
-        <Alert.Description>{t('e2ee.chat.recoveryNotice')}</Alert.Description>
-        <div {...stylex.props(styles.actions)}>
-          <Button
-            size="small"
-            variant="secondary"
-            data-testid="e2ee-chat-recovery-setup"
-            onClick={onSetup}
-          >
-            {t('e2ee.chat.setupRecovery')}
-          </Button>
-          <Button
-            size="small"
-            variant="ghost"
-            icon
-            data-testid="e2ee-chat-recovery-dismiss"
-            aria-label={t('common.close')}
-            onClick={() => {
-              writeDismissed(accountId, workspaceId);
-              setDismissed(true);
-            }}
-          >
-            <X size={14} aria-hidden="true" />
-          </Button>
+    <section
+      aria-labelledby="e2ee-chat-recovery-notice-title"
+      data-testid="e2ee-chat-recovery-notice"
+      {...stylex.props(styles.card)}
+    >
+      <E2eeShieldKeyArt attention />
+      <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.copy)}>
+          <p id="e2ee-chat-recovery-notice-title" {...stylex.props(styles.title)}>
+            {t('e2ee.chat.recoveryNoticeTitle')}
+          </p>
+          <p {...stylex.props(styles.message)}>{t('e2ee.chat.recoveryNotice')}</p>
         </div>
+        <Button
+          size="small"
+          variant="secondary"
+          shape="pill"
+          data-testid="e2ee-chat-recovery-setup"
+          onClick={onSetup}
+        >
+          {t('e2ee.chat.setupRecovery')}
+        </Button>
       </div>
-    </Alert.Root>
+      <div {...stylex.props(styles.close)}>
+        <Button
+          size="small"
+          variant="ghost"
+          icon
+          shape="pill"
+          data-testid="e2ee-chat-recovery-dismiss"
+          aria-label={t('common.close')}
+          onClick={() => {
+            writeDismissed(accountId, workspaceId);
+            setDismissed(true);
+          }}
+        >
+          <X size={14} aria-hidden="true" />
+        </Button>
+      </div>
+    </section>
   );
 }
