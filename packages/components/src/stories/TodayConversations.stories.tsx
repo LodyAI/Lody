@@ -129,6 +129,8 @@ const PAGE: TodayFragment[] = [
   line('Back on ', { m: 'demo-later' }, ' after lunch'),
   line('Done: ', { m: 'demo-settled' }, ', ', { m: 'demo-archived' }),
   line({ m: 'demo-idle' }),
+  // CJK without spaces: a mention keeps its own gap before text, none before punctuation.
+  line('跟进', { m: 'demo-running' }, '的进度，再看', { m: 'demo-unread' }, '。'),
   {
     text: `Pair with ${TODAY_MENTION_CHAR} on the sync review`,
     mentions: [{ start: 10, kind: 'member', id: 'member-ava' }],

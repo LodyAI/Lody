@@ -25,10 +25,36 @@ import { UserAvatar } from '../user-avatar';
 // padding so a selection fill clears the icon and title; the icon is a fixed
 // slot centred on the line with its own hover, apart from the title's
 // underline; selection only tints the fill, so the title keeps its state colour
-// (a Done title stays dim and struck through).
+// (a Done title stays dim and struck through). The chip spaces itself only from
+// text that touches it: a space or punctuation beside it already separates it,
+// so there its end padding overhangs instead of adding to a word space.
 const CHIP_PAD = space[1];
-const ICON_HIT = '18px';
-const ICON_BLEED = '3px';
+// Glyph (or countdown) to title: about a word space, so the icon reads as part
+// of its title, as inline references do elsewhere (the composer's chips 0.2em,
+// VS Code's chat anchors 3px, AFFiNE's and Outline's mentions 4px).
+const ICON_GAP = space[1];
+// How far the icon's hover fill reaches past its glyph on each side.
+const ICON_BLEED = '2px';
+
+/**
+ * Whether a mention needs its own gap from `neighbour`, the character just
+ * before or after it: yes for a letter, CJK text or another mention; no for a
+ * space, punctuation or the edge of the text. Static rows and the editor decide
+ * it from the same node text, so a row keeps its metrics when the editor mounts.
+ */
+function todayMentionNeedsGap(neighbour: string | undefined): boolean {
+  return neighbour !== undefined && !/[\s\p{P}]/u.test(neighbour);
+}
+
+/** Which sides of the mention at `index` of `text` need their own gap. */
+export function todayMentionGaps(text: string, index: number): TodayMentionGaps {
+  return {
+    before: todayMentionNeedsGap(text[index - 1]),
+    after: todayMentionNeedsGap(text[index + 1]),
+  };
+}
+
+export type TodayMentionGaps = { before: boolean; after: boolean };
 
 const styles = stylex.create({
   // Inline so a long title wraps like text; each line fragment keeps its own padding.
@@ -42,6 +68,11 @@ const styles = stylex.create({
     paddingInlineEnd: CHIP_PAD,
     userSelect: 'none',
   },
+  // A space or punctuation follows: the end padding keeps the selection fill but
+  // takes no room, so `test should` and `flag,` read as in plain text.
+  flushEnd: { marginInlineEnd: `calc(-1 * ${CHIP_PAD})` },
+  // Text touches the start (CJK has no spaces): as much room as a word space gives.
+  gapStart: { marginInlineStart: CHIP_PAD },
   // The editor's text selection tint (`::selection`), so a selected chip reads as
   // part of the selected run and keeps every state colour.
   selected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 25%, transparent)` },
@@ -49,18 +80,17 @@ const styles = stylex.create({
   // an inline-block on the line's baseline, one line box tall. Its glyph sits
   // in a line-height box centred on the line (not `vertical-align: middle`,
   // which reads low), and a countdown inside is ordinary text on the shared
-  // baseline in every font. The 1px start margin keeps the caret before the
-  // chip clear of the hover fill.
+  // baseline in every font. The hover fill starts 1px into the chip, which
+  // keeps the caret before the chip clear of it.
   icon: {
     display: 'inline-block',
     boxSizing: 'border-box',
-    minWidth: ICON_HIT,
     lineHeight: text.bodyLeading,
     verticalAlign: 'baseline',
-    marginInlineStart: '1px',
-    paddingInlineStart: 0,
+    marginInlineStart: 0,
+    paddingInlineStart: ICON_BLEED,
     paddingInlineEnd: ICON_BLEED,
-    marginInlineEnd: `calc(${space[1]} - ${ICON_BLEED})`,
+    marginInlineEnd: `calc(${ICON_GAP} - ${ICON_BLEED})`,
     paddingBlock: 0,
     borderWidth: 0,
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
@@ -184,7 +214,14 @@ const STATUS_SHAPES: Record<Exclude<TodaySessionState, 'waiting'>, React.ReactNo
       <path d="M6 2.5 A3.5 3.5 0 0 1 6 9.5 Z" fill="currentColor" />
     </>
   ),
-  unread: <circle cx="6" cy="6" r="3.5" fill="currentColor" />,
+  // A ring like every other state, with a dot inside: a bare dot beside the
+  // bullet of a line that starts with the mention read as a second bullet.
+  unread: (
+    <>
+      <circle {...RING} />
+      <circle cx="6" cy="6" r="2.25" fill="currentColor" />
+    </>
+  ),
   later: (
     <>
       <circle {...RING} />
@@ -219,18 +256,29 @@ function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok'
  * Pointer presses never reach the row, so they never activate the editor.
  * A resolved conversation drags out like a sidebar row (onto a conversation or
  * the new-chat page); a press on the status icon never starts that drag.
+ * `gaps` come from {@link todayMentionGaps} on the node text.
  * Behavior: specs/today-outline.md (Conversation mentions).
  */
-export function TodayMention(props: { mention: TodayMentionTarget; selected?: boolean }) {
+export function TodayMention(props: {
+  mention: TodayMentionTarget;
+  selected?: boolean;
+  gaps: TodayMentionGaps;
+}) {
   const { t } = useTranslation();
-  const { mention, selected = false } = props;
+  const { mention, selected = false, gaps } = props;
   if (mention.kind === 'member' && mention.id) {
     return <TodayMemberMention userId={mention.id} selected={selected} />;
   }
   if (mention.kind !== 'session' || !mention.id) {
     return (
       <span
-        {...stylex.props(styles.mention, styles.muted, selected && styles.selected)}
+        {...stylex.props(
+          styles.mention,
+          gaps.before && styles.gapStart,
+          !gaps.after && styles.flushEnd,
+          styles.muted,
+          selected && styles.selected
+        )}
         data-today-mention=""
         contentEditable={false}
       >
@@ -238,7 +286,7 @@ export function TodayMention(props: { mention: TodayMentionTarget; selected?: bo
       </span>
     );
   }
-  return <TodaySessionMention sessionId={mention.id} selected={selected} />;
+  return <TodaySessionMention sessionId={mention.id} selected={selected} gaps={gaps} />;
 }
 
 function TodayMemberMention(props: { userId: string; selected: boolean }) {
@@ -283,7 +331,11 @@ export function useTodaySessionDisplay(sessionId: SessionId): TodaySessionDispla
   return todaySessionDisplay({ meta, metaSettled, live, nowMs });
 }
 
-function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
+function TodaySessionMention(props: {
+  sessionId: string;
+  selected: boolean;
+  gaps: TodayMentionGaps;
+}) {
   const { t } = useTranslation();
   const controller = useTodayEditor();
   const sessionId = props.sessionId as SessionId;
@@ -301,7 +353,13 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
   if (display.state !== 'ok') {
     return (
       <span
-        {...stylex.props(styles.mention, styles.muted, props.selected && styles.selected)}
+        {...stylex.props(
+          styles.mention,
+          props.gaps.before && styles.gapStart,
+          !props.gaps.after && styles.flushEnd,
+          styles.muted,
+          props.selected && styles.selected
+        )}
         {...rootProps}
       >
         {display.state === 'missing'
@@ -321,7 +379,12 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
   }[display.status];
   return (
     <span
-      {...stylex.props(styles.mention, props.selected && styles.selected)}
+      {...stylex.props(
+        styles.mention,
+        props.gaps.before && styles.gapStart,
+        !props.gaps.after && styles.flushEnd,
+        props.selected && styles.selected
+      )}
       {...rootProps}
       data-today-status={display.status}
       draggable
