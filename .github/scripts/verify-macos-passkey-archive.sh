@@ -14,7 +14,8 @@ archive_suffix="${LODY_PASSKEY_ARCHIVE_SUFFIX:-}"
 verify_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/macos-passkey-verify.XXXXXX")"
 trap 'rm -rf "${verify_dir}"' EXIT
 
-for arch in arm64 x64; do
+arches="${LODY_PASSKEY_ARCHES:-arm64 x64}"
+for arch in ${arches}; do
   macho_arch="${arch}"
   if [[ "${arch}" == "x64" ]]; then
     macho_arch="x86_64"
@@ -110,4 +111,4 @@ for arch in arm64 x64; do
   fi
 done
 
-echo "Verified signed macOS Passkey archives for arm64 and x64 (${app_name} ${version})"
+echo "Verified signed macOS Passkey archives for ${arches} (${app_name} ${version})"
