@@ -57,112 +57,33 @@
   their reason; no time window. No snapshot-author
   substitution or uncertain ACP retry.
   [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
-- `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
-  desktop 16-byte pairing session via core's fixed v1 helper. Machine
-  possession binds strict UTF-8 machineId; activation matches the verified current
-  device and retained signed admission. Session
-  IDs stay outside possession and ledger records; old developer formats need recreation.
-  Local prepare/activate: OS-user socket; remote: signed offer/scoped port. Fleet checks account/workspace/genesis first.
-  Activation refreshes verified ledger/mailbox; ACK only an installed current key. Failure keeps pairing retryable.
-  Local activation answers after `activation.json`; Fleet's start owner finishes startup.
-  The local catalog never refuses that check: a workspace it lacks or binds to another
-  genesis waits for the first authoritative list outcome (list, rejection, subscription
-  error or shutdown), then fails closed; a cached match proceeds offline
-  ([startup decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-e2ee-pairing-first-workspace-list.md)).
-  A known-revoked identity (device receipt or exact `e2ee_device_revoked`) is archived
-  before a new offer; never offer a revoked key ([re-pairing](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md#re-pairing-a-revoked-machine)).
-  After admission, `lody machine pair` treats a missing key as a bounded wait for desktop
-  delivery, never as failure; other activation errors stay terminal
-  ([remote contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md)).
+- `prepareCliE2eeMachineLegacy` binds the retained credential hash to the 16-byte pairing session via core's v1 helper. Machine possession binds strict UTF-8 `machineId`; activation matches the verified device and retained signed admission. Session IDs stay outside possession and ledger records.
+- Local prepare/activate uses OS-user socket; remote uses signed offer and scoped port. Fleet checks account/workspace/genesis first: missing/conflicting catalog rows wait for the first authoritative list outcome, then fail closed; cached matches proceed offline ([decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-30-e2ee-pairing-first-workspace-list.md)). Activation refreshes verified ledger/mailbox and ACKs only an installed current key; failure stays retryable. Archive known-revoked identities before new offers; never offer a revoked key ([re-pairing](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md#re-pairing-a-revoked-machine)). After admission, `lody machine pair` treats missing key as a bounded wait; other activation errors stay terminal.
+- Staging read failures never block verified mailbox reception. Retain sealed old-epoch sends and historical reads; new seals use core's verified current epoch when installed, or the newest retained published key only within core's durable 15-min missing-key budget (exhaustion fails for retry). Provider epoch hints and `rotationRequired` are not encryption authority.
+- Rejected dispatch/feature requests naming a newer epoch or missing current-epoch key, signed by a current ledger device, join one bounded catch-up per verified ledger state, then reopen (core guard still decides); joined older refreshes missing the key get at most one extra round. Unchanged-state failures cool down independently (`at`-based 4 s `missing-key` vs 60 s newer-epoch); successful key install clears cooldown. Logs carry only both epochs ([M3](../../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md)).
+- Prepared bindings cannot start content replicas: verify current installed key, then write `activation.json` before Fleet attaches rooms. Remote activation closes its owner; local promotes it into Fleet's start (closed unless adopted). Desktop ledger handoffs are untrusted bytes verified from pinned genesis; rejection falls back to history and never confirms authority. Markers grant no authority (match genesis/device). Activated workspaces reopen offline; join identical intents; Fleet shutdown drains activation before cloud-port close.
+- Encrypted pollers publish protected Loro metadata with null hosted PR association. `runtime-cloud-port.ts` closes plaintext channels but keeps attachment relay URL and preview tunnel (proof verifier rejects); MessageHandler fences plaintext attachment reads. Edit-and-resend replacements include `signMachineInput` intent in the same commit. Account E2EE ports retain repo-scoped GitHub credentials (personal: account-bound; others: App tokens); device-only ports omit GitHub.
+- Fleet/Lody/one-shot commands load `workspace-legacy` only in the encrypted branch; keep custody/core off the ordinary entry graph so CLI plus maps fit in 2 GiB.
 
-- Staging read denial/I/O failure cannot block independently verified mailbox reception.
-- Retain already sealed old-epoch sends and historical reads. New seals use the verified current
-  epoch in core when installed. Only genuine absence permits the newest retained published key
-  within core’s durable fifteen-minute observation budget; exhaustion fails for retry.
-  Provider epoch hints are not encryption authority; rotationRequired alone is only a hint.
-  A rejected dispatch or feature request naming a newer epoch, or missing its current-epoch key,
-  signed by a current ledger device, joins
-  one bounded catch-up per verified ledger state, then reopens; the core guard still decides.
-  A joined older refresh that leaves the current key missing gets at most one additional
-  round through the same owner and wait budget. An unsuccessful refresh of an unchanged
-  ledger cools down; successful key installation must not cool down the next rotation.
-  Logs carry only both epochs.
-  [M3 selection](../../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
-- Prepared bindings cannot start content replicas. Activate only the native ledger/key
-  receiver: verify current installed key, THEN write `activation.json` before Fleet attaches
-  rooms. Remote activation closes its owner; local activation promotes that leased owner into
-  Fleet's start, which closes it unless a runtime adopts it. A desktop ledger handoff is untrusted
-  bytes verified from the pinned genesis; rejection falls back to history, and it never confirms
-  authority. Marker grants no authority; match genesis/device.
-  Activated workspaces reopen offline. Join identical per-workspace intents; Fleet shutdown
-  drains activation before cloud-port close.
-
-- Encrypted pollers publish protected Loro metadata, with null hosted PR association.
-- `runtime-cloud-port.ts` closes plaintext cloud channels for encrypted runtimes but keeps
-  the attachment relay URL and the preview tunnel, whose ordinary proof verifier rejects.
-  MessageHandler fences plaintext attachment reads.
-- Edit-and-resend replacements carry this machine's `signMachineInput` intent in the same
-  commit; an unsigned one is never written.
-- Account E2EE ports retain repo-scoped GitHub credentials. Personal requests stay account-bound; other accounts use App tokens. Device-only ports omit GitHub.
-
-- Fleet/Lody/one-shot commands load `workspace-legacy` only in the encrypted branch.
-  Keep custody/core off the ordinary entry graph; CLI plus maps must fit the 2 GiB heap.
-
-- Runtime journals are signing-key-scoped: retain old evidence; never reuse old KEK blobs.
-  Hints follow replacements only after verified admission/install. Pairing waits raise
-  no startup issue/timer/global offline state. Activation binds the approved key,
-  drains other identities and retains its cleanup retry owner.
-- Only activation/binding/device-original ENOENT means pairing wait. Check originals
-  before custody init; stale hints never probe keyrings. Other errors retain Fleet
-  retry; never cache transient I/O as missing pairing.
-- Ingest failure fences new seals until verified refresh; keep the last verified view
-  and healthy readers. Retries double up to five minutes and never stop while open;
-  explicit refresh restarts the backoff. Seal may request retry but never await it in the SDK save queue.
-  Never skip rejected records or reset pins. Close cancels pending retry timers.
-- An encrypted workspace keeps one bounded background authority check: credential
-  plus verified-ledger refresh, joined to the existing single-flight owner. Exact
-  member/device refusal stops that owner through the durable receipt; a generic failure
-  keeps the last verified view. Inbound machine-control frames request it; transient
-  history retries double from 1 s to 5 min without fencing seals. Never depend on token expiry, and
-  keep the read-only client-loss probe from triggering I/O.
+- Runtime journals are signing-key-scoped: retain old evidence and never reuse old KEK blobs. Hints follow replacements only after verified admission and install. Pairing waits raise no startup issue, timer, or global offline state; `LodyFleet` parks `e2ee_device_revoked` in `waitingForPairing` too. Activation binds the approved key, drains other identities, and retains its cleanup retry owner.
+- Only `activation.json`, `binding.json`, or device-original ENOENT means pairing wait. Check originals before custody init so stale hints never probe keyrings. Other errors retain Fleet retry; never cache transient I/O as missing pairing.
+- Ingest failure fences new seals until verified refresh while keeping the last verified view and healthy readers. Retries double up to 5 min and never stop while open; explicit refresh restarts backoff. Seal may request retry but never await it in the SDK save queue. Never skip rejected records or reset pins; close cancels pending retry timers.
+- Each encrypted workspace keeps one bounded background authority check (credential plus verified-ledger refresh) joined to the single-flight owner. Exact member/device refusal stops it via durable receipt; generic failures keep the last verified view. Inbound machine-control frames request it; transient history and `waiting-key` retries double from 1 s to 5 min without fencing seals. Never depend on token expiry, and keep the read-only client-loss probe I/O-free.
 
 ## Local machine pairing
 
-- `pairing-journal.ts` retains immutable frontend/session proofs and admissions before key
-  receipt. Verify full history and current same-member personal authority. New sessions
-  need consent; preserve signer/keys/credential. Preflight latest session before Fleet
-  ownership changes; reject late sessions.
-- Publish ownership before replacement originals; publish material/current identity atomically.
-  Same-scope takeover: atomic old creating=-1/new creating=1, retain bytes.
-  Match account/machine/workspace/genesis/member; superseded sessions cannot publish/retake.
-  Reuse originals. Unpublished generations with retained credentials cannot replace missing
-  devices; fresh explicit sessions may replace lost published identities with distinct
-  signing-key-scoped credentials. Ledger-only owners cannot receive keys. Same-identity
-  retries keep healthy owners; only identical intents share flights. Cancellation never
-  guesses remote settlement. See [recovery rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md).
-- Remote commands use workspace custody and scoped grants; see the
-  [remote contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md).
+- `pairing-journal.ts` owns `pairings.sqlite` exclusively (never open it elsewhere) and retains immutable frontend/session proofs and admissions before key receipt. Verify full history and current same-member personal authority; new sessions require consent and preserve signer/keys/credential. Preflight latest session before Fleet ownership changes and reject late sessions.
+- Publish ownership before replacement originals; publish material and current identity atomically. Same-scope takeover atomically marks old `creating=-1` and new `creating=1`, retaining bytes, matching account/machine/workspace/genesis/member; superseded sessions cannot publish or retake. Unpublished generations with retained credentials cannot replace missing devices; fresh explicit sessions may replace lost published identities with signing-key-scoped credentials. Ledger-only owners cannot receive keys; same-identity retries keep healthy owners; only identical intents share flights; cancellation never guesses remote settlement ([rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md)).
+- Remote pairing uses workspace custody and scoped grants ([contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md)), retries only `RetryablePairingError` within bounded budget, and never re-calls `claim` after admission. Pass `AbortSignal` explicitly on `CloudE2eePort` (no `AsyncLocalStorage`/hidden symbols) and fence `publishActivation` (`link`/`rename`) and `completeRemotePairing` against cancellation and expiry.
 
 ## Catalog and Fleet containment
 
-- Encrypted workspace catalog rules bind `../local-workspace-catalog.ts`; see
-  [lib rules](../AGENTS.md#encrypted-workspace-catalog).
-
-- Same-context `creating=-1` means `prepare-superseded`; other errors stay errors. Main
-  archives only the matching all-null unsigned attempt before fresh consent. Keep CLI originals.
-- A readable `binding.json` outranks listed mode: contradicting rows never start, relabel, revoke or rewrite cache; unreadable bindings block opens and retry (`retained-binding.ts`).
-- Never cache an unimplemented content mode. `export` decrypts locally; `export` and
-  `sync` include encrypted Schedule documents and Registry
-  ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
-
-- Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
-  fresh approval/KEK. OS/unknown stays OS.
-
-Verify member removal and persist its receipt before custody release. Drain execution/sync; erase scoped content under identity lease/pairing mutex. Retry before open, preserve projects, and rejoin with fresh keys. [Roost cleanup](../../session/README.md#encrypted-roost-history).
-
-- `client-loss-observer.ts` is read-only E2E diagnostics, requiring nonrelease build
-  opt-in and runtime `LODY_E2E=1`. Bind baseline requester identity to verified ledger
-  state; never refresh authority or stop owners for observation. Track raw watcher
-  and ACP promises after cancellation/map clearing; timeout never means drained.
+- Encrypted workspace catalog rules bind `../local-workspace-catalog.ts` ([lib rules](../AGENTS.md#encrypted-workspace-catalog)).
+- Same-context `creating=-1` means `prepare-superseded`; other errors stay errors. Main archives only matching all-null unsigned attempts before fresh consent; keep CLI originals.
+- Readable `binding.json` outranks listed mode: contradicting rows never start, relabel, revoke, or rewrite cache; unreadable bindings block opens and retry (`retained-binding.ts`).
+- Never cache unimplemented content modes. `export` decrypts locally; `export` and `sync` include encrypted Schedule documents and Registry ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
+- Reset runs over same-user socket: drain, exclusive sibling lease, archive whole dir, require fresh approval/KEK; OS/unknown stays OS.
+- Verify member removal and persist `removed.json` before custody release. Drain execution/sync; erase under identity lease and fail-closed `pairing-mutex.sqlite` (`busy` never swallowed), deleting `roost/` and `custody/` before `remote-bootstrap.json`/`activation.json`/`binding.json` and unlinking corrupt journals. Replay `removed.json` before `openWorkspace` and `loadCliE2eeMachineBootstrapLegacy`, preserve projects, and rejoin with fresh keys ([Roost cleanup](../../session/README.md#encrypted-roost-history)).
+- `client-loss-observer.ts` is read-only E2E diagnostics (nonrelease opt-in + `LODY_E2E=1`): bind baseline requester to verified ledger, never trigger refresh/stop, and track raw watcher/ACP promises after cancellation/map clearing (timeout never means drained).
 
 E2EE notification ports forward only the CLI account’s recipients. Live Activity summaries omit HTTP approval IDs; permission responses require signed in-App device actions.

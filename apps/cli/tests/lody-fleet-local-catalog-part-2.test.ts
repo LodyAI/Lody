@@ -636,85 +636,92 @@ it.each(['e2ee_pairing_required', 'e2ee_storage_failed'])(
   }
 );
 
-it('waits silently for pairing when an activated machine has lost its custody', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'fleet-e2ee-custody-loss-'));
-  vi.stubEnv('LODY_DATA_DIR', directory);
-  const { openCliE2eeWorkspaceLegacy } = await import('../src/lib/e2ee/workspace-legacy');
-  const workspace = {
-    id: 'lost-custody',
-    name: 'Lost custody',
-    slug: null,
-    role: 'owner',
-    contentMode: 'e2ee',
-    genesisHash: 'ab'.repeat(32),
-  };
-  const root = join(
-    getLodyDataDir(),
-    'e2ee',
-    createHash('sha256').update('user-1').digest('hex'),
-    workspace.id
-  );
-  await mkdir(root, { recursive: true });
-  await writeFile(
-    join(root, 'binding.json'),
-    JSON.stringify({
-      workspaceId: workspace.id,
-      genesisHash: workspace.genesisHash,
-      genesisRecordHex: 'aa',
-    })
-  );
-  await writeFile(
-    join(root, 'activation.json'),
-    JSON.stringify({ genesisHash: workspace.genesisHash, signingPublicKey: 'cd'.repeat(32) })
-  );
-  const create = vi.spyOn(Lody, 'create').mockImplementation(async () => {
-    await openCliE2eeWorkspaceLegacy({
-      accountId: 'user-1',
-      workspaceId: workspace.id,
-      genesisHash: workspace.genesisHash,
-      cloud: {} as never,
-      onUnavailable: () => {},
-      keyring: async () => {
-        throw new Error('missing custody must not probe the keyring');
-      },
+it.each(['e2ee_pairing_required', 'e2ee_device_revoked'] as const)(
+  'waits silently for pairing without a 10s retry loop on %s',
+  async (reason) => {
+    const directory = await mkdtemp(join(tmpdir(), `fleet-e2ee-${reason}-`));
+    vi.stubEnv('LODY_DATA_DIR', directory);
+    const { openCliE2eeWorkspaceLegacy } = await import('../src/lib/e2ee/workspace-legacy');
+    const workspace = {
+      id: `parked-${reason}`,
+      name: 'Parked workspace',
+      slug: null,
+      role: 'owner',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    const root = join(
+      getLodyDataDir(),
+      'e2ee',
+      createHash('sha256').update('user-1').digest('hex'),
+      workspace.id
+    );
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      join(root, 'binding.json'),
+      JSON.stringify({
+        workspaceId: workspace.id,
+        genesisHash: workspace.genesisHash,
+        genesisRecordHex: 'aa',
+      })
+    );
+    await writeFile(
+      join(root, 'activation.json'),
+      JSON.stringify({ genesisHash: workspace.genesisHash, signingPublicKey: 'cd'.repeat(32) })
+    );
+    const create = vi.spyOn(Lody, 'create').mockImplementation(async () => {
+      if (reason === 'e2ee_device_revoked') throw new Error('e2ee_device_revoked');
+      await openCliE2eeWorkspaceLegacy({
+        accountId: 'user-1',
+        workspaceId: workspace.id,
+        genesisHash: workspace.genesisHash,
+        cloud: {} as never,
+        onUnavailable: () => {},
+        keyring: async () => {
+          throw new Error('missing custody must not probe the keyring');
+        },
+      });
+      throw new Error('missing original must not open a runtime');
     });
-    throw new Error('missing original must not open a runtime');
-  });
-  const harness = createFleetHarness(createCatalogStub(() => Effect.succeed(catalogSnapshot({}))));
-  const issues = new Set<string>();
-  harness.runtimeStateReporter.upsertIssue.mockImplementation((issue) => {
-    issues.add(issue.code);
-  });
-  harness.runtimeStateReporter.clearIssue.mockImplementation((code) => {
-    issues.delete(code);
-  });
-  const fleet = harness.fleet as unknown as {
-    desiredWorkspaces: Map<string, unknown>;
-    retryTimers: Map<string, ReturnType<typeof setTimeout>>;
-    waitingForPairing: Set<string>;
-    startWorkspace(workspace: never): Promise<void>;
-    stopped: boolean;
-  };
-  delete (fleet as unknown as { startWorkspace?: unknown }).startWorkspace;
-  fleet.desiredWorkspaces.set(workspace.id, workspace);
-  vi.useFakeTimers();
-  try {
-    await fleet.startWorkspace(workspace as never);
-    expect(fleet.waitingForPairing.has(workspace.id)).toBe(true);
-    expect(fleet.retryTimers.size).toBe(0);
-    expect(issues.has(`workspace_start_failed:${workspace.id}`)).toBe(false);
-    expect(issues.has('workspace_runtime_retrying')).toBe(false);
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(fleet.retryTimers.size).toBe(0);
-    await expect(stat(join(root, 'custody'))).rejects.toHaveProperty('code', 'ENOENT');
-  } finally {
-    fleet.stopped = true;
-    create.mockRestore();
-    vi.useRealTimers();
-    vi.unstubAllEnvs();
-    await rm(directory, { recursive: true, force: true });
+    const harness = createFleetHarness(
+      createCatalogStub(() => Effect.succeed(catalogSnapshot({})))
+    );
+    const issues = new Set<string>([`workspace_start_failed:${workspace.id}`]);
+    harness.runtimeStateReporter.upsertIssue.mockImplementation((issue) => {
+      issues.add(issue.code);
+    });
+    harness.runtimeStateReporter.clearIssue.mockImplementation((code) => {
+      issues.delete(code);
+    });
+    const fleet = harness.fleet as unknown as {
+      desiredWorkspaces: Map<string, unknown>;
+      retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+      waitingForPairing: Set<string>;
+      startWorkspace(workspace: never): Promise<void>;
+      stopped: boolean;
+    };
+    delete (fleet as unknown as { startWorkspace?: unknown }).startWorkspace;
+    fleet.desiredWorkspaces.set(workspace.id, workspace);
+    vi.useFakeTimers();
+    try {
+      await fleet.startWorkspace(workspace as never);
+      expect(fleet.waitingForPairing.has(workspace.id)).toBe(true);
+      expect(fleet.retryTimers.size).toBe(0);
+      expect(issues.has(`workspace_start_failed:${workspace.id}`)).toBe(false);
+      expect(issues.has('workspace_runtime_retrying')).toBe(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(fleet.retryTimers.size).toBe(0);
+      expect(create).toHaveBeenCalledTimes(1);
+      await expect(stat(join(root, 'custody'))).rejects.toHaveProperty('code', 'ENOENT');
+    } finally {
+      fleet.stopped = true;
+      create.mockRestore();
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
   }
-});
+);
 
 it.each(['EMFILE', 'EACCES'])(
   'retries an encrypted workspace after %s clears without requiring activation',
