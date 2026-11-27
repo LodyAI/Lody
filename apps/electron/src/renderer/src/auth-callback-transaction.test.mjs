@@ -330,8 +330,14 @@ void test('a callback after process restart asks for a fresh login and validates
   )
   assert.equal(login.getState().error, 'restart_required')
   assert.equal(readDesktopLoginCallback('lody://auth/callback#token=abc'), 'abc')
+  assert.equal(readDesktopLoginCallback('lody://auth/callback/#token=abc'), 'abc')
+  assert.equal(
+    readDesktopLoginCallback('AI.LODY.STABLE://auth/callback/#token=abc', 'ai.lody.stable'),
+    'abc'
+  )
   assert.equal(readDesktopLoginCallback('https://auth/callback#token=abc'), null)
   assert.equal(readDesktopLoginCallback('lody://other/callback#token=abc'), null)
+  assert.equal(readDesktopLoginCallback('lody://auth/callback/extra#token=abc'), null)
   assert.equal(readDesktopLoginCallback('lody://auth/callback?unexpected=1#token=abc'), null)
 })
 

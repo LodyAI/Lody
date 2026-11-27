@@ -3,6 +3,7 @@ import { isAppResourceLink, parseSessionLink, LODY_PROTOCOLS } from '@lody/share
 import { getDesktopCallbackProtocol } from './desktop-channel'
 
 const DEEP_LINK_PROTOCOL = desktopInstallationProfile.desktopProtocol
+const CALLBACK_PROTOCOL = getDesktopCallbackProtocol(desktopInstallationProfile)
 const PROTOCOL_PATTERN = DEEP_LINK_PROTOCOL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const DEEP_LINK_PREFIX = `${DEEP_LINK_PROTOCOL}://`
 const WINDOWS_CALLBACK_MARKER = `\\${DEEP_LINK_PROTOCOL}\\callback`
@@ -30,9 +31,13 @@ export function parseDeepLinkArg(arg: string): string | null {
   if (parseSessionLink(normalized) && !normalized.startsWith('session://')) return normalized
   // Every advertised common-scheme route must reach routing (or a visible error),
   // even when it belongs to another installation.
-  if (normalized.startsWith(`${LODY_PROTOCOLS.resource}://`)) return normalized
-  if (normalized.startsWith(`${getDesktopCallbackProtocol(desktopInstallationProfile)}://`))
-    return normalized
+  const lower = normalized.toLowerCase()
+  if (lower.startsWith(`${LODY_PROTOCOLS.resource}://`)) {
+    return `${LODY_PROTOCOLS.resource}://${normalized.slice(LODY_PROTOCOLS.resource.length + 3)}`
+  }
+  if (lower.startsWith(`${CALLBACK_PROTOCOL}://`)) {
+    return `${CALLBACK_PROTOCOL}://${normalized.slice(CALLBACK_PROTOCOL.length + 3)}`
+  }
 
   const directPattern = new RegExp(`${PROTOCOL_PATTERN}:\\/\\/.+`, 'i')
   const directMatch = normalized.match(directPattern)

@@ -374,6 +374,27 @@ describe('electron browser sign-in handoff', () => {
     expect(deepLinkNavigations).toEqual([url]);
   });
 
+  it('uses an already-encoded better-auth.electron cookie token without double-encoding', async () => {
+    window.history.replaceState({}, '', `/login${ELECTRON_QUERY}&desktop_channel=stable`);
+    const encodedToken = btoa(JSON.stringify({ identifier: 'cookie-code', state: 'state-abc' }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '');
+    await renderLoginPage(
+      createAuthClient({
+        transferUser: async () => {
+          document.cookie = `better-auth.electron=${encodedToken}; path=/`;
+          return { data: {} };
+        },
+      })
+    );
+    await clickButton(/Continue with this account/i);
+    const url = handoffLink()?.getAttribute('href');
+    expect(url).toMatch(/^ai\.lody\.stable:\/\/auth\/callback#token=/);
+    expect(readDeepLinkPayload(url!)).toEqual({ identifier: 'cookie-code', state: 'state-abc' });
+    expect(deepLinkNavigations).toEqual([url]);
+  });
+
   it('does not offer a desktop handoff for an unrecognized callback channel', async () => {
     window.history.replaceState(
       {},
