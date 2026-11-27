@@ -30,9 +30,7 @@ function RouterErrorComponent({ error, info, reset }: ErrorComponentProps) {
       diagnostic.name = properties.error_type;
       diagnostic.stack = undefined;
       deferredPostHog.captureException(diagnostic, properties);
-    } catch {
-      // Analytics is side-effect-only: must never throw into product code.
-    }
+    } catch {}
   }, [error, info?.componentStack, normalizedError]);
 
   return (
