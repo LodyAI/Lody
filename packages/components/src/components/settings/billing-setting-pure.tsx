@@ -618,13 +618,18 @@ export function BillingSettingsView({
     overview.effectivePlanTier === 'plus';
   const showSubscriptionOffer = !entitled || canScheduleAfterGift;
   const showGiftFocus = isPromotional && hasGiftTimeline && !checkoutInProgress && !isPastDue;
+  const paidFocusAt = hasGiftTimeline
+    ? overview.autoRenewAfterGift
+      ? (overview.nextBillingAt ?? giftEnd)
+      : giftEnd
+    : overview.currentPeriodEnd;
   const showPaidFocus =
     overview.entitlementSource === 'stripe' &&
     isPaid &&
-    overview.currentPeriodEnd !== null &&
+    paidFocusAt !== null &&
     !checkoutInProgress &&
     !isPastDue;
-  const planFocusAt = showGiftFocus ? giftEnd : showPaidFocus ? overview.currentPeriodEnd : null;
+  const planFocusAt = showGiftFocus ? giftEnd : showPaidFocus ? paidFocusAt : null;
 
   // `null` = unlimited.
   const sessionLimit = entitled ? null : FREE_SESSION_LIMIT_PER_WORKSPACE;
@@ -743,6 +748,9 @@ export function BillingSettingsView({
                   ? t('billing.freeTagline')
                   : null;
 
+  const showInlinePlanStatusDetail =
+    Boolean(planStatusDetail) && (planFocusAt === null || (showPaidFocus && hasGiftTimeline));
+
   const offerTitle = checkoutInProgress
     ? overview.subscriptionSetupPending
       ? t('billing.completeSubscriptionSetupTitle')
@@ -757,17 +765,31 @@ export function BillingSettingsView({
     : canScheduleAfterGift
       ? t('billing.subscribeAfterGiftSubtitle', { date: formatDate(giftEnd) })
       : t('billing.upgradeSubtitle');
+  const hasPreGiftAdjustmentCharge =
+    !isPromotional &&
+    hasGiftTimeline &&
+    upcomingInvoice !== null &&
+    (overview.nextBillingAt === null ||
+      (upcomingInvoice.expectedAt != null &&
+        upcomingInvoice.expectedAt < overview.nextBillingAt)) &&
+    (upcomingInvoice.amountDue > 0 ||
+      upcomingInvoice.adjustment !== null ||
+      upcomingInvoice.creditApplied !== null);
   const postGiftBillingScheduled =
-    isPromotional && overview.autoRenewAfterGift && overview.nextBillingAt !== null;
-  // During a gift, Stripe may preview the next $0 service invoice. Use its
-  // amount for the first post-gift charge only when it reaches that boundary.
-  const chargePreview = isPromotional
-    ? postGiftBillingScheduled &&
-      upcomingInvoice?.expectedAt != null &&
-      overview.nextBillingAt !== null &&
-      upcomingInvoice.expectedAt >= overview.nextBillingAt
+    hasGiftTimeline &&
+    !hasPreGiftAdjustmentCharge &&
+    overview.autoRenewAfterGift &&
+    overview.nextBillingAt !== null;
+  // Ignore $0 gift-phase invoice previews unless a pre-gift seat fee is due.
+  const chargePreview = hasGiftTimeline
+    ? hasPreGiftAdjustmentCharge
       ? upcomingInvoice
-      : null
+      : postGiftBillingScheduled &&
+          upcomingInvoice?.expectedAt != null &&
+          overview.nextBillingAt !== null &&
+          upcomingInvoice.expectedAt >= overview.nextBillingAt
+        ? upcomingInvoice
+        : null
     : upcomingInvoice;
   const breakdown = chargePreview
     ? [
@@ -776,7 +798,7 @@ export function BillingSettingsView({
               key: 'renewal',
               label:
                 chargePreview.renewal.quantity != null
-                  ? isPromotional && overview.autoRenewAfterGift
+                  ? postGiftBillingScheduled
                     ? t('billing.upcomingPostGiftRenewalWithSeats', {
                         count: chargePreview.renewal.quantity,
                         interval:
@@ -925,12 +947,12 @@ export function BillingSettingsView({
                   ) : null}
                 </span>
               ) : null}
-              {planIntervalLabel && planFocusAt === null && planStatusDetail ? (
+              {planIntervalLabel && showInlinePlanStatusDetail ? (
                 <span aria-hidden="true" {...stylex.props(styles.statusDot)}>
                   ·
                 </span>
               ) : null}
-              {planFocusAt === null && planStatusDetail ? (
+              {showInlinePlanStatusDetail ? (
                 <span {...stylex.props(isPastDue && styles.danger)}>{planStatusDetail}</span>
               ) : showGiftFocus ? (
                 <span>
