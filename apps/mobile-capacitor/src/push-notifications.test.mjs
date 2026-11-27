@@ -17,8 +17,14 @@ function deferred() {
   });
   return { promise, resolve };
 }
-async function setup(platform, { channel, configure, autoToken = true } = {}) {
+async function setup(platform, { channel, configure, autoToken = true, storage = {} } = {}) {
   const events = [];
+  const visited = [];
+  const window = {
+    location: { origin: 'https://localhost' },
+    history: { pushState: (_state, _title, route) => visited.push(route) },
+    dispatchEvent: (event) => events.push(event.type),
+  };
   const listeners = new Map();
   const timers = new Set();
   const context = vm.createContext({
@@ -27,9 +33,15 @@ async function setup(platform, { channel, configure, autoToken = true } = {}) {
       return fn;
     },
     clearTimeout: (fn) => timers.delete(fn),
-    window: {},
+    window,
     console,
-    localStorage: { getItem: () => 'installation' },
+    URL,
+    PopStateEvent: class {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    localStorage: { getItem: (key) => storage[key] ?? 'installation' },
   });
   const exports = {
     '@capacitor/app': { App: { getInfo: async () => ({ id: 'app.test' }) } },
@@ -70,7 +82,7 @@ async function setup(platform, { channel, configure, autoToken = true } = {}) {
   );
   await entry.evaluate();
   entry.namespace.initPushBridge();
-  return { bridge: context.window.__LODY_PUSH__, events, listeners, timers };
+  return { bridge: context.window.__LODY_PUSH__, events, listeners, timers, visited };
 }
 await test('logout while Android channel creation is pending cannot register afterward', async () => {
   const entered = deferred();
@@ -204,4 +216,31 @@ await test('encrypted Live Activity keeps session navigation while removing HTTP
   assert.equal(configurations[0].authToken, 'synthetic');
   await bridge.syncConversationSummary({ ...input, contentMode: 'plaintext' });
   assert.equal(payloads[1].items[0].permissionRequestId, 'request');
+});
+await test('a cold-start notification tap opens only after its recipient registers', async () => {
+  const t = await setup('ios', { storage: { 'lody:push-user': 'alice' } });
+  const tap = (route, recipientUserId = 'alice') =>
+    t.listeners.get('pushNotificationActionPerformed')({
+      notification: { data: { route, recipientUserId } },
+    });
+  await Promise.resolve();
+  tap('//evil.test/path');
+  tap('/workspace/w1/session/s1');
+  assert.deepEqual(t.visited, []);
+  await t.bridge.register(async () => {});
+  assert.deepEqual(t.visited, ['/workspace/w1/session/s1']);
+  assert.equal(t.events.filter((event) => event === 'popstate').length, 1);
+  tap('/workspace/w1/session/s2', 'bob');
+  tap('/workspace/w1/session/s3');
+  assert.deepEqual(t.visited, ['/workspace/w1/session/s1', '/workspace/w1/session/s3']);
+});
+await test('a parked notification tap does not survive logout into the next registration', async () => {
+  const t = await setup('ios', { storage: { 'lody:push-user': 'alice' } });
+  await Promise.resolve();
+  t.listeners.get('pushNotificationActionPerformed')({
+    notification: { data: { route: '/workspace/w1', recipientUserId: 'alice' } },
+  });
+  await t.bridge.unregister();
+  await t.bridge.register(async () => {});
+  assert.deepEqual(t.visited, []);
 });

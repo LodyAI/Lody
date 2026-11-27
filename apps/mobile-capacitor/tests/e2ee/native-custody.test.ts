@@ -144,6 +144,22 @@ it('does not recreate a lost native key for the retained identity', async () => 
   expect(f.plugin.keys.size).toBe(0);
 });
 
+it('member removal or reset can delete the native originals journal while custody still holds it open', async () => {
+  const f = await setup();
+  await f.run(f.custody.create());
+  await f.run(f.custody.wrap('signing-private-key', payload));
+  const outcome = await new Promise<'deleted' | 'blocked' | 'failed'>((resolve) => {
+    const request = indexedDB.deleteDatabase('fixture-native-originals');
+    request.onsuccess = () => resolve('deleted');
+    request.onblocked = () => resolve('blocked');
+    request.onerror = () => resolve('failed');
+  });
+  expect(outcome).toBe('deleted');
+  expect((await indexedDB.databases()).map((db) => db.name)).not.toContain(
+    'fixture-native-originals'
+  );
+});
+
 async function editNativeJournal<A>(
   work: (tx: IDBTransaction, done: (value: A) => void) => void
 ): Promise<A> {

@@ -28,6 +28,7 @@ export function MobileRecoveryHostProvider({ children }: { children: ReactNode }
       }
     | undefined
   >(undefined);
+  const choosers = useRef<AbortController | undefined>(undefined);
   const cancelConfirmation = () => {
     confirmation.current?.resolve(null);
     confirmation.current = undefined;
@@ -55,6 +56,8 @@ export function MobileRecoveryHostProvider({ children }: { children: ReactNode }
       return;
     }
     // One port per login: a new account or session gets a new port and a reloaded section.
+    const controller = new AbortController();
+    choosers.current = controller;
     const owned = mobileRecoveryPort({
       config,
       accountId,
@@ -68,6 +71,8 @@ export function MobileRecoveryHostProvider({ children }: { children: ReactNode }
     });
     setHost({ key: `${accountId}:${sessionId}`, value: { port: owned.port } });
     return () => {
+      controller.abort();
+      if (choosers.current === controller) choosers.current = undefined;
       owned.dispose();
       confirmation.current?.resolve(null);
       confirmation.current = undefined;
@@ -99,11 +104,14 @@ export function MobileRecoveryHostProvider({ children }: { children: ReactNode }
               onClick={() => {
                 // Capture this prompt before any await; never answer a later login's prompt.
                 const answer = confirmation.current;
+                const signal = choosers.current?.signal;
                 confirmation.current = undefined;
                 setConfirming(false);
-                void chooseRecoveryFile().then(
-                  (file) => answer?.resolve(file),
-                  (error: unknown) => answer?.reject(error)
+                if (!answer) return;
+                if (!signal) return answer.resolve(null);
+                void chooseRecoveryFile({ signal }).then(
+                  (file) => answer.resolve(file),
+                  (error: unknown) => answer.reject(error)
                 );
               }}
             >

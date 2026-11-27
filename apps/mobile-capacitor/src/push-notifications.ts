@@ -65,7 +65,23 @@ async function report() {
       });
     }).catch(() => console.error('Activity push configuration failed'));
 }
+let tapped: { route: string; recipient: unknown } | undefined;
+function openTapped() {
+  const tap = tapped;
+  if (!tap || !notify) return;
+  tapped = undefined;
+  if (tap.recipient !== localStorage.getItem('lody:push-user')) return;
+  window.history.pushState(null, '', tap.route);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
 export function initPushBridge() {
+  void PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
+    const route = event.notification.data?.route;
+    if (typeof route !== 'string' || !route.startsWith('/') || route.startsWith('//')) return;
+    if (new URL(route, window.location.origin).origin !== window.location.origin) return;
+    tapped = { route, recipient: event.notification.data?.recipientUserId };
+    openTapped();
+  }).catch(() => console.error('Push notification tap listener failed'));
   window.__LODY_PUSH__ = {
     async permission() {
       const { receive } = await PushNotifications.checkPermissions();
@@ -87,19 +103,10 @@ export function initPushBridge() {
         await PushNotifications.addListener('registrationError', () => {
           tokenWaiter?.finish(new Error('Native push registration failed'));
         });
-        await PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
-          if (event.notification.data?.recipientUserId !== localStorage.getItem('lody:push-user'))
-            return;
-          const route = event.notification.data?.route;
-          if (typeof route !== 'string' || !route.startsWith('/') || route.startsWith('//')) return;
-          const target = new URL(route, window.location.origin);
-          if (target.origin !== window.location.origin) return;
-          window.history.pushState(null, '', route);
-          window.dispatchEvent(new PopStateEvent('popstate'));
-        });
       })();
       await listeners;
       if (current !== epoch) return;
+      openTapped();
       const ready = waitForToken();
       try {
         await nativeCommand(async () => {
@@ -126,6 +133,7 @@ export function initPushBridge() {
       tokenWaiter?.finish(new Error('Native push registration cancelled'));
       notify = undefined;
       token = undefined;
+      tapped = undefined;
       await nativeCommand(async () => {
         await Promise.allSettled([
           ...(Capacitor.getPlatform() === 'ios'

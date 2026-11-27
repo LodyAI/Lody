@@ -22,6 +22,8 @@ export function mobileRecoveryPort(options: {
   let loaded: MobileRecoveryWorkspaces | undefined;
   let engine: Promise<MobileRecoveryWorkspaces> | undefined;
   let disposed = false;
+  const choosers = new AbortController();
+  const choose = () => chooseRecoveryFile({ signal: choosers.signal });
   const check = () => {
     const current = options.currentSession();
     if (
@@ -59,7 +61,7 @@ export function mobileRecoveryPort(options: {
         return loaded;
       })),
     run: config.run,
-    chooseFile: options.chooseFile ?? chooseRecoveryFile,
+    chooseFile: options.chooseFile ?? choose,
     defaultLabel: config.defaultLabel,
     saveFile: async (file) => {
       check();
@@ -67,7 +69,7 @@ export function mobileRecoveryPort(options: {
         options.exportFile ?? (await import('./recovery-file')).exportMobileRecoveryFile;
       if (!(await exportFile(file, check))) return null;
       check();
-      const read = await (options.confirmSavedFile ?? options.chooseFile ?? chooseRecoveryFile)();
+      const read = await (options.confirmSavedFile ?? options.chooseFile ?? choose)();
       try {
         check();
         return read;
@@ -81,6 +83,7 @@ export function mobileRecoveryPort(options: {
     port,
     dispose: () => {
       disposed = true;
+      choosers.abort();
       loaded?.dispose();
     },
   };

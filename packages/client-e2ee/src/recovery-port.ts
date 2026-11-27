@@ -28,36 +28,78 @@ export type RecoveryWorkspacesPortHost = {
 /** Recovery files are at most 4 KiB; anything larger is refused before it is read. */
 const fileLimit = 4096;
 
-/** A one-shot file chooser. Resolves null when the person dismisses it. */
-export function chooseRecoveryFile(): Promise<Uint8Array | null> {
+/** How long a chooser waits for `change` after the page regains focus before it counts as dismissed. */
+export const RECOVERY_CHOOSER_FOCUS_GRACE_MS = 1000;
+let openChooser: (() => void) | undefined;
+
+/**
+ * A one-shot file chooser. Resolves null when the person dismisses it. WKWebView can close
+ * its picker without `cancel`, and a caller may hold the recovery command permit while it
+ * waits, so the chooser also settles as dismissed when `signal` aborts, when a newer chooser
+ * opens, or when the page regains focus and no file arrives within the grace period.
+ */
+export function chooseRecoveryFile(options?: {
+  readonly signal?: AbortSignal;
+}): Promise<Uint8Array | null> {
+  openChooser?.();
+  const signal = options?.signal;
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return resolve(null);
     const input = document.createElement('input');
     input.type = 'file';
     input.hidden = true;
-    const done = () => input.remove();
+    let settled = false,
+      picked = false,
+      left = false,
+      grace: ReturnType<typeof setTimeout> | undefined;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(grace);
+      input.remove();
+      signal?.removeEventListener('abort', dismiss);
+      window.removeEventListener('blur', leave);
+      window.removeEventListener('focus', returned);
+      document.removeEventListener('visibilitychange', visibility);
+      if (openChooser === dismiss) openChooser = undefined;
+      settle();
+    };
+    const dismiss = () => finish(() => resolve(null));
+    const leave = () => {
+      left = true;
+    };
+    const returned = () => {
+      if (!left || picked) return;
+      clearTimeout(grace);
+      grace = setTimeout(dismiss, RECOVERY_CHOOSER_FOCUS_GRACE_MS);
+    };
+    const visibility = () => (document.visibilityState === 'hidden' ? leave() : returned());
     input.addEventListener(
       'change',
       () => {
-        done();
+        picked = true;
+        clearTimeout(grace);
         const chosen = input.files?.[0];
-        if (!chosen) return resolve(null);
+        if (!chosen) return dismiss();
         if (chosen.size < 1 || chosen.size > fileLimit)
-          return reject(new Error('e2ee_recovery_invalid-input'));
+          return finish(() => reject(new Error('e2ee_recovery_invalid-input')));
         chosen.arrayBuffer().then(
-          (buffer) => resolve(new Uint8Array(buffer)),
-          () => reject(new Error('e2ee_recovery_invalid-input'))
+          (buffer) => {
+            const bytes = new Uint8Array(buffer);
+            if (settled) bytes.fill(0);
+            else finish(() => resolve(bytes));
+          },
+          () => finish(() => reject(new Error('e2ee_recovery_invalid-input')))
         );
       },
       { once: true }
     );
-    input.addEventListener(
-      'cancel',
-      () => {
-        done();
-        resolve(null);
-      },
-      { once: true }
-    );
+    input.addEventListener('cancel', dismiss, { once: true });
+    signal?.addEventListener('abort', dismiss, { once: true });
+    window.addEventListener('blur', leave);
+    window.addEventListener('focus', returned);
+    document.addEventListener('visibilitychange', visibility);
+    openChooser = dismiss;
     document.body.append(input);
     input.click();
   });

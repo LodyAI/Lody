@@ -811,3 +811,121 @@ it('a staging build binds the origin of its VITE_SITE_URL instead of Lody Cloud'
     'e2ee_recovery_authentication'
   );
 });
+
+function silentChooserPage() {
+  class Input extends EventTarget {
+    type = '';
+    hidden = false;
+    files: { size: number; arrayBuffer: () => Promise<ArrayBuffer> }[] | null = null;
+    removed = false;
+    remove() {
+      this.removed = true;
+    }
+    click() {
+      opened.push(this);
+      for (const wake of waiting.splice(0)) wake();
+    }
+    choose(bytes: Uint8Array | null) {
+      this.files = bytes
+        ? [{ size: bytes.length, arrayBuffer: async () => bytes.slice().buffer }]
+        : [];
+      this.dispatchEvent(new Event('change'));
+    }
+  }
+  const opened: Input[] = [];
+  const waiting: (() => void)[] = [];
+  const page = Object.assign(new EventTarget(), {
+    createElement: () => new Input(),
+    body: { append: () => {} },
+    visibilityState: 'visible',
+  });
+  const view = new EventTarget();
+  vi.stubGlobal('document', page);
+  vi.stubGlobal('window', view);
+  const nth = (count: number) =>
+    new Promise<Input>((resolve) => {
+      const check = () =>
+        opened.length >= count ? resolve(opened[count - 1]!) : waiting.push(check);
+      check();
+    });
+  return { opened, nth, view };
+}
+
+it('a verification chooser WebKit never answers cannot hold the recovery command permit', async () => {
+  const f = await fixture();
+  f.empty();
+  const page = silentChooserPage();
+  let saved = new Uint8Array();
+  const owned = mobileRecoveryPort({
+    config: {
+      ...f.options,
+      run: Effect.runPromise,
+      defaultLabel: async () => 'iPhone',
+      runtime: () => undefined,
+    },
+    accountId: 'account-a',
+    sessionId: 'login-a',
+    currentSession: f.options.currentSession,
+    exportFile: async (bytes) => {
+      saved = bytes.slice();
+      return true;
+    },
+  });
+  try {
+    const stuck = owned.port.create!();
+    const silent = await page.nth(1);
+    const next = owned.port.checkFile!();
+    expect(await stuck).toEqual({ outcome: 'cancelled' });
+    expect(silent.removed).toBe(true);
+    expect(f.paths).not.toContain('e2eeRecoveryVault:putImmutable');
+    (await page.nth(2)).dispatchEvent(new Event('cancel'));
+    expect(await next).toEqual({ outcome: 'cancelled' });
+    const retry = owned.port.create!();
+    (await page.nth(3)).choose(saved);
+    expect(await retry).toEqual({ outcome: 'created', vaultId: expect.any(String) });
+    const orphan = owned.port.checkFile!();
+    const open = await page.nth(4);
+    owned.dispose();
+    expect(await orphan).toEqual({ outcome: 'cancelled' });
+    expect(open.removed).toBe(true);
+  } finally {
+    saved.fill(0);
+    owned.dispose();
+  }
+}, 30_000);
+
+it('a chooser counts as dismissed when the page regains focus without a file, but not once one is picked', async () => {
+  const page = silentChooserPage();
+  const { chooseRecoveryFile, RECOVERY_CHOOSER_FOCUS_GRACE_MS } =
+    await import('@lody/client-e2ee/recovery-port');
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const dismissed = chooseRecoveryFile();
+    page.view.dispatchEvent(new Event('focus'));
+    vi.advanceTimersByTime(RECOVERY_CHOOSER_FOCUS_GRACE_MS * 2);
+    let settled = false;
+    void dismissed.then(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    page.view.dispatchEvent(new Event('blur'));
+    page.view.dispatchEvent(new Event('focus'));
+    vi.advanceTimersByTime(RECOVERY_CHOOSER_FOCUS_GRACE_MS - 1);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(await dismissed).toBeNull();
+
+    const picked = chooseRecoveryFile();
+    page.view.dispatchEvent(new Event('blur'));
+    page.view.dispatchEvent(new Event('focus'));
+    page.opened[1]!.choose(new Uint8Array([7, 8, 9]));
+    vi.advanceTimersByTime(RECOVERY_CHOOSER_FOCUS_GRACE_MS * 2);
+    expect(await picked).toEqual(new Uint8Array([7, 8, 9]));
+
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(await chooseRecoveryFile({ signal: aborted.signal })).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});

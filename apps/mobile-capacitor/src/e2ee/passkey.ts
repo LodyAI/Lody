@@ -85,13 +85,11 @@ export function makeMobilePasskeyPort(input: {
     try {
       return await work();
     } catch (error) {
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        error.code === 'cancelled'
-      )
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+      if (code === 'cancelled')
         throw input.cancelled?.() ?? new E2eePasskeyCancelled('e2ee_passkey_cancelled');
+      if (code === 'unavailable') throw new Error('e2ee_passkey_unavailable');
       throw new Error('e2ee_passkey_failed');
     }
   }

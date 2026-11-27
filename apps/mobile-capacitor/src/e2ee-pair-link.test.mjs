@@ -9,7 +9,7 @@ const source = ts.transpileModule(
   { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }
 ).outputText;
 
-const pairUrl = 'lody://pair/ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-2345';
+const pairUrl = 'lody://auto-pair?id=automatic-0&code=secret-code-0';
 const autoPairUrl = 'lody://auto-pair?id=automatic-1&code=secret-code-1';
 
 /** A native shell whose launch URL and URL-open events the test controls. */
@@ -115,34 +115,35 @@ await test('a later warm link is not replaced by the slower cold-launch answer',
   );
 });
 
-await test('only lody pair and auto-pair links reach the pairing screen', async () => {
+await test('only lody auto-pair approval links reach the pairing screen', async () => {
   const t = await boot();
   await t.settle();
   for (const url of [
     'lody://auth/callback?code=oauth-secret',
+    'lody://pair/ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-2345',
     'lody://pair/',
     'lody://auto-pair',
-    'https://lody.ai/pair/ABCD',
-    'lodyx://pair/ABCD',
+    'https://lody.ai/auto-pair?id=a&code=b',
+    'lodyx://auto-pair?id=a&code=b',
     'not a url',
   ])
     t.open(url);
   assert.deepEqual(t.events, []);
   assert.equal(t.window.__LODY_PENDING_E2EE_PAIR_URL__, undefined);
-  t.open('LODY://PAIR/ABCD-EFGH');
   t.open('Lody://Auto-Pair?id=a&code=b');
   assert.deepEqual(
     t.events.map((event) => event.url),
-    ['LODY://PAIR/ABCD-EFGH', 'Lody://Auto-Pair?id=a&code=b']
+    ['Lody://Auto-Pair?id=a&code=b']
   );
 });
 
 await test('an oversized pairing link is ignored', async () => {
   const t = await boot();
   await t.settle();
-  t.open(`lody://pair/${'A'.repeat(512)}`);
+  const prefix = 'lody://auto-pair?id=';
+  t.open(`${prefix}${'A'.repeat(512)}`);
   assert.deepEqual(t.events, []);
-  const longest = `lody://pair/${'A'.repeat(512 - 'lody://pair/'.length)}`;
+  const longest = `${prefix}${'A'.repeat(512 - prefix.length)}`;
   t.open(longest);
   assert.deepEqual(
     t.events.map((event) => event.url),
@@ -155,7 +156,7 @@ await test('pairing codes are never written to the console, even when the native
   await failing.settle();
   failing.open(autoPairUrl);
   failing.open('lody://auth/callback?code=oauth-secret');
-  failing.open(`lody://pair/${'A'.repeat(600)}`);
+  failing.open(`lody://auto-pair?id=${'A'.repeat(600)}`);
   assert.deepEqual(failing.logged, []);
 });
 

@@ -87,6 +87,12 @@ final class LodyPasskeyCeremony: NSObject, ASAuthorizationControllerDelegate, AS
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
         let native = error as NSError
-        complete(.failure(native.domain == ASAuthorizationError.errorDomain && native.code == ASAuthorizationError.canceled.rawValue ? .cancelled : .failed))
+        guard native.domain == ASAuthorizationError.errorDomain else { complete(.failure(.failed)); return }
+        switch native.code {
+        case ASAuthorizationError.canceled.rawValue: complete(.failure(.cancelled))
+        // The system could not present the sheet (inactive scene); no credential was tried.
+        case ASAuthorizationError.notInteractive.rawValue: complete(.failure(.unavailable))
+        default: complete(.failure(.failed))
+        }
     }
 }
