@@ -923,7 +923,7 @@ void test('recovers a journaled replacement after a crash when only the old nati
   assert.deepEqual(await readdir(directory), ['kek.safe-storage', 'kek.safe-storage.rewrap-lock'])
 })
 
-void test('safeStorage lock or permission denial reports unavailable without modifying the wrapped KEK', async (t) => {
+void test('safeStorage temporary lock or unavailability reports custody-locked while filesystem permissions stay distinct', async (t) => {
   const directory = await fixture(t)
   await execute(makeDesktopE2eeCustody({ directory, platform: 'darwin', safeStorage: backend() }))
   const wrapped = await readFile(join(directory, 'kek.safe-storage'))
@@ -931,9 +931,9 @@ void test('safeStorage lock or permission denial reports unavailable without mod
     new Error(
       'Error while decrypting the ciphertext provided to safeStorage.decryptStringAsync. Decryption is not available.'
     ),
+    new Error('safeStorage is temporarily unavailable'),
     new Error('Keychain is locked (errSecInteractionNotAllowed)'),
-    new Error('User denied access to safe storage'),
-    Object.assign(new Error('access denied'), { code: 'EACCES' })
+    new Error('User canceled authorization')
   ]) {
     const locked = await execute(
       Effect.result(
@@ -951,6 +951,29 @@ void test('safeStorage lock or permission denial reports unavailable without mod
     assert.equal(locked._tag, 'Failure')
     assert.equal(locked.failure?.code, 'unavailable')
     assert.equal(isDesktopE2eeCustodyLocked(locked.failure), true)
+    assert.deepEqual(await readFile(join(directory, 'kek.safe-storage')), wrapped)
+  }
+  for (const [error, expectedCode] of [
+    [Object.assign(new Error('permission denied'), { code: 'EACCES' }), 'permissions'],
+    [Object.assign(new Error('operation not permitted'), { code: 'EPERM' }), 'permissions'],
+    [new Error('permission denied'), 'storage']
+  ]) {
+    const denied = await execute(
+      Effect.result(
+        makeDesktopE2eeCustody({
+          directory,
+          platform: 'darwin',
+          safeStorage: backend({
+            decryptStringAsync: async () => {
+              throw error
+            }
+          })
+        })
+      )
+    )
+    assert.equal(denied._tag, 'Failure')
+    assert.equal(denied.failure?.code, expectedCode)
+    assert.equal(isDesktopE2eeCustodyLocked(denied.failure), false)
     assert.deepEqual(await readFile(join(directory, 'kek.safe-storage')), wrapped)
   }
 })
