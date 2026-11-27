@@ -36,6 +36,8 @@
     "build:linux:release": "node scripts/cloud-release.mjs production --linux",
     "build:linux:arm64:release": "node scripts/cloud-release.mjs production --linux AppImage deb --arm64",
     "build:mac:release": "node scripts/cloud-release.mjs production --mac --arm64 --x64",
+    "build:mac:arm64:release": "node scripts/cloud-release.mjs production --mac --arm64",
+    "build:mac:x64:release": "node scripts/cloud-release.mjs production --mac --x64",
     "build:mac:staging": "node scripts/cloud-release.mjs staging --mac",
     "build:linux:arm64": "pnpm run build && node scripts/package-electron.mjs --linux AppImage deb --arm64",
     "package:nightly:mac": "node package-electron.mjs --production --mac --arm64 --x64 --publish never",

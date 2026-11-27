@@ -177,10 +177,7 @@ jobs:
       source-sha: ${{ needs.release.outputs.checkout_sha }}
       target-environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
     secrets: inherit
-  publish-daemon:
-    permissions:
-      contents: read
-      actions: read
+  e2e-gate-passed:
     needs:
       - release
       - validate-app-redirects
@@ -189,6 +186,18 @@ jobs:
       ${{ !cancelled() && needs.release.result == 'success' &&
       ((needs.validate-app-redirects.result == 'success' && needs.e2e-gate.result == 'success') ||
       (needs.validate-app-redirects.result == 'skipped' && needs.e2e-gate.result == 'skipped' && needs.release.outputs.skip_validate == 'true')) &&
+      needs.release.outputs.publish_requested == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Release validation and E2E gate passed"
+  publish-daemon:
+    permissions:
+      contents: read
+      actions: read
+    needs:
+      - release
+    if: >-
+      ${{ !cancelled() && needs.release.result == 'success' &&
       needs.release.outputs.publish_requested == 'true' &&
       (contains(fromJSON(needs.release.outputs.paths_released), 'apps/cli') || github.event_name == 'workflow_dispatch') }}
     uses: ./.github/workflows/publish-daemon-sea.yml
@@ -196,13 +205,16 @@ jobs:
       source-sha: ${{ needs.release.outputs.checkout_sha }}
       channel: ${{ needs.release.outputs.target_environment == 'production' && 'stable' || 'next' }}
       target-environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+      gate-job-name: ${{ needs.release.outputs.skip_validate == 'true' && '' || 'e2e-gate-passed' }}
     secrets: inherit
   verify-daemon-installation:
     needs:
       - release
+      - e2e-gate-passed
       - publish-daemon
     if: |-
       ${{ !cancelled() && needs.release.result == 'success' &&
+          needs.e2e-gate-passed.result == 'success' &&
           (needs.publish-daemon.result == 'success' || needs.publish-daemon.result == 'skipped') &&
           (needs.release.outputs.publish_requested == 'true' ||
            (github.event_name == 'push' && needs.release.outputs.target_environment == 'production' &&
@@ -313,14 +325,10 @@ jobs:
   build-electron:
     needs:
       - release
-      - validate-app-redirects
-      - e2e-gate
     permissions:
       contents: read
     if: |-
       ${{ !cancelled() && needs.release.result == 'success' &&
-        ((needs.validate-app-redirects.result == 'success' && needs.e2e-gate.result == 'success') ||
-        (needs.validate-app-redirects.result == 'skipped' && needs.e2e-gate.result == 'skipped' && needs.release.outputs.skip_validate == 'true')) &&
         (
           (
             needs.release.outputs.publish_requested == 'true' &&
@@ -339,9 +347,9 @@ jobs:
         ${{
           fromJSON(
             needs.release.outputs.target_environment == 'production' && needs.release.outputs.linux_arm64 != 'true' &&
-            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win:release"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux:release"}]}' ||
+            '{"include":[{"os":"macos-15","target":"mac-arm64","build_script":"build:mac:arm64:release"},{"os":"macos-15","target":"mac-x64","build_script":"build:mac:x64:release"},{"os":"windows-2022","target":"win","build_script":"build:win:release"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux:release"}]}' ||
             needs.release.outputs.target_environment == 'production' &&
-            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win:release"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux:release"},{"os":"ubuntu-24.04-arm","target":"linux-arm64","build_script":"build:linux:arm64:release"}]}' ||
+            '{"include":[{"os":"macos-15","target":"mac-arm64","build_script":"build:mac:arm64:release"},{"os":"macos-15","target":"mac-x64","build_script":"build:mac:x64:release"},{"os":"windows-2022","target":"win","build_script":"build:win:release"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux:release"},{"os":"ubuntu-24.04-arm","target":"linux-arm64","build_script":"build:linux:arm64:release"}]}' ||
             '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:staging"}]}'
           )
         }}
@@ -451,15 +459,15 @@ jobs:
       - name: Install dependencies
         run: corepack pnpm install --frozen-lockfile --prefer-offline
       - name: Prepare macOS signing and notarization credentials
-        if: matrix.target == 'mac'
+        if: startsWith(matrix.target, 'mac')
         shell: bash
         env:
-          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
-          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
-          APPLE_API_KEY_P8: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_P8 || '' }}
-          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
-          APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
-          SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
+          CSC_LINK: ${{ startsWith(matrix.target, 'mac') && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ startsWith(matrix.target, 'mac') && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY_P8: ${{ startsWith(matrix.target, 'mac') && secrets.APPLE_API_KEY_P8 || '' }}
+          APPLE_API_KEY_ID: ${{ startsWith(matrix.target, 'mac') && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ startsWith(matrix.target, 'mac') && secrets.APPLE_API_ISSUER || '' }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ startsWith(matrix.target, 'mac') && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
           set -euo pipefail
@@ -484,16 +492,16 @@ jobs:
           chmod 600 "${api_key_path}"
           echo "APPLE_API_KEY=${api_key_path}" >> "$GITHUB_ENV"
       - name: Remove previous macOS packaging outputs
-        if: matrix.target == 'mac'
+        if: startsWith(matrix.target, 'mac')
         run: rm -rf -- apps/electron/dist
       - name: Validate Sparkle signing key pair before building
-        if: matrix.target == 'mac'
+        if: startsWith(matrix.target, 'mac')
         env:
           SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: node apps/electron/sparkle-signing.mjs key-pair
       - name: Prepare macOS Passkey credentials and native addons
-        if: matrix.target == 'mac' && needs.release.outputs.target_environment == 'production'
+        if: startsWith(matrix.target, 'mac') && needs.release.outputs.target_environment == 'production'
         env:
           MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64 }}
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -502,12 +510,12 @@ jobs:
         run: bash .github/scripts/prepare-macos-passkey.sh
       - name: Build Electron package (${{ matrix.target }})
         env:
-          CSC_NAME: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_NAME || '' }}
-          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
-          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
-          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
-          APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
-          SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
+          CSC_NAME: ${{ startsWith(matrix.target, 'mac') && secrets.MACOS_CERTIFICATE_NAME || '' }}
+          CSC_LINK: ${{ startsWith(matrix.target, 'mac') && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ startsWith(matrix.target, 'mac') && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY_ID: ${{ startsWith(matrix.target, 'mac') && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ startsWith(matrix.target, 'mac') && secrets.APPLE_API_ISSUER || '' }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ startsWith(matrix.target, 'mac') && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
           BUILD_SCRIPT: ${{ matrix.build_script }}
         shell: bash
         run: |
@@ -518,11 +526,13 @@ jobs:
             corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
           fi
       - name: Verify signed macOS Passkey archives (production)
-        if: matrix.target == 'mac' && needs.release.outputs.target_environment == 'production'
+        if: startsWith(matrix.target, 'mac') && needs.release.outputs.target_environment == 'production'
+        env:
+          LODY_PASSKEY_ARCHES: ${{ matrix.target == 'mac-arm64' && 'arm64' || (matrix.target == 'mac-x64' && 'x64' || 'arm64 x64') }}
         shell: bash
         run: bash .github/scripts/verify-macos-passkey-archive.sh
       - name: Generate signed Sparkle appcast and deltas (staging)
-        if: matrix.target == 'mac' && needs.release.outputs.target_environment != 'production'
+        if: startsWith(matrix.target, 'mac') && needs.release.outputs.target_environment != 'production'
         uses: ./.github/actions/generate-sparkle-appcast
         with:
           legacy-appcast-sha256: 6f23204c249f4c7ef5dc599a0ff2b6053dac43246b35ed0f3a1e3d972b1377d7
@@ -535,7 +545,7 @@ jobs:
           private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
           allow-missing-appcast: ${{ vars.SPARKLE_ALLOW_MISSING_APPCAST || 'false' }}
       - name: Generate signed Sparkle appcast and deltas (arm64)
-        if: matrix.target == 'mac' && needs.release.outputs.target_environment == 'production'
+        if: (matrix.target == 'mac' || matrix.target == 'mac-arm64') && needs.release.outputs.target_environment == 'production'
         uses: ./.github/actions/generate-sparkle-appcast
         with:
           delta-compression: lzfse
@@ -549,7 +559,7 @@ jobs:
           private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
           allow-missing-appcast: ${{ vars.SPARKLE_ALLOW_MISSING_APPCAST || 'false' }}
       - name: Generate signed Sparkle appcast and deltas (x64)
-        if: matrix.target == 'mac' && needs.release.outputs.target_environment == 'production'
+        if: (matrix.target == 'mac' || matrix.target == 'mac-x64') && needs.release.outputs.target_environment == 'production'
         uses: ./.github/actions/generate-sparkle-appcast
         with:
           delta-compression: lzfse
@@ -617,10 +627,21 @@ jobs:
               cp "$file" "${destination}"
             done
 
+          if [[ "${MATRIX_TARGET}" == "mac-arm64" || "${MATRIX_TARGET}" == "mac-x64" ]]; then
+            arch_suffix="${MATRIX_TARGET#mac-}"
+            for meta in latest-mac.yml next-mac.yml; do
+              if [[ -f "electron-release-assets/${meta}" ]]; then
+                mv "electron-release-assets/${meta}" "electron-release-assets/${meta%.yml}-${arch_suffix}.yml"
+              fi
+            done
+          fi
+
           if [[ -z "$(ls -A electron-release-assets)" ]]; then
             echo "No electron release assets collected"
             exit 1
           fi
+        env:
+          MATRIX_TARGET: ${{ matrix.target }}
       - name: Upload Electron release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -630,8 +651,8 @@ jobs:
           if-no-files-found: error
       - name: Remove macOS notarization key
         env:
-          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
-        if: always() && matrix.target == 'mac'
+          APPLE_API_KEY_ID: ${{ startsWith(matrix.target, 'mac') && secrets.APPLE_API_KEY_ID || '' }}
+        if: always() && startsWith(matrix.target, 'mac')
         shell: bash
         run: |
           rm -f \
@@ -641,12 +662,14 @@ jobs:
   upload-electron-to-r2:
     needs:
       - release
+      - e2e-gate-passed
       - build-electron
       - verify-daemon-installation
     permissions:
       contents: read
     if: >-
-      ${{ !cancelled() && needs.release.result == 'success' && needs.build-electron.result == 'success' &&
+      ${{ !cancelled() && needs.release.result == 'success' && needs.e2e-gate-passed.result == 'success' &&
+      needs.build-electron.result == 'success' &&
       needs.verify-daemon-installation.result == 'success' &&
           ((
           needs.release.outputs.publish_requested == 'true' &&
@@ -685,6 +708,8 @@ jobs:
           pattern: electron-release-assets-*
           path: electron-release-assets
           merge-multiple: true
+      - name: Merge split macOS updater metadata
+        run: node .github/scripts/merge-mac-updater-metadata.mjs electron-release-assets
       - name: Ensure AWS CLI
         run: bash .github/scripts/setup-aws-cli.sh
         shell: bash
@@ -879,20 +904,92 @@ jobs:
               --cache-control "no-cache" \
               "${extra_args[@]}"
           done
+  build-mobile-web:
+    needs:
+      - release
+    permissions:
+      contents: read
+    if: >-
+      ${{ !cancelled() && needs.release.result == 'success' &&
+      ((github.event_name == 'push' || inputs.component == 'android' || inputs.component == 'ios') &&
+        needs.release.outputs.publish_requested == 'true' &&
+        contains(fromJSON(needs.release.outputs.paths_released), 'apps/mobile-capacitor')) }}
+    runs-on: ubuntu-latest
+    environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+    env:
+      LODY_ENV: ${{ needs.release.outputs.target_environment == 'production' && 'production' || 'staging' }}
+      MOBILE_VITE_MODE: ${{ needs.release.outputs.target_environment == 'production' && 'prod' || 'staging' }}
+      NODE_OPTIONS: --max-old-space-size=8192
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      VITE_CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL }}
+      VITE_CONVEX_DEPLOY_URL: ${{ vars.LODY_AUTH_URL }}
+      VITE_SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SESSION_SHARE_ORIGIN: ${{ vars.VITE_SESSION_SHARE_ORIGIN }}
+      VITE_GITHUB_APP_NAME: ${{ vars.VITE_GITHUB_APP_NAME }}
+      VITE_ONESIGNAL_APP_ID: ${{ vars.VITE_ONESIGNAL_APP_ID || vars.ONESIGNAL_APP_ID }}
+      VITE_ONESIGNAL_SAFARI_WEB_ID: ${{ vars.VITE_ONESIGNAL_SAFARI_WEB_ID || vars.ONESIGNAL_SAFARI_WEB_ID }}
+      VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
+      VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
+      VITE_VIBELOFT_WEB_AUTH_KEY: ${{ vars.VITE_VIBELOFT_WEB_AUTH_KEY }}
+      VITE_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release.outputs.checkout_sha }}
+          submodules: recursive
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+      - name: Normalize mobile auth base URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_site_url="${VITE_CONVEX_SITE_URL:-${VITE_CONVEX_DEPLOY_URL:-}}"
+          if [[ -z "${raw_site_url}" ]]; then
+            echo "VITE_CONVEX_SITE_URL=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          normalized_site_url="${raw_site_url%/}"
+          if [[ "${normalized_site_url}" == *".convex.cloud" ]]; then
+            normalized_site_url="${normalized_site_url/.convex.cloud/.convex.site}"
+          fi
+
+          echo "VITE_CONVEX_SITE_URL=${normalized_site_url}" >> "$GITHUB_ENV"
+      - name: Build shared Capacitor web bundle
+        run: pnpm --filter @lody/mobile-capacitor exec vite build --mode "${MOBILE_VITE_MODE}"
+      - name: Upload shared Capacitor web bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mobile-capacitor-dist
+          path: apps/mobile-capacitor/dist
+          if-no-files-found: error
   build-mobile-android:
     needs:
       - release
-      - validate-app-redirects
-      - e2e-gate
-      - verify-daemon-installation
+      - build-mobile-web
     permissions:
       contents: read
       actions: read
     if: >-
       ${{ !cancelled() && needs.release.result == 'success' &&
-      ((needs.validate-app-redirects.result == 'success' && needs.e2e-gate.result == 'success') ||
-      (needs.validate-app-redirects.result == 'skipped' && needs.e2e-gate.result == 'skipped' && needs.release.outputs.skip_validate == 'true')) &&
-      needs.verify-daemon-installation.result == 'success' &&
+      needs.build-mobile-web.result == 'success' &&
           ((github.event_name == 'push' || inputs.component == 'android') &&
         needs.release.outputs.publish_requested == 'true' &&
         contains(fromJSON(needs.release.outputs.paths_released), 'apps/mobile-capacitor')) }}
@@ -1071,6 +1168,11 @@ jobs:
           decode_base64_secret "ANDROID_KEYSTORE_BASE64" "${ANDROID_KEYSTORE_BASE64}" "${keystore_path}"
           chmod 600 "${keystore_path}"
           echo "ANDROID_KEYSTORE_PATH=${keystore_path}" >> "$GITHUB_ENV"
+      - name: Download shared Capacitor web bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mobile-capacitor-dist
+          path: apps/mobile-capacitor/dist
       - name: Sync Android project
         env:
           PUSH_ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.PUSH_ANDROID_GOOGLE_SERVICES_JSON }}
@@ -1083,9 +1185,11 @@ jobs:
 
           pnpm --filter @lody/mobile-capacitor run configure:push
 
-          pnpm --filter @lody/mobile-capacitor exec vite build --mode "${MOBILE_VITE_MODE}"
+          node apps/mobile-capacitor/scripts/set-app-icon.mjs android stable
 
           pnpm --filter @lody/mobile-capacitor exec cap sync android
+
+          node apps/mobile-capacitor/scripts/normalize-android-gradle-paths.mjs
       - name: Build signed Android APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -1120,6 +1224,10 @@ jobs:
           name: mobile-android-apk
           path: mobile-android-release/app.apk
           if-no-files-found: error
+      - name: Wait for same-run SEA verification before Android publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/wait-release-gate.mjs
       - name: Ensure AWS CLI
         shell: bash
         run: bash .github/scripts/setup-aws-cli.sh
@@ -1135,15 +1243,13 @@ jobs:
   upload-mobile-ios-to-app-store-connect:
     needs:
       - release
-      - validate-app-redirects
-      - e2e-gate
+      - build-mobile-web
     permissions:
       contents: read
       actions: read
     if: |-
       ${{ !cancelled() && needs.release.result == 'success' &&
-        ((needs.validate-app-redirects.result == 'success' && needs.e2e-gate.result == 'success') ||
-        (needs.validate-app-redirects.result == 'skipped' && needs.e2e-gate.result == 'skipped' && needs.release.outputs.skip_validate == 'true')) &&
+        needs.build-mobile-web.result == 'success' &&
           ((github.event_name == 'push' || inputs.component == 'ios') &&
         needs.release.outputs.publish_requested == 'true' &&
         contains(fromJSON(needs.release.outputs.paths_released), 'apps/mobile-capacitor') &&
@@ -1421,8 +1527,17 @@ jobs:
             "${IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64}" \
             "${RUNNER_TEMP}/live-activity-widget.mobileprovision" \
             "IOS_LIVE_ACTIVITY_WIDGET_PROFILE_NAME"
+      - name: Download shared Capacitor web bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mobile-capacitor-dist
+          path: apps/mobile-capacitor/dist
       - name: Sync iOS project
-        run: pnpm --filter @lody/mobile-capacitor run ci:sync:ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/mobile-capacitor/scripts/set-app-icon.mjs ios stable
+          pnpm --filter @lody/mobile-capacitor exec cap sync ios
       - name: Configure manual code signing
         working-directory: apps/mobile-capacitor/ios/App
         shell: bash
@@ -1577,6 +1692,8 @@ jobs:
           pattern: electron-release-assets-*
           path: electron-release-assets
           merge-multiple: true
+      - name: Merge split macOS updater metadata
+        run: node .github/scripts/merge-mac-updater-metadata.mjs electron-release-assets
       - name: Attach immutable Electron installers
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
@@ -1609,11 +1726,13 @@ jobs:
       - release
       - validate-app-redirects
       - e2e-gate
+      - e2e-gate-passed
       - publish-daemon
       - verify-daemon-installation
       - publish-cli
       - build-electron
       - upload-electron-to-r2
+      - build-mobile-web
       - build-mobile-android
       - upload-mobile-ios-to-app-store-connect
       - attach-electron-release
