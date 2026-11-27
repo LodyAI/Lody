@@ -373,8 +373,6 @@ export function E2eeAutomaticPairingPage({
       /* Live discovery is optional; scoped polling still verifies the same originals. */
     }
     void tick();
-    // Keep polling even when `subscribeAutomaticPairing` is active: post-reveal
-    // `e2eeAccountPairing` and `e2eeMailbox` updates do not mutate `e2eeAutomaticPairing`.
     const timer = setInterval(() => void tick(), POLL_MS);
     const onOnline = () => void tick();
     window.addEventListener('online', onOnline);
@@ -1165,10 +1163,8 @@ export function E2eeAutomaticPairingInbox({
       /* Live discovery is optional; scoped polling still verifies the same originals. */
     }
     void tick();
-    // A hidden window does not poll; the subscription and the system notification
-    // still run, and showing the window again checks at once. Keep polling while
-    // visible even with `subscribeAutomaticPairing` active because the requester's
-    // post-reveal `e2eeAccountPairing` submission does not fire `e2eeAutomaticPairing`.
+    // Hidden windows rely on the subscription and notification; visible ones still poll,
+    // since a post-reveal `e2eeAccountPairing` submission does not fire this subscription.
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void tick();
     }, POLL_MS);

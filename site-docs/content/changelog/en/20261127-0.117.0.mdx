@@ -1,0 +1,17 @@
+---
+title: '20261127-0.117.0'
+version: 0.117.0
+date: 2026-11-27
+description: Adds 6 interface languages, cross-session permission memory, teammate task filtering, and end-to-end encryption & sign-in reliability improvements.
+---
+
+Version 0.117.0
+
+- Added 6 interface languages: Traditional Chinese, Japanese, Korean, Spanish, French, and Russian.
+- Added cross-session permission memory with a synced default permission setting, teammate filtering for sidebar tasks, user avatars in the team member add menu, and sticky expanded work-group summary headers while scrolling.
+- Desktop Today window now remembers its bounds and supports a global toggle shortcut.
+- Mobile now supports sharing conversations as images, quoting from Markdown tables, code blocks, and chat cards, and opening new current-directory tabs as local drafts; fixed iOS menu flicker, foreground recovery, and Share Extension input behavior.
+- Privacy settings now support immediate telemetry opt-out with a unified usage-sharing switch and regional cookie notices.
+- Fixed email sign-in focus stealing during the view transition and prevented verified email sign-in from auto-redirecting to the verification page.
+- Hardened encrypted workspace creation, device pairing, key recovery, and member key delivery with clearer guidance and error messages.
+- Upgraded Loro to 1.19.1 with improved daemon and renderer memory budgets, added workspace WebSocket transport for durable daemon Streams rooms, added the CLI `restore-id` command, and surfaced delegation chain limits.

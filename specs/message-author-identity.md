@@ -51,6 +51,11 @@ B, while the original human remains the authorization principal throughout.
   structured history export retain author metadata. Legacy history remains readable
   without eager backfill or rewriting. Missing historical identity is not guessed
   from titles, parent relationships or the current Role catalog.
+- A human author may carry the sender's own workspace display name, written by the
+  sender at submission (or copied from their queued input), never another member's.
+  It is a display label, not an authorization claim. When a different human than the
+  previous one starts speaking in a Session, the executing machine places a one-line
+  sender header before that input; a single-user Session receives none.
 
 ## Performance and compatibility
 

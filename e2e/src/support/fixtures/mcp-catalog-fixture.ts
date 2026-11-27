@@ -50,10 +50,12 @@ function isProcessAlive(pid: number): boolean {
 
 export class McpCatalogFixture {
   readonly serverName = 'Synthetic workspace MCP';
+  readonly editedServerName = 'Synthetic workspace MCP (edited)';
   readonly serverDescription = 'Deterministic stdio MCP for the Lody desktop journey';
   readonly scriptedAgentCommandLine: string;
   readonly mcpCommand = process.execPath;
   readonly mcpArgs: string[];
+  readonly editedMcpArgs: string[];
 
   constructor(
     readonly acpEventLogPath: string,
@@ -63,6 +65,7 @@ export class McpCatalogFixture {
       .map(quoteCommandArgument)
       .join(' ');
     this.mcpArgs = [SYNTHETIC_MCP_ENTRY, mcpEventLogPath];
+    this.editedMcpArgs = [SYNTHETIC_MCP_ENTRY, mcpEventLogPath, '--reconfigured'];
   }
 
   readAcpEvents(): McpCatalogAcpEvent[] {
@@ -106,13 +109,18 @@ export class McpCatalogFixture {
   }
 
   async waitForMcpEvent(event: string): Promise<McpProcessEvent> {
+    const events = await this.waitForMcpEvents(event, 1);
+    return events[0]!;
+  }
+
+  async waitForMcpEvents(event: string, minimumCount: number): Promise<McpProcessEvent[]> {
     await expect
-      .poll(() => this.readMcpEvents().find((entry) => entry.event === event), {
+      .poll(() => this.readMcpEvents().filter((entry) => entry.event === event).length, {
         timeout: 30_000,
         intervals: [50, 100, 250, 500],
       })
-      .toBeDefined();
-    return this.readMcpEvents().find((entry) => entry.event === event)!;
+      .toBeGreaterThanOrEqual(minimumCount);
+    return this.readMcpEvents().filter((entry) => entry.event === event);
   }
 
   async expectAgentExited(pid: number): Promise<void> {

@@ -1223,9 +1223,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               nativeReaderOwner = requestedReader;
               nativeLeasePreallocated = true;
             }
-            // Preload the workspace runtime chunk and prefetch the Streams token in
-            // parallel with native.open. The token is never attached to Loro Repo until
-            // native.open finishes verifying genesisHash and createE2eeContent validates bucketId.
+            // The prefetched Streams token reaches Loro Repo only after open verification.
             runtimeModulePromise = import('./create-workspace-runtime');
             const prefetchedStreamsToken =
               typeof native.contentStreamsToken === 'function'

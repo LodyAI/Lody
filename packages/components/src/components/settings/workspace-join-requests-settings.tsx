@@ -1,4 +1,5 @@
 import { seatBillingErrorKey } from './billing-errors';
+import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import {
   useLegacyWorkspaceMutation,
   useLegacyWorkspaceQuery,
@@ -124,9 +125,17 @@ export function WorkspaceJoinRequestsSettings({
     cloudOperations.workspaceJoinRequests.reviewRequest
   );
   const [approvalId, setApprovalId] = useState<string | null>(null);
+  const [seatPolicyRefreshKey, refreshSeatPolicy] = useState(0);
   const seatPreview = useCloudQuery(cloudOperations.billing.getWorkspaceSeatInvitePreview, {
     workspaceId,
+    ...(seatPolicyRefreshKey > 0 ? { policyRefreshKey: seatPolicyRefreshKey } : {}),
   });
+  useReferralPolicyRefresh(
+    seatPreview?.status === 'billed'
+      ? (seatPreview.policyNextChangeAt ?? seatPreview.promoEndsAt)
+      : undefined,
+    refreshSeatPolicy
+  );
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const live = useRef(true);
   useEffect(() => {

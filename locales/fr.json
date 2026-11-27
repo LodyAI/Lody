@@ -6212,6 +6212,13 @@
   "sessions.fileViewer.selection.screenshotPreview": "Capture d’écran sélectionnée",
   "sidebar.filter.showBranchNames": "Afficher la branche",
   "sidebar.filter.hideEmptyProjects": "Masquer les projets vides",
+  "sidebar.filter.memberYou": "Vous",
+  "sidebar.filter.owner": "Propriétaire",
+  "sidebar.filter.ownerIs": "est",
+  "sidebar.filter.ownerIsAnyOf": "est l’un de",
+  "sidebar.filter.ownerSearch": "Rechercher des membres…",
+  "sidebar.filter.ownerEmpty": "Aucun membre correspondant",
+  "sidebar.filter.ownerClear": "Effacer le filtre propriétaire",
   "sidebar.filter.detailsHeading": "Détails",
   "login.lastUsed": "Dernière utilisation",
   "login.tagline": "Un espace de travail partagé pour les agents de code que votre équipe utilise déjà.",
@@ -7288,5 +7295,9 @@
   "e2ee.team.pinMismatch": "Cette invitation ne correspond pas à l'enregistrement de sécurité de l'espace. Demandez à un administrateur d'en envoyer une nouvelle.",
   "e2ee.verify.cameraDenied": "L'accès à la caméra a été refusé. Autorisez-la dans les réglages du navigateur ou du système, ou saisissez le code à 6 chiffres.",
   "e2ee.mode.verifyingAccess": "Vérification de l'accès chiffré pour cet appareil…",
-  "e2ee.auto.syncing.keepOpen": "En attente de l'envoi de la clé de sécurité par votre autre appareil. Gardez Lody ouvert sur cet appareil…"
+  "e2ee.auto.syncing.keepOpen": "En attente de l'envoi de la clé de sécurité par votre autre appareil. Gardez Lody ouvert sur cet appareil…",
+  "billing.promoOfferTitle": "Remise promotionnelle",
+  "billing.switchPromoDiscountWithPercent": "Remise promotionnelle (−{{discount}} %)",
+  "billing.switchRenewalDateStandardYearly": "Prochain renouvellement : {{date}} au tarif standard ({{amount}}/an).",
+  "workspace.invite.seat.promoNoteUntil": "Inclut −{{discount}} % si l’invitation est acceptée d’ici le {{date}}. Renouvellement au tarif standard."
 }

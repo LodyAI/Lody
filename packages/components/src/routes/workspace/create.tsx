@@ -182,7 +182,11 @@ function CreateWorkspaceAuthed({
   const creationAvailability = useCloudQuery(
     cloudOperations.billing.getWorkspaceCreationAvailability
   );
-  const newWorkspacePricing = useCloudQuery(cloudOperations.billing.getMyNewWorkspacePricing, {});
+  const [promoRefreshKey, refreshPromoPolicy] = useState(0);
+  const newWorkspacePricing = useCloudQuery(
+    cloudOperations.billing.getMyNewWorkspacePricing,
+    promoRefreshKey > 0 ? { policyRefreshKey: promoRefreshKey } : {}
+  );
   const [referralCode, setReferralCode] = useState(() => readReferral());
   const createPaidWorkspaceCheckout = useCloudAction(
     cloudOperations.billing.createPaidWorkspaceCheckout
@@ -236,6 +240,13 @@ function CreateWorkspaceAuthed({
     paidRequired ? { policyRefreshKey, ...(referralCode ? { code: referralCode } : {}) } : 'skip'
   );
   useReferralPolicyRefresh(referralOffer?.policy?.nextChangeAt, refreshPolicy);
+  useReferralPolicyRefresh(
+    Math.min(
+      newWorkspacePricing?.promo?.nextChangeAt ?? Infinity,
+      newWorkspacePricing?.promo?.policy?.nextChangeAt ?? Infinity
+    ),
+    refreshPromoPolicy
+  );
   // Mirrors the early-return below: the form is only really shown when creating
   // is allowed for an existing-workspace user, or the user has none.
   const willRenderCreateForm = allowExisting === true || !hasExistingWorkspaces;

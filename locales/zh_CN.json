@@ -6213,6 +6213,13 @@
   "sessions.fileViewer.selection.screenshotPreview": "选区截图预览",
   "sidebar.filter.showBranchNames": "显示分支",
   "sidebar.filter.hideEmptyProjects": "隐藏空项目",
+  "sidebar.filter.memberYou": "我",
+  "sidebar.filter.owner": "所有者",
+  "sidebar.filter.ownerIs": "是",
+  "sidebar.filter.ownerIsAnyOf": "是其中之一",
+  "sidebar.filter.ownerSearch": "搜索成员…",
+  "sidebar.filter.ownerEmpty": "没有匹配的成员",
+  "sidebar.filter.ownerClear": "清除所有者筛选",
   "sidebar.filter.detailsHeading": "详情",
   "login.lastUsed": "上次使用",
   "login.tagline": "为团队正在使用的 Coding Agents 提供一个共享工作空间。",
@@ -7288,5 +7295,9 @@
   "e2ee.team.pinMismatch": "此邀请与工作区的安全记录不匹配，请联系管理员重新发送邀请。",
   "e2ee.verify.cameraDenied": "未获得相机权限。请在浏览器或系统设置中允许相机权限，或直接输入 6 位验证码。",
   "e2ee.mode.verifyingAccess": "正在验证此设备的加密访问权限…",
-  "e2ee.auto.syncing.keepOpen": "正在等待另一台设备发送安全钥匙，请保持该设备上的 Lody 处于打开状态…"
+  "e2ee.auto.syncing.keepOpen": "正在等待另一台设备发送安全钥匙，请保持该设备上的 Lody 处于打开状态…",
+  "billing.promoOfferTitle": "限时折扣",
+  "billing.switchPromoDiscountWithPercent": "限时升级优惠（{{rate}} 折）",
+  "billing.switchRenewalDateStandardYearly": "下次续费：{{date}}，按标准价 {{amount}}/年计费。",
+  "workspace.invite.seat.promoNoteUntil": "{{date}} 前接受邀请入组享当期 {{rate}} 折，下期续费按标准价计费。"
 }

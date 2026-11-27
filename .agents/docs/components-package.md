@@ -297,8 +297,10 @@ identifies the replica, including when those fields have yet to arrive. The
 server distinguishes pending publication, access that requires the target
 machine, and refusal. Pending publication, required machine authorization,
 temporary transport failure, or local replica quota exhaustion lets the owning
-machine admit a fresh exact-session read. A Streams access refusal ends that
-read route.
+machine admit a fresh exact-session read. A backend without the read-grant route
+(HTTP 404) is treated as required machine authorization, so clients released
+before that route is deployed keep the machine read path. A Streams access
+refusal ends that read route.
 
 During machine admission and while the machine serves history, Streams can
 prepare a window at a captured tail independently. The route switches when

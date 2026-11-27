@@ -7,6 +7,8 @@ import {
   ReferralOfferNotice,
   ReferralSettingsView,
 } from '../src/components/settings/referral-settings-pure';
+import { BillingSettingsView } from '../src/components/settings/billing-setting-pure';
+import { OPTIMISTIC_BILLING_OVERVIEW } from '../src/components/settings/billing-overview-cache';
 import { initI18n } from '../src/i18n';
 
 const clock = vi.hoisted(() => ({ now: 1000 }));
@@ -113,6 +115,209 @@ describe('campaign checkout display', () => {
     );
     expect(container.textContent).toContain('existing checkout keeps 20% off');
     expect(container.textContent).toContain('$86.40');
+  });
+  it('picks max(promotional, referral) discount on the upgrade card and badges monthly-to-yearly upgrades', async () => {
+    const baseProps = {
+      sessionCount: 5,
+      interval: 'year' as const,
+      pendingAction: null,
+      redeemPending: false,
+      cancelPending: false,
+      invoices: [],
+      invoicesError: false,
+      paymentProcessing: false,
+      onIntervalChange: () => {},
+      onUpgrade: () => {},
+      onSwitchInterval: () => {},
+      switchIntervalPending: false,
+      onCancelSubscription: () => {},
+      onResumeSubscription: () => {},
+      onRedeemCode: () => {},
+      onRetryInvoices: () => {},
+      referralCreditCents: 2000,
+    };
+    const promoPolicy = {
+      campaignId: 'bf-2026',
+      startsAt: Date.UTC(2026, 10, 25, 16),
+      endsAt: Date.UTC(2026, 10, 30, 16),
+      monthly: { discountPercent: 20 },
+      yearly: { discountPercent: 20 },
+      upgradeToYearly: true,
+      seatExpansion: true,
+    };
+
+    await act(async () =>
+      root.render(
+        <BillingSettingsView
+          {...baseProps}
+          overview={{
+            ...OPTIMISTIC_BILLING_OVERVIEW,
+            canManageBilling: true,
+            pricing: {
+              ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+              promo: {
+                policy: promoPolicy,
+                yearlyDiscountPercent: 20,
+                monthlyDiscountPercent: 20,
+              },
+            },
+          }}
+          referralOffer={{
+            policy: { campaignId: 'standard', discountPercent: 10, rewardPercent: 20 },
+            onRemove: () => {},
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Promotional discount');
+    expect(container.textContent).toContain('$76.80');
+    expect(container.textContent).not.toContain('Referral credit applied');
+
+    await act(async () =>
+      root.render(
+        <BillingSettingsView
+          {...baseProps}
+          overview={{
+            ...OPTIMISTIC_BILLING_OVERVIEW,
+            canManageBilling: true,
+            pricing: {
+              ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+              promo: {
+                policy: promoPolicy,
+                yearlyDiscountPercent: 20,
+                monthlyDiscountPercent: 20,
+              },
+            },
+          }}
+          referralOffer={{
+            policy: { campaignId: 'ref-25', discountPercent: 25, rewardPercent: 25 },
+            onRemove: () => {},
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Referral discount');
+    expect(container.textContent).toContain('$72');
+
+    await act(async () =>
+      root.render(
+        <BillingSettingsView
+          {...baseProps}
+          overview={{
+            ...OPTIMISTIC_BILLING_OVERVIEW,
+            billingAccountId: 'ba_1',
+            canManageBilling: true,
+            effectivePlanTier: 'plus',
+            entitlementSource: 'stripe',
+            subscriptionStatus: 'active',
+            billingInterval: 'month',
+            currentPeriodEnd: Date.UTC(2026, 11, 15),
+            pricing: {
+              ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+              promo: {
+                policy: promoPolicy,
+                upgradeToYearlyDiscountPercent: 20,
+              },
+            },
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Switch to yearly');
+    expect(container.textContent).toContain('20% off');
+
+    await act(async () =>
+      root.render(
+        <BillingSettingsView
+          {...baseProps}
+          overview={{
+            ...OPTIMISTIC_BILLING_OVERVIEW,
+            billingAccountId: 'ba_gift',
+            canManageBilling: true,
+            giftStackingSupported: true,
+            scheduleManaged: true,
+            effectivePlanTier: 'plus',
+            entitlementSource: 'stripe_gift',
+            subscriptionStatus: 'active',
+            billingInterval: 'month',
+            giftEndsAt: Date.now() + 30 * 86_400_000,
+            autoRenewAfterGift: false,
+            canResumeAfterGift: false,
+            pricing: {
+              ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+              promo: {
+                policy: promoPolicy,
+                monthlyDiscountPercent: 20,
+                yearlyDiscountPercent: 25,
+              },
+            },
+          }}
+          referralOffer={{
+            policy: { campaignId: 'ref-25', discountPercent: 25, rewardPercent: 25 },
+            onRemove: () => {},
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Subscribe after gift');
+    expect(container.textContent).toContain('Promotional discount');
+    expect(container.textContent).toContain('$72');
+    expect(container.textContent).not.toContain('Referral discount');
+
+    await initI18n('zh_CN');
+    await act(async () =>
+      root.render(
+        <BillingSettingsView
+          {...baseProps}
+          overview={{
+            ...OPTIMISTIC_BILLING_OVERVIEW,
+            canManageBilling: true,
+            pricing: {
+              ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+              promo: {
+                policy: {
+                  ...promoPolicy,
+                  name: { zh: '黑五特惠', en: 'Black Friday' },
+                },
+                yearlyDiscountPercent: 20,
+                monthlyDiscountPercent: 20,
+              },
+            },
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('黑五特惠');
+
+    await initI18n('en');
+    await act(async () =>
+      root.render(
+        <BillingSettingsView
+          {...baseProps}
+          overview={{
+            ...OPTIMISTIC_BILLING_OVERVIEW,
+            billingAccountId: 'ba_1',
+            canManageBilling: true,
+            effectivePlanTier: 'plus',
+            entitlementSource: 'stripe',
+            subscriptionStatus: 'active',
+            billingInterval: 'month',
+            currentPeriodEnd: Date.UTC(2026, 11, 15),
+            pricing: {
+              ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+              promo: {
+                policy: {
+                  ...promoPolicy,
+                  name: { zh: '黑五特惠', en: 'Black Friday' },
+                },
+                upgradeToYearlyDiscountPercent: 20,
+              },
+            },
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Black Friday · 20% off');
   });
 });
 

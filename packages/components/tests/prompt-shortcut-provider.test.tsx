@@ -190,7 +190,7 @@ describe('PromptShortcutProvider lifecycle', () => {
 
       if (transition === 'workspace') fixture.workspaceId = 'workspace-b';
       await render(transition !== 'readiness');
-      expect(() => first.setDirectory([])).toThrow('Shortcut runtime disposed');
+      expect(() => first.flush()).toThrow('Shortcut runtime disposed');
 
       const opening = deferred();
       fixture.createRepo.mockImplementationOnce(async () => {
@@ -209,7 +209,7 @@ describe('PromptShortcutProvider lifecycle', () => {
       expect(current).not.toBeNull();
       expect(current).not.toBe(first);
       expect(container.textContent).toBe('workspace-a');
-      await expect(current!.setDirectory([])).resolves.toBeUndefined();
+      await expect(current!.flush()).resolves.toBeUndefined();
     }
   );
 
@@ -301,7 +301,7 @@ describe('PromptShortcutProvider lifecycle', () => {
     await render();
     expect(rendered).not.toContain(first);
     expect(current).not.toBe(first);
-    expect(() => first.setDirectory([])).toThrow('Shortcut runtime disposed');
+    expect(() => first.flush()).toThrow('Shortcut runtime disposed');
     fixture.auth.confirmedUnauthenticated = true;
     await render();
     expect(current).toBeNull();
@@ -687,7 +687,6 @@ describe('PromptShortcutSync workspace-index replica checkpoints', () => {
       grant,
     });
     try {
-      // Seed entry 1 on the fake Streams server.
       const wFlock = await writerRepo.acquireFlockDoc(streamId);
       new PromptShortcutCatalog(wFlock.flock).put(entry1);
       await wFlock.release();
@@ -718,7 +717,6 @@ describe('PromptShortcutSync workspace-index replica checkpoints', () => {
       await sync1.dispose();
       await repo1.destroy();
 
-      // Push entry 2 while client is offline.
       const wFlock2 = await writerRepo.acquireFlockDoc(streamId);
       new PromptShortcutCatalog(wFlock2.flock).put(entry2);
       await wFlock2.release();

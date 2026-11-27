@@ -18,7 +18,7 @@ export function isWebBrowserStorageRuntime(): boolean {
     const platform = host.Capacitor?.getPlatform?.();
     if (platform === 'ios' || platform === 'android') return false;
   } catch {
-    /* Ignore non-standard Capacitor globals. */
+    return true;
   }
   return true;
 }

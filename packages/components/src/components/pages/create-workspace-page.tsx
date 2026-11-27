@@ -9,7 +9,7 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 import { pageSurface as surface } from './surface';
-import type { ReferralPolicy } from '@lody/cloud-api';
+import type { PromoCheckoutOffer, ReferralPolicy } from '@lody/cloud-api';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
@@ -24,7 +24,7 @@ import { Field as UiField } from '@lody/ui/field';
 import { PricingPageLink } from '../shared/pricing-page-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { formatUsd } from '../settings/billing-setting-pure';
-import { ReferralOfferNotice } from '../settings/referral-settings-pure';
+import { PromoOfferNotice, ReferralOfferNotice } from '../settings/referral-settings-pure';
 
 const layoutStyles = stylex.create({
   page: {
@@ -50,6 +50,7 @@ export interface CreateWorkspacePricing {
   monthlyAmountCents: number;
   yearlyAmountCents: number;
   yearlyOfferKey?: string | null;
+  promo?: PromoCheckoutOffer | null;
 }
 
 export interface CreateWorkspacePageProps {
@@ -266,21 +267,44 @@ export function CreateWorkspacePage({
                       </button>
                     ))}
                   </div>
-                  {referralOffer &&
-                  pricing &&
-                  !(billingInterval === 'year' && pricing.yearlyOfferKey) ? (
-                    <ReferralOfferNotice
-                      interval={billingInterval}
-                      regularCents={
-                        billingInterval === 'year'
-                          ? pricing.yearlyAmountCents
-                          : pricing.monthlyAmountCents
-                      }
-                      disabled={creating}
-                      onRemove={referralOffer.onRemove}
-                      policy={referralOffer.policy}
-                    />
-                  ) : null}
+                  {(() => {
+                    if (!pricing || (billingInterval === 'year' && pricing.yearlyOfferKey)) {
+                      return null;
+                    }
+                    const regularCents =
+                      billingInterval === 'year'
+                        ? pricing.yearlyAmountCents
+                        : pricing.monthlyAmountCents;
+                    const promoPercent =
+                      billingInterval === 'year'
+                        ? (pricing.promo?.yearlyDiscountPercent ?? 0)
+                        : (pricing.promo?.monthlyDiscountPercent ?? 0);
+                    const referralPercent = referralOffer
+                      ? (referralOffer.policy?.discountPercent ?? 10)
+                      : 0;
+                    if (promoPercent > 0 && (!referralOffer || promoPercent > referralPercent)) {
+                      return (
+                        <PromoOfferNotice
+                          interval={billingInterval}
+                          regularCents={regularCents}
+                          discountPercent={promoPercent}
+                          policy={pricing.promo?.policy}
+                        />
+                      );
+                    }
+                    if (referralOffer) {
+                      return (
+                        <ReferralOfferNotice
+                          interval={billingInterval}
+                          regularCents={regularCents}
+                          disabled={creating}
+                          onRemove={referralOffer.onRemove}
+                          policy={referralOffer.policy}
+                        />
+                      );
+                    }
+                    return null;
+                  })()}
                   <p {...stylex.props(surface.hint)}>
                     {t(
                       'organization.plusBillingHelp',

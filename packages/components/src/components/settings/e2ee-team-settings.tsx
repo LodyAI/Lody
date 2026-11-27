@@ -9,6 +9,7 @@ import { e2eeErrorCode } from '@/lib/e2ee-admission-refusals';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+import { getServerNow } from '@lody/shared';
 import type { E2eeMemberKeyDelivery, E2eeWorkspaceRuntime } from '@lody/platform';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import { Badge } from '@lody/ui/badge';
@@ -18,6 +19,7 @@ import { Card } from '@lody/ui/card';
 import { Spinner } from '@lody/ui/spinner';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
+import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import { getAppShareUrl } from '@/lib/app-location';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { memberJoinPath } from '@/lib/e2ee-member-offer';
@@ -355,8 +357,12 @@ function TeamSession({
       if (current()) setBusy(false);
     }
   };
+  const triggerReadRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    if (!runtime.memberJoinRequests) return undefined;
+    if (!runtime.memberJoinRequests) {
+      triggerReadRef.current = null;
+      return undefined;
+    }
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inFlight = false;
@@ -397,16 +403,37 @@ function TeamSession({
         schedule();
       }
     };
+    triggerReadRef.current = () => {
+      if (!disposed) void read();
+    };
     const unsubscribe = runtime.subscribePendingMemberRequests?.(workspaceId, () => {
       if (!disposed) void read();
     });
+    const onVisibilityOrFocus = () => {
+      if (!disposed && document.visibilityState !== 'hidden') void read();
+    };
+    window.addEventListener('focus', onVisibilityOrFocus);
+    document.addEventListener('visibilitychange', onVisibilityOrFocus);
     void read();
     return () => {
       disposed = true;
+      triggerReadRef.current = null;
       clearTimeout(timer);
       unsubscribe?.();
+      window.removeEventListener('focus', onVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', onVisibilityOrFocus);
     };
   }, [runtime, workspaceId, t]);
+  const [seatPolicyRefreshKey, refreshSeatPolicy] = useState(0);
+  useReferralPolicyRefresh(
+    data?.seatPreview?.status === 'billed'
+      ? (data.seatPreview.policyNextChangeAt ?? data.seatPreview.promoEndsAt)
+      : undefined,
+    refreshSeatPolicy
+  );
+  useEffect(() => {
+    if (seatPolicyRefreshKey > 0) triggerReadRef.current?.();
+  }, [seatPolicyRefreshKey]);
   const hasInFlightDeliveries = deliveries.some(
     (delivery) => delivery.state === 'pending' || delivery.state === 'delivering'
   );
@@ -454,15 +481,23 @@ function TeamSession({
     });
   // Approval adds a paid seat: say so beside the approve button, not only at the top.
   const seat = data?.seatPreview;
+  const seatPromoExpired =
+    seat?.status === 'billed' && seat.promoEndsAt != null && getServerNow() >= seat.promoEndsAt;
+  const effectiveApprovalProrated =
+    seat?.status === 'billed'
+      ? seatPromoExpired && seat.regularProratedAmount != null
+        ? seat.regularProratedAmount
+        : seat.proratedAmount
+      : null;
   const approvalCost =
     seat?.status === 'billed'
-      ? seat.proratedAmount === null
+      ? effectiveApprovalProrated === null
         ? t('e2ee.team.approveCostUnknown')
         : t('e2ee.team.approveCost', {
             amount: new Intl.NumberFormat(toIntlLocaleOrEn(i18n?.language), {
               style: 'currency',
               currency: seat.currency ?? 'usd',
-            }).format(seat.proratedAmount / 100),
+            }).format(effectiveApprovalProrated / 100),
           })
       : null;
   const hasPendingRequests = (data?.items.length ?? 0) > 0;

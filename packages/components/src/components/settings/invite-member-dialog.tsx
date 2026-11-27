@@ -2,15 +2,19 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreditCard, Shield, User } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { getServerNow } from '@lody/shared';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { Spinner } from '@lody/ui/spinner';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Select } from '@lody/ui/select';
+import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import { Dialog } from '@/ui/dialog';
 import { settingsSurface as surface } from './surface';
+import { discountBadgeValues, resolvePromoCampaignName } from './discount-badge-values';
 
 const styles = stylex.create({
   form: { display: 'flex', flexDirection: 'column', gap: space[4] },
@@ -30,6 +34,8 @@ const styles = stylex.create({
     color: colors.label,
   },
   amount: { fontVariantNumeric: 'tabular-nums' },
+  amountGroup: { display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: space[1.5] },
+  amountRegular: { color: colors.secondaryLabel, fontVariantNumeric: 'tabular-nums' },
   costNote: {
     margin: 0,
     marginTop: space[1],
@@ -296,6 +302,11 @@ export function SeatCostNotice({
   onOpenBilling?: () => void;
 }) {
   const { t, i18n } = useTranslation();
+  const [, refreshPromoBoundary] = useState(0);
+  useReferralPolicyRefresh(
+    preview?.status === 'billed' ? preview.promoEndsAt : undefined,
+    refreshPromoBoundary
+  );
   const formatDate = (value: number) =>
     new Intl.DateTimeFormat(i18n.language.replace('_', '-'), { dateStyle: 'medium' }).format(value);
 
@@ -340,18 +351,50 @@ export function SeatCostNotice({
       </p>
     );
   const yearly = preview.interval === 'year';
+  const promoExpired = preview.promoEndsAt != null && getServerNow() >= preview.promoEndsAt;
+  const effectiveProratedAmount =
+    promoExpired && preview.regularProratedAmount != null
+      ? preview.regularProratedAmount
+      : preview.proratedAmount;
+  const promoPercent = promoExpired ? 0 : (preview.promoDiscountPercent ?? 0);
+  const customPromoName =
+    promoPercent > 0 ? resolvePromoCampaignName(preview.promoName, i18n.language) : null;
+  const showRegularProrated =
+    promoPercent > 0 &&
+    preview.regularProratedAmount != null &&
+    preview.regularProratedAmount > effectiveProratedAmount;
   return (
     <div {...stylex.props(surface.formBlock)}>
       <div {...stylex.props(styles.costLine)}>
         <span>{t('workspace.invite.seat.addsSeats', { count: preview.addedSeats ?? 1 })}</span>
-        <span {...stylex.props(styles.amount)}>
-          {preview.proratedAmount === null
-            ? t('workspace.invite.seat.amountUnknown')
-            : t('workspace.invite.seat.approxAmount', {
-                amount: formatAmount(preview.proratedAmount),
-              })}
+        <span {...stylex.props(styles.amountGroup)}>
+          {promoPercent > 0 ? (
+            <Badge tone="success">
+              {customPromoName
+                ? `${customPromoName} · ${t('referral.offerBadge', discountBadgeValues(promoPercent))}`
+                : t('referral.offerBadge', discountBadgeValues(promoPercent))}
+            </Badge>
+          ) : null}
+          {showRegularProrated ? (
+            <s {...stylex.props(styles.amountRegular)}>
+              {formatAmount(preview.regularProratedAmount!)}
+            </s>
+          ) : null}
+          <span {...stylex.props(styles.amount)}>
+            {t('workspace.invite.seat.approxAmount', {
+              amount: formatAmount(effectiveProratedAmount),
+            })}
+          </span>
         </span>
       </div>
+      {promoPercent > 0 && preview.promoEndsAt != null ? (
+        <p {...stylex.props(styles.costNote)}>
+          {t('workspace.invite.seat.promoNoteUntil', {
+            ...discountBadgeValues(promoPercent),
+            date: formatDate(preview.promoEndsAt - 1),
+          })}
+        </p>
+      ) : null}
       <p {...stylex.props(styles.costNote)}>{t('workspace.invite.seat.acceptanceNote')}</p>
       {preview.paymentAction && (
         <p role="status" {...stylex.props(styles.costNote)}>

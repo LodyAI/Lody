@@ -1441,8 +1441,6 @@ describe('pairing hardening', () => {
     let submitted = false;
     let unsubscribed = false;
     const runtime = {
-      // Simulates Convex subscribeAutomaticPairing being active while the requester's
-      // post-reveal e2eeAccountPairing submission does not trigger automaticPairing again.
       subscribeAutomaticPairing: () => () => {
         unsubscribed = true;
       },
@@ -1459,7 +1457,6 @@ describe('pairing hardening', () => {
     );
     await flush();
     expect(document.querySelector('[data-testid="e2ee-approval-code"]')).toBeNull();
-    // Requester submits to e2eeAccountPairing without firing subscribeAutomaticPairing.
     submitted = true;
     await tick(2_000);
     await flush();

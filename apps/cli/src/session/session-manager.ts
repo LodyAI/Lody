@@ -46,6 +46,7 @@ import {
   WorkspaceId,
   type AgentConfigId,
   type LocalProjectId,
+  type McpServerId,
   type ProjectRef,
   getSessionRoomId,
   isLoroRepoDocDeleted,
@@ -137,7 +138,12 @@ import {
   readMachineLocalProjects,
   readLocalProjectRootResolveSyncTimeoutMs,
 } from '@/lib/local-project-meta';
-import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
+import {
+  loadSessionMcpCatalog,
+  readSessionMcpAuthRevisions,
+  readSessionMcpConfigFingerprint,
+  type SessionMcpMount,
+} from '@/agent/session-mcp-resolver';
 import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
 
 function formatManagedRuntimeProgressDetail(event: ManagedRuntimeProgressEvent): string {
@@ -229,6 +235,7 @@ export interface ISession {
   getProviderBinding?(): import('./automation-observations').ProviderBinding | undefined;
   getMemoryBinding?(): SessionConfig['memory'];
   getMcpServerIds?(): Readonly<SessionConfig['mcpServerIds']>;
+  getMcpMount?(): SessionMcpMount | undefined;
   getWorkdir(): string;
   /**
    * Host-side working directory for file operations.
@@ -773,9 +780,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           sessionId,
           selectedIds: config.mcpServerIds,
           logger: this.logger,
-          env: mcpRequesterUserId === this.cloudPort.identity.userId ? process.env : {},
+          env: this.mcpEnvironmentFor(mcpRequesterUserId),
           prepare: (entry, resolved) =>
             this.mcpAuthentication.prepare(entry, resolved, mcpOwner, mcpRequesterUserId),
+          getAuthRevision: this.mcpAuthRevisionFor(mcpRequesterUserId),
         }),
       releaseExternalMcpServers: () => this.mcpAuthentication.release(mcpOwner),
       onImageGenerationBegin: (event) => this.emit('onImageGenerationBegin', sessionId, event),
@@ -1893,6 +1901,38 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       });
       throw error;
     }
+  }
+
+  /** Only the CLI account's own turns may read the daemon environment into MCP connections. */
+  private mcpEnvironmentFor(requesterUserId: string | undefined) {
+    return requesterUserId === this.cloudPort.identity.userId ? process.env : {};
+  }
+
+  /** Local credentials reach only the CLI account's own mounts, so only its turns observe their revisions. */
+  private mcpAuthRevisionFor(requesterUserId: string | undefined) {
+    return requesterUserId === this.cloudPort.identity.userId
+      ? (serverId: string) => this.mcpAuthentication.getAuthRevision(serverId)
+      : undefined;
+  }
+
+  /** What a fresh ACP start would mount now; `undefined` when the catalog is unreadable. */
+  readMcpConfigurationFingerprint(
+    selectedIds: readonly McpServerId[],
+    requesterUserId: string | undefined
+  ): Promise<string | undefined> {
+    return readSessionMcpConfigFingerprint({
+      repo: this.workspaceDocument.repo,
+      workspaceId: this.workspaceId,
+      selectedIds,
+      env: this.mcpEnvironmentFor(requesterUserId),
+    });
+  }
+
+  readMcpAuthRevisions(
+    selectedIds: readonly McpServerId[],
+    requesterUserId: string | undefined
+  ): Record<string, number> {
+    return readSessionMcpAuthRevisions(selectedIds, this.mcpAuthRevisionFor(requesterUserId));
   }
 
   /** Retire an instance between prompts without ending its execution owner's turn. */

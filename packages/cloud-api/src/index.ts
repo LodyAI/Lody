@@ -309,12 +309,46 @@ type CheckoutUrls = {
   returnTarget?: 'desktop' | 'web';
 };
 
+export type PromoCampaignName = string | Record<string, string>;
+
+export interface PromoPolicy {
+  campaignId: string;
+  name?: PromoCampaignName | null;
+  startsAt: number;
+  endsAt: number;
+  monthly?: { discountPercent: number } | null;
+  yearly?: { discountPercent: number } | null;
+  upgradeToYearly: boolean;
+  seatExpansion: boolean;
+  nextChangeAt?: number;
+}
+
+export interface PromoRetainedCheckout {
+  campaignId: string;
+  name?: PromoCampaignName | null;
+  interval: BillingInterval;
+  discountPercent: number;
+  startsAt: number;
+  endsAt: number;
+  expiresAt: number;
+}
+
+export interface PromoCheckoutOffer {
+  policy?: PromoPolicy | null;
+  nextChangeAt?: number;
+  monthlyDiscountPercent?: number;
+  yearlyDiscountPercent?: number;
+  upgradeToYearlyDiscountPercent?: number;
+  retained?: PromoRetainedCheckout | null;
+}
+
 type Pricing = {
   monthlyAmountCents: number;
   yearlyAmountCents: number;
   monthlyOfferKey: null;
   yearlyOfferKey: string | null;
   yearlyOfferEndsAt: number | null;
+  promo?: PromoCheckoutOffer | null;
 };
 
 type WorkspaceAccess =
@@ -763,8 +797,11 @@ export type CloudApi = {
       },
       { workspaceId: string; workspaceSlug: string; url: string | null; existing: boolean }
     >;
-    getBillingOverview: Query<{ workspaceId: string }, BillingOverview | null>;
-    getMyNewWorkspacePricing: Query<Record<string, never>, Pricing | null>;
+    getBillingOverview: Query<
+      { workspaceId: string; policyRefreshKey?: number },
+      BillingOverview | null
+    >;
+    getMyNewWorkspacePricing: Query<{ policyRefreshKey?: number }, Pricing | null>;
     getMyPaidWorkspacePlanTiers: Query<
       Record<string, never>,
       Array<{ workspaceId: string; planTier: Exclude<PlanTier, 'free'> }>
@@ -799,7 +836,7 @@ export type CloudApi = {
       } | null
     >;
     getWorkspaceSeatInvitePreview: Query<
-      { workspaceId: string; requestedSeats?: number },
+      { workspaceId: string; requestedSeats?: number; policyRefreshKey?: number },
       SeatInvitePreview | null
     >;
     listDeletedWorkspaceBillingAccounts: Query<
@@ -837,6 +874,9 @@ export type CloudApi = {
         remainingCredit: number;
         nextRenewalAt: number | null;
         promoApplied: boolean;
+        promoKind?: 'early_bird_forever' | 'campaign_once';
+        promoDiscountPercent?: number;
+        promoName?: PromoCampaignName | null;
       } | null
     >;
     reconcileWorkspaceCheckout: Action<

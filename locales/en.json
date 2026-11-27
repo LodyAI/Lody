@@ -6213,6 +6213,13 @@
   "sessions.fileViewer.selection.screenshotPreview": "Selected screenshot",
   "sidebar.filter.showBranchNames": "Show Branch",
   "sidebar.filter.hideEmptyProjects": "Hide Empty Projects",
+  "sidebar.filter.memberYou": "You",
+  "sidebar.filter.owner": "Owner",
+  "sidebar.filter.ownerIs": "is",
+  "sidebar.filter.ownerIsAnyOf": "is any of",
+  "sidebar.filter.ownerSearch": "Search people…",
+  "sidebar.filter.ownerEmpty": "No matching people",
+  "sidebar.filter.ownerClear": "Clear owner filter",
   "sidebar.filter.detailsHeading": "Details",
   "login.lastUsed": "Last used",
   "login.tagline": "A shared workspace for the coding agents your team already uses.",
@@ -7288,5 +7295,9 @@
   "e2ee.team.pinMismatch": "This invitation does not match the workspace's security record. Ask an admin to send a new invitation.",
   "e2ee.verify.cameraDenied": "Camera permission was denied. Allow camera access in your browser or system settings, or enter the 6-digit code instead.",
   "e2ee.mode.verifyingAccess": "Verifying encrypted access for this device…",
-  "e2ee.auto.syncing.keepOpen": "Waiting for your other device to send the security key. Keep Lody open on that device…"
+  "e2ee.auto.syncing.keepOpen": "Waiting for your other device to send the security key. Keep Lody open on that device…",
+  "billing.promoOfferTitle": "Promotional discount",
+  "billing.switchPromoDiscountWithPercent": "Promotional discount ({{discount}}% off)",
+  "billing.switchRenewalDateStandardYearly": "Next renewal: {{date}} at the standard rate ({{amount}}/year).",
+  "workspace.invite.seat.promoNoteUntil": "Includes {{discount}}% off if accepted by {{date}}. Renews at standard rate."
 }

@@ -56,7 +56,7 @@ jobs:
     needs:
       - validate-target
     if: needs.validate-target.result == 'success'
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/release' && 'cloud-production' || 'cloud-staging' }}
     env:
       LODY_ENV: ${{ github.ref == 'refs/heads/release' && 'production' || 'staging' }}

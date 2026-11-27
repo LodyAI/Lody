@@ -201,9 +201,7 @@ export function useInstantQrOffer(
           try {
             unsubscribe = runtime.subscribeAccountPairingApproval(next.lookupId, wake);
             subscribed = true;
-          } catch {
-            /* Live approval wakeup is optional; polling remains the fallback. */
-          }
+          } catch {}
         }
         const effectivePollMs =
           options.pollMs ?? (subscribed ? INSTANT_QR_FALLBACK_POLL_MS : pollMs);

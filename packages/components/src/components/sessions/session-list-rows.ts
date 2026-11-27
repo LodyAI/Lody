@@ -1,4 +1,4 @@
-import { isSessionInMyScope } from '@/lib/session-visibility';
+import { isSessionInMyScope, isSessionInTaskOwnerFilter } from '@/lib/session-visibility';
 import { hasFailedLatestTurn, resolveSessionPrimaryPullRequest } from '@lody/shared';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import type {
@@ -42,6 +42,8 @@ export type WorkspaceMember = {
 
 export type BuildSessionListRowsOptions = {
   scope: SessionListScope;
+  /** Team scope only: the owners whose tasks to list; omitted or `null` lists every owner. */
+  ownerIds?: ReadonlySet<string> | null;
   currentUserId: string | null | undefined;
   defaultTitle: string;
   /** Set of online machine IDs - sessions with machines not in this set are considered offline */
@@ -414,6 +416,7 @@ export function buildSessionListRows(
 ): SessionListRow[] {
   const {
     scope,
+    ownerIds,
     currentUserId,
     defaultTitle,
     onlineMachineIds,
@@ -478,7 +481,9 @@ export function buildSessionListRows(
   }
 
   // For team scope, include owner info
-  return sessions.map((session) => mapAndAggregate(session, getOwner(session.userId)));
+  return sessions
+    .filter((session) => isSessionInTaskOwnerFilter(session, ownerIds ?? null))
+    .map((session) => mapAndAggregate(session, getOwner(session.userId)));
 }
 
 /** The unpinned rows each Workspace-mode sidebar group renders. */

@@ -525,10 +525,7 @@ export function E2eeWorkspaceConsole({
                 });
               }
             };
-            // When a live ledgerHead subscription is available and the local pin already
-            // matches the fresh native open (which verified history from the host), skip
-            // the redundant immediate describe + synchronize; the subscription below
-            // catches any newer head immediately.
+            // A live ledgerHead subscription covers newer heads when the pin already matches.
             const skipInitialSync =
               Boolean(port.subscribeLedgerHead) && pin === status.genesisHash && status.length > 0;
             if (!skipInitialSync) {

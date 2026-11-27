@@ -6212,6 +6212,13 @@
   "sessions.fileViewer.selection.screenshotPreview": "Выбранный снимок экрана",
   "sidebar.filter.showBranchNames": "Показывать ветку",
   "sidebar.filter.hideEmptyProjects": "Скрывать пустые проекты",
+  "sidebar.filter.memberYou": "Вы",
+  "sidebar.filter.owner": "Владелец",
+  "sidebar.filter.ownerIs": "—",
+  "sidebar.filter.ownerIsAnyOf": "— один из",
+  "sidebar.filter.ownerSearch": "Поиск участников…",
+  "sidebar.filter.ownerEmpty": "Нет подходящих участников",
+  "sidebar.filter.ownerClear": "Сбросить фильтр по владельцу",
   "sidebar.filter.detailsHeading": "Детали",
   "login.lastUsed": "Последний вход",
   "login.tagline": "Общее рабочее пространство для кодинг-агентов, которыми уже пользуется ваша команда.",
@@ -7428,5 +7435,9 @@
   "e2ee.team.pinMismatch": "Это приглашение не совпадает с записью безопасности пространства. Попросите администратора отправить новое.",
   "e2ee.verify.cameraDenied": "Доступ к камере запрещён. Разрешите камеру в настройках браузера или системы, либо введите 6-значный код.",
   "e2ee.mode.verifyingAccess": "Проверка зашифрованного доступа для этого устройства…",
-  "e2ee.auto.syncing.keepOpen": "Ожидание отправки ключа безопасности с другого устройства. Держите Lody открытым на том устройстве…"
+  "e2ee.auto.syncing.keepOpen": "Ожидание отправки ключа безопасности с другого устройства. Держите Lody открытым на том устройстве…",
+  "billing.promoOfferTitle": "Акционная скидка",
+  "billing.switchPromoDiscountWithPercent": "Акционная скидка (−{{discount}}%)",
+  "billing.switchRenewalDateStandardYearly": "Следующее продление: {{date}} по стандартному тарифу ({{amount}}/год).",
+  "workspace.invite.seat.promoNoteUntil": "Скидка {{discount}}% при принятии приглашения до {{date}}. Продление по стандартному тарифу."
 }

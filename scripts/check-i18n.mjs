@@ -127,6 +127,8 @@ const DISCOUNT_OR_RATE_KEYS = new Set([
   'referral.shareTitle',
   'referral.perkDiscount',
   'referral.offerBadge',
+  'billing.switchPromoDiscountWithPercent',
+  'workspace.invite.seat.promoNoteUntil',
 ]);
 
 /**

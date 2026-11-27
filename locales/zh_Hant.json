@@ -6212,6 +6212,13 @@
   "sessions.fileViewer.selection.screenshotPreview": "已選取的螢幕截圖",
   "sidebar.filter.showBranchNames": "顯示分支",
   "sidebar.filter.hideEmptyProjects": "隱藏空專案",
+  "sidebar.filter.memberYou": "我",
+  "sidebar.filter.owner": "擁有者",
+  "sidebar.filter.ownerIs": "是",
+  "sidebar.filter.ownerIsAnyOf": "是其中之一",
+  "sidebar.filter.ownerSearch": "搜尋成員…",
+  "sidebar.filter.ownerEmpty": "沒有符合的成員",
+  "sidebar.filter.ownerClear": "清除擁有者篩選",
   "sidebar.filter.detailsHeading": "詳細資訊",
   "login.lastUsed": "上次使用",
   "login.tagline": "為團隊現正使用的 Coding Agents 打造的共享工作區。",
@@ -7288,5 +7295,9 @@
   "e2ee.team.pinMismatch": "此邀請與工作區的安全記錄不相符，請聯絡管理員重新傳送邀請。",
   "e2ee.verify.cameraDenied": "未取得相機權限。請在瀏覽器或系統設定中允許相機權限，或直接輸入 6 位數驗證碼。",
   "e2ee.mode.verifyingAccess": "正在驗證此裝置的加密存取權限…",
-  "e2ee.auto.syncing.keepOpen": "正在等待另一台裝置傳送安全金鑰，請保持該裝置上的 Lody 處於開啟狀態…"
+  "e2ee.auto.syncing.keepOpen": "正在等待另一台裝置傳送安全金鑰，請保持該裝置上的 Lody 處於開啟狀態…",
+  "billing.promoOfferTitle": "限時折扣",
+  "billing.switchPromoDiscountWithPercent": "限時升級優惠（{{rate}} 折）",
+  "billing.switchRenewalDateStandardYearly": "下次續訂：{{date}}，按標準價 {{amount}}/年計費。",
+  "workspace.invite.seat.promoNoteUntil": "{{date}} 前接受邀請加入享當期 {{rate}} 折，下期續訂按標準價計費。"
 }

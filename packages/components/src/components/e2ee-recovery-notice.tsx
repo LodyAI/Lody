@@ -25,9 +25,7 @@ function readDismissed(accountId: string | null | undefined, workspaceId: string
 function writeDismissed(accountId: string | null | undefined, workspaceId: string) {
   try {
     globalThis.localStorage?.setItem(dismissalKey(accountId, workspaceId), '1');
-  } catch {
-    /* Storage restrictions never block dismissal in the current session. */
-  }
+  } catch {}
 }
 
 const styles = stylex.create({

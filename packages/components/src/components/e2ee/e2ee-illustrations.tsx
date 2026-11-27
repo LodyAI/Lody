@@ -2,12 +2,6 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { ease } from '@lody/ui/tokens/scales.stylex';
 
-/**
- * Encrypted-workspace art in the plug card's language (`../chat/no-machine-hint.tsx`):
- * decorative, token-filled, `label` subject on the gray ramp with one accent lamp.
- * Only transform and opacity move, never under reduced motion.
- */
-
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
 
 const travel = stylex.keyframes({
@@ -85,7 +79,6 @@ const styles = stylex.create({
   },
 });
 
-/** A key seen flat: ring bow, shaft and two teeth, drawn around (x, y) = bow centre. */
 function KeyGlyph({ x, y }: { x: number; y: number }) {
   return (
     <g transform={`translate(${x} ${y}) scale(0.82)`}>

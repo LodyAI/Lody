@@ -237,8 +237,7 @@ export function createCloudE2eeWorkspaces(input: {
         });
         assertAccount(owner);
       }
-      // Listing is a projection: optimistically surface the validated workspace and
-      // refresh the full list in the background so navigation is not blocked on a list RTT.
+      // Listing is a projection: show the validated workspace now, refresh in the background.
       input.onWorkspaceCreated?.({
         id: result.workspaceId,
         name: result.name,

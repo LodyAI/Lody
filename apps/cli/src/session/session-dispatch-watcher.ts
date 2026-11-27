@@ -2413,6 +2413,7 @@ export class SessionDispatchWatcher {
     )?._lodyAutomation;
     const pendingEntry = buildPendingUserHistoryEntry({
       userId: queuedItem.userId ?? meta.userId,
+      userName: queuedItem.userId ? queuedItem.userName : undefined,
       inputBlocks,
       timestamp,
       inputConfig: { ...inputConfig, ...(automation ? { _lodyAutomation: automation } : {}) },

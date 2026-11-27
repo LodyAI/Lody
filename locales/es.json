@@ -6212,6 +6212,13 @@
   "sessions.fileViewer.selection.screenshotPreview": "Captura seleccionada",
   "sidebar.filter.showBranchNames": "Mostrar rama",
   "sidebar.filter.hideEmptyProjects": "Ocultar proyectos vacíos",
+  "sidebar.filter.memberYou": "Tú",
+  "sidebar.filter.owner": "Propietario",
+  "sidebar.filter.ownerIs": "es",
+  "sidebar.filter.ownerIsAnyOf": "es alguno de",
+  "sidebar.filter.ownerSearch": "Buscar personas…",
+  "sidebar.filter.ownerEmpty": "No hay personas que coincidan",
+  "sidebar.filter.ownerClear": "Borrar filtro de propietario",
   "sidebar.filter.detailsHeading": "Detalles",
   "login.lastUsed": "Último uso",
   "login.tagline": "Un espacio de trabajo compartido para los agentes de programación que tu equipo ya usa.",
@@ -7288,5 +7295,9 @@
   "e2ee.team.pinMismatch": "Esta invitación no coincide con el registro de seguridad del espacio. Pide a un administrador que envíe una nueva.",
   "e2ee.verify.cameraDenied": "Se denegó el permiso de cámara. Permite el acceso en los ajustes del navegador o del sistema, o introduce el código de 6 dígitos.",
   "e2ee.mode.verifyingAccess": "Verificando el acceso cifrado de este dispositivo…",
-  "e2ee.auto.syncing.keepOpen": "Esperando a que el otro dispositivo envíe la clave de seguridad. Mantén Lody abierto en ese dispositivo…"
+  "e2ee.auto.syncing.keepOpen": "Esperando a que el otro dispositivo envíe la clave de seguridad. Mantén Lody abierto en ese dispositivo…",
+  "billing.promoOfferTitle": "Descuento promocional",
+  "billing.switchPromoDiscountWithPercent": "Descuento promocional ({{discount}}% de dto.)",
+  "billing.switchRenewalDateStandardYearly": "Próxima renovación: {{date}} a la tarifa estándar ({{amount}}/año).",
+  "workspace.invite.seat.promoNoteUntil": "Incluye un {{discount}}% de descuento si se acepta antes del {{date}}. Se renueva a la tarifa estándar."
 }
