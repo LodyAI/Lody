@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ErrorBoundaryFallback } from '../src/components/error-boundary-fallback';
 import { initI18n } from '../src/i18n';
+import { createRouter } from '../src/router';
+import type { LodyAuthClient } from '../src/lib/auth';
 
 const mocks = vi.hoisted(() => ({
   startHardReset: vi.fn<() => Promise<boolean>>(),
@@ -174,5 +176,30 @@ describe('ErrorBoundaryFallback', () => {
     click(button('Copy error details'));
     await act(async () => {});
     expect(writeText.mock.calls[0]?.[0]).toContain('[CONVEX Q(localProjects:list)]');
+  });
+
+  it('routes uncaught router errors through ErrorBoundaryFallback with recovery actions', () => {
+    const router = createRouter({ authClient: {} as LodyAuthClient });
+    const DefaultErrorComponent = router.options.defaultErrorComponent;
+    expect(DefaultErrorComponent).toBeTypeOf('function');
+    if (!DefaultErrorComponent) return;
+
+    const reset = vi.fn();
+    act(() => {
+      root.render(
+        <DefaultErrorComponent
+          error={new TypeError("Cannot read properties of null (reading 'id')")}
+          info={{ componentStack: '\n    at CloudPlatformProvider' }}
+          reset={reset}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain("Cannot read properties of null (reading 'id')");
+    expect(container.textContent).not.toContain('Hide Error');
+    click(button('Try again'));
+    expect(reset).toHaveBeenCalledTimes(1);
+    click(button('Reload Lody'));
+    expect(mocks.reloadApp).toHaveBeenCalledTimes(1);
   });
 });

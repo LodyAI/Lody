@@ -893,7 +893,7 @@ export class AuthService {
 
     const organizations = unwrapResponseData<unknown[]>(organizationsResponse)
     const firstOrganizationId = Array.isArray(organizations)
-      ? readOrganizationId(organizations[0])
+      ? (organizations.map(readOrganizationId).find((id) => id !== null) ?? null)
       : null
     if (!firstOrganizationId) {
       return activeOrganizationResponse

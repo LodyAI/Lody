@@ -923,4 +923,35 @@ describe('useOrganization list recovery', () => {
     });
     expect(latestOrganizationState?.activeOrganization?.id).toBe('encrypted-a');
   });
+
+  it('ignores null entries in ordinary and encrypted organization lists without throwing', async () => {
+    const ordinaryA = createOrganization('ordinary-a', 'ordinary-a', 'Ordinary A');
+    organizationMocks.encryptedWorkspaces = [null];
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useListOrganizations: () => ({
+        data: [null, ordinaryA],
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: ordinaryA,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    const store = createStore();
+    await act(async () => {
+      if (!container) {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+      }
+      root?.render(createElement(TestApp, { targetSlug: 'ordinary-a', renderVersion: 0, store }));
+    });
+    expect(latestOrganizationState?.organizations?.map((org) => org.id)).toEqual(['ordinary-a']);
+  });
 });
