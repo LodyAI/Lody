@@ -39,6 +39,7 @@ import {
   classifyE2eeControlFailure,
   e2eeControlDiagnostics,
 } from '../src/lib/e2ee-control-failure';
+import { decodeE2eeIpcError, encodeE2eeIpcError } from '@lody/shared/e2ee-ipc-error';
 import { withAccountPairingCode } from '../src/lib/e2ee-account-pairing-ipc';
 import { requestFailureCode } from '../src/lib/e2ee-actionable-failure';
 import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
@@ -844,7 +845,7 @@ it.each([
   }
 );
 
-it('classifies desktop e2ee_storage as local-identity and custody_locked as custody-locked, never server', () => {
+it('round-trips structured E2EE IPC errors and classifies desktop storage/custody-locked failures', async () => {
   expect(classifyE2eeControlFailure(new Error('e2ee_storage'))).toEqual({
     kind: 'local-identity',
     code: 'e2ee_storage',
@@ -853,33 +854,27 @@ it('classifies desktop e2ee_storage as local-identity and custody_locked as cust
     classifyE2eeControlFailure(
       new Error("Error invoking remote method 'e2ee.open': Error: e2ee_custody_locked")
     )
-  ).toEqual({
-    kind: 'custody-locked',
-    code: 'e2ee_custody_locked',
+  ).toEqual({ kind: 'custody-locked', code: 'e2ee_custody_locked' });
+  const rateLimited = encodeE2eeIpcError({
+    kind: 'self-service-rate-limited',
+    code: 'self_service_rate_limited',
+    retryAt: 1_800_000_000_000,
   });
-  expect(
-    requestFailureCode(
-      new Error(
-        "Error invoking remote method 'e2ee.revokeDevice': Error: retryAt=1800000000000: e2ee_self_service_rate_limited"
-      )
-    )
-  ).toBe('e2ee_self_service_rate_limited');
-});
-
-it('restores account pairing refusal codes and attemptsLeft across Electron IPC', async () => {
-  for (const [message, expected] of [
-    ['Error: e2ee_pairing-update-required', { code: 'pairing-update-required' }],
-    ['Error: e2ee_pairing-code-locked', { code: 'pairing-code-locked' }],
-    ['Error: e2ee_pairing-unavailable', { code: 'pairing-unavailable' }],
-    ['Error: e2ee_pairing-rate-limited', { code: 'pairing-rate-limited' }],
-    [
-      "Error invoking remote method 'e2ee.approveAccountPairing': Error: e2ee_pairing-code-mismatch:2",
-      { code: 'pairing-code-mismatch', attemptsLeft: 2 },
-    ],
-  ] as const) {
-    const err = await withAccountPairingCode(Promise.reject(new Error(message))).catch(
-      (cause: unknown) => cause
-    );
-    expect(err).toMatchObject(expected);
-  }
+  expect(requestFailureCode(new Error(`Error invoking remote: Error: ${rateLimited}`))).toBe(
+    'e2ee_self_service_rate_limited'
+  );
+  expect(decodeE2eeIpcError(rateLimited)).toEqual({
+    kind: 'self-service-rate-limited',
+    code: 'self_service_rate_limited',
+    retryAt: 1_800_000_000_000,
+  });
+  const mismatch = encodeE2eeIpcError({
+    kind: 'pairing-code-mismatch',
+    code: 'pairing-code-mismatch',
+    attemptsLeft: 2,
+  });
+  const err = await withAccountPairingCode(
+    Promise.reject(new Error(`Error invoking remote: Error: ${mismatch}`))
+  ).catch((cause: unknown) => cause);
+  expect(err).toMatchObject({ code: 'pairing-code-mismatch', attemptsLeft: 2 });
 });

@@ -9,7 +9,8 @@ import test from 'node:test'
 import { Effect, Exit, Fiber, Scope } from 'effect'
 import { Bytes, verifySignature } from '@lody/e2ee-core/protocol'
 import { signGenesisRecord } from '@lody/e2ee-core/protocol'
-import { isDesktopE2eeCustodyLocked, makeDesktopE2eeCustody } from './e2ee-custody.mts'
+import { DesktopSafeStorageLockedError, makeDesktopE2eeCustody } from './e2ee-custody.mts'
+import { classifySafeStorageFailure } from './safe-storage-classification.ts'
 
 // An authenticated synthetic native boundary, never a real OS keychain claim.
 const wrapping = Buffer.alloc(32, 72)
@@ -923,58 +924,43 @@ void test('recovers a journaled replacement after a crash when only the old nati
   assert.deepEqual(await readdir(directory), ['kek.safe-storage', 'kek.safe-storage.rewrap-lock'])
 })
 
-void test('safeStorage temporary lock or unavailability reports custody-locked while filesystem permissions stay distinct', async (t) => {
+void test('safeStorage failure matrix distinguishes temporary locks from permissions and preserves kek.safe-storage', async (t) => {
+  for (const [error, expected] of [
+    [
+      new Error(
+        'Error while decrypting the ciphertext provided to safeStorage.decryptStringAsync. Decryption is not available.'
+      ),
+      'locked'
+    ],
+    [new Error('safeStorage is temporarily unavailable'), 'locked'],
+    [new Error('Keychain is locked (errSecInteractionNotAllowed)'), 'locked'],
+    [new Error('User canceled authorization'), 'locked'],
+    [Object.assign(new Error('permission denied'), { code: 'EACCES' }), 'permissions'],
+    [Object.assign(new Error('operation not permitted'), { code: 'EPERM' }), 'permissions'],
+    [new Error('permission denied'), 'permission-text'],
+    [new Error('Keychain permission denied'), 'permission-text']
+  ]) {
+    assert.equal(classifySafeStorageFailure({ error }), expected)
+  }
   const directory = await fixture(t)
   await execute(makeDesktopE2eeCustody({ directory, platform: 'darwin', safeStorage: backend() }))
   const wrapped = await readFile(join(directory, 'kek.safe-storage'))
-  for (const error of [
-    new Error(
-      'Error while decrypting the ciphertext provided to safeStorage.decryptStringAsync. Decryption is not available.'
-    ),
-    new Error('safeStorage is temporarily unavailable'),
-    new Error('Keychain is locked (errSecInteractionNotAllowed)'),
-    new Error('User canceled authorization')
-  ]) {
-    const locked = await execute(
-      Effect.result(
-        makeDesktopE2eeCustody({
-          directory,
-          platform: 'darwin',
-          safeStorage: backend({
-            decryptStringAsync: async () => {
-              throw error
-            }
-          })
+  const locked = await execute(
+    Effect.result(
+      makeDesktopE2eeCustody({
+        directory,
+        platform: 'darwin',
+        safeStorage: backend({
+          decryptStringAsync: async () => {
+            throw new Error(
+              'Error while decrypting the ciphertext provided to safeStorage.decryptStringAsync. Decryption is not available.'
+            )
+          }
         })
-      )
+      })
     )
-    assert.equal(locked._tag, 'Failure')
-    assert.equal(locked.failure?.code, 'unavailable')
-    assert.equal(isDesktopE2eeCustodyLocked(locked.failure), true)
-    assert.deepEqual(await readFile(join(directory, 'kek.safe-storage')), wrapped)
-  }
-  for (const [error, expectedCode] of [
-    [Object.assign(new Error('permission denied'), { code: 'EACCES' }), 'permissions'],
-    [Object.assign(new Error('operation not permitted'), { code: 'EPERM' }), 'permissions'],
-    [new Error('permission denied'), 'storage'],
-    [new Error('Keychain permission denied'), 'storage']
-  ]) {
-    const denied = await execute(
-      Effect.result(
-        makeDesktopE2eeCustody({
-          directory,
-          platform: 'darwin',
-          safeStorage: backend({
-            decryptStringAsync: async () => {
-              throw error
-            }
-          })
-        })
-      )
-    )
-    assert.equal(denied._tag, 'Failure')
-    assert.equal(denied.failure?.code, expectedCode)
-    assert.equal(isDesktopE2eeCustodyLocked(denied.failure), false)
-    assert.deepEqual(await readFile(join(directory, 'kek.safe-storage')), wrapped)
-  }
+  )
+  assert.equal(locked._tag, 'Failure')
+  assert.ok(locked.failure instanceof DesktopSafeStorageLockedError)
+  assert.deepEqual(await readFile(join(directory, 'kek.safe-storage')), wrapped)
 })

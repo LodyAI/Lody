@@ -45,25 +45,39 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
   ledger: () => Effect.Effect<LedgerView, unknown>
 }) {
   const scope = yield* Effect.scope
-  let opening: Deferred.Deferred<IrohEndpoint, unknown> | undefined
-  let liveEndpoint: IrohEndpoint | undefined
-  let closed = false
+  type IrohState =
+    | { readonly _tag: 'Idle' }
+    | { readonly _tag: 'Opening'; readonly deferred: Deferred.Deferred<IrohEndpoint, unknown> }
+    | { readonly _tag: 'Live'; readonly endpoint: IrohEndpoint }
+    | { readonly _tag: 'Closed' }
+  let state: IrohState = { _tag: 'Idle' }
   let warming = new Set<string>()
+  const closeIfOpened = (current: IrohState) =>
+    current._tag === 'Live'
+      ? Effect.promise(() => current.endpoint.close().catch(() => undefined))
+      : current._tag === 'Opening'
+        ? Effect.exit(Deferred.await(current.deferred)).pipe(
+            Effect.flatMap((opened) =>
+              Exit.isSuccess(opened)
+                ? Effect.promise(() => opened.value.close().catch(() => undefined))
+                : Effect.void
+            )
+          )
+        : Effect.void
   yield* Effect.addFinalizer(() =>
-    Effect.gen(function* () {
-      closed = true
-      liveEndpoint = undefined
-      if (!opening) return
-      const opened = yield* Effect.exit(Deferred.await(opening))
-      if (Exit.isSuccess(opened)) yield* Effect.promise(() => opened.value.close())
+    Effect.suspend(() => {
+      const previous = state
+      state = { _tag: 'Closed' }
+      return closeIfOpened(previous)
     })
   )
   // Single flight; a failed open is not cached, so the next use retries it.
   const endpoint = Effect.gen(function* () {
-    if (closed) return yield* Effect.fail(new Error('iroh_closed'))
-    if (opening) return yield* Deferred.await(opening)
+    if (state._tag === 'Closed') return yield* Effect.fail(new Error('iroh_closed'))
+    if (state._tag === 'Live') return state.endpoint
+    if (state._tag === 'Opening') return yield* Deferred.await(state.deferred)
     const deferred = yield* Deferred.make<IrohEndpoint, unknown>()
-    opening = deferred
+    state = { _tag: 'Opening', deferred }
     const opened = yield* Effect.exit(
       options.withSeed((seed) =>
         options.native.openEndpoint(Buffer.from(seed.buffer, seed.byteOffset, seed.byteLength), {
@@ -74,28 +88,31 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
         })
       )
     )
-    if (Exit.isFailure(opened) && opening === deferred) opening = undefined
-    if (Exit.isSuccess(opened)) {
-      const live = opened.value
-      if (closed || opening !== deferred) {
-        yield* Effect.promise(() => live.close().catch(() => undefined))
-        const resetExit = Exit.fail(new Error('iroh_reset'))
-        yield* Deferred.done(deferred, resetExit)
-        return yield* resetExit
-      }
-      liveEndpoint = live
-      // Observation only: whether a home relay connected within 15 seconds.
-      yield* Effect.forkIn(
-        Effect.promise(() => live.online(15_000).catch(() => false)).pipe(
-          Effect.tap((online) =>
-            Effect.sync(() => console.debug('[e2ee-iroh] desktop relay online', { online }))
-          )
-        ),
-        scope
-      )
+    const stillCurrent = state._tag === 'Opening' && state.deferred === deferred
+    if (Exit.isFailure(opened)) {
+      if (stillCurrent) state = { _tag: 'Idle' }
+      yield* Deferred.done(deferred, opened)
+      return yield* opened
     }
+    const live = opened.value
+    if (!stillCurrent) {
+      yield* Effect.promise(() => live.close().catch(() => undefined))
+      const resetExit = Exit.fail(new Error('iroh_reset'))
+      yield* Deferred.done(deferred, resetExit)
+      return yield* resetExit
+    }
+    state = { _tag: 'Live', endpoint: live }
+    // Observation only: whether a home relay connected within 15 seconds.
+    yield* Effect.forkIn(
+      Effect.promise(() => live.online(15_000).catch(() => false)).pipe(
+        Effect.tap((online) =>
+          Effect.sync(() => console.debug('[e2ee-iroh] desktop relay online', { online }))
+        )
+      ),
+      scope
+    )
     yield* Deferred.done(deferred, opened)
-    return yield* opened
+    return live
   })
   const target = Effect.fnUntraced(function* (machineId: string) {
     const key = irohTargetDevice(yield* options.ledger(), machineId)
@@ -105,8 +122,8 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
   return {
     peek: (machineId: string) =>
       Effect.gen(function* () {
-        if (closed || !liveEndpoint) return undefined
-        const live = liveEndpoint
+        if (state._tag !== 'Live') return undefined
+        const live = state.endpoint
         const key = yield* target(machineId)
         return makeIrohRoute(live, key, warming)
       }),
@@ -124,25 +141,14 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
     /** Drops pre-sleep endpoint and warming state so the next call dials fresh sockets. */
     reset: () =>
       Effect.gen(function* () {
-        if (closed) return
+        if (state._tag === 'Closed') return
         warming = new Set<string>()
-        const staleOpening = opening
-        const staleLive = liveEndpoint
-        opening = undefined
-        liveEndpoint = undefined
-        if (staleLive) {
-          yield* Effect.promise(() => staleLive.close().catch(() => undefined))
-        } else if (staleOpening) {
-          yield* Effect.forkIn(
-            Effect.exit(Deferred.await(staleOpening)).pipe(
-              Effect.flatMap((settled) =>
-                Exit.isSuccess(settled)
-                  ? Effect.promise(() => settled.value.close().catch(() => undefined))
-                  : Effect.void
-              )
-            ),
-            scope
-          )
+        const previous = state
+        state = { _tag: 'Idle' }
+        if (previous._tag === 'Live') {
+          yield* closeIfOpened(previous)
+        } else if (previous._tag === 'Opening') {
+          yield* Effect.forkIn(closeIfOpened(previous), scope)
         }
       })
   }

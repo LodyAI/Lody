@@ -1,3 +1,4 @@
+import { decodeE2eeIpcError } from '@lody/shared/e2ee-ipc-error';
 import { E2eeHistoryError, type VerifiedLedgerHistory } from './e2ee-ledger-history';
 import {
   E2eeLocalEvidenceConflictError,
@@ -135,7 +136,8 @@ export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
     return { kind: 'progress-conflict', code: 'local-evidence-conflict' };
   if (message.includes('e2ee_genesis_conflict') || message.includes('e2ee_conflict'))
     return { kind: 'identity-conflict', code: 'pin-mismatch' };
-  if (/\be2ee_custody_locked\b/.test(message))
+  const decodedIpc = error instanceof Error ? decodeE2eeIpcError(error) : undefined;
+  if (decodedIpc?.code === 'custody_locked')
     return { kind: 'custody-locked', code: 'e2ee_custody_locked' };
   const local =
     /\be2ee_(permissions|identity-lost|corrupt|rewrap-failed|custody_unavailable|identity-busy|local-history-recovery-required|trusted-pin-unavailable|restart-required|storage)\b/.exec(

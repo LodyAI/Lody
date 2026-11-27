@@ -125,7 +125,9 @@ Isolate verification/storage errors; bad input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
 Compaction failures warn only; retry after 64 records, keeping originals/pins.
 Conflicts refuse fallback. Failed close retains its fence; report restart-required.
-Opens join a closing workspace's drain once, outside the lock; never `closed`.
+Opens join a closing workspace's drain once, outside the lock (`openWithDrain`); never `closed`.
+`WorkspaceReaderRegistry` tracks per-sender refcounts and reload `senderEpoch` so stale teardown never drops a newer page; empty workspaces detach via `detachWorkspaceIfEmpty` under the lock and drain outside it.
+`power-state-broadcast.ts` owns the 2-second wake coalescer (`subscribePowerLifecycle`): E2EE wake recovery binds once at IPC registration, `e2ee-key-delivery.mts` aborts only pre-sleep rounds (`startedAt <= sleptAt`) and retries inside the same serialized fiber, and `e2ee-runtime.mts` clears `currentRoundMailbox` on `keyRound` exit.
 Fixed cloud refs; auth/bound/abort; fence late disposed calls. Keep uncertain bytes; raw/SDK causes stay in main.
 Verified reads beat lost ACKs; cleanup keeps admission. `e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
 

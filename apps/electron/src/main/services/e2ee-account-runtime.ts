@@ -12,8 +12,9 @@ import {
 import { app, net } from 'electron'
 import { createDesktopAuthFetch } from '../auth-fetch'
 import { Effect, Exit, Scope, Semaphore, Deferred } from 'effect'
+import { E2EE_PUBLIC_FAILURE_CODES, createE2eeIpcError } from '@lody/shared/e2ee-ipc-error'
 import { makeElectronE2eeCustody } from '../e2ee-custody-electron'
-import { isDesktopE2eeCustodyLocked } from '../e2ee-custody.mjs'
+import { DesktopSafeStorageLockedError } from '../e2ee-custody.mjs'
 import { makeDesktopE2eeBootstrap, type DesktopE2eeCreationIntent } from './e2ee-bootstrap.mjs'
 import type { E2eeCloudClient } from './e2ee-cloud-client.mjs'
 import type { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mjs'
@@ -73,6 +74,118 @@ const accountFailure = (code: string) =>
     ),
     { code }
   )
+/** Encapsulates per-workspace reader counts and reload epochs for one account owner. */
+export class WorkspaceReaderRegistry extends Map<string, Map<number, number>> {
+  private readonly epochs = new Map<string, Map<number, number>>()
+
+  acquire(workspaceId: string, senderId: number, epoch?: number): number {
+    const readers = this.get(workspaceId) ?? new Map<number, number>()
+    const wsEpochs = this.epochs.get(workspaceId) ?? new Map<number, number>()
+    const prevEpoch = wsEpochs.get(senderId)
+    const nextCount =
+      epoch !== undefined && prevEpoch !== undefined && prevEpoch < epoch
+        ? 1
+        : (readers.get(senderId) ?? 0) + 1
+    readers.set(senderId, nextCount)
+    this.set(workspaceId, readers)
+    if (epoch !== undefined) {
+      wsEpochs.set(senderId, epoch)
+      this.epochs.set(workspaceId, wsEpochs)
+    }
+    return nextCount
+  }
+
+  release(workspaceId: string, senderId: number): { removedSender: boolean; empty: boolean } {
+    const readers = this.get(workspaceId)
+    const count = readers?.get(senderId) ?? 0
+    if (count > 1) {
+      readers!.set(senderId, count - 1)
+      return { removedSender: false, empty: false }
+    }
+    const removedSender = readers?.delete(senderId) ?? false
+    this.epochs.get(workspaceId)?.delete(senderId)
+    const empty = (readers?.size ?? 0) === 0
+    if (empty) {
+      this.delete(workspaceId)
+      this.epochs.delete(workspaceId)
+    }
+    return { removedSender, empty }
+  }
+
+  releaseSender(senderId: number, maxEpoch?: number): string[] {
+    const emptied: string[] = []
+    for (const [workspaceId, readers] of [...this.entries()]) {
+      if (!readers.has(senderId)) continue
+      const recordedEpoch = this.epochs.get(workspaceId)?.get(senderId)
+      if (maxEpoch !== undefined && recordedEpoch !== undefined && recordedEpoch > maxEpoch)
+        continue
+      readers.delete(senderId)
+      this.epochs.get(workspaceId)?.delete(senderId)
+      if (readers.size === 0) {
+        this.delete(workspaceId)
+        this.epochs.delete(workspaceId)
+        emptied.push(workspaceId)
+      }
+    }
+    return emptied
+  }
+
+  hasReader(workspaceId: string, senderId: number): boolean {
+    return this.get(workspaceId)?.has(senderId) ?? false
+  }
+
+  count(workspaceId: string, senderId: number): number {
+    return this.get(workspaceId)?.get(senderId) ?? 0
+  }
+
+  total(workspaceId: string): number {
+    return [...(this.get(workspaceId)?.values() ?? [])].reduce((sum, count) => sum + count, 0)
+  }
+}
+
+/** Detaches a workspace inside the account lock when no readers remain; caller drains outside the lock. */
+export function detachWorkspaceIfEmpty(
+  owner: {
+    readonly readers: ReadonlyMap<string, ReadonlyMap<number, number>>
+    readonly host: {
+      beginCloseWorkspace(workspaceId: string): Effect.Effect<Effect.Effect<void, unknown>, unknown>
+    }
+  },
+  workspaceId: string
+): Effect.Effect<Effect.Effect<void, unknown>, unknown> {
+  return owner.readers.get(workspaceId)?.size
+    ? Effect.succeed(Effect.void)
+    : owner.host.beginCloseWorkspace(workspaceId)
+}
+
+/** Joins at most one in-flight `pendingClose` drain outside the account lock, then retries once. */
+export async function openWithDrain<A>(
+  attempt: (
+    drained: boolean
+  ) => Promise<
+    | { readonly kind: 'done'; readonly value: A }
+    | { readonly kind: 'closing'; readonly closing: Effect.Effect<void, unknown> }
+    | { readonly kind: 'aborted'; readonly drain: Effect.Effect<void, unknown> }
+  >
+): Promise<A> {
+  const first = await attempt(false)
+  if (first.kind === 'done') return first.value
+  if (first.kind === 'aborted') {
+    await Effect.runPromise(first.drain).catch(() => undefined)
+    throw new Error('e2ee_closed')
+  }
+  await Effect.runPromise(first.closing).catch(() => {
+    throw new Error('e2ee_restart-required: Restart Lody to finish releasing encrypted resources.')
+  })
+  const second = await attempt(true)
+  if (second.kind === 'done') return second.value
+  if (second.kind === 'aborted') {
+    await Effect.runPromise(second.drain).catch(() => undefined)
+    throw new Error('e2ee_closed')
+  }
+  throw new Error('e2ee_closed')
+}
+
 type Account = {
   accountId: string
   /** Login generation the owner was opened under. */
@@ -83,8 +196,7 @@ type Account = {
   host: Effect.Success<ReturnType<typeof makeDesktopE2eeRuntimeHost>>
   cloud?: E2eeCloudClient
   closeFailed?: boolean
-  readers: Map<string, Map<number, number>>
-  readerEpochs: Map<string, Map<number, number>>
+  readers: WorkspaceReaderRegistry
   fenceLoss: (
     workspaceId: string,
     reason: 'member_removed' | 'device_revoked',
@@ -386,7 +498,7 @@ function runAccountOperation<A>(
                 yield* leaseE2eeIdentity(directory)
                 const custody = yield* makeElectronE2eeCustody(join(directory, 'custody')).pipe(
                   Effect.mapError((error) =>
-                    isDesktopE2eeCustodyLocked(error)
+                    error instanceof DesktopSafeStorageLockedError
                       ? accountFailure('custody_locked')
                       : error.code === 'unavailable' || error.code === 'basic-text'
                         ? accountFailure('custody_unavailable')
@@ -419,8 +531,7 @@ function runAccountOperation<A>(
                   scope,
                   bootstrap,
                   host,
-                  readers: new Map<string, Map<number, number>>(),
-                  readerEpochs: new Map<string, Map<number, number>>(),
+                  readers: new WorkspaceReaderRegistry(),
                   fenceLoss: (workspaceId, reason, generation) =>
                     fenceLoss(owned, workspaceId, reason, generation)
                 }
@@ -581,18 +692,9 @@ export function releaseDesktopE2eeReader(senderId: number, maxEpoch?: number): v
             const cleanup: Effect.Effect<void, unknown>[] = []
             const current = owners.get(directory)
             if (!current) return cleanup
-            for (const [workspaceId, readers] of current.readers) {
-              if (!readers.has(senderId)) continue
-              const recordedEpoch = current.readerEpochs.get(workspaceId)?.get(senderId)
-              if (maxEpoch !== undefined && recordedEpoch !== undefined && recordedEpoch > maxEpoch)
-                continue
-              readers.delete(senderId)
-              current.readerEpochs.get(workspaceId)?.delete(senderId)
-              if (readers.size === 0) {
-                cleanup.push(yield* current.host.beginCloseWorkspace(workspaceId))
-                current.readers.delete(workspaceId)
-                current.readerEpochs.delete(workspaceId)
-              }
+            const emptied = current.readers.releaseSender(senderId, maxEpoch)
+            for (const workspaceId of emptied) {
+              cleanup.push(yield* current.host.beginCloseWorkspace(workspaceId))
             }
             return cleanup
           })
@@ -618,19 +720,8 @@ export function releaseDesktopE2eeReader(senderId: number, maxEpoch?: number): v
   })
 }
 
-const IROH_WAKE_COALESCE_MS = 2_000
-let lastIrohWakeResetAt: number | undefined
-
-/** Resets pre-sleep iroh endpoints across open owners after OS resume/unlock.
- * Coalesces rapid `resume` -> `unlock-screen` pairs so a freshly rebuilt endpoint survives. */
-export function resetDesktopE2eeIrohOnWake(now = Date.now()): void {
-  if (
-    lastIrohWakeResetAt !== undefined &&
-    now >= lastIrohWakeResetAt &&
-    now - lastIrohWakeResetAt < IROH_WAKE_COALESCE_MS
-  )
-    return
-  lastIrohWakeResetAt = now
+/** Resets pre-sleep iroh endpoints across open owners after OS wake (coalesced by power-state-broadcast). */
+export function resetDesktopE2eeIrohOnWake(): void {
   const active = [...owners.values()].filter((owner) => !owner.closeFailed)
   if (active.length === 0) return
   void Effect.runPromise(
@@ -995,100 +1086,25 @@ function publicE2eeFailure(error: unknown): Error {
     publicAccessLosses.set(projected, 'member_removed')
     return projected
   }
-  const allowed = new Set([
-    'identity-busy',
-    'permissions',
-    'identity-lost',
-    'account_unavailable',
-    'custody_unavailable',
-    'custody_locked',
-    'missing-binding',
-    'pairing-elsewhere',
-    'pairing-tampered',
-    'pairing-expired',
-    'pairing-used',
-    'pairing-unavailable',
-    'pairing-rate-limited',
-    'pairing-update-required',
-    'pairing-code-mismatch',
-    'pairing-code-locked',
-    'member_removed',
-    'member_invitation_invalid',
-    'member_invitation_endorser_ineligible',
-    'member_invitation_expired',
-    'member_invitation_mismatch',
-    'member_invitation_used',
-    'device_revoked',
-    'conflict',
-    'local-evidence-conflict',
-    'snapshot-history-required',
-    'key-update-required',
-    'key-pending',
-    'closed',
-    'corrupt',
-    'invalid-input',
-    'pairing_key_revoked',
-    'storage',
-    'invalid-ledger',
-    'machine_not_owned',
-    'machine_not_shared',
-    'sharing_conflict',
-    'sharing_unavailable',
-    'sharing_invalid',
-    'sharing_storage',
-    'rotation_candidate_unavailable',
-    'management_unauthorized',
-    'management_operator_required',
-    'management_pending',
-    'management_retry',
-    'self_service_rate_limited',
-    'workspace_transfer_active_subscription',
-    'workspace_transfer_payment_required',
-    'restart-required',
-    'local-history-recovery-required',
-    'trusted-pin-unavailable'
-  ])
   if (code === 'restart-required') return accountFailure(code)
   if (code === 'pairing-code-mismatch') {
     const attemptsLeft =
-      error &&
-      typeof error === 'object' &&
-      'attemptsLeft' in error &&
-      typeof error.attemptsLeft === 'number' &&
-      Number.isSafeInteger(error.attemptsLeft) &&
-      error.attemptsLeft >= 0
-        ? error.attemptsLeft
+      error && typeof error === 'object' && 'attemptsLeft' in error
+        ? (error.attemptsLeft as number | undefined)
         : undefined
-    return Object.assign(
-      new Error(
-        attemptsLeft !== undefined
-          ? `e2ee_pairing-code-mismatch:${attemptsLeft}`
-          : 'e2ee_pairing-code-mismatch'
-      ),
-      attemptsLeft !== undefined ? { code, attemptsLeft } : { code }
-    )
+    return createE2eeIpcError({ kind: 'pairing-code-mismatch', code, attemptsLeft })
   }
   if (code === 'self_service_rate_limited') {
     const retryAt =
-      error &&
-      typeof error === 'object' &&
-      'retryAt' in error &&
-      typeof error.retryAt === 'number' &&
-      Number.isSafeInteger(error.retryAt) &&
-      error.retryAt >= 0
-        ? error.retryAt
+      error && typeof error === 'object' && 'retryAt' in error
+        ? (error.retryAt as number | undefined)
         : undefined
-    return Object.assign(
-      new Error(
-        retryAt !== undefined
-          ? `retryAt=${retryAt}: e2ee_self_service_rate_limited`
-          : 'e2ee_self_service_rate_limited'
-      ),
-      retryAt !== undefined ? { code, retryAt } : { code }
-    )
+    return createE2eeIpcError({ kind: 'self-service-rate-limited', code, retryAt })
   }
   return new Error(
-    typeof code === 'string' && allowed.has(code) ? `e2ee_${code}` : 'e2ee_host_operation_failed'
+    typeof code === 'string' && E2EE_PUBLIC_FAILURE_CODES.has(code as never)
+      ? `e2ee_${code}`
+      : 'e2ee_host_operation_failed'
   )
 }
 

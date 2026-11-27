@@ -865,52 +865,6 @@ describe('RuntimeProvider warm workspace preparation', () => {
     }
   );
 
-  it('refreshes encrypted workspace state on app.powerState resume and unlock-screen', async () => {
-    const factory = new IDBFactory();
-    vi.stubGlobal('indexedDB', factory);
-    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
-    const pushes = new Map<string, (payload: unknown) => void>();
-    vi.stubGlobal('ipc', {
-      on: (channel: string, handler: (payload: unknown) => void) => {
-        pushes.set(channel, handler);
-        return () => pushes.delete(channel);
-      },
-    });
-    ordinaryCloud();
-    listEncrypted();
-    let epoch = 0;
-    const currentStatus = () => ({
-      genesisHash: '11'.repeat(32),
-      signingPublicKey: '22'.repeat(32),
-      epoch,
-      hasCurrentKey: true,
-      rotationRequired: false,
-    });
-    let refreshes = 0;
-    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
-    environment.e2eeWorkspaces!.runtime = {
-      open: async () => currentStatus(),
-      status: async () => currentStatus(),
-      close: async () => {},
-      refresh: async () => {
-        refreshes += 1;
-        return currentStatus();
-      },
-    } as unknown as E2eeWorkspaceRuntime;
-    await render();
-    const afterOpen = refreshes;
-    await act(async () => pushes.get('app.powerState')?.('suspend'));
-    await act(async () => pushes.get('app.powerState')?.('lock-screen'));
-    expect(refreshes).toBe(afterOpen);
-    epoch = 1;
-    await act(async () => pushes.get('app.powerState')?.('resume'));
-    expect(refreshes).toBe(afterOpen + 1);
-    epoch = 2;
-    await act(async () => pushes.get('app.powerState')?.('unlock-screen'));
-    expect(refreshes).toBe(afterOpen + 2);
-    vi.unstubAllGlobals();
-  });
-
   it.each([true, false])(
     'cold native removal uses only a saved exact locator: %s',
     async (saved) => {

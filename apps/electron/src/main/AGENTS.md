@@ -79,6 +79,12 @@ The encrypted adapter enables Meta, Loro documents and the owning workspace/mach
 `e2ee-custody-electron.ts` is the readiness-gated native composition factory.
 Reject unavailable native encryption and Linux `basic_text`/unknown backends;
 never reuse auth cookie plaintext overrides or fall back to plaintext files.
+`safe-storage-classification.ts` is the single classifier shared by `auth-storage.ts`
+and `e2ee-custody.mts`: temporary OS Keychain locks (including Electron's
+`"Decryption is not available."`) never delete stored auth credentials and map
+custody failures to `DesktopSafeStorageLockedError` (`e2ee_custody_locked`)
+without modifying `kek.safe-storage`; `EACCES`/`EPERM` stay `permissions` and
+text-only `permission denied` stays `storage`, never `custody_locked`.
 
 New content seals prefer installed current keys inside core, never renderer hints.
 Only genuine absence permits retained published keys within the durable fifteen-minute

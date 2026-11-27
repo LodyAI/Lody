@@ -6,7 +6,7 @@ import { TerminalClientMessageSchema } from '@lody/shared/terminal-protocol'
 import { AppIpc, installNativeThemeWatch } from './services/app-ipc'
 import { AuthIpc } from './services/auth-ipc'
 import { CliIpc } from './services/cli-ipc'
-import { E2eeIpc } from './services/e2ee-ipc'
+import { E2eeIpc, installE2eePowerLifecycle } from './services/e2ee-ipc'
 import { ImageIpc } from './services/image-ipc'
 import { LocalPlatformIpc } from './services/local-platform-ipc'
 import { LocalProjectsIpc } from './services/local-projects-ipc'
@@ -104,5 +104,10 @@ export function registerIpcServices(deps: IpcServiceDeps) {
     sendTerminalFireAndForget(event, 'close_session', payload)
   })
 
-  return createRegisteredIpcServices()
+  const services = createRegisteredIpcServices()
+  const e2eeService = Object.values(services).find(
+    (service): service is E2eeIpc => service instanceof E2eeIpc
+  )
+  if (e2eeService) installE2eePowerLifecycle(e2eeService)
+  return services
 }

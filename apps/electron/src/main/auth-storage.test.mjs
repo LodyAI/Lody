@@ -120,6 +120,9 @@ void test('a temporarily locked or denied keychain preserves stored credentials 
   )
 
   for (const error of [
+    new Error(
+      'Error while decrypting the ciphertext provided to safeStorage.decryptString. Decryption is not available.'
+    ),
     new Error('Keychain is locked (errSecInteractionNotAllowed)'),
     new Error('User canceled keychain authorization'),
     Object.assign(new Error('Permission denied'), { code: 'EACCES' })

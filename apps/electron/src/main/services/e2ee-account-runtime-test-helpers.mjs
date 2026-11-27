@@ -71,7 +71,8 @@ import {
   signLedgerRecord
 } from '@lody/e2ee-core/protocol'
 
-import { isDesktopE2eeCustodyLocked, makeDesktopE2eeCustody } from '../e2ee-custody.mts'
+import { DesktopSafeStorageLockedError, makeDesktopE2eeCustody } from '../e2ee-custody.mts'
+import * as e2eeIpcError from '../../../../../packages/shared/src/e2ee-ipc-error.ts'
 
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 
@@ -160,62 +161,98 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
     ...globals,
     require: (id) =>
       Object.hasOwn(dependencies, id)
-        ? dependencies[id]
-        : id === '../../services/e2ee-recovery-history.mjs'
-          ? recoveryHistory
-          : id === './e2ee-diagnostics.mjs'
-            ? { rememberDesktopE2eeFailure }
-            : id === '../../services/e2ee-member-join.mjs'
-              ? memberJoining
-              : id === '../../services/e2ee-cloud-errors.mjs' || id === './e2ee-cloud-errors.mjs'
-                ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
-                : id === '../../services/e2ee-personal-pairing.mjs'
-                  ? { PersonalPairingOfferSchema }
-                  : id === '../../services/e2ee-account-pairing-host.mjs'
-                    ? { makeDesktopAccountPairingHost }
-                    : id === '../../services/e2ee-key-delivery.mjs'
-                      ? loadSync('./e2ee-key-delivery.mts', dependencies, console, env, globals)
-                      : id === '../../services/e2ee-agent-pairing-service.mjs'
-                        ? loadSync(
-                            './e2ee-agent-pairing-service.mts',
-                            dependencies,
-                            console,
-                            env,
-                            globals
-                          )
-                        : id === '@lody/e2ee-client/account-requester'
-                          ? { KEY_DELIVERY_RETRY_DELAYS }
-                          : id === '@lody/e2ee-core/protocol'
-                            ? { decodeRecord }
-                            : id === '../../services/e2ee-recovery-vault.mjs' ||
-                                id === '../../services/e2ee-passkey-macos.mjs'
-                              ? {}
-                              : id === '../../services/e2ee-client-loss-probe'
-                                ? // Production default: the E2E probe is disabled and forwards work.
-                                  {
-                                    observeClientLossOperation: (
-                                      _kind,
-                                      _workspace,
-                                      _sender,
-                                      work
-                                    ) => work()
-                                  }
-                                : id === '../e2ee-custody.mjs'
-                                  ? { isDesktopE2eeCustodyLocked, makeDesktopE2eeCustody }
-                                  : id === '../../power-state-broadcast'
+        ? id === '../../services/e2ee-account-runtime' &&
+          dependencies[id] &&
+          typeof dependencies[id] === 'object'
+          ? {
+              detachWorkspaceIfEmpty: (owner, workspaceId) =>
+                owner.readers.get(workspaceId)?.size
+                  ? Effect.succeed(Effect.void)
+                  : owner.host.beginCloseWorkspace(workspaceId),
+              openWithDrain: async (attempt) => {
+                const first = await attempt(false)
+                if (first.kind === 'done') return first.value
+                if (first.kind === 'aborted') {
+                  await Effect.runPromise(first.drain).catch(() => undefined)
+                  throw new Error('e2ee_closed')
+                }
+                await Effect.runPromise(first.closing).catch(() => {
+                  throw new Error(
+                    'e2ee_restart-required: Restart Lody to finish releasing encrypted resources.'
+                  )
+                })
+                const second = await attempt(true)
+                if (second.kind === 'done') return second.value
+                if (second.kind === 'aborted') {
+                  await Effect.runPromise(second.drain).catch(() => undefined)
+                  throw new Error('e2ee_closed')
+                }
+                throw new Error('e2ee_closed')
+              },
+              ...dependencies[id]
+            }
+          : dependencies[id]
+        : id === '@lody/shared/e2ee-ipc-error'
+          ? e2eeIpcError
+          : id === '../../services/e2ee-recovery-history.mjs'
+            ? recoveryHistory
+            : id === './e2ee-diagnostics.mjs'
+              ? { rememberDesktopE2eeFailure }
+              : id === '../../services/e2ee-member-join.mjs'
+                ? memberJoining
+                : id === '../../services/e2ee-cloud-errors.mjs' || id === './e2ee-cloud-errors.mjs'
+                  ? { E2eeMemberRemovedError, E2eeDeviceRevokedError }
+                  : id === '../../services/e2ee-personal-pairing.mjs'
+                    ? { PersonalPairingOfferSchema }
+                    : id === '../../services/e2ee-account-pairing-host.mjs'
+                      ? { makeDesktopAccountPairingHost }
+                      : id === '../../services/e2ee-key-delivery.mjs'
+                        ? loadSync('./e2ee-key-delivery.mts', dependencies, console, env, globals)
+                        : id === '../../services/e2ee-agent-pairing-service.mjs'
+                          ? loadSync(
+                              './e2ee-agent-pairing-service.mts',
+                              dependencies,
+                              console,
+                              env,
+                              globals
+                            )
+                          : id === '@lody/e2ee-client/account-requester'
+                            ? { KEY_DELIVERY_RETRY_DELAYS }
+                            : id === '@lody/e2ee-core/protocol'
+                              ? { decodeRecord }
+                              : id === '../../services/e2ee-recovery-vault.mjs' ||
+                                  id === '../../services/e2ee-passkey-macos.mjs'
+                                ? {}
+                                : id === '../../services/e2ee-client-loss-probe'
+                                  ? // Production default: the E2E probe is disabled and forwards work.
+                                    {
+                                      observeClientLossOperation: (
+                                        _kind,
+                                        _workspace,
+                                        _sender,
+                                        work
+                                      ) => work()
+                                    }
+                                  : id === '../e2ee-custody.mjs'
                                     ? {
-                                        subscribePowerState: () => () => {},
-                                        notifyPowerState: () => {}
+                                        DesktopSafeStorageLockedError,
+                                        makeDesktopE2eeCustody
                                       }
-                                    : id === '../auth-fetch'
-                                      ? loadSync(
-                                          '../auth-fetch.ts',
-                                          dependencies,
-                                          console,
-                                          env,
-                                          globals
-                                        )
-                                      : require(id)
+                                    : id === '../../power-state-broadcast'
+                                      ? {
+                                          subscribePowerLifecycle: () => () => {},
+                                          subscribePowerState: () => () => {},
+                                          notifyPowerState: () => {}
+                                        }
+                                      : id === '../auth-fetch'
+                                        ? loadSync(
+                                            '../auth-fetch.ts',
+                                            dependencies,
+                                            console,
+                                            env,
+                                            globals
+                                          )
+                                        : require(id)
   })
   return exports
 }

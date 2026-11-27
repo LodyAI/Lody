@@ -14,6 +14,7 @@
     },
     "./node/e2ee-clock": "./src/node/e2ee-clock.ts",
     "./node/e2ee-identity": "./src/node/e2ee-identity.ts",
+    "./e2ee-ipc-error": "./src/e2ee-ipc-error.ts",
     "./e2ee-local-pairing": "./src/e2ee-local-pairing.ts",
     "./workspace-streams-persistence": "./src/workspace-streams-persistence.ts",
     "./streams-crdt-factory": "./src/streams-crdt-factory.ts",

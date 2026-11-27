@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { copyFileSync, renameSync } from 'node:fs'
+import { classifySafeStorageFailure } from './safe-storage-classification'
 
 // The desktop auth store (`userData/config.json`) only caches Better Auth
 // credentials; the durable identity lives on the server. A value in it that can
@@ -38,35 +39,6 @@ export type AuthStorage = {
   setItem: (key: string, value: unknown) => void
 }
 
-const RECOVERABLE_KEYCHAIN_ERROR =
-  /keychain|lock|unlock|cancel|denied|deny|permission|interaction not allowed|auth(?:entication)? failed|errsec|secret service|kwallet|unavailable|busy|timeout/i
-
-const DEFINITE_CIPHERTEXT_CORRUPTION =
-  /error while decrypting the ciphertext|decryption failed|invalid ciphertext|corrupt|bad decrypt|unsupported state or unable to authenticate data/i
-
-function isDefiniteCiphertextCorruption(
-  value: string,
-  error: unknown,
-  cipher: AuthStorageCipher
-): boolean {
-  try {
-    if (!cipher.isEncryptionAvailable()) return false
-  } catch {
-    return false
-  }
-  const errCode =
-    error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
-      ? error.code
-      : ''
-  if (errCode === 'EACCES' || errCode === 'EPERM' || errCode === 'EBUSY') return false
-  const message = error instanceof Error ? error.message : String(error ?? '')
-  if (RECOVERABLE_KEYCHAIN_ERROR.test(message)) return false
-  const trimmed = value.trim()
-  if (trimmed.length === 0 || trimmed.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed))
-    return true
-  return DEFINITE_CIPHERTEXT_CORRUPTION.test(message)
-}
-
 export function createRecoveringAuthStorage(
   backend: AuthStorageBackend,
   { encryptedKeys, cipher, backup, onRecovered }: Dependencies
@@ -87,7 +59,14 @@ export function createRecoveringAuthStorage(
       } catch (error) {
         // A temporarily locked OS keychain or user-denied prompt must not destroy
         // stored credentials; only definite ciphertext corruption drops the entry.
-        if (!isDefiniteCiphertextCorruption(value, error, cipher)) return null
+        if (
+          classifySafeStorageFailure({
+            error,
+            available: () => cipher.isEncryptionAvailable(),
+            value
+          }) !== 'corrupt'
+        )
+          return null
         const backupPath = backup(backend.path)
         backend.delete(key)
         verified.delete(key)

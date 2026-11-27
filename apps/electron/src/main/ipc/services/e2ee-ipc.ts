@@ -41,9 +41,17 @@ import {
   publicAccessLoss,
   desktopAccountPairingDatabase,
   desktopE2eeHasWorkspaceIdentity,
-  desktopE2eeRecoveryJournalPath
+  desktopE2eeRecoveryJournalPath,
+  detachWorkspaceIfEmpty,
+  openWithDrain
 } from '../../services/e2ee-account-runtime'
-import { subscribePowerState } from '../../power-state-broadcast'
+import { subscribePowerLifecycle } from '../../power-state-broadcast'
+import {
+  E2EE_PAIRING_REFUSAL_CODES,
+  E2EE_PUBLIC_FAILURE_CODES,
+  decodeE2eeIpcError,
+  encodeE2eeIpcError
+} from '@lody/shared/e2ee-ipc-error'
 import {
   makeDesktopAccountPairingHost,
   type AccountPairingCloud,
@@ -236,20 +244,6 @@ function liveAccountPairingCloud(accountId: string): AccountPairingCloud {
     pairingClaim: (request) => Effect.flatMap(current, (client) => client.pairingClaim(request))
   }
 }
-const PAIRING_REFUSALS = new Set([
-  'pairing-elsewhere',
-  'pairing-tampered',
-  'pairing-expired',
-  'pairing-used',
-  'pairing-update-required',
-  'pairing-code-mismatch',
-  'pairing-code-locked',
-  // Relay refusals the new device explains: switched off on this deployment, or
-  // too many new requests this hour.
-  'pairing-unavailable',
-  'pairing-rate-limited',
-  'invalid-input'
-])
 /** Resolves an iroh route under the account lock; no network wait happens here. */
 /** How long an iroh call may wait for the account lock before Streams takes it. */
 const IROH_ROUTE_BUDGET_MS = 250
@@ -432,26 +426,15 @@ export class E2eeIpc extends ProductWindowIpcService {
     cloud: desktopE2eeCloudClient,
     run: runDesktopE2eeOperation
   })
-  private lastPowerWakeAt: number | undefined
-  constructor() {
-    super()
-    subscribePowerState?.((state) => {
-      if (state === 'suspend' || state === 'lock-screen') {
-        this.keyDelivery.noteSuspend?.()
-        return
-      }
-      if (state !== 'resume' && state !== 'unlock-screen') return
-      const now = this.keyDeliveryNow()
-      if (
-        this.lastPowerWakeAt !== undefined &&
-        now >= this.lastPowerWakeAt &&
-        now - this.lastPowerWakeAt < 2_000
-      )
-        return
-      this.lastPowerWakeAt = now
-      this.keyDelivery.wake()
-      resetDesktopE2eeIrohOnWake?.(now)
-    })
+  /** Wires E2EE wake recovery to the single power-lifecycle coalescer; caller owns disposal. */
+  bindPowerLifecycle(): () => void {
+    return (
+      subscribePowerLifecycle?.((event) => {
+        if (event.kind !== 'wake') return
+        this.keyDelivery.wake(event.sleptAt)
+        resetDesktopE2eeIrohOnWake?.()
+      }) ?? (() => {})
+    )
   }
   private readonly agentPairing = makeDesktopAgentPairing({
     withAccount: withDesktopE2eeAccount,
@@ -916,18 +899,10 @@ export class E2eeIpc extends ProductWindowIpcService {
     if (result.state !== 'committed') {
       if (primary !== undefined) {
         this.pairingFailure = primary
-        const message = primary instanceof Error ? primary.message : ''
-        const explicit = /^(e2ee_[a-z0-9_-]{1,64}(?::\d+)?)(?=$|:)/.exec(message)?.[1]
-        if (explicit) throw new Error(explicit)
-        const code =
-          primary &&
-          typeof primary === 'object' &&
-          'code' in primary &&
-          typeof primary.code === 'string'
-            ? primary.code
-            : undefined
-        if (code && /^[a-z0-9_-]{1,64}$/.test(code))
-          throw new Error(code.startsWith('e2ee_') ? code : `e2ee_${code}`)
+        const decoded = decodeE2eeIpcError(primary)
+        if (decoded && E2EE_PUBLIC_FAILURE_CODES.has(decoded.code as never)) {
+          throw new Error(encodeE2eeIpcError(decoded))
+        }
         const reason =
           primary &&
           typeof primary === 'object' &&
@@ -1674,7 +1649,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       const code =
         error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined
       // Raw causes stay in main; the IPC decorator logs rejected Errors.
-      if (code && PAIRING_REFUSALS.has(code)) {
+      if (code && E2EE_PAIRING_REFUSAL_CODES.has(code as never)) {
         const attemptsLeft =
           code === 'pairing-code-mismatch' &&
           error &&
@@ -1687,7 +1662,9 @@ export class E2eeIpc extends ProductWindowIpcService {
             : undefined
         // eslint-disable-next-line preserve-caught-error
         throw new Error(
-          attemptsLeft !== undefined ? `e2ee_${code}:${attemptsLeft}` : `e2ee_${code}`
+          code === 'pairing-code-mismatch'
+            ? encodeE2eeIpcError({ kind: 'pairing-code-mismatch', code, attemptsLeft })
+            : encodeE2eeIpcError({ kind: 'code', code })
         )
       }
       // eslint-disable-next-line preserve-caught-error
@@ -2695,99 +2672,70 @@ export class E2eeIpc extends ProductWindowIpcService {
     const epoch = window ? (senderEpochs.get(window) ?? 1) : 1
     let accountId: string | undefined
     let proofIdentity: typeof identity
-    // Join at most one drain of a reader this account just released for this
-    // workspace (e.g. the workspace runtime closing as its control page opens).
-    let drained = false
-    const acquire = (proof?: readonly E2eeWorkspaceHistoryPage[]) =>
-      withDesktopE2eeAccount(
-        (owner) =>
-          Effect.gen(
-            function* (this: E2eeIpc) {
-              if (accountId !== undefined && owner.accountId !== accountId)
-                return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-              if (proofIdentity) {
-                const current = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    const openLocal = (proof?: readonly E2eeWorkspaceHistoryPage[]) =>
+      openWithDrain((drained) =>
+        withDesktopE2eeAccount(
+          (owner) =>
+            Effect.gen(
+              function* (this: E2eeIpc) {
+                if (accountId !== undefined && owner.accountId !== accountId)
+                  return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+                if (proofIdentity) {
+                  const current = getIpcServiceDeps().authService.getCachedSessionIdentity()
+                  if (
+                    current.userId !== proofIdentity.userId ||
+                    current.generation !== proofIdentity.generation
+                  )
+                    return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+                }
+                accountId = owner.accountId
+                if (!drained) {
+                  const closing = yield* owner.host.pendingClose(workspaceId)
+                  if (closing) return { kind: 'closing', closing } as const
+                }
+                if (window && (window.isDestroyed() || (senderEpochs.get(window) ?? 1) !== epoch))
+                  return yield* Effect.fail(new Error('e2ee_closed'))
+                const status = yield* owner.host.open(workspaceId, observed, proof)
+                const latest =
+                  expectedAccountId === undefined && !proofIdentity
+                    ? undefined
+                    : getIpcServiceDeps().authService.getCachedSessionIdentity()
                 if (
-                  current.userId !== proofIdentity.userId ||
-                  current.generation !== proofIdentity.generation
+                  expectedAccountId !== undefined &&
+                  (latest?.userId !== expectedAccountId ||
+                    latest?.generation !== identity?.generation)
                 )
                   return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-              }
-              accountId = owner.accountId
-              if (!drained) {
-                const closing = yield* owner.host.pendingClose(workspaceId)
-                if (closing) return { kind: 'closing', closing } as const
-              }
-              if (window && (window.isDestroyed() || (senderEpochs.get(window) ?? 1) !== epoch))
-                return yield* Effect.fail(new Error('e2ee_closed'))
-              const status = yield* owner.host.open(workspaceId, observed, proof)
-              const latest =
-                expectedAccountId === undefined && !proofIdentity
-                  ? undefined
-                  : getIpcServiceDeps().authService.getCachedSessionIdentity()
-              if (
-                expectedAccountId !== undefined &&
-                (latest?.userId !== expectedAccountId ||
-                  latest?.generation !== identity?.generation)
-              )
-                return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-              if (
-                proofIdentity &&
-                (latest?.userId !== proofIdentity.userId ||
-                  latest?.generation !== proofIdentity.generation)
-              )
-                return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-              if (window && (window.isDestroyed() || (senderEpochs.get(window) ?? 1) !== epoch)) {
-                const drain = owner.readers.get(workspaceId)?.size
-                  ? Effect.void
-                  : yield* owner.host.beginCloseWorkspace(workspaceId)
-                return { kind: 'aborted', drain } as const
-              }
-              const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
-              const epochs = owner.readerEpochs?.get(workspaceId) ?? new Map<number, number>()
-              const previousEpoch = epochs.get(id)
-              const nextCount =
-                previousEpoch !== undefined && previousEpoch < epoch
-                  ? 1
-                  : (readers.get(id) ?? 0) + 1
-              readers.set(id, nextCount)
-              owner.readers.set(workspaceId, readers)
-              epochs.set(id, epoch)
-              owner.readerEpochs?.set(workspaceId, epochs)
-              return {
-                kind: 'opened',
-                opened:
-                  expectedAccountId === undefined
-                    ? status
-                    : { ...status, readerOwner: this.readerOwner(owner) }
-              } as const
-            }.bind(this)
-          ),
-        workspaceId,
-        false
-      )
-    // The drain runs outside the account lock, exactly like the releasing close.
-    const openLocal = async (proof?: readonly E2eeWorkspaceHistoryPage[]) => {
-      const first = await acquire(proof)
-      if (first.kind === 'opened') return first.opened
-      if (first.kind === 'aborted') {
-        await Effect.runPromise(first.drain).catch(() => undefined)
-        throw new Error('e2ee_closed')
-      }
-      drained = true
-      await Effect.runPromise(first.closing).catch(() => {
-        throw new Error(
-          'e2ee_restart-required: Restart Lody to finish releasing encrypted resources.'
+                if (
+                  proofIdentity &&
+                  (latest?.userId !== proofIdentity.userId ||
+                    latest?.generation !== proofIdentity.generation)
+                )
+                  return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+                if (window && (window.isDestroyed() || (senderEpochs.get(window) ?? 1) !== epoch)) {
+                  const drain = yield* detachWorkspaceIfEmpty(owner, workspaceId)
+                  return { kind: 'aborted', drain } as const
+                }
+                if (typeof owner.readers.acquire === 'function') {
+                  owner.readers.acquire(workspaceId, id, epoch)
+                } else {
+                  const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
+                  readers.set(id, (readers.get(id) ?? 0) + 1)
+                  owner.readers.set(workspaceId, readers)
+                }
+                return {
+                  kind: 'done',
+                  value:
+                    expectedAccountId === undefined
+                      ? status
+                      : { ...status, readerOwner: this.readerOwner(owner) }
+                } as const
+              }.bind(this)
+            ),
+          workspaceId,
+          false
         )
-      })
-      const second = await acquire(proof)
-      if (second.kind === 'opened') return second.opened
-      if (second.kind === 'aborted') {
-        await Effect.runPromise(second.drain).catch(() => undefined)
-        throw new Error('e2ee_closed')
-      }
-      throw new Error('e2ee_closed')
-    }
+      )
     // Only a missing pre-snapshot proof requests history. A known conflict never retries.
     // Network work stays outside the native account lock and grants no reader on failure.
     return openLocal()
@@ -2849,17 +2797,21 @@ export class E2eeIpc extends ProductWindowIpcService {
             return Effect.void
           if (!ownsReader(owner)) return Effect.void
           const readers = owner.readers.get(workspaceId)
+          if (typeof owner.readers.release === 'function') {
+            const { removedSender, empty } = owner.readers.release(workspaceId, id)
+            if (removedSender && readers && window) readerTokens.get(readers)?.delete(window)
+            if (empty) return yield* owner.host.beginCloseWorkspace(workspaceId)
+            return Effect.void
+          }
           const count = readers?.get(id) ?? 0
           if (count > 1) readers!.set(id, count - 1)
           else {
             readers?.delete(id)
-            owner.readerEpochs?.get(workspaceId)?.delete(id)
             if (readers && window) readerTokens.get(readers)?.delete(window)
           }
           if (readers?.size === 0) {
             const drain = yield* owner.host.beginCloseWorkspace(workspaceId)
             owner.readers.delete(workspaceId)
-            owner.readerEpochs?.delete(workspaceId)
             return drain
           }
           return Effect.void
@@ -2880,8 +2832,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     if (!input || typeof input.accountId !== 'string' || typeof input.workspaceId !== 'string')
       throw new Error('e2ee_invalid-input')
     const { accountId, workspaceId } = input
-    let drained = false
-    const attempt = () =>
+    const captured = await openWithDrain((drained) =>
       withDesktopE2eeAccount(
         (owner) =>
           Effect.gen(function* () {
@@ -2894,29 +2845,19 @@ export class E2eeIpc extends ProductWindowIpcService {
             const status = yield* owner.host.open(workspaceId)
             // The account lock protects this temporary read. Existing window readers
             // keep their host; otherwise detach here and drain outside that lock.
-            const cleanup = owner.readers.get(workspaceId)?.size
-              ? Effect.void
-              : yield* owner.host.beginCloseWorkspace(workspaceId)
+            const cleanup = yield* detachWorkspaceIfEmpty(owner, workspaceId)
             return {
-              kind: 'read' as const,
-              identity: { workspaceId: status.workspaceId, genesisHash: status.genesisHash },
-              cleanup
+              kind: 'done' as const,
+              value: {
+                identity: { workspaceId: status.workspaceId, genesisHash: status.genesisHash },
+                cleanup
+              }
             }
           }),
         workspaceId,
         false
       )
-    let captured = await attempt()
-    if (captured.kind === 'closing') {
-      drained = true
-      await Effect.runPromise(captured.closing).catch(() => {
-        throw new Error(
-          'e2ee_restart-required: Restart Lody to finish releasing encrypted resources.'
-        )
-      })
-      captured = await attempt()
-      if (captured.kind !== 'read') throw new Error('e2ee_closed')
-    }
+    )
     await Effect.runPromise(captured.cleanup).catch(() => {
       throw new Error('e2ee_cleanup_failed')
     })
@@ -3824,5 +3765,18 @@ export class E2eeIpc extends ProductWindowIpcService {
     } finally {
       file.fill(0)
     }
+  }
+}
+
+let disposeE2eePowerLifecycle: (() => void) | undefined
+
+/** Registers E2EE wake recovery once at IPC service registration; replaces any prior binding. */
+export function installE2eePowerLifecycle(service: E2eeIpc): () => void {
+  disposeE2eePowerLifecycle?.()
+  const dispose = service.bindPowerLifecycle()
+  disposeE2eePowerLifecycle = dispose
+  return () => {
+    if (disposeE2eePowerLifecycle === dispose) disposeE2eePowerLifecycle = undefined
+    dispose()
   }
 }

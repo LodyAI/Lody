@@ -1,5 +1,6 @@
 import { Effect } from 'effect'
 import { makeNodeE2eeCustody, NodeE2eeCustodyError } from '@lody/e2ee-core/adapters/node-custody'
+import { classifySafeStorageFailure } from './safe-storage-classification'
 export {
   NodeE2eeCustodyError as DesktopE2eeCustodyError,
   nodeE2eePorts as desktopE2eePorts,
@@ -7,6 +8,13 @@ export {
   type NodeE2eeDevice as DesktopE2eeDevice,
   type PreparedNodeE2eeDevice as PreparedDesktopE2eeDevice
 } from '@lody/e2ee-core/adapters/node-custody'
+
+/** Typed subclass for temporarily locked/unavailable OS safeStorage (distinct from missing backend). */
+export class DesktopSafeStorageLockedError extends NodeE2eeCustodyError {
+  constructor() {
+    super({ code: 'unavailable' })
+  }
+}
 
 /** Electron's native async interface; never the auth cookie plaintext override. */
 export interface DesktopSafeStorage {
@@ -17,40 +25,17 @@ export interface DesktopSafeStorage {
   decryptStringAsync(value: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>
 }
 
-const SAFE_STORAGE_LOCKED =
-  /keychain.{0,32}lock|lock.{0,32}keychain|\block(?:ed)?\b|unlock|cancel|interaction not allowed|auth(?:entication)? failed|errsec|secret service|kwallet|temporarily unavailable|not available|unavailable/i
-
-const custodyLockedErrors = new WeakSet<object>()
-
-export function isDesktopE2eeCustodyLocked(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && custodyLockedErrors.has(error)
-}
-
-function custodyLockedError(): NodeE2eeCustodyError {
-  const error = new NodeE2eeCustodyError({ code: 'unavailable' })
-  custodyLockedErrors.add(error)
-  return error
-}
-
 function classifySafeStorageError(
   error: unknown,
   storage: DesktopSafeStorage
 ): NodeE2eeCustodyError {
   if (error instanceof NodeE2eeCustodyError) return error
-  const errCode =
-    error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
-      ? error.code
-      : ''
-  if (errCode === 'EACCES' || errCode === 'EPERM')
-    return new NodeE2eeCustodyError({ code: 'permissions' })
-  const message = error instanceof Error ? error.message : String(error ?? '')
-  if (/permission denied/i.test(message)) return new NodeE2eeCustodyError({ code: 'storage' })
-  try {
-    if (!storage.isEncryptionAvailable()) return custodyLockedError()
-  } catch {
-    return custodyLockedError()
-  }
-  if (SAFE_STORAGE_LOCKED.test(message)) return custodyLockedError()
+  const kind = classifySafeStorageFailure({
+    error,
+    available: () => storage.isEncryptionAvailable()
+  })
+  if (kind === 'permissions') return new NodeE2eeCustodyError({ code: 'permissions' })
+  if (kind === 'locked') return new DesktopSafeStorageLockedError()
   return new NodeE2eeCustodyError({ code: 'storage' })
 }
 

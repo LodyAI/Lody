@@ -144,17 +144,17 @@ function selfServiceRateLimit(error: unknown): { retryAt?: number } | null {
   let node: unknown = error
   for (let depth = 0; depth < 8 && node && typeof node === 'object'; depth++) {
     const record = node as {
+      kind?: unknown
       reason?: unknown
       code?: unknown
       retryAt?: unknown
       cause?: unknown
-      constructor?: { name?: string }
     }
     if (
+      record.kind === 'self-service-rate-limited' ||
       record.reason === 'self-service-rate-limited' ||
       record.code === 'self_service_rate_limited' ||
-      record.code === 'e2ee_self_service_rate_limited' ||
-      record.constructor?.name === 'E2eeSelfServiceRateLimitedError'
+      record.code === 'e2ee_self_service_rate_limited'
     ) {
       const retryAt =
         typeof record.retryAt === 'number' &&
@@ -1322,6 +1322,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           round = undefined
           roundMode = 'full'
           roundRecipients = undefined
+          currentRoundMailbox = undefined
           yield* Deferred.done(done, result)
           return yield* result
         }, Effect.uninterruptible)
