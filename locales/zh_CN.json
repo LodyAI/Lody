@@ -7308,5 +7308,11 @@
   "billing.switchPromoDiscountWithPercent": "限时升级优惠（年付折上 {{rate}} 折）",
   "billing.switchRenewalDateStandardYearly": "下次续费：{{date}}，按标准价 {{amount}}/年计费。",
   "workspace.invite.seat.promoNoteUntil": "{{date}} 前接受邀请入组享当期 {{rate}} 折，下期续费按标准价计费。",
-  "workspace.invite.seat.promoNoteYearlyUntil": "{{date}} 前接受邀请入组享年付折上 {{rate}} 折，下期续费按标准价计费。"
+  "workspace.invite.seat.promoNoteYearlyUntil": "{{date}} 前接受邀请入组享年付折上 {{rate}} 折，下期续费按标准价计费。",
+  "sidebar.promoBanner.dismiss": "关闭优惠提示",
+  "sidebar.promoBanner.viewOffer": "查看优惠",
+  "sidebar.promoBanner.descriptionBoth": "Plus 年付享折上 {{rate}} 折（低至 {{perMonth}}/月，相当于月付 {{combinedRate}} 折），月付享 {{monthlyRate}} 折。",
+  "sidebar.promoBanner.descriptionYearly": "Plus 年付享折上 {{rate}} 折（低至 {{perMonth}}/月，相当于月付 {{combinedRate}} 折）。",
+  "sidebar.promoBanner.descriptionMonthly": "Plus 首月订阅立享 {{rate}} 折（{{price}}/席位）。",
+  "sidebar.promoBanner.descriptionUpgrade": "切换年付享折上 {{rate}} 折优惠（相当于月付 {{combinedRate}} 折）。"
 }

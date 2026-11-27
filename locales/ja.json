@@ -7308,5 +7308,11 @@
   "billing.switchPromoDiscountWithPercent": "期間限定割引（年払いさらに {{discount}}% OFF）",
   "billing.switchRenewalDateStandardYearly": "次回更新日: {{date}}（通常料金 {{amount}}/年）。",
   "workspace.invite.seat.promoNoteUntil": "{{date}} までに承諾された場合は {{discount}}% OFF が適用されます。次回更新からは通常料金になります。",
-  "workspace.invite.seat.promoNoteYearlyUntil": "{{date}} までに承諾された場合は年額からさらに {{discount}}% OFF が適用されます。次回更新からは通常料金になります。"
+  "workspace.invite.seat.promoNoteYearlyUntil": "{{date}} までに承諾された場合は年額からさらに {{discount}}% OFF が適用されます。次回更新からは通常料金になります。",
+  "sidebar.promoBanner.dismiss": "キャンペーン通知を閉じる",
+  "sidebar.promoBanner.viewOffer": "詳細を見る",
+  "sidebar.promoBanner.descriptionBoth": "Plus 年額はさらに {{discount}}% OFF（{{perMonth}}/月、月額比 {{combinedDiscount}}% OFF）、月額は {{monthlyDiscount}}% OFF。",
+  "sidebar.promoBanner.descriptionYearly": "Plus 年額はさらに {{discount}}% OFF（{{perMonth}}/月、月額比 {{combinedDiscount}}% OFF）。",
+  "sidebar.promoBanner.descriptionMonthly": "Plus 初月が {{discount}}% OFF（{{price}}/シート）。",
+  "sidebar.promoBanner.descriptionUpgrade": "年払いへの切り替えでさらに {{discount}}% OFF（月額比 {{combinedDiscount}}% OFF）。"
 }

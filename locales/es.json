@@ -7308,5 +7308,11 @@
   "billing.switchPromoDiscountWithPercent": "Descuento promocional ({{discount}}% extra anual)",
   "billing.switchRenewalDateStandardYearly": "Próxima renovación: {{date}} a la tarifa estándar ({{amount}}/año).",
   "workspace.invite.seat.promoNoteUntil": "Incluye un {{discount}}% de descuento si se acepta antes del {{date}}. Se renueva a la tarifa estándar.",
-  "workspace.invite.seat.promoNoteYearlyUntil": "Incluye un {{discount}}% extra sobre la tarifa anual si se acepta antes del {{date}}. Se renueva a la tarifa estándar."
+  "workspace.invite.seat.promoNoteYearlyUntil": "Incluye un {{discount}}% extra sobre la tarifa anual si se acepta antes del {{date}}. Se renueva a la tarifa estándar.",
+  "sidebar.promoBanner.dismiss": "Cerrar promoción",
+  "sidebar.promoBanner.viewOffer": "Ver oferta",
+  "sidebar.promoBanner.descriptionBoth": "Plus anual con {{discount}}% extra ({{perMonth}}/mes, {{combinedDiscount}}% vs. mensual) o {{monthlyDiscount}}% en mensual.",
+  "sidebar.promoBanner.descriptionYearly": "Plus anual con {{discount}}% extra ({{perMonth}}/mes, {{combinedDiscount}}% vs. mensual).",
+  "sidebar.promoBanner.descriptionMonthly": "{{discount}}% de descuento en tu primer mes de Plus ({{price}}/asiento).",
+  "sidebar.promoBanner.descriptionUpgrade": "Cambia a anual con un {{discount}}% extra ({{combinedDiscount}}% vs. mensual)."
 }

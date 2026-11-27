@@ -9,6 +9,12 @@ import {
 } from '../src/components/settings/referral-settings-pure';
 import { BillingSettingsView } from '../src/components/settings/billing-setting-pure';
 import { OPTIMISTIC_BILLING_OVERVIEW } from '../src/components/settings/billing-overview-cache';
+import {
+  DISMISSED_PROMO_CAMPAIGNS_STORAGE_KEY,
+  SidebarPromoBanner,
+  resolveSidebarPromoOffer,
+  useDismissedPromoCampaigns,
+} from '../src/components/sidebar-promo-banner';
 import { initI18n } from '../src/i18n';
 
 const clock = vi.hoisted(() => ({ now: 1000 }));
@@ -353,5 +359,124 @@ describe('policy boundary refresh', () => {
     await act(async () => root.render(<Probe next={Infinity} />));
     await act(async () => window.dispatchEvent(new Event('focus')));
     expect(container.textContent).toBe('1');
+  });
+});
+
+describe('sidebar promotional popup banner', () => {
+  function BannerHarness({
+    campaignId,
+    onOpenBilling,
+  }: {
+    campaignId: string;
+    onOpenBilling: () => void;
+  }) {
+    const { dismissedIds, dismissCampaign } = useDismissedPromoCampaigns();
+    const offer = resolveSidebarPromoOffer(
+      {
+        ...OPTIMISTIC_BILLING_OVERVIEW,
+        canManageBilling: true,
+        pricing: {
+          ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+          promo: {
+            policy: {
+              campaignId,
+              name: { zh: '黑五特惠', en: 'Black Friday' },
+              startsAt: 500,
+              endsAt: 5000,
+              monthly: { discountPercent: 20 },
+              yearly: { discountPercent: 20 },
+              upgradeToYearly: true,
+              seatExpansion: true,
+            },
+            monthlyDiscountPercent: 20,
+            yearlyDiscountPercent: 20,
+          },
+        },
+      },
+      1000
+    );
+    if (!offer || dismissedIds.includes(offer.campaignId)) return null;
+    return (
+      <SidebarPromoBanner
+        offer={offer}
+        onDismiss={() => dismissCampaign(offer.campaignId)}
+        onViewOffer={() => {
+          dismissCampaign(offer.campaignId);
+          onOpenBilling();
+        }}
+      />
+    );
+  }
+
+  beforeEach(() => {
+    window.localStorage.removeItem(DISMISSED_PROMO_CAMPAIGNS_STORAGE_KEY);
+  });
+
+  it('dismisses permanently when clicking X or View offer and skips annual paid workspaces', async () => {
+    await initI18n('zh_CN');
+    const onOpenBilling = vi.fn();
+    await act(async () =>
+      root.render(<BannerHarness campaignId="bf-2026" onOpenBilling={onOpenBilling} />)
+    );
+    expect(container.textContent).toContain('黑五特惠');
+    expect(container.textContent).toContain('折上 8 折');
+    expect(container.textContent).toContain('相当于月付 6.4 折');
+    expect(container.textContent).toContain('查看优惠');
+
+    const closeBtn = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="关闭优惠提示"]'
+    );
+    expect(closeBtn).not.toBeNull();
+    await act(async () => closeBtn!.click());
+    expect(container.textContent).toBe('');
+    expect(window.localStorage.getItem(DISMISSED_PROMO_CAMPAIGNS_STORAGE_KEY)).toBe(
+      JSON.stringify(['bf-2026'])
+    );
+    expect(onOpenBilling).not.toHaveBeenCalled();
+
+    await act(async () =>
+      root.render(<BannerHarness campaignId="bf-2026" onOpenBilling={onOpenBilling} />)
+    );
+    expect(container.textContent).toBe('');
+
+    await act(async () =>
+      root.render(<BannerHarness campaignId="ny-2027" onOpenBilling={onOpenBilling} />)
+    );
+    expect(container.textContent).toContain('查看优惠');
+    const buttons = [...container.querySelectorAll('button')];
+    const viewBtn = buttons.find((b) => b.textContent?.includes('查看优惠'));
+    expect(viewBtn).toBeDefined();
+    await act(async () => viewBtn!.click());
+    expect(onOpenBilling).toHaveBeenCalledOnce();
+    expect(container.textContent).toBe('');
+    expect(window.localStorage.getItem(DISMISSED_PROMO_CAMPAIGNS_STORAGE_KEY)).toBe(
+      JSON.stringify(['bf-2026', 'ny-2027'])
+    );
+
+    const annualPaid = resolveSidebarPromoOffer(
+      {
+        ...OPTIMISTIC_BILLING_OVERVIEW,
+        effectivePlanTier: 'plus',
+        entitlementSource: 'stripe',
+        subscriptionStatus: 'active',
+        billingInterval: 'year',
+        pricing: {
+          ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+          promo: {
+            policy: {
+              campaignId: 'bf-2026',
+              startsAt: 500,
+              endsAt: 5000,
+              yearly: { discountPercent: 20 },
+              upgradeToYearly: true,
+              seatExpansion: true,
+            },
+            yearlyDiscountPercent: 20,
+          },
+        },
+      },
+      1000
+    );
+    expect(annualPaid).toBeNull();
   });
 });
