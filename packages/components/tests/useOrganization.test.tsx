@@ -1044,7 +1044,7 @@ describe('runtime external boundary decoding across auth, cloud, and IPC', () =>
     ).toEqual({
       id: 'user-apple-1',
       email: 'apple.user@privaterelay.appleid.com',
-      name: 'apple.user',
+      name: 'User',
       image: undefined,
     });
 
@@ -1057,7 +1057,7 @@ describe('runtime external boundary decoding across auth, cloud, and IPC', () =>
     ).toEqual({
       id: 'user-apple-2',
       email: 'member@example.com',
-      name: 'member',
+      name: 'User',
       image: undefined,
     });
 

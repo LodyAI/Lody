@@ -21,16 +21,9 @@ const SessionUserSchema = z
     message: 'Session user is missing both id and _id',
   });
 
-function resolveDisplayName(name: string | null | undefined, email: string): string {
+function resolveDisplayName(name: string | null | undefined): string {
   const trimmed = typeof name === 'string' ? name.trim() : '';
-  if (trimmed.length > 0) {
-    return trimmed;
-  }
-  const localPart = email.split('@')[0]?.trim();
-  if (localPart && localPart.length > 0) {
-    return localPart;
-  }
-  return 'User';
+  return trimmed.length > 0 ? trimmed : 'User';
 }
 
 export function normalizeCurrentUserFromSessionUser(sessionUser: unknown): CurrentUser {
@@ -38,7 +31,7 @@ export function normalizeCurrentUserFromSessionUser(sessionUser: unknown): Curre
   return CurrentUserSchema.parse({
     id: parsed.id ?? parsed._id,
     email: parsed.email,
-    name: resolveDisplayName(parsed.name, parsed.email),
+    name: resolveDisplayName(parsed.name),
     image: parsed.image,
   });
 }
@@ -52,7 +45,7 @@ export function safeNormalizeCurrentUserFromSessionUser(sessionUser: unknown): C
     {
       id: parsed.data.id ?? parsed.data._id,
       email: parsed.data.email,
-      name: resolveDisplayName(parsed.data.name, parsed.data.email),
+      name: resolveDisplayName(parsed.data.name),
       image: parsed.data.image,
     },
     { jitless: true }
