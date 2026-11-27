@@ -92,6 +92,7 @@ jobs:
           vars.MOBILE_ANDROID_DOWNLOAD_BASE_URL_STAGING
         }}
       MOBILE_VERSION_CODE: ${{ needs.validate-target.outputs.build_number }}
+      VITE_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
