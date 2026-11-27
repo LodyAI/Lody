@@ -1879,7 +1879,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const parentMeta = await parentSessionDoc.getMetaState();
       if (parentMeta?.isWorktree) {
         await sessionDoc.setIsWorktree(true);
-        if (hasWorktreeArtifactsCleaned(workdir)) {
+        if (workdir && hasWorktreeArtifactsCleaned(workdir)) {
           const setupHistory = createWorktreeScriptHistoryRecorder({
             sessionDoc,
             sessionId: config.sessionId!,
