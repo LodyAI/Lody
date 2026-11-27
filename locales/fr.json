@@ -626,7 +626,9 @@
   "referral.older": "Plus ancien",
   "referral.offerTitle": "Remise de parrainage",
   "referral.offerBadge": "{{discount}} % de remise",
-  "referral.offerYearly": "Première année à {{first}} par siège, puis {{regular}}/an.",
+  "referral.offerYearlyBadge": "−{{discount}} % suppl. annuel",
+  "referral.offerYearly": "−{{discount}} % suppl. sur le tarif annuel (−{{combinedDiscount}} % vs mensuel) : première année à {{first}} par siège, puis {{regular}}/an.",
+  "referral.retainedCheckoutYearly": "Votre paiement en cours conserve −{{discount}} % suppl. annuel ({{first}} la première année par siège).",
   "referral.offerMonthly": "Premier mois à {{first}} par siège, puis {{regular}}/mois.",
   "referral.remove": "Ne pas utiliser",
   "referral.invalid": "Ce lien de parrainage n'est plus valide. Retirez-le pour continuer.",
@@ -7296,8 +7298,15 @@
   "e2ee.verify.cameraDenied": "L'accès à la caméra a été refusé. Autorisez-la dans les réglages du navigateur ou du système, ou saisissez le code à 6 chiffres.",
   "e2ee.mode.verifyingAccess": "Vérification de l'accès chiffré pour cet appareil…",
   "e2ee.auto.syncing.keepOpen": "En attente de l'envoi de la clé de sécurité par votre autre appareil. Gardez Lody ouvert sur cet appareil…",
+  "billing.yearlySaveBadge": "−20 %",
   "billing.promoOfferTitle": "Remise promotionnelle",
-  "billing.switchPromoDiscountWithPercent": "Remise promotionnelle (−{{discount}} %)",
+  "billing.promoYearlyOfferBadge": "−{{discount}} % suppl. annuel",
+  "billing.promoYearlyExtraBadge": "−{{discount}} % suppl.",
+  "billing.promoMonthlyOfferBadge": "−{{discount}} %",
+  "billing.promoOfferYearly": "−{{discount}} % suppl. sur le tarif annuel (−{{combinedDiscount}} % vs mensuel) : première année à {{first}} par siège, puis {{regular}}/an.",
+  "billing.promoRetainedYearly": "Votre paiement en cours conserve −{{discount}} % suppl. annuel ({{first}} la première année par siège).",
+  "billing.switchPromoDiscountWithPercent": "Remise promotionnelle (−{{discount}} % suppl. annuel)",
   "billing.switchRenewalDateStandardYearly": "Prochain renouvellement : {{date}} au tarif standard ({{amount}}/an).",
-  "workspace.invite.seat.promoNoteUntil": "Inclut −{{discount}} % si l’invitation est acceptée d’ici le {{date}}. Renouvellement au tarif standard."
+  "workspace.invite.seat.promoNoteUntil": "Inclut −{{discount}} % si l’invitation est acceptée d’ici le {{date}}. Renouvellement au tarif standard.",
+  "workspace.invite.seat.promoNoteYearlyUntil": "Inclut −{{discount}} % suppl. sur le tarif annuel si l’invitation est acceptée d’ici le {{date}}. Renouvellement au tarif standard."
 }

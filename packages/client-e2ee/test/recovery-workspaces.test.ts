@@ -208,7 +208,7 @@ it('ingests appendRecord historyPage to skip redundant history refresh, falls ba
   const contiguous = await f.setupWorkspace('A');
   expect(contiguous).toEqual([{ workspaceId: 'A', name: 'A', outcome: 'recoverable' }]);
   const s1 = f.state();
-  expect(s1.historyReads).toBe(1);
+  expect(s1.historyReads).toBe(0);
   expect(s1.mailboxFetches.length).toBeGreaterThan(0);
   expect(s1.mailboxFetches.every((row) => row.kind === 'recovery')).toBe(true);
   const recoveryDevicesA = s1.records
@@ -222,5 +222,18 @@ it('ingests appendRecord historyPage to skip redundant history refresh, falls ba
   f.resetIoCounters();
   const gapped = await f.setupWorkspace('B');
   expect(gapped).toEqual([{ workspaceId: 'B', name: 'B', outcome: 'recoverable' }]);
-  expect(f.state().historyReads).toBe(2);
+  expect(f.state().historyReads).toBe(1);
+}, 60_000);
+
+it('deduplicates history and vault entry reads during single-workspace disaster recovery while preserving continuity checks', async () => {
+  const f = await load();
+  f.resetIoCounters();
+  const rows = await f.execute()(
+    f.controller().restore({ file: new Uint8Array(f.fileBytes()) }, ['A'])
+  );
+  expect(rows).toEqual([{ workspaceId: 'A', name: 'A', outcome: 'Committed' }]);
+  const io = f.state();
+  expect(io.historyReads).toBeLessThanOrEqual(2);
+  expect(io.entryReads).toBeLessThanOrEqual(2);
+  expect(await f.openStatus('A')).toMatchObject({ hasCurrentKey: true });
 }, 60_000);

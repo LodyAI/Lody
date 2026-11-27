@@ -293,9 +293,9 @@ export function readDesktopLoginCallback(url: string, protocol = 'lody'): string
   try {
     const parsed = new URL(url)
     if (
-      parsed.protocol !== `${protocol}:` ||
+      parsed.protocol !== `${protocol.toLowerCase()}:` ||
       parsed.hostname !== 'auth' ||
-      parsed.pathname !== '/callback' ||
+      parsed.pathname.replace(/\/$/, '') !== '/callback' ||
       parsed.search
     )
       return null

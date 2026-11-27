@@ -67,6 +67,9 @@ export function buildEmailVerificationCallbackSearch({
     params.set('client_id', electronOAuthQuery.client_id);
     params.set('state', electronOAuthQuery.state);
     params.set('code_challenge', electronOAuthQuery.code_challenge);
+    if (electronOAuthQuery.desktop_channel !== undefined) {
+      params.set('desktop_channel', electronOAuthQuery.desktop_channel);
+    }
     if (electronOAuthQuery.code_challenge_method !== undefined) {
       params.set('code_challenge_method', electronOAuthQuery.code_challenge_method);
     }

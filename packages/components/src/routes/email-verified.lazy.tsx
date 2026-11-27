@@ -16,6 +16,7 @@ const FORWARDED_PARAM_KEYS = [
   'client_id',
   'state',
   'code_challenge',
+  'desktop_channel',
   'code_challenge_method',
 ] as const;
 

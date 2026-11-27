@@ -370,9 +370,13 @@ export function SeatCostNotice({
         <span {...stylex.props(styles.amountGroup)}>
           {promoPercent > 0 ? (
             <Badge tone="success">
-              {customPromoName
-                ? `${customPromoName} · ${t('referral.offerBadge', discountBadgeValues(promoPercent))}`
-                : t('referral.offerBadge', discountBadgeValues(promoPercent))}
+              {(() => {
+                const badgeText = t(
+                  yearly ? 'billing.promoYearlyExtraBadge' : 'billing.promoMonthlyOfferBadge',
+                  discountBadgeValues(promoPercent)
+                );
+                return customPromoName ? `${customPromoName} · ${badgeText}` : badgeText;
+              })()}
             </Badge>
           ) : null}
           {showRegularProrated ? (
@@ -389,10 +393,15 @@ export function SeatCostNotice({
       </div>
       {promoPercent > 0 && preview.promoEndsAt != null ? (
         <p {...stylex.props(styles.costNote)}>
-          {t('workspace.invite.seat.promoNoteUntil', {
-            ...discountBadgeValues(promoPercent),
-            date: formatDate(preview.promoEndsAt - 1),
-          })}
+          {t(
+            yearly
+              ? 'workspace.invite.seat.promoNoteYearlyUntil'
+              : 'workspace.invite.seat.promoNoteUntil',
+            {
+              ...discountBadgeValues(promoPercent),
+              date: formatDate(preview.promoEndsAt - 1),
+            }
+          )}
         </p>
       ) : null}
       <p {...stylex.props(styles.costNote)}>{t('workspace.invite.seat.acceptanceNote')}</p>

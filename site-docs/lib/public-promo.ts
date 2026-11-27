@@ -278,11 +278,46 @@ function formatShortCampaignEndDate(endsAtExclusiveMs: number, locale: SiteLocal
 }
 
 function formatChineseRate(discountPercent: number): string {
-  const rate = (100 - discountPercent) / 10;
-  return Number.isInteger(rate) ? String(rate) : rate.toFixed(1).replace(/\.0$/u, '');
+  const rate = Number(((100 - discountPercent) / 10).toFixed(2));
+  return Number.isInteger(rate) ? String(rate) : String(rate);
 }
 
-export function formatPublicPromoBadge(discountPercent: number, locale: SiteLocale): string {
+function formatCombinedYearlyChineseRate(yearlyDiscountPercent: number): string {
+  const combinedRate = Number(((80 * (100 - yearlyDiscountPercent)) / 1000).toFixed(2));
+  return String(combinedRate);
+}
+
+function formatCombinedYearlyOffPercent(yearlyDiscountPercent: number): string {
+  const combinedOff = Number((100 - (80 * (100 - yearlyDiscountPercent)) / 100).toFixed(1));
+  return String(combinedOff);
+}
+
+export function formatPublicPromoBadge(
+  discountPercent: number,
+  locale: SiteLocale,
+  options?: { isYearly?: boolean }
+): string {
+  const isYearly = options?.isYearly ?? false;
+  if (isYearly) {
+    switch (locale) {
+      case 'zh':
+      case 'zh-hant':
+        return `折上 ${formatChineseRate(discountPercent)} 折`;
+      case 'ja':
+        return `さらに ${discountPercent}% OFF`;
+      case 'ko':
+        return `추가 ${discountPercent}% 할인`;
+      case 'es':
+        return `−${discountPercent}% extra`;
+      case 'fr':
+        return `−${discountPercent} % suppl.`;
+      case 'ru':
+        return `Ещё −${discountPercent}%`;
+      case 'en':
+      default:
+        return `Extra ${discountPercent}% off`;
+    }
+  }
   switch (locale) {
     case 'zh':
     case 'zh-hant':
@@ -318,63 +353,66 @@ export function formatPublicPromoNote(args: {
   );
   const regularTotal = formatCentsUsd(isYearly ? REGULAR_YEARLY_CENTS : REGULAR_MONTHLY_CENTS);
   const endDate = formatShortCampaignEndDate(promo.endsAt, locale);
+  const rateZh = formatChineseRate(percent);
+  const combinedRateZh = formatCombinedYearlyChineseRate(percent);
+  const combinedOff = formatCombinedYearlyOffPercent(percent);
 
   switch (locale) {
     case 'zh':
       return isYearly
-        ? `首年 ${firstTotal}/席（次年恢复 ${regularTotal}/年）· 截止 ${endDate}`
+        ? `年付 8 折基础上再享 ${rateZh} 折（相当于月付 ${combinedRateZh} 折）· 首年 ${firstTotal}/席，次年恢复 ${regularTotal}/年 · 截止 ${endDate}`
         : `首月 ${firstTotal}/席（次月恢复 ${regularTotal}/月）· 截止 ${endDate}`;
     case 'zh-hant':
       return isYearly
-        ? `首年 ${firstTotal}/席（次年恢復 ${regularTotal}/年）· 截止 ${endDate}`
+        ? `年付 8 折基礎上再享 ${rateZh} 折（相當於月付 ${combinedRateZh} 折）· 首年 ${firstTotal}/席，次年恢復 ${regularTotal}/年 · 截止 ${endDate}`
         : `首月 ${firstTotal}/席（次月恢復 ${regularTotal}/月）· 截止 ${endDate}`;
     case 'ja':
       return isYearly
-        ? `初年度 ${firstTotal}/席（翌年以降 ${regularTotal}/年）· ${endDate} まで`
+        ? `年額からさらに ${percent}% OFF（月額比 ${combinedOff}% OFF）· 初年度 ${firstTotal}/席（翌年以降 ${regularTotal}/年）· ${endDate} まで`
         : `初月 ${firstTotal}/席（翌月以降 ${regularTotal}/月）· ${endDate} まで`;
     case 'ko':
       return isYearly
-        ? `첫해 ${firstTotal}/좌석 (이후 ${regularTotal}/년) · ${endDate} 마감`
+        ? `연간 추가 ${percent}% 할인(월간 대비 ${combinedOff}% 할인) · 첫해 ${firstTotal}/좌석 (이후 ${regularTotal}/년) · ${endDate} 마감`
         : `첫달 ${firstTotal}/좌석 (이후 ${regularTotal}/월) · ${endDate} 마감`;
     case 'es':
       return isYearly
-        ? `Primer año ${firstTotal}/asiento, luego ${regularTotal}/año · Hasta el ${endDate}`
+        ? `−${percent}% extra anual (−${combinedOff}% vs. mensual) · Primer año ${firstTotal}/asiento, luego ${regularTotal}/año · Hasta el ${endDate}`
         : `Primer mes ${firstTotal}/asiento, luego ${regularTotal}/mes · Hasta el ${endDate}`;
     case 'fr':
       return isYearly
-        ? `1re année ${firstTotal}/siège, puis ${regularTotal}/an · Jusqu’au ${endDate}`
+        ? `−${percent} % suppl. annuel (−${combinedOff} % vs mensuel) · 1re année ${firstTotal}/siège, puis ${regularTotal}/an · Jusqu’au ${endDate}`
         : `1er mois ${firstTotal}/siège, puis ${regularTotal}/mois · Jusqu’au ${endDate}`;
     case 'ru':
       return isYearly
-        ? `Первый год ${firstTotal}/место, далее ${regularTotal}/год · До ${endDate}`
+        ? `Ещё −${percent}% к годовому (−${combinedOff}% к помесячному) · Первый год ${firstTotal}/место, далее ${regularTotal}/год · До ${endDate}`
         : `Первый месяц ${firstTotal}/место, далее ${regularTotal}/мес · До ${endDate}`;
     case 'en':
     default:
       return isYearly
-        ? `First year ${firstTotal}/seat, then ${regularTotal}/yr · Ends ${endDate}`
+        ? `Extra ${percent}% off annual (${combinedOff}% off monthly) · First year ${firstTotal}/seat, then ${regularTotal}/yr · Ends ${endDate}`
         : `First month ${firstTotal}/seat, then ${regularTotal}/mo · Ends ${endDate}`;
   }
 }
 
-function formatUpToPromoBadge(discountPercent: number, locale: SiteLocale): string {
+function formatYearlyStackBannerBadge(yearlyDiscountPercent: number, locale: SiteLocale): string {
+  const rateZh = formatChineseRate(yearlyDiscountPercent);
   switch (locale) {
     case 'zh':
-      return `低至 ${formatChineseRate(discountPercent)} 折`;
     case 'zh-hant':
-      return `低至 ${formatChineseRate(discountPercent)} 折`;
+      return `年付折上 ${rateZh} 折`;
     case 'ja':
-      return `最大 ${discountPercent}% OFF`;
+      return `年額さらに ${yearlyDiscountPercent}% OFF`;
     case 'ko':
-      return `최대 ${discountPercent}% 할인`;
+      return `연간 추가 ${yearlyDiscountPercent}% 할인`;
     case 'es':
-      return `Hasta −${discountPercent}%`;
+      return `−${yearlyDiscountPercent}% extra anual`;
     case 'fr':
-      return `Jusqu’à −${discountPercent} %`;
+      return `−${yearlyDiscountPercent} % suppl. annuel`;
     case 'ru':
-      return `До −${discountPercent}%`;
+      return `Ещё −${yearlyDiscountPercent}% на год`;
     case 'en':
     default:
-      return `Up to ${discountPercent}% off`;
+      return `Extra ${yearlyDiscountPercent}% off yearly`;
   }
 }
 
@@ -416,25 +454,23 @@ export function formatLandingPromoBannerCopy(
   promo: PublicPromoActive,
   locale: SiteLocale
 ): { badge: string; message: string; cta: string; dismissLabel: string } {
-  const hasMonthly =
-    promo.monthlyDiscountPercent !== null && promo.monthlyDiscountPercent > 0;
-  const hasYearly =
-    promo.yearlyDiscountPercent !== null && promo.yearlyDiscountPercent > 0;
-  const bestPercent = Math.max(promo.yearlyDiscountPercent ?? 0, promo.monthlyDiscountPercent ?? 0);
-  const isUpTo =
-    hasMonthly &&
-    hasYearly &&
-    promo.monthlyDiscountPercent !== promo.yearlyDiscountPercent;
+  const monthlyPercent = promo.monthlyDiscountPercent ?? 0;
+  const yearlyPercent = promo.yearlyDiscountPercent ?? 0;
+  const hasMonthly = monthlyPercent > 0;
+  const hasYearly = yearlyPercent > 0;
   const planScope: BannerPlanScope =
     hasMonthly && hasYearly ? 'both' : hasYearly ? 'yearly_only' : 'monthly_only';
   const canUpgradeToYearly = promo.upgradeToYearly && hasYearly;
   const canExpandSeats = promo.seatExpansion && (hasMonthly || hasYearly);
   const endDate = formatShortCampaignEndDate(promo.endsAt, locale);
-  const badge = isUpTo
-    ? formatUpToPromoBadge(bestPercent, locale)
-    : formatPublicPromoBadge(bestPercent, locale);
+  const badge = hasYearly
+    ? formatYearlyStackBannerBadge(yearlyPercent, locale)
+    : formatPublicPromoBadge(monthlyPercent, locale, { isYearly: false });
   const customName = resolvePublicPromoName(promo, locale);
-  const rateZh = formatChineseRate(bestPercent);
+  const yearlyRateZh = formatChineseRate(yearlyPercent);
+  const monthlyRateZh = formatChineseRate(monthlyPercent);
+  const combinedYearlyRateZh = formatCombinedYearlyChineseRate(yearlyPercent);
+  const combinedYearlyOff = formatCombinedYearlyOffPercent(yearlyPercent);
 
   switch (locale) {
     case 'zh': {
@@ -455,7 +491,12 @@ export function formatLandingPromoBannerCopy(
             ]
           : []),
       ];
-      const discountClause = isUpTo ? `低至 ${rateZh} 折` : `立享 ${rateZh} 折`;
+      const discountClause =
+        planScope === 'both'
+          ? `享年付折上 ${yearlyRateZh} 折（相当于月付 ${combinedYearlyRateZh} 折）、月付 ${monthlyRateZh} 折`
+          : planScope === 'yearly_only'
+            ? `享年付折上 ${yearlyRateZh} 折（相当于月付 ${combinedYearlyRateZh} 折）`
+            : `立享 ${monthlyRateZh} 折`;
       const prefix = customName ? `${customName} · Lody Plus` : 'Lody Plus 限时特惠';
       return {
         badge,
@@ -482,7 +523,12 @@ export function formatLandingPromoBannerCopy(
             ]
           : []),
       ];
-      const discountClause = isUpTo ? `低至 ${rateZh} 折` : `立享 ${rateZh} 折`;
+      const discountClause =
+        planScope === 'both'
+          ? `享年付折上 ${yearlyRateZh} 折（相當於月付 ${combinedYearlyRateZh} 折）、月付 ${monthlyRateZh} 折`
+          : planScope === 'yearly_only'
+            ? `享年付折上 ${yearlyRateZh} 折（相當於月付 ${combinedYearlyRateZh} 折）`
+            : `立享 ${monthlyRateZh} 折`;
       const prefix = customName ? `${customName} · Lody Plus` : 'Lody Plus 限時特惠';
       return {
         badge,
@@ -509,7 +555,12 @@ export function formatLandingPromoBannerCopy(
             ]
           : []),
       ];
-      const rateLabel = isUpTo ? `最大 ${bestPercent}% OFF` : `${bestPercent}% OFF`;
+      const rateLabel =
+        planScope === 'both'
+          ? `年額さらに ${yearlyPercent}% OFF（月額比 ${combinedYearlyOff}% OFF）・月額 ${monthlyPercent}% OFF`
+          : planScope === 'yearly_only'
+            ? `年額さらに ${yearlyPercent}% OFF（月額比 ${combinedYearlyOff}% OFF）`
+            : `${monthlyPercent}% OFF`;
       const prefix = customName ? `${customName} · Lody Plus` : 'Lody Plus 期間限定セール';
       return {
         badge,
@@ -536,7 +587,12 @@ export function formatLandingPromoBannerCopy(
             ]
           : []),
       ];
-      const rateLabel = isUpTo ? `최대 ${bestPercent}% 할인` : `${bestPercent}% 할인`;
+      const rateLabel =
+        planScope === 'both'
+          ? `연간 추가 ${yearlyPercent}% 할인(월간 대비 ${combinedYearlyOff}% 할인) · 월간 ${monthlyPercent}% 할인`
+          : planScope === 'yearly_only'
+            ? `연간 추가 ${yearlyPercent}% 할인(월간 대비 ${combinedYearlyOff}% 할인)`
+            : `${monthlyPercent}% 할인`;
       const prefix = customName ? `${customName} · Lody Plus` : 'Lody Plus 기간 한정 혜택';
       return {
         badge,
@@ -563,9 +619,12 @@ export function formatLandingPromoBannerCopy(
             ]
           : []),
       ];
-      const rateLabel = isUpTo
-        ? `hasta ${bestPercent}% de dto.`
-        : `${bestPercent}% de dto.`;
+      const rateLabel =
+        planScope === 'both'
+          ? `${yearlyPercent}% extra en plan anual (${combinedYearlyOff}% vs. mensual) y ${monthlyPercent}% en mensual`
+          : planScope === 'yearly_only'
+            ? `${yearlyPercent}% extra en plan anual (${combinedYearlyOff}% vs. mensual)`
+            : `${monthlyPercent}% de dto.`;
       return {
         badge,
         message: `${customName ?? 'Oferta limitada'}: ${rateLabel} en ${joinLocalizedScopes(scopes, ' y ')} · Hasta el ${endDate}`,
@@ -591,7 +650,12 @@ export function formatLandingPromoBannerCopy(
             ]
           : []),
       ];
-      const rateLabel = isUpTo ? `jusqu’à −${bestPercent} %` : `−${bestPercent} %`;
+      const rateLabel =
+        planScope === 'both'
+          ? `−${yearlyPercent} % suppl. sur l’annuel (−${combinedYearlyOff} % vs mensuel) et −${monthlyPercent} % sur le mensuel`
+          : planScope === 'yearly_only'
+            ? `−${yearlyPercent} % suppl. sur l’annuel (−${combinedYearlyOff} % vs mensuel)`
+            : `−${monthlyPercent} %`;
       return {
         badge,
         message: `${customName ?? 'Offre limitée'} : ${rateLabel} sur ${joinLocalizedScopes(scopes, ' et ')} · Jusqu’au ${endDate}`,
@@ -617,7 +681,12 @@ export function formatLandingPromoBannerCopy(
             ]
           : []),
       ];
-      const rateLabel = isUpTo ? `скидка до ${bestPercent}%` : `скидка ${bestPercent}%`;
+      const rateLabel =
+        planScope === 'both'
+          ? `ещё −${yearlyPercent}% к годовому (−${combinedYearlyOff}% к помесячному) и −${monthlyPercent}% на месячный`
+          : planScope === 'yearly_only'
+            ? `ещё −${yearlyPercent}% к годовому (−${combinedYearlyOff}% к помесячному)`
+            : `скидка ${monthlyPercent}%`;
       return {
         badge,
         message: `${customName ?? 'Акция'}: ${rateLabel} на ${joinLocalizedScopes(scopes, ' и ')} · До ${endDate}`,
@@ -644,7 +713,12 @@ export function formatLandingPromoBannerCopy(
             ]
           : []),
       ];
-      const rateLabel = isUpTo ? `up to ${bestPercent}% off` : `${bestPercent}% off`;
+      const rateLabel =
+        planScope === 'both'
+          ? `extra ${yearlyPercent}% off annual (${combinedYearlyOff}% off monthly) & ${monthlyPercent}% off monthly on`
+          : planScope === 'yearly_only'
+            ? `extra ${yearlyPercent}% off annual (${combinedYearlyOff}% off monthly) on`
+            : `${monthlyPercent}% off`;
       return {
         badge,
         message: `${customName ?? 'Limited-time offer'}: ${rateLabel} ${joinLocalizedScopes(scopes, ' & ')} · Ends ${endDate}`,

@@ -626,7 +626,9 @@
   "referral.older": "Más antiguos",
   "referral.offerTitle": "Descuento por referido",
   "referral.offerBadge": "{{discount}}% de descuento",
-  "referral.offerYearly": "Primer año {{first}} por asiento; después, {{regular}}/año.",
+  "referral.offerYearlyBadge": "{{discount}}% extra anual",
+  "referral.offerYearly": "{{discount}}% extra sobre la tarifa anual ({{combinedDiscount}}% vs. mensual): primer año {{first}} por asiento; después, {{regular}}/año.",
+  "referral.retainedCheckoutYearly": "Tu pago en curso conserva el {{discount}}% extra anual ({{first}} el primer año por asiento).",
   "referral.offerMonthly": "Primer mes {{first}} por asiento; después, {{regular}}/mes.",
   "referral.remove": "No usar",
   "referral.invalid": "Este enlace de referido ya no funciona. Quítalo para continuar.",
@@ -7296,8 +7298,15 @@
   "e2ee.verify.cameraDenied": "Se denegó el permiso de cámara. Permite el acceso en los ajustes del navegador o del sistema, o introduce el código de 6 dígitos.",
   "e2ee.mode.verifyingAccess": "Verificando el acceso cifrado de este dispositivo…",
   "e2ee.auto.syncing.keepOpen": "Esperando a que el otro dispositivo envíe la clave de seguridad. Mantén Lody abierto en ese dispositivo…",
+  "billing.yearlySaveBadge": "Ahorra 20%",
   "billing.promoOfferTitle": "Descuento promocional",
-  "billing.switchPromoDiscountWithPercent": "Descuento promocional ({{discount}}% de dto.)",
+  "billing.promoYearlyOfferBadge": "{{discount}}% extra anual",
+  "billing.promoYearlyExtraBadge": "{{discount}}% extra",
+  "billing.promoMonthlyOfferBadge": "{{discount}}% de dto.",
+  "billing.promoOfferYearly": "{{discount}}% extra sobre la tarifa anual ({{combinedDiscount}}% vs. mensual): primer año {{first}} por asiento; después, {{regular}}/año.",
+  "billing.promoRetainedYearly": "Tu pago en curso conserva el {{discount}}% extra anual ({{first}} el primer año por asiento).",
+  "billing.switchPromoDiscountWithPercent": "Descuento promocional ({{discount}}% extra anual)",
   "billing.switchRenewalDateStandardYearly": "Próxima renovación: {{date}} a la tarifa estándar ({{amount}}/año).",
-  "workspace.invite.seat.promoNoteUntil": "Incluye un {{discount}}% de descuento si se acepta antes del {{date}}. Se renueva a la tarifa estándar."
+  "workspace.invite.seat.promoNoteUntil": "Incluye un {{discount}}% de descuento si se acepta antes del {{date}}. Se renueva a la tarifa estándar.",
+  "workspace.invite.seat.promoNoteYearlyUntil": "Incluye un {{discount}}% extra sobre la tarifa anual si se acepta antes del {{date}}. Se renueva a la tarifa estándar."
 }

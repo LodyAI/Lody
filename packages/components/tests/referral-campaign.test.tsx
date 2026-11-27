@@ -288,6 +288,9 @@ describe('campaign checkout display', () => {
       )
     );
     expect(container.textContent).toContain('黑五特惠');
+    expect(container.textContent).toContain('年付折上 8 折');
+    expect(container.textContent).toContain('相当于月付 6.4 折');
+    expect(container.textContent).toContain('$6.40');
 
     await initI18n('en');
     await act(async () =>
@@ -317,7 +320,7 @@ describe('campaign checkout display', () => {
         />
       )
     );
-    expect(container.textContent).toContain('Black Friday · 20% off');
+    expect(container.textContent).toContain('Black Friday · Extra 20% off yearly');
   });
 });
 

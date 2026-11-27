@@ -231,41 +231,77 @@ export function CreateWorkspacePage({
                     {t('organization.plusBillingInterval', 'Billing interval')}
                   </div>
                   <div {...stylex.props(styles.intervals)}>
-                    {(['year', 'month'] as const).map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => onBillingIntervalChange?.(value)}
-                        disabled={creating}
-                        {...stylex.props(
-                          styles.interval,
-                          billingInterval === value
-                            ? styles.intervalSelected
-                            : styles.intervalUnselected
-                        )}
-                      >
-                        {value === 'year'
-                          ? t('billing.yearly', 'Yearly')
-                          : t('billing.monthly', 'Monthly')}
-                        {pricing ? (
-                          <span {...stylex.props(styles.intervalPrice)}>
-                            {t('organization.plusPricePerSeatMonth', {
-                              price: formatUsd(
-                                value === 'year'
-                                  ? Math.round(pricing.yearlyAmountCents / 12)
-                                  : pricing.monthlyAmountCents
-                              ),
-                            })}
-                            {value === 'year' ? (
-                              <>
-                                {' · '}
-                                {t('organization.plusPriceBilledYearly')}
-                              </>
-                            ) : null}
-                          </span>
-                        ) : null}
-                      </button>
-                    ))}
+                    {(['year', 'month'] as const).map((value) => {
+                      const regularOptionMonthCents = pricing
+                        ? value === 'year'
+                          ? Math.round(pricing.yearlyAmountCents / 12)
+                          : pricing.monthlyAmountCents
+                        : 0;
+                      const optionPromoPercent =
+                        pricing && !(value === 'year' && pricing.yearlyOfferKey)
+                          ? value === 'year'
+                            ? (pricing.promo?.yearlyDiscountPercent ?? 0)
+                            : (pricing.promo?.monthlyDiscountPercent ?? 0)
+                          : 0;
+                      const optionReferralPercent =
+                        referralOffer && !(value === 'year' && pricing?.yearlyOfferKey)
+                          ? (referralOffer.policy?.discountPercent ?? 10)
+                          : 0;
+                      const optionDiscountPercent = Math.max(
+                        optionPromoPercent,
+                        optionReferralPercent
+                      );
+                      const discountedOptionMonthCents =
+                        pricing && optionDiscountPercent > 0
+                          ? value === 'year'
+                            ? Math.round(
+                                Math.round(
+                                  (pricing.yearlyAmountCents * (100 - optionDiscountPercent)) / 100
+                                ) / 12
+                              )
+                            : Math.round(
+                                (pricing.monthlyAmountCents * (100 - optionDiscountPercent)) / 100
+                              )
+                          : null;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => onBillingIntervalChange?.(value)}
+                          disabled={creating}
+                          {...stylex.props(
+                            styles.interval,
+                            billingInterval === value
+                              ? styles.intervalSelected
+                              : styles.intervalUnselected
+                          )}
+                        >
+                          {value === 'year'
+                            ? `${t('billing.yearly', 'Yearly')} (${t('billing.yearlySaveBadge', 'Save 20%')})`
+                            : t('billing.monthly', 'Monthly')}
+                          {pricing ? (
+                            <span {...stylex.props(styles.intervalPrice)}>
+                              {discountedOptionMonthCents !== null ? (
+                                <>
+                                  <s>{formatUsd(regularOptionMonthCents)}</s>{' '}
+                                </>
+                              ) : null}
+                              {t('organization.plusPricePerSeatMonth', {
+                                price: formatUsd(
+                                  discountedOptionMonthCents ?? regularOptionMonthCents
+                                ),
+                              })}
+                              {value === 'year' ? (
+                                <>
+                                  {' · '}
+                                  {t('organization.plusPriceBilledYearly')}
+                                </>
+                              ) : null}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
                   </div>
                   {(() => {
                     if (!pricing || (billingInterval === 'year' && pricing.yearlyOfferKey)) {

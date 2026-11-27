@@ -88,6 +88,11 @@ function syntheticService({ missingReadEntries = false } = {}) {
             status: 'error',
             errorMessage: "Could not find public function for 'e2eeRecoveryVault:readEntries'"
           })
+        if (args.entryIds.length > 8)
+          return Response.json({
+            status: 'error',
+            errorData: { code: 'e2ee_recovery_vault_invalid' }
+          })
         return response(args.entryIds.map((id) => entries.get(key(args.vaultId, id)) ?? null))
       case 'e2eeRecoveryVault:readIndex':
         return response(index.get(args.vaultId)?.entry ?? null)

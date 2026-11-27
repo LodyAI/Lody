@@ -627,7 +627,9 @@
   "referral.older": "Older",
   "referral.offerTitle": "Referral discount",
   "referral.offerBadge": "{{discount}}% off",
-  "referral.offerYearly": "First year {{first}} per seat, then {{regular}}/year.",
+  "referral.offerYearlyBadge": "Extra {{discount}}% off yearly",
+  "referral.offerYearly": "Extra {{discount}}% off the annual rate ({{combinedDiscount}}% off monthly): first year {{first}} per seat, then {{regular}}/year.",
+  "referral.retainedCheckoutYearly": "Your existing checkout keeps {{discount}}% off on top of the annual rate ({{first}} for the first year per seat).",
   "referral.offerMonthly": "First month {{first}} per seat, then {{regular}}/month.",
   "referral.remove": "Don't use",
   "referral.invalid": "This referral link no longer works. Remove it to continue.",
@@ -7296,8 +7298,15 @@
   "e2ee.verify.cameraDenied": "Camera permission was denied. Allow camera access in your browser or system settings, or enter the 6-digit code instead.",
   "e2ee.mode.verifyingAccess": "Verifying encrypted access for this device…",
   "e2ee.auto.syncing.keepOpen": "Waiting for your other device to send the security key. Keep Lody open on that device…",
+  "billing.yearlySaveBadge": "Save 20%",
   "billing.promoOfferTitle": "Promotional discount",
-  "billing.switchPromoDiscountWithPercent": "Promotional discount ({{discount}}% off)",
+  "billing.promoYearlyOfferBadge": "Extra {{discount}}% off yearly",
+  "billing.promoYearlyExtraBadge": "Extra {{discount}}% off",
+  "billing.promoMonthlyOfferBadge": "{{discount}}% off",
+  "billing.promoOfferYearly": "Extra {{discount}}% off the annual rate ({{combinedDiscount}}% off monthly): first year {{first}} per seat, then {{regular}}/year.",
+  "billing.promoRetainedYearly": "Your existing checkout keeps an extra {{discount}}% off yearly ({{first}} for the first year per seat).",
+  "billing.switchPromoDiscountWithPercent": "Promotional discount (extra {{discount}}% off yearly)",
   "billing.switchRenewalDateStandardYearly": "Next renewal: {{date}} at the standard rate ({{amount}}/year).",
-  "workspace.invite.seat.promoNoteUntil": "Includes {{discount}}% off if accepted by {{date}}. Renews at standard rate."
+  "workspace.invite.seat.promoNoteUntil": "Includes {{discount}}% off if accepted by {{date}}. Renews at standard rate.",
+  "workspace.invite.seat.promoNoteYearlyUntil": "Includes an extra {{discount}}% off the annual rate if accepted by {{date}}. Renews at standard rate."
 }

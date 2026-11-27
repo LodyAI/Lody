@@ -626,7 +626,9 @@
   "referral.older": "古い項目",
   "referral.offerTitle": "紹介割引",
   "referral.offerBadge": "{{discount}}% オフ",
-  "referral.offerYearly": "初年度は 1 シートあたり {{first}}、以降は年額 {{regular}} です。",
+  "referral.offerYearlyBadge": "初年度さらに {{discount}}% OFF",
+  "referral.offerYearly": "年額割引からさらに {{discount}}% OFF（月額比 {{combinedDiscount}}% OFF）：初年度は 1 シートあたり {{first}}、以降は年額 {{regular}} です。",
+  "referral.retainedCheckoutYearly": "進行中のチェックアウトでは年払いさらに {{discount}}% OFF（初年度 1 シート {{first}}）が維持されます。",
   "referral.offerMonthly": "初月は 1 シートあたり {{first}}、以降は月額 {{regular}} です。",
   "referral.remove": "使用しない",
   "referral.invalid": "この紹介リンクは無効になりました。続行するには削除してください。",
@@ -7296,8 +7298,15 @@
   "e2ee.verify.cameraDenied": "カメラの権限が拒否されました。ブラウザまたはシステム設定でカメラを許可するか、6桁のコードを入力してください。",
   "e2ee.mode.verifyingAccess": "この端末の暗号化アクセスを確認しています…",
   "e2ee.auto.syncing.keepOpen": "もう一方の端末からセキュリティキーが送信されるのを待っています。その端末で Lody を開いたままにしてください…",
+  "billing.yearlySaveBadge": "20% お得",
   "billing.promoOfferTitle": "期間限定割引",
-  "billing.switchPromoDiscountWithPercent": "期間限定割引（{{discount}}% OFF）",
+  "billing.promoYearlyOfferBadge": "年払いさらに {{discount}}% OFF",
+  "billing.promoYearlyExtraBadge": "さらに {{discount}}% OFF",
+  "billing.promoMonthlyOfferBadge": "{{discount}}% OFF",
+  "billing.promoOfferYearly": "年額割引からさらに {{discount}}% OFF（月額比 {{combinedDiscount}}% OFF）：初年度は 1 シートあたり {{first}}、以降は年額 {{regular}} です。",
+  "billing.promoRetainedYearly": "進行中のチェックアウトでは年払いさらに {{discount}}% OFF（初年度 1 シート {{first}}）が維持されます。",
+  "billing.switchPromoDiscountWithPercent": "期間限定割引（年払いさらに {{discount}}% OFF）",
   "billing.switchRenewalDateStandardYearly": "次回更新日: {{date}}（通常料金 {{amount}}/年）。",
-  "workspace.invite.seat.promoNoteUntil": "{{date}} までに承諾された場合は {{discount}}% OFF が適用されます。次回更新からは通常料金になります。"
+  "workspace.invite.seat.promoNoteUntil": "{{date}} までに承諾された場合は {{discount}}% OFF が適用されます。次回更新からは通常料金になります。",
+  "workspace.invite.seat.promoNoteYearlyUntil": "{{date}} までに承諾された場合は年額からさらに {{discount}}% OFF が適用されます。次回更新からは通常料金になります。"
 }

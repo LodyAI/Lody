@@ -4,7 +4,7 @@ import { TestClock } from 'effect/testing';
 import { ConvexHttpClient } from 'convex/browser';
 import { ConvexError } from 'convex/values';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
-import { makeClientRecovery } from '../src/recovery';
+import { makeClientRecovery, recoveryFailure } from '../src/recovery';
 import { makeRecoveryWorkspaces, type RecoveryWorkspaceProgress } from '../src/recovery-workspaces';
 import type { RecoveryVaultCiphertextDto } from '@lody/cloud-api';
 import { RecoveryVaults } from '@lody/e2ee-core';
@@ -48,9 +48,11 @@ function fixture() {
         entries.set(args.entry.entryId, args.entry);
         value = { ok: true };
       } else if (path === 'e2eeRecoveryVault:readEntry') value = entries.get(args.entryId) ?? null;
-      else if (path === 'e2eeRecoveryVault:readEntries')
-        value = (args.entryIds as string[]).map((id) => entries.get(id) ?? null);
-      else if (path === 'e2eeRecoveryVault:deleteUnreferenced') {
+      else if (path === 'e2eeRecoveryVault:readEntries') {
+        const ids = args.entryIds as string[];
+        if (ids.length > 8) throw new Error('e2ee_recovery_vault_invalid');
+        value = ids.map((id) => entries.get(id) ?? null);
+      } else if (path === 'e2eeRecoveryVault:deleteUnreferenced') {
         entries.delete(args.entryId);
         value = { ok: true };
       } else if (path === 'e2eeRecoveryVault:readIndex') value = index;
@@ -498,3 +500,27 @@ it('a host without an HTTP(S) site origin refuses recovery before cloud or journ
   expect(f.paths).toEqual([]);
   expect(await indexedDB.databases()).toEqual([]);
 });
+
+it('createWithPassword skips redundant reopen, methods batches slot reads, and SecurityError maps to storage', async () => {
+  expect(recoveryFailure(new DOMException('Storage blocked', 'SecurityError')).message).toBe(
+    'e2ee_recovery_storage'
+  );
+  const f = fixture();
+  const created = await Effect.runPromise(f.service.createWithPassword('correct horse battery'));
+  expect(created.vaultId).toMatch(/^[0-9a-f]{64}$/);
+  expect(f.paths.filter((path) => path === 'e2eeRecoveryVault:putImmutable')).toHaveLength(1);
+  expect(f.paths.filter((path) => path === 'e2eeRecoveryVault:readEntry')).toHaveLength(2);
+  expect(f.paths.filter((path) => path === 'e2eeRecoveryVault:readEntries')).toHaveLength(0);
+  expect(f.paths.filter((path) => path === 'e2eeRecoveryVault:readIndex')).toHaveLength(1);
+  expect(f.paths.filter((path) => path === 'e2eeRecoveryVault:compareAndSwapIndex')).toHaveLength(
+    1
+  );
+
+  const beforeMethods = f.paths.length;
+  const methods = await Effect.runPromise(f.service.methods(created.vaultId));
+  expect(methods).toEqual({ hasFile: false, hasPassword: true, hasPasskey: false });
+  const methodPaths = f.paths.slice(beforeMethods);
+  expect(methodPaths.filter((path) => path === 'e2eeRecoveryVault:readEntries')).toHaveLength(1);
+  expect(methodPaths.filter((path) => path === 'e2eeRecoveryVault:readEntry')).toHaveLength(1);
+  expect(methodPaths.filter((path) => path === 'e2eeRecoveryVault:readIndex')).toHaveLength(1);
+}, 30_000);

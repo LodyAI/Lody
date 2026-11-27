@@ -627,7 +627,9 @@
   "referral.older": "较早",
   "referral.offerTitle": "推荐优惠",
   "referral.offerBadge": "首单 {{rate}} 折",
-  "referral.offerYearly": "首年每席位 {{first}}，之后 {{regular}}/年。",
+  "referral.offerYearlyBadge": "首年折上 {{rate}} 折",
+  "referral.offerYearly": "年付 8 折基础上再享 {{rate}} 折（相当于月付 {{combinedRate}} 折）：首年每席位 {{first}}，之后 {{regular}}/年。",
+  "referral.retainedCheckoutYearly": "未完成的结账仍保留年付折上 {{rate}} 折（首年每席位 {{first}}）。",
   "referral.offerMonthly": "首月每席位 {{first}}，之后 {{regular}}/月。",
   "referral.remove": "不使用",
   "referral.invalid": "推荐链接已失效，移除后可继续购买。",
@@ -7296,8 +7298,15 @@
   "e2ee.verify.cameraDenied": "未获得相机权限。请在浏览器或系统设置中允许相机权限，或直接输入 6 位验证码。",
   "e2ee.mode.verifyingAccess": "正在验证此设备的加密访问权限…",
   "e2ee.auto.syncing.keepOpen": "正在等待另一台设备发送安全钥匙，请保持该设备上的 Lody 处于打开状态…",
+  "billing.yearlySaveBadge": "省 20%",
   "billing.promoOfferTitle": "限时折扣",
-  "billing.switchPromoDiscountWithPercent": "限时升级优惠（{{rate}} 折）",
+  "billing.promoYearlyOfferBadge": "年付折上 {{rate}} 折",
+  "billing.promoYearlyExtraBadge": "折上 {{rate}} 折",
+  "billing.promoMonthlyOfferBadge": "限时 {{rate}} 折",
+  "billing.promoOfferYearly": "年付 8 折基础上再享 {{rate}} 折（相当于月付 {{combinedRate}} 折）：首年每席位 {{first}}，之后 {{regular}}/年。",
+  "billing.promoRetainedYearly": "未完成的结账仍保留年付折上 {{rate}} 折（首年每席位 {{first}}）。",
+  "billing.switchPromoDiscountWithPercent": "限时升级优惠（年付折上 {{rate}} 折）",
   "billing.switchRenewalDateStandardYearly": "下次续费：{{date}}，按标准价 {{amount}}/年计费。",
-  "workspace.invite.seat.promoNoteUntil": "{{date}} 前接受邀请入组享当期 {{rate}} 折，下期续费按标准价计费。"
+  "workspace.invite.seat.promoNoteUntil": "{{date}} 前接受邀请入组享当期 {{rate}} 折，下期续费按标准价计费。",
+  "workspace.invite.seat.promoNoteYearlyUntil": "{{date}} 前接受邀请入组享年付折上 {{rate}} 折，下期续费按标准价计费。"
 }

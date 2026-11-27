@@ -163,3 +163,96 @@ it('forwards recovery-only confirmation to the runtime before removing the last 
     await owner.close();
   }
 });
+
+it('claimMemberJoin retains the open reader after admission so retries skip claim and reopen', async () => {
+  const pins = personalEntryPins('member-join-retry-pins');
+  const offer = await offerFor('ws-join-retry', 21);
+  await Effect.runPromise(pins.prepare('acc-1', offer, 'member'));
+  const session = createStore<PlatformSessionState>(signedIn('acc-1'));
+  let claims = 0;
+  let opens = 0;
+  let refreshes = 0;
+  let closes = 0;
+  let keyArrived = false;
+  vi.mocked(makePersonalWorkspaceRuntime).mockReturnValue(
+    Effect.succeed({
+      claimMemberJoin: async () => {
+        claims++;
+        return { ready: false, state: 'committed' as const };
+      },
+      open: async (_id: string, _obs: unknown, _acc: unknown, readerOwner?: string) => {
+        opens++;
+        return {
+          workspaceId: offer.workspaceId,
+          genesisHash: offer.genesisHash,
+          signingPublicKey: '00'.repeat(32),
+          epoch: 0,
+          hasCurrentKey: false,
+          memberRole: 'member' as const,
+          deviceKind: 'personal' as const,
+          readerOwner: readerOwner ?? 'r1',
+        };
+      },
+      refresh: async () => {
+        refreshes++;
+        return {
+          workspaceId: offer.workspaceId,
+          genesisHash: offer.genesisHash,
+          signingPublicKey: '00'.repeat(32),
+          epoch: 0,
+          hasCurrentKey: keyArrived,
+          memberRole: 'member' as const,
+          deviceKind: 'personal' as const,
+        };
+      },
+      close: async () => {
+        closes++;
+      },
+    } as unknown as Effect.Success<ReturnType<typeof makePersonalWorkspaceRuntime>>)
+  );
+  const owner = personalEntry({
+    run: Effect.runPromise,
+    pins,
+    ports: () => Layer.effectContext(Effect.die('synthetic runtime owns the device')),
+    ledgerRecords: () => () => Effect.succeed([]),
+  });
+  try {
+    const runtime = owner.createRuntime({ session })!;
+    expect(await runtime.claimMemberJoin!(offer.workspaceId, offer.pairingSessionId)).toEqual({
+      ready: false,
+      state: 'committed',
+    });
+    expect((await Effect.runPromise(pins.read('acc-1', offer.workspaceId)))?.phase).toBe('ready');
+    expect({ claims, opens, refreshes, closes }).toEqual({
+      claims: 1,
+      opens: 1,
+      refreshes: 1,
+      closes: 0,
+    });
+
+    expect(await runtime.claimMemberJoin!(offer.workspaceId, offer.pairingSessionId)).toEqual({
+      ready: false,
+      state: 'committed',
+    });
+    expect({ claims, opens, refreshes, closes }).toEqual({
+      claims: 1,
+      opens: 1,
+      refreshes: 2,
+      closes: 0,
+    });
+
+    keyArrived = true;
+    expect(await runtime.claimMemberJoin!(offer.workspaceId, offer.pairingSessionId)).toEqual({
+      ready: true,
+      state: 'committed',
+    });
+    expect({ claims, opens, refreshes, closes }).toEqual({
+      claims: 1,
+      opens: 1,
+      refreshes: 3,
+      closes: 1,
+    });
+  } finally {
+    await owner.close();
+  }
+});
