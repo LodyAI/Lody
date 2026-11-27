@@ -2,7 +2,7 @@ import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-
 import * as stylex from '@stylexjs/stylex';
 import { Result } from 'effect';
 import { Camera, Check, Copy, ScanLine } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PAIRING_URL_PREFIX, parsePairingString } from '@lody/e2ee-core/protocol';
 import {
@@ -25,7 +25,28 @@ import { useIsHandheldScanner } from '@/hooks/use-mobile';
 import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
 import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
+/** A card of its own, or a plain column inside the card that hosts it. */
+function Surface({
+  embedded,
+  children,
+  ...rest
+}: {
+  embedded: boolean;
+  children: ReactNode;
+  'data-testid': string;
+  'data-e2ee-pairing-surface': string;
+}) {
+  return embedded ? (
+    <div {...rest} {...stylex.props(styles.embedded)}>
+      {children}
+    </div>
+  ) : (
+    <Card.Root {...rest}>{children}</Card.Root>
+  );
+}
+
 const styles = stylex.create({
+  embedded: { display: 'flex', flexDirection: 'column', gap: space[3] },
   retryAlert: {
     display: 'flex',
     alignItems: 'center',
@@ -573,7 +594,11 @@ type ApprovePhase =
  * request before anything is shown; the user then reads the fixed warning, sees the
  * named target and its scope, and may deselect any workspace before approving.
  */
-export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime }) {
+export function E2eeAccountPairingApprove(props: {
+  runtime: ApproveRuntime;
+  /** Inside another card, under that card's own heading: no card or title of its own. */
+  embedded?: boolean;
+}) {
   const { runtime } = props;
   const { t } = useTranslation();
   const live = useLive();
@@ -624,8 +649,12 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime }) {
     setError(null);
   };
   return (
-    <Card.Root data-testid="e2ee-account-pairing-approve" data-e2ee-pairing-surface="">
-      <Card.Title>{t('e2ee.accountPair.approve.title')}</Card.Title>
+    <Surface
+      embedded={props.embedded === true}
+      data-testid="e2ee-account-pairing-approve"
+      data-e2ee-pairing-surface=""
+    >
+      {!props.embedded && <Card.Title>{t('e2ee.accountPair.approve.title')}</Card.Title>}
       {phase.kind === 'enter' && (
         <>
           <p {...stylex.props(styles.muted)}>{t('e2ee.accountPair.approve.lead')}</p>
@@ -801,6 +830,6 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime }) {
           {t(error)}
         </p>
       )}
-    </Card.Root>
+    </Surface>
   );
 }

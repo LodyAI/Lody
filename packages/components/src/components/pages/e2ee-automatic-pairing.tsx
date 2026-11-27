@@ -631,44 +631,46 @@ export function E2eeAutomaticPairingPage({
           <ChevronLeft size={16} />
           {t('e2ee.control.back')}
         </Button>
-        <E2eeAccountPairingRequest
-          key={workspaceId}
-          runtime={runtime}
-          workspaceId={workspaceId}
-          autoStart={false}
-          onJoined={onJoined}
-          onRequestApproval={() => setApprovalChoice({ runtime, workspaceId })}
-          // Consent and scanning share one view; the scan holds the automatic request.
-          {...(qrSupported
-            ? {
-                onScanJoin: () => {
-                  setApprovalChoice({ runtime, workspaceId });
-                  setQrError(null);
-                  setQr('scanning');
-                },
-              }
-            : {})}
-        />
-        {lostAccess && (
-          <div {...stylex.props(themeStyles.spaced3)} data-testid="e2ee-lost-all-entry">
-            <E2eeLostAccessEntry
-              {...lostAccess}
-              workspaceId={workspaceId}
-              workspaceName={lostAccess.workspaceName ?? state?.workspaceName}
-              {...(runtime.openBrowserRecovery
-                ? {
-                    recovery: undefined,
-                    entryVariant: 'link' as const,
-                    entryLabel: t('e2ee.lostAccess.entrySecondary'),
-                  }
-                : recovery
-                  ? { recovery: { ...recovery, onRecovered: recovered } }
-                  : {})}
-              disabled={busy}
-              onOpenChange={setLostAllOpen}
-            />
-          </div>
-        )}
+        <section {...stylex.props(themeStyles.consentColumn)}>
+          <E2eeAccountPairingRequest
+            key={workspaceId}
+            runtime={runtime}
+            workspaceId={workspaceId}
+            autoStart={false}
+            onJoined={onJoined}
+            onRequestApproval={() => setApprovalChoice({ runtime, workspaceId })}
+            // Consent and scanning share one view; the scan holds the automatic request.
+            {...(qrSupported
+              ? {
+                  onScanJoin: () => {
+                    setApprovalChoice({ runtime, workspaceId });
+                    setQrError(null);
+                    setQr('scanning');
+                  },
+                }
+              : {})}
+          />
+          {lostAccess && (
+            <div {...stylex.props(themeStyles.spaced3)} data-testid="e2ee-lost-all-entry">
+              <E2eeLostAccessEntry
+                {...lostAccess}
+                workspaceId={workspaceId}
+                workspaceName={lostAccess.workspaceName ?? state?.workspaceName}
+                {...(runtime.openBrowserRecovery
+                  ? {
+                      recovery: undefined,
+                      entryVariant: 'link' as const,
+                      entryLabel: t('e2ee.lostAccess.entrySecondary'),
+                    }
+                  : recovery
+                    ? { recovery: { ...recovery, onRecovered: recovered } }
+                    : {})}
+                disabled={busy}
+                onOpenChange={setLostAllOpen}
+              />
+            </div>
+          )}
+        </section>
       </PairingPage>
     );
   const formatTime = (value: number) =>
@@ -676,6 +678,9 @@ export function E2eeAutomaticPairingPage({
       hour: '2-digit',
       minute: '2-digit',
     }).format(new Date(value));
+  // While a scan or a scanned join runs, its own Cancel is the only way out on the page.
+  const scanFlow = qr === 'scanning' || qr === 'joining';
+  const workspaceLabel = state?.workspaceName ?? lostAccess?.workspaceName;
   const terminal =
     !receiving &&
     !activeQr &&
@@ -720,7 +725,9 @@ export function E2eeAutomaticPairingPage({
               ? `e2ee.auto.${state.phase}.title`
               : receiving
                 ? 'e2ee.auto.syncing.title'
-                : 'e2ee.auto.waiting.title'
+                : qr === 'joining'
+                  ? 'e2ee.auto.joining.title'
+                  : 'e2ee.auto.waiting.title'
           )}
         </h1>
         {terminal ? (
@@ -783,8 +790,12 @@ export function E2eeAutomaticPairingPage({
           </>
         ) : (
           <>
-            <p {...stylex.props(themeStyles.hint6)}>{t('e2ee.auto.requesting')}</p>
-            <p {...stylex.props(themeStyles.layout)}>{state?.workspaceName}</p>
+            {!scanFlow && workspaceLabel && (
+              <>
+                <p {...stylex.props(themeStyles.hint6)}>{t('e2ee.auto.requesting')}</p>
+                <p {...stylex.props(themeStyles.layout)}>{workspaceLabel}</p>
+              </>
+            )}
             {qr === 'joining' ? (
               <div {...stylex.props(themeStyles.layout2)}>
                 <p role="status" data-testid="e2ee-qr-joining" {...stylex.props(themeStyles.hint5)}>
@@ -864,24 +875,26 @@ export function E2eeAutomaticPairingPage({
                 {t(qrError)}
               </p>
             )}
-            <details {...stylex.props(themeStyles.hint3)}>
-              <summary {...stylex.props(themeStyles.row3)}>
-                {t('e2ee.auto.noRequest')}
-                <ChevronDown size={14} />
-              </summary>
-              <p {...stylex.props(themeStyles.copy3)}>{t('e2ee.auto.noRequest.help')}</p>
-              <Button variant="link" disabled={busy} onClick={() => void restart(true)}>
-                {t('e2ee.auto.changeDevice')}
-              </Button>
-              {onManual && (
-                <Button variant="link" onClick={() => cancel(true)}>
-                  {t('e2ee.auto.manual')}
+            {!scanFlow && (
+              <details {...stylex.props(themeStyles.hint3)}>
+                <summary {...stylex.props(themeStyles.row3)}>
+                  {t('e2ee.auto.noRequest')}
+                  <ChevronDown size={14} />
+                </summary>
+                <p {...stylex.props(themeStyles.copy3)}>{t('e2ee.auto.noRequest.help')}</p>
+                <Button variant="link" disabled={busy} onClick={() => void restart(true)}>
+                  {t('e2ee.auto.changeDevice')}
                 </Button>
-              )}
-            </details>
+                {onManual && (
+                  <Button variant="link" onClick={() => cancel(true)}>
+                    {t('e2ee.auto.manual')}
+                  </Button>
+                )}
+              </details>
+            )}
           </>
         )}
-        {!receiving && state?.phase !== 'removed' && (
+        {!receiving && !scanFlow && state?.phase !== 'removed' && (
           <>
             {lostAccess ? (
               <div {...stylex.props(themeStyles.spaced3)} data-testid="e2ee-lost-all-entry">
@@ -910,7 +923,7 @@ export function E2eeAutomaticPairingPage({
             {t(error)}
           </p>
         )}
-        {blocked && !receiving && (
+        {blocked && !receiving && !scanFlow && (
           <section aria-label={t('e2ee.auto.previous.title')}>
             <p>
               {t('e2ee.auto.previous.help', {
@@ -939,7 +952,7 @@ export function E2eeAutomaticPairingPage({
             )}
           </section>
         )}
-        {!terminal && !receiving && (
+        {!terminal && !receiving && !scanFlow && (
           <div {...stylex.props(themeStyles.hint15)}>
             {state && (
               <p>
@@ -1054,7 +1067,8 @@ export function E2eeAutomaticPairingInbox({
   const mobile = handheld;
   const [scanning, setScanning] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
-  const [approvalTab, setApprovalTab] = useState<'qr' | 'code'>('qr');
+  /** The one approval method on screen; the others are a link away. */
+  const [approvalTab, setApprovalTab] = useState<'qr' | 'code' | 'scan'>('qr');
   /** The code an external auto-pair link carried for one request. While the field still
    * holds it, the window shows the code to compare instead of an input to fill. */
   const [linked, setLinked] = useState<{ id: string; code: string } | null>(null);
@@ -1191,7 +1205,13 @@ export function E2eeAutomaticPairingInbox({
     setCode('');
     setError(null);
     setPeerCancelled(false);
-    setApprovalTab(approvalLead(requestsRef.current.find((row) => row.id === selected)));
+    setApprovalTab(
+      handheld
+        ? cameraSupported()
+          ? 'scan'
+          : 'code'
+        : approvalLead(requestsRef.current.find((row) => row.id === selected))
+    );
   }, [selected]);
   useEffect(() => {
     setLinked((value) => (value && value.id !== selected ? null : value));
@@ -1284,32 +1304,35 @@ export function E2eeAutomaticPairingInbox({
   };
   // The one-time code another phone scans to join: shown at once on a computer, and on
   // request on a phone.
-  const qrSlot = qrSupported && runtime && (shownQr || current) && (
+  const qrSlot = qrSupported && runtime && shownQr && (
     <div {...stylex.props(themeStyles.panel3)} data-testid="e2ee-approval-qr">
-      {shownQr ? (
-        <E2eeInstantQrApprove
-          key={shownQr}
-          runtime={runtime}
-          compact
-          hideExpiry={Boolean(current)}
-          onJoined={() => qrJoined(shownQr)}
-        />
-      ) : (
-        <div {...stylex.props(themeStyles.column3)}>
-          <Button
-            data-testid="e2ee-approval-show-qr"
-            variant={mobile ? 'ghost' : 'primary'}
-            disabled={Boolean(busy)}
-            onClick={() => current && setQrFor(current.id)}
-          >
-            <QrCode size={16} aria-hidden="true" />
-            {t(mobile ? 'e2ee.auto.showQr.mobile' : 'e2ee.auto.showQr')}
-          </Button>
-          <p {...stylex.props(themeStyles.hint8)}>{t('e2ee.auto.showQr.help')}</p>
-        </div>
-      )}
+      <E2eeInstantQrApprove
+        key={shownQr}
+        runtime={runtime}
+        compact
+        hideExpiry={Boolean(current)}
+        onJoined={() => qrJoined(shownQr)}
+      />
     </div>
   );
+  /** A phone leads with scanning the new screen; typing and showing its own code are links. */
+  const phoneMethods = (
+    [
+      cameraSupported() && { id: 'scan' as const, label: 'e2ee.auto.switchToScan' },
+      { id: 'code' as const, label: 'e2ee.auto.switchToCode.mobile' },
+      qrSupported && { id: 'qr' as const, label: 'e2ee.auto.switchToQr.mobile' },
+    ] as const
+  ).filter((method) => method && method.id !== approvalTab) as {
+    id: 'scan' | 'code' | 'qr';
+    label: string;
+  }[];
+  const choosePhoneMethod = (method: 'scan' | 'code' | 'qr') => {
+    setScanning(false);
+    setScanNotice(null);
+    // Showing this phone's code starts a fresh offer; leaving it ends the offer.
+    setQrFor(method === 'qr' && current ? current.id : null);
+    setApprovalTab(method);
+  };
   // External links (for example from a system camera or Android BROWSABLE intent) are
   // untrusted: an approval link only opens/prefills the matching request when no other
   // pairing surface is active, and a join link stays queued for an open join page.
@@ -1519,7 +1542,7 @@ export function E2eeAutomaticPairingInbox({
                   <p {...stylex.props(themeStyles.hint2)}>{t('e2ee.auto.linked.help')}</p>
                 </div>
               )}
-              {mobile && current && !linkedCode && cameraSupported() && (
+              {mobile && current && !linkedCode && approvalTab === 'scan' && cameraSupported() && (
                 <div {...stylex.props(themeStyles.layout5)} data-testid="e2ee-approval-scan">
                   {scanning ? (
                     <>
@@ -1572,14 +1595,9 @@ export function E2eeAutomaticPairingInbox({
                 <>
                   <div
                     hidden={Boolean(
-                      linkedCode || (!mobile && qrSupported && approvalTab !== 'code')
+                      linkedCode || (approvalTab !== 'code' && (mobile || qrSupported))
                     )}
                   >
-                    {mobile && cameraSupported() && (
-                      <p {...stylex.props(pairingStyles.alternative)}>
-                        {t('e2ee.auto.orCode.mobile')}
-                      </p>
-                    )}
                     <form
                       {...stylex.props(themeStyles.codeForm)}
                       onSubmit={(event) => {
@@ -1622,6 +1640,27 @@ export function E2eeAutomaticPairingInbox({
                       )}
                     </form>
                   </div>
+                  {mobile && !linkedCode && approvalTab === 'qr' && qrSlot}
+                  {mobile && !linkedCode && phoneMethods.length > 0 && (
+                    <div {...stylex.props(themeStyles.methodLinks)}>
+                      {phoneMethods.map((method) => (
+                        <Button
+                          key={method.id}
+                          variant="link"
+                          size="small"
+                          data-testid={
+                            method.id === 'qr'
+                              ? 'e2ee-approval-show-qr'
+                              : `e2ee-approval-method-${method.id}`
+                          }
+                          disabled={Boolean(busy)}
+                          onClick={() => choosePhoneMethod(method.id)}
+                        >
+                          {t(method.label)}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
                   {!mobile && qrSupported && !linkedCode && (
                     <Button
                       variant="link"
@@ -1644,7 +1683,7 @@ export function E2eeAutomaticPairingInbox({
                   </p>
                 </>
               )}
-              {mobile && !linkedCode && qrSlot}
+              {mobile && !current && qrSlot}
             </div>
             {current && (
               <div {...stylex.props(themeStyles.dialogFooter)}>
@@ -1707,6 +1746,7 @@ const themeStyles = stylex.create({
     color: uiColors.label,
   },
   switchMethod: { alignSelf: 'flex-start' },
+  methodLinks: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start' },
   hint: {
     marginBlock: appSpace[6],
     borderRadius: uiRadius.large,
@@ -1732,6 +1772,13 @@ const themeStyles = stylex.create({
     paddingBottom: 'max(2rem,env(safe-area-inset-bottom))',
   },
   glyph2: { marginTop: appSpace[5], width: '100%' },
+  consentColumn: {
+    marginInline: 'auto',
+    display: 'flex',
+    maxWidth: '24rem',
+    flexDirection: 'column',
+    paddingTop: appSpace[10],
+  },
   column: {
     marginInline: 'auto',
     display: 'flex',
@@ -2032,13 +2079,6 @@ const themeStyles = stylex.create({
     paddingBlock: appSpace[3],
     paddingInline: appSpace[4],
   },
-  column3: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: appSpace[2],
-    textAlign: 'center',
-  },
   glyph3: { width: '100%', maxWidth: { default: null, '@media (min-width: 640px)': '24rem' } },
   spaced4: {
     marginTop: appSpace[6],
@@ -2146,11 +2186,5 @@ const pairingStyles = stylex.create({
     fontWeight: 600,
     letterSpacing: '0.15em',
     fontVariantNumeric: 'tabular-nums',
-  },
-  alternative: {
-    textAlign: 'center',
-    fontSize: uiText.footnoteSize,
-    lineHeight: uiText.footnoteLeading,
-    color: uiColors.secondaryLabel,
   },
 });

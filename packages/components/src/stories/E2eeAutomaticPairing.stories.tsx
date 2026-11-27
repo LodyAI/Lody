@@ -301,7 +301,8 @@ export const PhoneBrowserConsent: Story = { args: { mode: 'awaiting', browser: t
 export const PhoneJoiningFromSystemCamera: Story = {
   args: { mode: 'awaiting', link: `lody://pair/${SYNTHETIC_PAIRING.replace(/-/g, '')}` },
 };
-/** A phone approving: scan the new device's screen, or type its code. */
+/** A phone approving: scanning the new screen leads; typing its code or letting it scan
+ * this phone are links. */
 export const DeviceApprovalOnPhone: Story = { args: { mode: 'approval' } };
 /** The console's Devices tab entry. */
 export const AddDeviceCard: Story = { args: { mode: 'addDevice', form: 'desktop' } };

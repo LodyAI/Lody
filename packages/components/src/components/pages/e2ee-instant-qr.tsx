@@ -269,7 +269,16 @@ const styles = stylex.create({
   card: { display: 'flex', flexDirection: 'column', gap: space[3] },
   cardLead: { margin: 0, color: colors.secondaryLabel },
   actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
-  disclosure: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  disclosure: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    paddingTop: space[3],
+  },
+  disclosureTrigger: { alignSelf: 'flex-start' },
   callout: {
     display: 'flex',
     alignItems: 'center',
@@ -434,37 +443,35 @@ export function E2eeAddDeviceCard(props: {
   if (!supportsInstantQr(props.runtime))
     return <E2eeAccountPairingApprove runtime={props.runtime} />;
   return (
-    <>
-      <Card.Root data-testid="e2ee-add-device">
-        <div {...stylex.props(styles.card)}>
-          <Card.Title>{t('e2ee.addDevice.title')}</Card.Title>
-          <p {...stylex.props(styles.cardLead)}>{t('e2ee.addDevice.lead')}</p>
-          {requests && requests.count > 0 && <E2eeWaitingRequestsCallout />}
-          {showing ? (
-            <>
-              <E2eeInstantQrApprove runtime={props.runtime} />
-              <div {...stylex.props(styles.actions)}>
-                <Button variant="ghost" size="small" onClick={() => setShowing(false)}>
-                  {t('e2ee.addDevice.hideQr')}
-                </Button>
-              </div>
-            </>
-          ) : (
+    <Card.Root data-testid="e2ee-add-device">
+      <div {...stylex.props(styles.card)}>
+        <Card.Title>{t('e2ee.addDevice.title')}</Card.Title>
+        <p {...stylex.props(styles.cardLead)}>{t('e2ee.addDevice.lead')}</p>
+        {requests && requests.count > 0 && <E2eeWaitingRequestsCallout />}
+        {showing ? (
+          <>
+            <E2eeInstantQrApprove runtime={props.runtime} />
             <div {...stylex.props(styles.actions)}>
-              <Button
-                data-testid="e2ee-add-device-show-qr"
-                onClick={() => {
-                  setManual(false);
-                  setShowing(true);
-                }}
-              >
-                <QrCode size={16} aria-hidden="true" />
-                {t('e2ee.addDevice.showQr')}
+              <Button variant="ghost" size="small" onClick={() => setShowing(false)}>
+                {t('e2ee.addDevice.hideQr')}
               </Button>
             </div>
-          )}
-        </div>
-      </Card.Root>
+          </>
+        ) : (
+          <div {...stylex.props(styles.actions)}>
+            <Button
+              data-testid="e2ee-add-device-show-qr"
+              onClick={() => {
+                setManual(false);
+                setShowing(true);
+              }}
+            >
+              <QrCode size={16} aria-hidden="true" />
+              {t('e2ee.addDevice.showQr')}
+            </Button>
+          </div>
+        )}
+      </div>
       <Collapsible.Root
         open={manual}
         onOpenChange={(next) => {
@@ -474,17 +481,24 @@ export function E2eeAddDeviceCard(props: {
       >
         <div {...stylex.props(styles.disclosure)}>
           <Collapsible.Trigger
-            render={<Button variant="ghost" size="small" data-testid="e2ee-add-device-manual" />}
+            render={
+              <Button
+                variant="ghost"
+                size="small"
+                data-testid="e2ee-add-device-manual"
+                xstyle={styles.disclosureTrigger}
+              />
+            }
           >
             {t('e2ee.addDevice.manual')}
             <ChevronDown size={14} aria-hidden="true" />
           </Collapsible.Trigger>
           <Collapsible.Panel>
-            <E2eeAccountPairingApprove runtime={props.runtime} />
+            <E2eeAccountPairingApprove runtime={props.runtime} embedded />
           </Collapsible.Panel>
         </div>
       </Collapsible.Root>
-    </>
+    </Card.Root>
   );
 }
 
