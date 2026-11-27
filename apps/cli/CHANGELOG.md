@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.117.0](https://github.com/LodyAI/Lody/compare/lody-cli-v0.116.1...lody-cli-v0.117.0) (2026-11-27)
+
+
+### Features
+
+* **cli:** carry daemon durable Streams rooms over the workspace WebSocket ([#3417](https://github.com/LodyAI/Lody/issues/3417)) ([d296180](https://github.com/LodyAI/Lody/commit/d29618097a12ebbbe6e9d87a4375935ba6341283))
+* **cli:** harden local machine identity persistence and add restore-id command ([#3334](https://github.com/LodyAI/Lody/issues/3334)) ([9411a91](https://github.com/LodyAI/Lody/commit/9411a910d25760dbaf3b9e419cd00aa785ffba06))
+* **orchestration:** surface the delegation chain limit and add a soft-limit budget ([#3441](https://github.com/LodyAI/Lody/issues/3441)) ([0278935](https://github.com/LodyAI/Lody/commit/0278935c7fb675dd17fcd9b36427758c78d2bc34))
+* **privacy:** minimize telemetry uploads, add regional cookie banner, and unify usage sharing switch ([#3354](https://github.com/LodyAI/Lody/issues/3354)) ([9c7d50a](https://github.com/LodyAI/Lody/commit/9c7d50ac8a21ccc8c0e1bff2d7f97fb4b88e70d2))
+* replicate published Roost history through Streams ([#3236](https://github.com/LodyAI/Lody/issues/3236)) ([d5a8161](https://github.com/LodyAI/Lody/commit/d5a8161b13327f6b6d2f043af7561cf6ab1e9f2a))
+* tell agents when a different human starts speaking ([#3451](https://github.com/LodyAI/Lody/issues/3451)) ([f98e473](https://github.com/LodyAI/Lody/commit/f98e4737ef8d329b4de16d981ba5cbd3574a1f80))
+
+
+### Bug Fixes
+
+* **automations:** unblock non-sessionActivity agents, surface blocked delivery, and refactor automations ([#3353](https://github.com/LodyAI/Lody/issues/3353)) ([da28eca](https://github.com/LodyAI/Lody/commit/da28eca1803405199f84474ca3f866c79b7e5fd0))
+* base Nightly versions on published Electron Stable ([#3389](https://github.com/LodyAI/Lody/issues/3389)) ([64078ac](https://github.com/LodyAI/Lody/commit/64078acbb5d802647eba451a8b6f8855c72dcd8f))
+* **cli:** align the Roost publish check with SDK 0.3.2 ([6367928](https://github.com/LodyAI/Lody/commit/63679289e3a5b24a651e2fecb86ed9657d3b5030))
+* **cli:** cancel promoted automation turns end to end on ended receipts and durable denials ([#3437](https://github.com/LodyAI/Lody/issues/3437)) ([aa867b0](https://github.com/LodyAI/Lody/commit/aa867b01dab21612b5dedbbb0f9030c3e17dc218))
+* **cli:** guard createSessionInner registration against aborted creates ([#3401](https://github.com/LodyAI/Lody/issues/3401)) ([5fb5822](https://github.com/LodyAI/Lody/commit/5fb582280d52389baf3e8f603d2584cb2bbf053a)), closes [#3391](https://github.com/LodyAI/Lody/issues/3391)
+* **cli:** retire the ACP when a selected MCP server's configuration changes ([#3433](https://github.com/LodyAI/Lody/issues/3433)) ([9c8fa67](https://github.com/LodyAI/Lody/commit/9c8fa67d075e5637d7ef894b99321e07f25b374a))
+* **cli:** start fresh ACP session on first-message edit-and-resend and abandon cancelled creates ([#3395](https://github.com/LodyAI/Lody/issues/3395)) ([5f420a1](https://github.com/LodyAI/Lody/commit/5f420a13db24637aa121ac1d42a61ad8bdf8b5fc)), closes [#3391](https://github.com/LodyAI/Lody/issues/3391)
+* **cli:** stop Inbox result continuations from looping on Automation admission [risk:medium] ([#3414](https://github.com/LodyAI/Lody/issues/3414)) ([f37afb8](https://github.com/LodyAI/Lody/commit/f37afb8625b8996f9be62efbf4fc1e1b2a06c9f6))
+* **cli:** update Kimi managed runtime to surface OAuth auth_required ([#3368](https://github.com/LodyAI/Lody/issues/3368)) ([4e2f025](https://github.com/LodyAI/Lody/commit/4e2f025d5d42c956a3077ac939d827e52c120193))
+* **code-collab:** track only uncommitted changes for non-worktree sessions ([#3333](https://github.com/LodyAI/Lody/issues/3333)) ([6c8390a](https://github.com/LodyAI/Lody/commit/6c8390ae5cfe74fddd80ea8c3d58023112319566))
+* **e2ee:** run Inbox result continuations as their delegating roots ([#3439](https://github.com/LodyAI/Lody/issues/3439)) ([39048b8](https://github.com/LodyAI/Lody/commit/39048b83a824b0e23d59e9b0a45a8af9688e7c9c)), closes [#3420](https://github.com/LodyAI/Lody/issues/3420)
+* price gpt-6.2 astra and sol ([#3365](https://github.com/LodyAI/Lody/issues/3365)) ([bb9444b](https://github.com/LodyAI/Lody/commit/bb9444bc2c6f5ad9b4f84e8af9ccd3361d169540))
+* **privacy:** allow immediate telemetry opt-out and prevent switch bounce-back ([#3425](https://github.com/LodyAI/Lody/issues/3425)) ([a291b89](https://github.com/LodyAI/Lody/commit/a291b89f5d67095fe18b12b8fc6afab4d87876a7))
+* **release:** [risk:high] flatten nightly desktop-compilation artifact download and retry transient 5xx in daemon installer check ([#3452](https://github.com/LodyAI/Lody/issues/3452)) ([b9bd142](https://github.com/LodyAI/Lody/commit/b9bd1424be709b2ffbccfc3b42c8221473ea5d38))
+* unblock release E2E gate across turn recovery, vault CAS retry, and cloud smoke [risk:high] ([#3410](https://github.com/LodyAI/Lody/issues/3410)) ([e29550e](https://github.com/LodyAI/Lody/commit/e29550e0f869839b51a93894b09917f6fb259688))
+
 ## [0.116.1](https://github.com/LodyAI/Lody/compare/lody-cli-v0.116.0...lody-cli-v0.116.1) (2026-11-25)
 
 
