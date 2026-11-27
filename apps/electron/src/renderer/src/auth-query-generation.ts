@@ -27,7 +27,16 @@ export type AuthQueryResult<TData, TError = unknown> = AuthQuerySnapshot<TData, 
   refetch: (queryParams?: unknown) => Promise<void>
 }
 
-export type AuthQueryStoreOptions = {
+export type AuthQueryDecodeResult<TData, TError = unknown> =
+  | { ok: true; data: TData | null }
+  | { ok: false; error: TError }
+
+export type AuthQueryDecoder<TData, TError = unknown> = (
+  raw: unknown
+) => AuthQueryDecodeResult<TData, TError>
+
+export type AuthQueryStoreOptions<TData, TError = unknown> = {
+  decode: AuthQueryDecoder<TData, TError>
   onCommit?: (response: unknown) => void
   timeoutMs?: number
 }
@@ -89,9 +98,20 @@ async function withAuthQueryTimeout<T>(
 export function createAuthQueryStore<TData, TError = unknown>(
   label: string,
   fetcher: () => Promise<unknown>,
-  options: AuthQueryStoreOptions = {}
+  options: AuthQueryStoreOptions<TData, TError>
 ) {
-  const { onCommit, timeoutMs = DEFAULT_ELECTRON_AUTH_QUERY_TIMEOUT_MS } = options
+  const { decode, onCommit, timeoutMs = DEFAULT_ELECTRON_AUTH_QUERY_TIMEOUT_MS } = options
+  const decodeResponse = (response: unknown): { data: TData | null; error: TError | null } => {
+    const responseError = unwrapError(response)
+    if (responseError !== null) {
+      return { data: null, error: responseError as TError }
+    }
+    const decoded = decode(unwrapData(response))
+    if (!decoded.ok) {
+      return { data: null, error: decoded.error }
+    }
+    return { data: decoded.data, error: null }
+  }
   const refetch = async (_queryParams?: unknown): Promise<void> => {
     await run(true)
   }
@@ -158,8 +178,7 @@ export function createAuthQueryStore<TData, TError = unknown>(
         const response = await withAuthQueryTimeout(label, timeoutMs, fetcher())
         generation.commitIfCurrent(requestGeneration, () => {
           onCommit?.(response)
-          const data = ((unwrapData(response) as TData | null | undefined) ?? null) as TData | null
-          const error = unwrapError(response) as TError | null
+          const { data, error } = decodeResponse(response)
           hasLoaded = true
           setSnapshot({
             data,
@@ -242,11 +261,12 @@ export function createAuthQueryStore<TData, TError = unknown>(
     inFlight = null
     pendingRefetch = false
     onCommit?.(response)
+    const { data, error } = decodeResponse(response)
     setSnapshot({
-      data: ((unwrapData(response) as TData | null | undefined) ?? null) as TData | null,
+      data,
       isPending: false,
       isRefetching: false,
-      error: unwrapError(response) as TError | null
+      error
     })
   }
 

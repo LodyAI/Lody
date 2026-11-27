@@ -12,8 +12,18 @@ import { deferredPostHog } from './lib/deferred-posthog';
 import { recordClientError } from './lib/client-log';
 import { ErrorBoundaryFallback } from './components/error-boundary-fallback';
 
-function RouterErrorComponent({ error, info, reset }: ErrorComponentProps) {
-  const normalizedError = error instanceof Error ? error : new Error(String(error));
+function normalizeRouterError(error: unknown): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+  if (typeof error === 'string' && error.length > 0) {
+    return new Error(error);
+  }
+  return new Error(String(error ?? 'Unexpected routing error'));
+}
+
+export function RouterErrorComponent({ error, info, reset }: ErrorComponentProps) {
+  const normalizedError = normalizeRouterError(error);
   const reportedErrorRef = useRef<unknown>(null);
 
   useEffect(() => {

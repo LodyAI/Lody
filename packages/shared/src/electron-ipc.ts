@@ -449,24 +449,29 @@ export const ElectronAuthCallbackSessionSchema = z
 
 export type ElectronAuthCallbackSession = z.infer<typeof ElectronAuthCallbackSessionSchema>;
 
-export type ElectronLoginState = {
-  revision: number;
-  attemptId: string | null;
-  phase: 'idle' | 'waiting' | 'exchanging' | 'authenticated' | 'error';
-  session: ElectronAuthCallbackSession | null;
-  error:
-    | 'browser_open_failed'
-    | 'authorization_expired'
-    | 'exchange_failed'
-    | 'exchange_certificate_failed'
-    | 'exchange_rejected'
-    | 'exchange_timeout'
-    | 'secure_storage_unavailable'
-    | 'restart_required'
-    | null;
-  /** Credential-free failure summary (HTTP status/server code or local error) for support. */
-  errorDetail: string | null;
-};
+export const ElectronLoginErrorSchema = z.enum([
+  'browser_open_failed',
+  'authorization_expired',
+  'exchange_failed',
+  'exchange_certificate_failed',
+  'exchange_rejected',
+  'exchange_timeout',
+  'secure_storage_unavailable',
+  'restart_required',
+]);
+
+export const ElectronLoginStateSchema = z
+  .object({
+    revision: z.number().int().nonnegative(),
+    attemptId: z.string().nullable(),
+    phase: z.enum(['idle', 'waiting', 'exchanging', 'authenticated', 'error']),
+    session: ElectronAuthCallbackSessionSchema.nullable(),
+    error: ElectronLoginErrorSchema.nullable(),
+    errorDetail: z.string().nullable(),
+  })
+  .strict();
+
+export type ElectronLoginState = z.infer<typeof ElectronLoginStateSchema>;
 
 /** Which Lody process reported the storage write failure that started a check. */
 export type ElectronStorageGuardSource = 'renderer' | 'cli';

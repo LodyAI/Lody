@@ -10,6 +10,11 @@ import { createDesktopAuthFetch } from '../../main/auth-fetch.ts'
 import { DesktopLogin, readDesktopLoginCallback } from '../../main/services/desktop-login.ts'
 import { createAuthQueryStore } from './auth-query-generation.ts'
 import { acquireAuthSessionStore } from '../../../../../packages/components/src/lib/auth-session-store.ts'
+import {
+  BoundaryDecodeError,
+  decodeBetterAuthOrganizations,
+  decodeBetterAuthSession
+} from '../../../../../packages/shared/src/boundary-decode.ts'
 
 const session = { session: { token: 'synthetic-session' }, user: { id: 'synthetic-user' } }
 
@@ -354,6 +359,7 @@ void test('desktop session query store exposes $store.atoms.session for shared e
       return requests === 1 ? await initialGate.promise : await refetchGate.promise
     },
     {
+      decode: (raw) => decodeBetterAuthSession('test.getSession', raw),
       onCommit: (response) => committedResponses.push(response)
     }
   )
@@ -435,4 +441,31 @@ void test('desktop session query store exposes $store.atoms.session for shared e
   stopStableListen()
   convexConsumer.stop()
   stableConsumer.stop()
+})
+
+void test('auth query store drops null organization items and degrades malformed session payloads to error state', async () => {
+  const orgsStore = createAuthQueryStore(
+    'listOrganizations',
+    async () => ({
+      data: [null, { id: 'org-1', slug: 'alpha', name: 'Alpha' }, { slug: 'broken' }],
+      error: null
+    }),
+    {
+      decode: (raw) => decodeBetterAuthOrganizations('test.listOrganizations', raw)
+    }
+  )
+  await orgsStore.refetch()
+  assert.equal(orgsStore.atom.get().error, null)
+  assert.deepEqual(orgsStore.atom.get().data, [{ id: 'org-1', slug: 'alpha', name: 'Alpha' }])
+
+  const malformedSessionStore = createAuthQueryStore(
+    'getSession',
+    async () => ({ data: { user: { id: '' } }, error: null }),
+    {
+      decode: (raw) => decodeBetterAuthSession('test.getSession', raw)
+    }
+  )
+  await malformedSessionStore.refetch()
+  assert.equal(malformedSessionStore.atom.get().data, null)
+  assert.ok(malformedSessionStore.atom.get().error instanceof BoundaryDecodeError)
 })

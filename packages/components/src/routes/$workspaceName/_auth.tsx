@@ -14,7 +14,7 @@ import { runtimeInitializingAtom, userAtom } from '@/atoms';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { usePostHog } from '@/lib/posthog-context';
-import { normalizeCurrentUserFromSessionUser } from '@/lib/current-user';
+import { safeNormalizeCurrentUserFromSessionUser } from '@/lib/current-user';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { deriveConvexSiteUrl } from '@lody/shared';
 import {
@@ -121,7 +121,7 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     if (!session?.user) {
       return null;
     }
-    return normalizeCurrentUserFromSessionUser(session.user);
+    return safeNormalizeCurrentUserFromSessionUser(session.user);
   }, [session?.user]);
   const analyticsUserWorkspaceKey = useMemo(() => {
     if (!currentUser || !currentWorkspaceId) {
