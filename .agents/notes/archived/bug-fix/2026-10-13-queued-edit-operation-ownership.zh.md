@@ -1,6 +1,7 @@
 # 保留上一条排队消息确认返回后的下一条编辑内容
 
 Status: implemented
+Archived: 2026-11-27
 Translation: current
 
 PR: https://github.com/LodyAI/Lody/pull/1533
@@ -17,11 +18,11 @@ PR: https://github.com/LodyAI/Lody/pull/1533
 
 `useMessageQueueEditing` 为开始、取消和保存操作分配身份。只有身份仍然有效的完成回调可以修改本地状态。卸载会使身份失效；过期的开始操作也不会继续发起下一次写入。队列写入、失焦自动保存和错误反馈继续由现有逻辑负责。所有消息的开始、保存和取消编辑现在都在本地写入完成后结束，远端同步独立进行。等待远端同步会在连接停滞时无限期禁用编辑框和确认按钮。本地写入失败仍保留草稿；本地写入也可能晚于下一次编辑完成，因此仍需保留操作归属保护。
 
-本决策补充[编辑框焦点决策](2026-09-12-composer-click-focus.md)，不改变其光标或底部操作行为。
+本决策补充[编辑框焦点决策](../../implemented/bug-fix/2026-09-12-composer-click-focus.md)，不改变其光标或底部操作行为。
 
 ## 证据与限制
 
-- [编辑状态归属](../../../../packages/components/src/components/sessions/message-queue/use-message-queue-editing.ts)与[生产回调](../../../../packages/components/src/components/sessions/session-chat-interface.tsx)。
+- 编辑状态归属 (`use-message-queue-editing.ts`, since removed)与[生产回调](../../../../packages/components/src/components/sessions/session-chat-interface.tsx)。
 - [队列组件测试](../../../../packages/components/tests/message-queue-row-editing.test.tsx)通过显式信号控制确认，覆盖下一条开始操作仍在等待时旧确认返回的情形。
 - [浏览器回归](../../../../packages/components/tests/e2e/composer-submission-focus.spec.ts)通过[延迟确认 story](../../../../packages/components/src/stories/MessageQueueDisplay.stories.tsx)操作真实队列组件。4 个聚焦队列的浏览器用例在 Chrome 中通过。修复前后截图位于忽略提交的 `artifacts/usability/`。
 - 修改文件通过 Oxlint。已尝试包类型检查与桌面构建，但未修改模块的依赖缺失或版本不匹配阻止了检查，包括 Office/PDF 预览及 CLI 的 MCP/WebRTC 依赖。尚未验证已安装桌面应用与真实 daemon 同步。

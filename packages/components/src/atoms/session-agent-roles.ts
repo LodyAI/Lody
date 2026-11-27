@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
-import type { AgentRoleId, SessionId } from '@lody/shared';
+import type { AgentRoleId } from '@lody/shared';
 
 /**
  * Explicit Role choices made in existing-session composers.
@@ -12,7 +12,7 @@ import type { AgentRoleId, SessionId } from '@lody/shared';
  * lineage fences a draft so a newer accepted/queued Turn from this or another
  * client wins without mistaking queue promotion/reordering for a new Turn.
  */
-export const sessionAgentRoleSelectionAtomFamily = atomFamily((_sessionId: SessionId) =>
+export const sessionAgentRoleSelectionAtomFamily = atomFamily((_scope: string) =>
   atom<
     | {
         roleId: AgentRoleId | null;
@@ -32,7 +32,7 @@ export const sessionAgentRoleSelectionAtomFamily = atomFamily((_sessionId: Sessi
  * logical Turn lineage beside the three-state Role value prevents queue
  * lifecycle changes from looking like newer accepted input.
  */
-export const sessionAgentRoleDurableSnapshotAtomFamily = atomFamily((_sessionId: SessionId) =>
+export const sessionAgentRoleDurableSnapshotAtomFamily = atomFamily((_scope: string) =>
   atom<
     | {
         roleId: AgentRoleId | null | undefined;

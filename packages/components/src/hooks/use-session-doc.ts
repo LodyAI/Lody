@@ -77,6 +77,19 @@ export type UseSessionDocResult = {
     item: PushMessageQueueInput,
     options?: { onAccepted?: () => void }
   ) => Promise<void>;
+  /**
+   * Save a composer edit of row `cid`: the same admission as a new queued
+   * message (receipt, signature, attachment preparation), replacing the row
+   * under its message id instead of appending one.
+   */
+  saveMessageQueueEdit: (
+    cid: string,
+    patch: Pick<
+      MessageQueueItem,
+      'task' | 'userId' | 'userName' | 'isEditing' | 'editingStartedAt' | 'acpSessionConfig'
+    >,
+    options?: { attachments?: SessionAttachmentDraft[]; onAccepted?: () => void }
+  ) => Promise<void>;
   removeMessageQueueItem: (cid: string) => Promise<void>;
   updateMessageQueueItem: (
     cid: string,
@@ -397,6 +410,44 @@ export function useSessionDoc(
     [runtime, sessionId]
   );
 
+  const saveMessageQueueEdit = useCallback<UseSessionDocResult['saveMessageQueueEdit']>(
+    async (cid, patch, saveOptions) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const mq = await withStore((store) => (store.getState().mq ?? []) as MessageQueueItem[]);
+      const current = mq.find((item) => item.$cid === cid);
+      if (!current?.userTurnId) throw new Error('Queued message is no longer available');
+      const userTurnId = current.userTurnId;
+      const attachments = saveOptions?.attachments;
+      const inputConfig = normalizeSessionTurnInputConfig(patch.acpSessionConfig);
+      const pendingTurn = buildDraftUserHistoryEntry(
+        {
+          userId: patch.userId,
+          userName: patch.userName,
+          inputBlocks: normalizeSessionInputBlocks(
+            inputConfig?.inputBlocks,
+            patch.acpSessionConfig?.prompt ?? (attachments?.length ? '' : patch.task)
+          ),
+          timestamp: current.timestamp,
+          inputConfig,
+        },
+        attachments
+      );
+      if (!pendingTurn) throw new Error('Queued message has no effective input');
+      await acceptSessionUserTurn(
+        runtime,
+        sessionId,
+        { ...pendingTurn, id: userTurnId } as SessionHistory,
+        { kind: 'queue' },
+        undefined,
+        { ...patch, userTurnId },
+        attachments,
+        saveOptions?.onAccepted,
+        { cid }
+      );
+    },
+    [runtime, sessionId, withStore]
+  );
+
   const removeMessageQueueItem = useCallback(
     async (cid: string) => {
       if (!runtime) {
@@ -485,6 +536,7 @@ export function useSessionDoc(
     historySync,
     addHistory,
     pushMessageQueue,
+    saveMessageQueueEdit,
     removeMessageQueueItem,
     updateMessageQueueItem,
     reorderMessageQueueItem,

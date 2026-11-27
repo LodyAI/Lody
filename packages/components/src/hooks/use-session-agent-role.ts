@@ -54,6 +54,7 @@ export type SessionAgentRoleControl = {
  */
 export function useSessionAgentRole({
   sessionId,
+  selectionScope,
   provenanceRoleId,
   provenanceRoleRevision,
   durableRoleId,
@@ -75,6 +76,11 @@ export function useSessionAgentRole({
   onConfigOptionChange,
 }: {
   sessionId: SessionId;
+  /**
+   * Keys the explicit choice and durable snapshot; defaults to the Session. A
+   * queued-message edit passes its own scope so the Session's draft survives.
+   */
+  selectionScope?: string;
   /** Role that created this session; seeds only the composer's display name. */
   provenanceRoleId?: AgentRoleId;
   provenanceRoleRevision?: number;
@@ -141,10 +147,10 @@ export function useSessionAgentRole({
      config is derived below, so a knob moved by hand takes the name away on its
      own. */
   const [selectionOverride, setSelectionOverride] = useAtom(
-    sessionAgentRoleSelectionAtomFamily(sessionId)
+    sessionAgentRoleSelectionAtomFamily(selectionScope ?? sessionId)
   );
   const [durableSnapshot, setDurableSnapshot] = useAtom(
-    sessionAgentRoleDurableSnapshotAtomFamily(sessionId)
+    sessionAgentRoleDurableSnapshotAtomFamily(selectionScope ?? sessionId)
   );
   const hydratedTurnKey = durableSourceTurnKey ?? null;
   const hydratedKnownTurnKeys = useMemo(

@@ -6,8 +6,12 @@ import { Provider, createStore } from 'jotai';
 import type { MessageQueueItem, SessionHistory, SessionId, WorkspaceId } from '@lody/shared';
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
-import { MessageQueueDisplay } from '@/components/sessions/message-queue';
+import {
+  MessageQueueDisplay,
+  type QueuedRunConfigSummary,
+} from '@/components/sessions/message-queue';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+import { UserAvatar } from '@/components/user-avatar';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 const storyCallerStyles = stylex.create({
   sheetOverride: {
@@ -111,8 +115,6 @@ const commonArgs = {
   onRemove: () => {},
   onReorder: () => {},
   onEditStart: () => {},
-  onEditCancel: () => {},
-  onEditSave: () => {},
   onSteer: () => {},
   showSteerAction: true,
 };
@@ -268,14 +270,128 @@ export const ScheduledOnlyMobile: Story = {
   parameters: { containerWidth: 'calc(100vw - 48px)' },
 };
 
+/** The first row is being edited in the composer: it keeps its place, dimmed and labelled. */
 export const EditingFirstItem: Story = {
   args: {
     ...commonArgs,
-    items: makeItems(3).map((item, index) => ({
-      ...item,
-      isEditing: index === 0,
-    })),
+    items: makeItems(3).map((item, index) => ({ ...item, isEditing: index === 0 })),
+    editingCid: 'cid-0',
   },
+};
+
+export const EditingFirstItemMobile: Story = {
+  args: { ...EditingFirstItem.args, roomy: true, footerPosition: 'inline' },
+  decorators: mobileDecorator,
+  parameters: { containerWidth: 'calc(100vw - 48px)' },
+};
+
+const PEOPLE: Record<string, { name: string }> = {
+  'user-1': { name: 'Mia Chen' },
+  'user-2': { name: 'Leo Park' },
+  'user-3': { name: 'Sam Rivera' },
+};
+
+/** The production avatar with a synthetic member (initials, no photo). */
+function StoryAvatar({ userId }: { userId?: string }) {
+  return <UserAvatar size="small" user={{ id: userId, name: PEOPLE[userId ?? '']?.name ?? '' }} />;
+}
+
+function makeTeamItems(): MessageQueueItem[] {
+  const senders = ['user-1', 'user-2', 'user-1', 'user-3'];
+  return makeItems(4).map((item, index) => {
+    const userId = senders[index]!;
+    return { ...item, userId, userName: PEOPLE[userId]!.name };
+  });
+}
+
+const teamArgs = {
+  ...commonArgs,
+  items: makeTeamItems(),
+  renderSenderAvatar: (item: MessageQueueItem) => <StoryAvatar userId={item.userId} />,
+};
+
+/** Several people queued here: every row carries its sender's face. */
+export const MultipleSenders: Story = { args: teamArgs };
+
+export const MultipleSendersMobile: Story = {
+  args: { ...teamArgs, roomy: true, footerPosition: 'inline' },
+  decorators: mobileDecorator,
+  parameters: { containerWidth: 'calc(100vw - 48px)' },
+};
+
+const runConfigs: Record<string, QueuedRunConfigSummary> = {
+  'cid-0': { agentLabel: 'Claude Code', modelLabel: 'Sonnet 4.5', reasoningLabel: 'Medium' },
+  'cid-1': {
+    agentLabel: 'Claude Code',
+    modelLabel: 'Opus 4.5',
+    reasoningLabel: 'High',
+    modeLabel: 'Ask before edits',
+    planOn: true,
+    differenceTag: 'Opus 4.5 · Plan',
+  },
+  'cid-2': {
+    agentLabel: 'Claude Code',
+    roleName: 'Reviewer',
+    modelLabel: 'Sonnet 4.5',
+    reasoningLabel: 'High',
+    differenceTag: 'Reviewer',
+  },
+  'cid-3': { agentLabel: 'Claude Code', modelLabel: 'Sonnet 4.5', reasoningLabel: 'Medium' },
+};
+const describeRunConfig = (item: MessageQueueItem) => runConfigs[item.$cid];
+
+/** Rows whose frozen run config differs from the composer's carry a short tag. */
+export const RunConfigDifferences: Story = {
+  args: { ...teamArgs, describeRunConfig },
+  parameters: { containerWidth: 620 },
+};
+
+/** Narrower than 520 px the tag is left out; the details still show it. */
+export const RunConfigDifferencesNarrow: Story = {
+  args: { ...teamArgs, describeRunConfig },
+  parameters: { containerWidth: 420 },
+};
+
+const openDetails = async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+  const rows = canvasElement.querySelectorAll<HTMLElement>('[data-message-queue-row]');
+  const row = rows[1]!;
+  const direct = row.querySelector<HTMLButtonElement>('[aria-label="Message details"]');
+  if (direct) {
+    await userEvent.click(direct);
+    return;
+  }
+  await userEvent.click(row.querySelector<HTMLButtonElement>('[aria-label="More"]')!);
+  const item = await within(document.body).findByRole('menuitem', { name: 'Message details' });
+  await userEvent.click(item);
+};
+
+const LONG_MESSAGE =
+  'Refactor the message queue to support priority ordering and cancellation tokens.\n\nKeep the existing drag order as the tie-breaker, and add tests for a cancelled head item while the agent is still running. Do not change the stored queue format.';
+
+/** The details popover: the full message, its sender and how it will run. */
+export const DetailsOpen: Story = {
+  args: {
+    ...teamArgs,
+    describeRunConfig,
+    items: teamArgs.items.map((item, index) =>
+      index === 1
+        ? {
+            ...item,
+            task: LONG_MESSAGE,
+            acpSessionConfig: { ...item.acpSessionConfig!, prompt: LONG_MESSAGE },
+          }
+        : item
+    ),
+  },
+  parameters: { containerWidth: 620 },
+  play: openDetails,
+};
+
+export const DetailsOpenMobile: Story = {
+  args: { ...DetailsOpen.args, roomy: true, footerPosition: 'inline' },
+  decorators: mobileDecorator,
+  parameters: { containerWidth: 'calc(100vw - 48px)' },
+  play: openDetails,
 };
 
 export const NativeSteerAllRows: Story = {
@@ -427,49 +543,38 @@ export const InactiveSession: Story = {
   },
 };
 
-/** Hold the first save acknowledgement while the user edits the next queued turn. */
-export const DeferredEditing: Story = {
-  args: { ...commonArgs, items: makeItems(2) },
-  render: function DeferredEditingStory(args) {
-    const [items, setItems] = useState(args.items);
-    return (
-      <MessageQueueDisplay
-        {...args}
-        items={items}
-        onEditStart={(item) => {
-          setItems((current) =>
-            current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: true } : row))
-          );
-        }}
-        onEditCancel={(item) => {
-          setItems((current) =>
-            current.map((row) => (row.$cid === item.$cid ? { ...row, isEditing: false } : row))
-          );
-        }}
-        onEditSave={async (item, task) => {
-          setItems((current) =>
-            current.map((row) =>
-              row.$cid === item.$cid
-                ? {
-                    ...row,
-                    task,
-                    isEditing: false,
-                    acpSessionConfig: { ...row.acpSessionConfig, prompt: task },
-                  }
-                : row
-            )
-          );
-          if (item.$cid === 'cid-0') {
-            await new Promise<void>((resolve) => {
-              window.addEventListener('storybook:release-queue-save', () => resolve(), {
-                once: true,
-              });
-            });
-          }
-        }}
-      />
-    );
-  },
+function editRecord(error?: string): PendingSessionSend {
+  return localRecord('turn-1', TASKS[1]!, {
+    queueReplace: { cid: 'cid-1' },
+    ...(error ? { error } : {}),
+    attachments: [
+      {
+        id: 'mock',
+        kind: 'image',
+        source: localImage,
+        name: 'mock.svg',
+        mimeType: 'image/svg+xml',
+        lastModified: 0,
+        progress: error ? 0 : 64,
+      },
+    ],
+  });
+}
+
+/** A saved edit with a new image: the row holds its place while the image uploads. */
+export const SavingEditWithAttachment: Story = {
+  args: { ...commonArgs, items: makeItems(3).map((item, i) => ({ ...item, isEditing: i === 1 })) },
+  decorators: [withLocalQueueRows([editRecord()])],
+  parameters: { containerWidth: 560 },
+};
+
+/** The new image failed: the row says why and offers retry or discarding the edit. */
+export const SavingEditFailed: Story = {
+  args: SavingEditWithAttachment.args,
+  decorators: [
+    withLocalQueueRows([editRecord("The image couldn't be uploaded (network_error). Try again.")]),
+  ],
+  parameters: { containerWidth: 560 },
 };
 
 /** The real disclosure keeps both recovery state and the total count visible. */
@@ -512,6 +617,7 @@ function OwnedQueueFixture({
   rowFooter?: boolean;
 }) {
   const [items, setItems] = useState(() => makeItems(count));
+  const [editingCid, setEditingCid] = useState<string | null>(null);
   const [result, setResult] = useState('Ready');
   useLayoutEffect(() => {
     if (scope !== 'root') return undefined;
@@ -558,19 +664,10 @@ function OwnedQueueFixture({
           setItems((rows) => rows.filter((row) => row.$cid !== cid));
           setResult(`Removed ${cid}`);
         }}
+        editingCid={editingCid}
         onEditStart={(item) => {
-          setItems((rows) => rows.map((row) => ({ ...row, isEditing: row.$cid === item.$cid })));
+          setEditingCid(item.$cid);
           setResult(`Editing ${item.$cid}`);
-        }}
-        onEditCancel={(item) => {
-          setItems((rows) => rows.map((row) => ({ ...row, isEditing: false })));
-          setResult(`Cancelled ${item.$cid}`);
-        }}
-        onEditSave={(item, task) => {
-          setItems((rows) =>
-            rows.map((row) => (row.$cid === item.$cid ? { ...row, task, isEditing: false } : row))
-          );
-          setResult(`Saved ${task}`);
         }}
         onReorder={(activeCid, overCid) => setResult(`Reordered ${activeCid} ${overCid}`)}
         onSteer={(item) => setResult(`Steered ${item.$cid}`)}

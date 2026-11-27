@@ -4,7 +4,8 @@
 
 Read the parent [sessions AGENTS.md](../AGENTS.md) first. This scope renders the
 queued-turn list (`message-queue-display.tsx`, `message-queue-row.tsx`,
-`queued-image-preview.tsx`, `use-message-queue-editing.ts`) that
+`queued-message-details.tsx`, `queued-image-preview.tsx`) and the composer edit of a
+queued turn (`queued-message-edit.ts`, `use-queued-message-composer-edit.ts`) that
 `session-chat-interface.tsx` mounts through the composer info bar's queue slot. Submission routing into the queue lives in
 `../session-message-submit-route.ts` and is described in
 [.agents/docs/sessions-live-status.md](../../../../../../.agents/docs/sessions-live-status.md).
@@ -28,7 +29,7 @@ Rows are inset tiles without hairline dividers; desktop rows share a 16 px index
 gutter, mobile rows drop it. Actions always end the row and stay on the message line, because a separate action
 line looked detached and cost a full row per item. Mobile rows, and any sheet
 narrower than 520 px, fold them into one More button (a real 40 × 36 px box on 36 px touch rows)
-whose menu preserves Steer, move-to-top, edit and delete when applicable. One-line
+whose menu preserves Steer, move-to-top, details, edit and delete when applicable. One-line
 previews use ellipsis, not `display: -webkit-box`: that display ignores the clamp
 inside the touch grid on iOS and the sheet paints the extra height black. The
 scroll fade is a mask on a non-scrolling wrapper around the scroller. Never put
@@ -50,16 +51,24 @@ falling back to a cloud transfer. Upload progress is subscribed only inside the 
 reads `useHasPendingQueueRecords`. Decisions: [local queue rows](../../../../../../.agents/notes/implemented/feature/2026-09-28-local-queue-pending-rows.md),
 [in-memory held sends](../../../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).
 
-Only the latest edit operation may change the local editor or pending state;
-an earlier blur-save acknowledgement must preserve the next row's draft and focus.
-Starting, saving and cancelling an edit complete after the local write, including
-for the first row; remote synchronization must never gate the editor or confirmation.
-[Decision](../../../../../../.agents/notes/implemented/bug-fix/2026-10-13-queued-edit-operation-ownership.md).
+A queued turn is edited in the composer, never inline in its row. Starting writes
+only `isEditing`/`editingStartedAt`; content and run config are written once on Save
+through `saveMessageQueueEdit` (the shared admission with `queueReplace`), replacing
+the row under its message id. Renew the lock only while the edit is on screen; a
+held save renews it from the runtime until it lands. A vanished row turns the edit
+into a draft. Untouched saves cancel; real changes make the editor the author and
+keep a frozen Role revision when the run config is unchanged. Local writes never
+wait for remote synchronization. One row is edited at a time, and the edited row
+offers no drag, steer, move or delete.
+[Decision](../../../../../../.agents/notes/implemented/feature/2026-11-27-queued-message-composer-edit.md).
+
+Details show the full message and frozen run config. Avatars appear only when
+another member queued here; the difference tag only outside phones and sheets
+narrower than 520 px.
 
 The queue disclosure is local display state, initially expanded, never shared or
-persisted. Keep its editing rows mounted while folded; focusing the disclosure must
-not commit or discard a row draft. Pressing its header therefore moves focus to the
-header, which bypasses ordinary blur-save and keeps an unfinished edit as a draft. Folded summaries retain pending/failed-send awareness. Intent:
+persisted. Folding never ends a composer edit. Pressing its header moves focus to
+the header. Folded summaries retain pending/failed-send awareness. Intent:
 [queue presentation](../../../../../../specs/message-queue.md).
 
 Production passes a separate `scheduledItems` view model; never fake a

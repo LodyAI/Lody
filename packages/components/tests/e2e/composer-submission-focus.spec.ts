@@ -374,60 +374,6 @@ test('full-width editing keeps the editor aligned with the message metadata', as
   }
 });
 
-test('editing a queued message places the caret at the end without moving it while typing', async ({
-  page,
-}) => {
-  await page.goto('/iframe.html?id=sessions-messagequeuedisplay--single-item&viewMode=story');
-  await page.getByRole('button', { name: 'Edit queued message', exact: true }).click();
-  const input = page.getByRole('textbox', { name: 'Edit queued message', exact: true });
-  await expect(input).toBeFocused();
-  const original = await input.inputValue();
-  await page.keyboard.type(' with more detail');
-  await expect(input).toHaveValue(`${original} with more detail`);
-  await input.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(0, 0));
-  await page.keyboard.type('Updated: ');
-  await expect(input).toHaveValue(`Updated: ${original} with more detail`);
-});
-
-test.describe('queued editor footer', () => {
-  test.use({ hasTouch: true });
-
-  for (const pointer of ['mouse', 'touch'] as const) {
-    test(`${pointer} on footer blank space moves the caret to the end; confirm and outside clicks still finish`, async ({
-      page,
-    }) => {
-      await page.goto('/iframe.html?id=sessions-messagequeuedisplay--single-item&viewMode=story');
-      const edit = page.getByRole('button', { name: 'Edit queued message', exact: true });
-      await edit.click();
-      const input = page.getByRole('textbox', { name: 'Edit queued message', exact: true });
-      const original = 'First line\nSecond line\nThird line\nFourth line\nLast line';
-      await input.fill(original);
-      await input.evaluate((node: HTMLTextAreaElement) => {
-        node.setSelectionRange(0, 0);
-        node.scrollTop = 0;
-      });
-      const confirm = page.getByRole('button', { name: 'Save changes (Enter)', exact: true });
-      const bounds = await confirm.locator('..').boundingBox();
-      expect(bounds).not.toBeNull();
-      const x = bounds!.x + bounds!.width / 2;
-      const y = bounds!.y + bounds!.height - 2;
-      if (pointer === 'touch') await page.touchscreen.tap(x, y);
-      else await page.mouse.click(x, y);
-      await expect(input).toBeFocused();
-      expect(await input.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
-      await page.keyboard.type(' with more detail');
-      await expect(input).toHaveValue(`${original} with more detail`);
-      await confirm.click();
-      await expect(input).toHaveCount(0);
-
-      await edit.click();
-      await input.fill('Finish on an outside click');
-      await page.getByText('Composer placeholder', { exact: true }).click();
-      await expect(input).toHaveCount(0);
-    });
-  }
-});
-
 for (const state of ['running-dark', 'idle-dark'] as const) {
   test(`desktop ${state} composer bottom space focuses the prompt`, async ({ page }) => {
     await page.goto(`/iframe.html?id=sessions-sessionchatinputarea--${state}&viewMode=story`);
@@ -752,31 +698,6 @@ test.describe('composer selector leading column', () => {
       }
     });
   }
-});
-
-test('a previous queued edit acknowledgement preserves the next edit and its focus', async ({
-  page,
-}) => {
-  await page.goto('/iframe.html?id=sessions-messagequeuedisplay--deferred-editing&viewMode=story');
-  await page.getByRole('button', { name: 'Edit queued message', exact: true }).first().click();
-  const input = page.getByRole('textbox', { name: 'Edit queued message', exact: true });
-  await input.fill('Refactor the queue; preserve existing ordering.');
-  await page.getByRole('button', { name: 'Edit queued message', exact: true }).click();
-  await expect(input).toHaveValue(
-    'Add tests for the Loro mirror schema migrations around session history'
-  );
-  await input.fill('Add regression tests for message ordering and cancellation.');
-  await page.evaluate(() => window.dispatchEvent(new Event('storybook:release-queue-save')));
-  await expect(input).toHaveValue('Add regression tests for message ordering and cancellation.');
-  await expect(input).toBeFocused();
-  await input.press('Enter');
-  await expect(input).toHaveCount(0);
-  await expect(
-    page.getByText('Refactor the queue; preserve existing ordering.', { exact: true })
-  ).toBeVisible();
-  await expect(
-    page.getByText('Add regression tests for message ordering and cancellation.', { exact: true })
-  ).toBeVisible();
 });
 
 test.describe('question request recovery', () => {

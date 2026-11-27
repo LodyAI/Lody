@@ -1,6 +1,7 @@
 # Preserve the next queued-message edit after an earlier acknowledgement
 
 Status: implemented
+Archived: 2026-11-27
 Translation: current
 
 PR: https://github.com/LodyAI/Lody/pull/1533
@@ -34,12 +35,12 @@ disable the editor and confirmation during a stalled connection. Local write
 failures still preserve the draft. Operation ownership remains necessary because
 local writes can also complete after another edit starts.
 
-This complements the [editor focus decision](2026-09-12-composer-click-focus.md)
+This complements the [editor focus decision](../../implemented/bug-fix/2026-09-12-composer-click-focus.md)
 without changing its caret or footer behavior.
 
 ## Evidence and limits
 
-- [Editing owner](../../../../packages/components/src/components/sessions/message-queue/use-message-queue-editing.ts)
+- Editing owner (`use-message-queue-editing.ts`, since removed)
   and [production callbacks](../../../../packages/components/src/components/sessions/session-chat-interface.tsx).
 - [Queue component tests](../../../../packages/components/tests/message-queue-row-editing.test.tsx)
   hold acknowledgements explicitly, including completion while the next start is pending.

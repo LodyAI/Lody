@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createMemoryHistory,
   createRootRoute,
@@ -25,7 +25,9 @@ import type {
   AgentConfigId,
   MachineId,
   MachineViewMeta,
+  MessageQueueItem,
   SessionId,
+  SessionInputBlock,
   SessionMeta,
   WorkspaceId,
 } from '@lody/shared';
@@ -35,8 +37,10 @@ import { machineMetaCacheAtom } from '@/atoms/doc-meta';
 import { authTokenAtom } from '@/atoms/runtime';
 import {
   SessionChatInputArea,
+  type SessionChatInputAreaHandle,
   type SessionChatInputAreaProps,
 } from '@/components/sessions/session-chat-input-area';
+import { MessageQueueDisplay } from '@/components/sessions/message-queue';
 const migrationStyles = stylex.create({
   conversationCard: {
     marginInline: 'auto',
@@ -407,3 +411,181 @@ export const UploadingAttachmentsPendingAcceptance: Story = {
 export const Archived: Story = {
   args: { isArchived: true },
 };
+
+const QUEUE_EDIT_MODELS = [
+  { value: 'sonnet', label: 'Sonnet 4.5' },
+  { value: 'opus', label: 'Opus 4.5' },
+];
+const QUEUE_EDIT_MODES = [
+  { value: 'default', label: 'Default' },
+  { value: 'plan', label: 'Plan' },
+];
+
+function queueEditItems(): MessageQueueItem[] {
+  const tasks = [
+    'Run the full test suite after the refactor lands',
+    'Refactor the message queue to support priority ordering and cancellation tokens',
+    'Write release notes for the queue changes',
+  ];
+  return tasks.map((task, index) => ({
+    $cid: `edit-cid-${index}`,
+    task,
+    userId: 'user-storybook',
+    userName: 'Storybook user',
+    userTurnId: `edit-turn-${index}`,
+    timestamp: '2026-11-27T09:00:00.000Z',
+    acpSessionConfig: {
+      prompt: task,
+      cliType: 'builtin',
+      agentType: 'codex',
+      modelId: index === 1 ? 'opus' : 'sonnet',
+      modeId: index === 1 ? 'plan' : 'default',
+    },
+  })) as unknown as MessageQueueItem[];
+}
+
+/**
+ * The real queue on the real composer. Editing moves the row's text into the
+ * composer, which turns Send into Save and adds Cancel; the row stays in place,
+ * dimmed, until the edit is saved or cancelled (Esc).
+ */
+function QueueEditShell({ startEditing }: { startEditing: boolean }) {
+  const store = useMemo(() => createStoryStore(), []);
+  const isMobile = useIsMobile();
+  const { resolvedTheme } = useTheme();
+  const [items, setItems] = useState(queueEditItems);
+  const [editing, setEditing] = useState<{
+    cid: string;
+    kept: SessionInputBlock[];
+    /** The Session's own selection, back once the edit ends. */
+    restore: { modelId: string; modeId: string };
+  } | null>(null);
+  const [modelId, setModelId] = useState('sonnet');
+  const [modeId, setModeId] = useState('default');
+  const composerRef = useRef<SessionChatInputAreaHandle>(null);
+  const session = useMemo<SessionMeta>(
+    () => ({
+      id: 'session-storybook-queue-edit' as SessionId,
+      machineId: STORY_MACHINE_ID,
+      createdAt: '2026-04-10T00:00:00.000Z',
+      title: 'Queue edit',
+      userId: 'user-storybook',
+      status: { type: 'running' },
+      cliType: 'builtin',
+      agentType: 'codex',
+      agentConfigId: STORY_AGENT_CONFIG_ID,
+    }),
+    []
+  );
+  const begin = (item: MessageQueueItem) => {
+    const config = item.acpSessionConfig;
+    setEditing({ cid: item.$cid, kept: [], restore: { modelId, modeId } });
+    setModelId(config?.modelId ?? 'sonnet');
+    setModeId(config?.modeId ?? 'default');
+    composerRef.current?.beginQueueEdit(config?.prompt ?? item.task);
+  };
+  const started = useRef(false);
+  useEffect(() => {
+    if (!startEditing || started.current) return;
+    started.current = true;
+    begin(items[1]!);
+  });
+  const position = editing ? items.findIndex((item) => item.$cid === editing.cid) + 1 : 0;
+  return (
+    <PlatformContext.Provider value={storyPlatform}>
+      <Provider store={store}>
+        <div {...stylex.props(storyLayout.frame)}>
+          <div {...stylex.props(migrationStyles.conversationCard)}>
+            <div {...stylex.props(storyLayout.frame2)} />
+            <div style={{ marginInline: 12 }}>
+              <MessageQueueDisplay
+                sessionId={session.id}
+                items={items}
+                editingCid={editing?.cid ?? null}
+                onEditStart={begin}
+                onFocusEdit={() => composerRef.current?.focusInput()}
+                onRemove={(cid) => setItems((rows) => rows.filter((row) => row.$cid !== cid))}
+                onReorder={() => {}}
+                onSteer={() => {}}
+                showSteerAction
+                roomy={isMobile}
+                footerPosition={isMobile ? 'inline' : 'below'}
+              />
+            </div>
+            <SessionChatInputArea
+              ref={composerRef}
+              session={session}
+              queueEdit={
+                editing
+                  ? {
+                      position,
+                      keptBlocks: editing.kept,
+                      onRemoveKeptBlock: (index) =>
+                        setEditing((current) =>
+                          current
+                            ? { ...current, kept: current.kept.filter((_, i) => i !== index) }
+                            : current
+                        ),
+                    }
+                  : null
+              }
+              onQueueEditCancel={() => {
+                if (editing) {
+                  setModelId(editing.restore.modelId);
+                  setModeId(editing.restore.modeId);
+                }
+                setEditing(null);
+              }}
+              sessionLocalProjectRootPath={null}
+              isMachineRemoved={false}
+              isAgentBusy
+              canStopAgent
+              isDark={resolvedTheme === 'dark'}
+              isEmptyConversation={false}
+              selectedModeId={modeId}
+              selectedModelId={modelId}
+              modeOptions={QUEUE_EDIT_MODES}
+              modelOptions={QUEUE_EDIT_MODELS}
+              availableCommands={[]}
+              onModeChange={setModeId}
+              onModelChange={setModelId}
+              onSendMessage={async (blocks) => {
+                if (!editing) return true;
+                const text = blocks
+                  .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+                  .join('\n');
+                setItems((rows) =>
+                  rows.map((row) =>
+                    row.$cid === editing.cid
+                      ? {
+                          ...row,
+                          task: text,
+                          acpSessionConfig: {
+                            ...row.acpSessionConfig!,
+                            prompt: text,
+                            modelId,
+                            modeId,
+                          },
+                        }
+                      : row
+                  )
+                );
+                setModelId(editing.restore.modelId);
+                setModeId(editing.restore.modeId);
+                setEditing(null);
+                return true;
+              }}
+              onStop={() => {}}
+              onRemoveQueueItem={async () => {}}
+              initialInputText="My unsent draft stays safe while I edit."
+              disableImageUpload
+            />
+          </div>
+        </div>
+      </Provider>
+    </PlatformContext.Provider>
+  );
+}
+
+export const QueueEditIdle: Story = { render: () => <QueueEditShell startEditing={false} /> };
+export const QueueEditInProgress: Story = { render: () => <QueueEditShell startEditing /> };

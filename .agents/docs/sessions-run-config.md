@@ -139,7 +139,10 @@ this page is the full text of the rules summarised there.
   document is ready. Keep the known logical Turn lineage as its supersession
   fence: queue promotion, deletion, reordering, and older history backfill are
   not newer Turns; consume a draft only when the authoritative current Turn
-  moves to a previously unseen key. Role
+  moves to a previously unseen key. A composer edit of a queued Turn selects in
+  its own scope keyed by the row (run-config draft target and Role choice),
+  seeded from the row's frozen values, so the Session's unsent choices survive
+  the edit ([queue edit](../../specs/message-queue.md#editing-in-the-composer)). Role
   selection and Turn submission stay disabled until the Session document is
   ready because its transient provider defaults are not a valid run config.
   Programmatic Turns inherit the current

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
-import { selectPendingQueueSends } from '@/lib/session-send-status';
+import { selectPendingQueueEdits, selectPendingQueueSends } from '@/lib/session-send-status';
 import { toast } from '@/lib/toast';
 
 const EMPTY: readonly PendingSessionSend[] = [];
@@ -37,6 +37,27 @@ export function usePendingQueueRecords(
     () => selectPendingQueueSends(sends, sessionId, queuedTurnIds),
     [queuedTurnIds, sends, sessionId]
   );
+}
+
+const EMPTY_EDITS: ReadonlyMap<string, PendingSessionSend> = new Map();
+
+/**
+ * Saved edits still preparing their new attachments, keyed by the row they
+ * replace. The row keeps its place and shows their progress or failure.
+ */
+export function usePendingQueueEdits(
+  sessionId: SessionId
+): ReadonlyMap<string, PendingSessionSend> {
+  const pending = useAtomValue(activeWorkspaceRuntimeAtom)?.pendingSends;
+  const sends = useSyncExternalStore(
+    pending?.subscribe ?? emptySubscribe,
+    pending?.getSnapshot ?? emptySnapshot,
+    emptySnapshot
+  );
+  return useMemo(() => {
+    const edits = selectPendingQueueEdits(sends, sessionId);
+    return edits.size > 0 ? edits : EMPTY_EDITS;
+  }, [sends, sessionId]);
 }
 
 /**

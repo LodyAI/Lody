@@ -143,6 +143,17 @@ function fixture(encrypted = false, token: string | null = 'token') {
       appendSessionTurn: async (sessionId: SessionId, entry: SessionHistory) => {
         await open(sessionId).sessionData.commands.appendTurn(entry);
       },
+      updateSessionMessage: async (
+        sessionId: SessionId,
+        cid: string,
+        patch: Record<string, unknown>
+      ) => {
+        open(sessionId).mirror.setState((draft: { mq?: Array<Record<string, unknown>> }) => {
+          draft.mq = (draft.mq ?? []).map((item) =>
+            item.$cid === cid ? { ...item, ...patch, $cid: cid } : item
+          );
+        });
+      },
     },
     requestSessionDispatchTurn: async (_machine: MachineId, args: { userTurnId: string }) => {
       dispatched.push(args.userTurnId);
@@ -185,7 +196,13 @@ function fixture(encrypted = false, token: string | null = 'token') {
       dispatchListeners.add(check);
       check();
     });
-  return { runtime, pending, turns, metas, delivered };
+  const queue = (sessionId = SESSION) =>
+    (open(sessionId).mirror.getState() as { mq?: Array<Record<string, unknown>> }).mq ?? [];
+  const seedQueue = (rows: Array<Record<string, unknown>>, sessionId = SESSION) =>
+    open(sessionId).mirror.setState((draft: { mq?: Array<Record<string, unknown>> }) => {
+      draft.mq = rows;
+    });
+  return { runtime, pending, turns, metas, delivered, queue, seedQueue };
 }
 
 function until(
@@ -775,4 +792,95 @@ it('rejects a remote attachment before consuming the draft when cloud admission 
   } finally {
     remove();
   }
+});
+
+const queuedRow = (overrides: Record<string, unknown> = {}) => ({
+  $cid: 'row-1',
+  task: 'Old text',
+  userId: 'author',
+  userName: 'Author',
+  userTurnId: 'turn-1',
+  timestamp: '2026-01-01T00:00:00Z',
+  isEditing: true,
+  editingStartedAt: 1,
+  acpSessionConfig: { prompt: 'Old text', cliType: 'builtin', agentType: 'codex' },
+  ...overrides,
+});
+const editSend = () => {
+  const base = send('turn-1', ['mock.png']);
+  return {
+    ...base,
+    // Production builds the turn from the same queued config it replaces.
+    entry: {
+      ...base.entry,
+      inputConfig: { ...base.entry.inputConfig, inputBlocks: [{ type: 'text', text: 'New text' }] },
+    } as SessionHistory,
+    delivery: { kind: 'queue' as const },
+    queueReplace: { cid: 'row-1' },
+    queue: {
+      userTurnId: 'turn-1',
+      task: 'New text',
+      userId: 'editor',
+      userName: 'Editor',
+      isEditing: false,
+      editingStartedAt: undefined,
+      acpSessionConfig: {
+        prompt: 'New text',
+        cliType: 'builtin',
+        agentType: 'codex',
+        inputBlocks: [{ type: 'text', text: 'New text' }],
+      },
+    },
+  };
+};
+
+it('holds a queued edit with a new image on its row, then replaces that row in place', async () => {
+  const f = fixture();
+  f.seedQueue([queuedRow(), queuedRow({ $cid: 'row-2', userTurnId: 'turn-2', task: 'Next' })]);
+  const started = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<void>();
+  upload.run = async (file) => {
+    started.resolve();
+    await finish.promise;
+    return ready(file);
+  };
+  f.pending.enqueue(editSend());
+  await started.promise;
+  // Until the image is ready the row keeps its old content and its lock.
+  expect(f.queue()[0]).toMatchObject({ $cid: 'row-1', task: 'Old text', isEditing: true });
+  finish.resolve();
+  await until(f.pending, (sends) => sends.length === 0);
+  const rows = f.queue();
+  expect(rows.map((row) => row.$cid)).toEqual(['row-1', 'row-2']);
+  expect(rows[0]).toMatchObject({
+    userTurnId: 'turn-1',
+    task: 'New text',
+    userId: 'editor',
+    userName: 'Editor',
+    isEditing: false,
+  });
+  expect((rows[0]!.acpSessionConfig as { inputBlocks: unknown[] }).inputBlocks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'image', imageId: 'mock.png' }),
+      expect.objectContaining({ type: 'text', text: 'New text' }),
+    ])
+  );
+  // An edit never appends a turn or a second row.
+  expect(f.turns()).toEqual([]);
+});
+
+it('fails a held edit visibly when its row was already sent or removed', async () => {
+  const f = fixture();
+  f.seedQueue([queuedRow()]);
+  const finish = Promise.withResolvers<void>();
+  upload.run = async (file) => {
+    await finish.promise;
+    return ready(file);
+  };
+  f.pending.enqueue(editSend());
+  f.seedQueue([]);
+  finish.resolve();
+  const send = await failed(f.pending, 'turn-1');
+  expect(send.error).toBe('This message was already sent or removed, so the edit was not saved.');
+  expect(f.queue()).toEqual([]);
 });

@@ -398,6 +398,96 @@ describe('SessionChatInputArea submission feedback', () => {
     return composerIn(container!);
   }
 
+  it('edits a queued message in the composer and hands the stashed draft back', async () => {
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    let cancelled = 0;
+    const queueEdit = { position: 2, keptBlocks: [], onRemoveKeptBlock: () => undefined };
+    const props = (editing: boolean) => ({
+      composerRef,
+      onSendMessage: async (blocks: SessionInputBlock[]) => {
+        submitted.push(blocks);
+        return true;
+      },
+      overrides: {
+        initialInputText: 'My own unsent draft',
+        queueEdit: editing ? queueEdit : null,
+        onQueueEditCancel: () => {
+          cancelled += 1;
+        },
+      },
+    });
+    const sessionId = 'queue-edit-composer';
+    let textarea = await renderComposer({ sessionId, ...props(false) });
+    expect(textarea.value).toBe('My own unsent draft');
+
+    // Start: the draft steps aside, the row's text arrives, Send becomes Save + Cancel.
+    await act(async () => composerRef.current!.beginQueueEdit('Queued text to fix'));
+    textarea = await renderComposer({ sessionId, ...props(true) });
+    expect(textarea.value).toBe('Queued text to fix');
+    expect(container!.querySelector('[data-queue-edit-banner]')?.textContent).toContain(
+      'Editing queued message 2'
+    );
+    expect(container!.querySelector('button[aria-label="Send"]')).toBeNull();
+    expect(container!.querySelector('[data-testid="composer-queue-edit-save"]')).toBeTruthy();
+
+    // Escape cancels without sending and restores the draft.
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      );
+    });
+    expect(cancelled).toBe(1);
+    expect(submitted).toEqual([]);
+    textarea = await renderComposer({ sessionId, ...props(false) });
+    expect(textarea.value).toBe('My own unsent draft');
+
+    // Save: the edited text goes to the host, then the draft comes back.
+    await act(async () => composerRef.current!.beginQueueEdit('Queued text to fix'));
+    textarea = await renderComposer({ sessionId, ...props(true) });
+    await act(async () => textarea.edit('Queued text, fixed', 'Queued text, fixed'.length));
+    await act(async () => {
+      container!
+        .querySelector<HTMLButtonElement>('[data-testid="composer-queue-edit-save"]')!
+        .click();
+    });
+    expect(submitted).toEqual([
+      [expect.objectContaining({ type: 'text', text: 'Queued text, fixed' })],
+    ]);
+    textarea = await renderComposer({ sessionId, ...props(false) });
+    expect(textarea.value).toBe('My own unsent draft');
+  });
+
+  it('closes an open menu before Escape ends a queued edit', async () => {
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    let cancelled = 0;
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async () => true,
+      overrides: {
+        initialInputText: '',
+        queueEdit: { position: 1, keptBlocks: [], onRemoveKeptBlock: () => undefined },
+        onQueueEditCancel: () => {
+          cancelled += 1;
+        },
+      },
+    });
+    const claimed = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
+    claimed.preventDefault();
+    await act(async () => textarea.dispatchEvent(claimed));
+    expect(cancelled).toBe(0);
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      );
+    });
+    expect(cancelled).toBe(1);
+  });
+
   it('retires the shown prompt suggestion once a sent message is accepted', async () => {
     const store = getDefaultStore();
     let publish: ((text: string | null) => void) | undefined;

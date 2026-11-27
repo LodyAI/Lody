@@ -10,12 +10,15 @@ export { PendingQueueRow } from './pending-queue-row';
 export {
   useHasPendingQueueRecords,
   usePendingQueueActions,
+  usePendingQueueEdits,
   usePendingQueueRecords,
 } from './use-pending-queue-records';
 export type { QueuedImageBlock } from './queued-image-preview';
+export { QueuedMessageDetails, type QueuedRunConfigSummary } from './queued-message-details';
 export {
-  useMessageQueueEditing,
-  getEditableTaskText,
-  type MessageQueueEditing,
-  type MessageQueueEditingCallbacks,
-} from './use-message-queue-editing';
+  beginQueuedMessageEdit,
+  queuedMessageEditAtomFamily,
+  queuedRunConfigOf,
+  resolveQueuedMessageEdit,
+  type QueuedMessageEditState,
+} from './queued-message-edit';
