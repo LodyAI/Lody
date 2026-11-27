@@ -924,6 +924,37 @@ describe('useOrganization list recovery', () => {
     expect(latestOrganizationState?.activeOrganization?.id).toBe('encrypted-a');
   });
 
+  it('ignores null entries in ordinary and encrypted organization lists without throwing', async () => {
+    const ordinaryA = createOrganization('ordinary-a', 'ordinary-a', 'Ordinary A');
+    organizationMocks.encryptedWorkspaces = [null];
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useListOrganizations: () => ({
+        data: [null, ordinaryA],
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: ordinaryA,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    const store = createStore();
+    await act(async () => {
+      if (!container) {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+      }
+      root?.render(createElement(TestApp, { targetSlug: 'ordinary-a', renderVersion: 0, store }));
+    });
+    expect(latestOrganizationState?.organizations?.map((org) => org.id)).toEqual(['ordinary-a']);
+  });
+
   it('drops null and malformed items from organization lists without crashing render', async () => {
     const validOrg = createOrganization('workspace-valid', 'valid-workspace', 'Valid Workspace');
     organizationMocks.authClient = {
@@ -950,7 +981,11 @@ describe('useOrganization list recovery', () => {
         root = createRoot(container);
       }
       root?.render(
-        createElement(TestApp, { targetSlug: 'valid-workspace', renderVersion: 1, store: localStore })
+        createElement(TestApp, {
+          targetSlug: 'valid-workspace',
+          renderVersion: 1,
+          store: localStore,
+        })
       );
     });
     expect(latestOrganizationState?.organizations).toEqual([validOrg]);
@@ -984,7 +1019,11 @@ describe('useOrganization list recovery', () => {
         root = createRoot(container);
       }
       root?.render(
-        createElement(TestApp, { targetSlug: 'valid-workspace', renderVersion: 1, store: localStore })
+        createElement(TestApp, {
+          targetSlug: 'valid-workspace',
+          renderVersion: 1,
+          store: localStore,
+        })
       );
     });
     expect(latestOrganizationState?.activeOrganization).toBeNull();
@@ -993,6 +1032,51 @@ describe('useOrganization list recovery', () => {
 });
 
 describe('runtime external boundary decoding across auth, cloud, and IPC', () => {
+  it('preserves verified account id when display name is empty (e.g. Apple Sign-In) and still fails closed without account id', async () => {
+    const { safeNormalizeCurrentUserFromSessionUser } = await import('../src/lib/current-user');
+
+    expect(
+      safeNormalizeCurrentUserFromSessionUser({
+        id: 'user-apple-1',
+        email: 'apple.user@privaterelay.appleid.com',
+        name: '',
+      })
+    ).toEqual({
+      id: 'user-apple-1',
+      email: 'apple.user@privaterelay.appleid.com',
+      name: 'apple.user',
+      image: undefined,
+    });
+
+    expect(
+      safeNormalizeCurrentUserFromSessionUser({
+        id: 'user-apple-2',
+        email: 'member@example.com',
+        name: '   ',
+      })
+    ).toEqual({
+      id: 'user-apple-2',
+      email: 'member@example.com',
+      name: 'member',
+      image: undefined,
+    });
+
+    expect(
+      safeNormalizeCurrentUserFromSessionUser({
+        id: '',
+        email: 'missing-id@example.com',
+        name: 'Has Name',
+      })
+    ).toBeNull();
+
+    expect(
+      safeNormalizeCurrentUserFromSessionUser({
+        email: 'no-id@example.com',
+        name: 'Has Name',
+      })
+    ).toBeNull();
+  });
+
   it('filters null organization items and rejects malformed single objects in cloudOperations decoders', async () => {
     const { cloudOperations } = await import('../src/lib/cloud-api-operations');
 

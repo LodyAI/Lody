@@ -144,6 +144,16 @@ const styles = stylex.create({
     color: colors.label,
     fontVariantNumeric: 'tabular-nums',
   },
+  priceStrike: {
+    fontSize: '1.125em',
+    color: colors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  tabSaveTag: {
+    marginLeft: space[1.5],
+    fontSize: '11px',
+    color: colors.accent,
+  },
   priceUnit: { fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   action: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[2] },
   perks: {
@@ -648,6 +658,26 @@ export function BillingSettingsView({
     (canScheduleAfterGift || !referralOffer || effectivePromoPercent > referralPercent);
   const showReferralOffer =
     Boolean(referralOffer) && !selectedOfferKey && !canScheduleAfterGift && !showPromoOffer;
+  const activeFirstDiscountPercent = showPromoOffer
+    ? effectivePromoPercent
+    : showReferralOffer
+      ? (referralOffer?.policy?.discountPercent ?? 10)
+      : 0;
+  const regularPerSeatMonthPrice = interval === 'year' ? yearlyPerMonthPrice : monthlyPrice;
+  const discountedPerSeatMonthPrice =
+    activeFirstDiscountPercent > 0
+      ? formatUsd(
+          interval === 'year'
+            ? Math.round(
+                Math.round(
+                  (overview.pricing.yearlyAmountCents * (100 - activeFirstDiscountPercent)) / 100
+                ) / 12
+              )
+            : Math.round(
+                (overview.pricing.monthlyAmountCents * (100 - activeFirstDiscountPercent)) / 100
+              )
+        )
+      : null;
   // Checkout takes one discount: credit pays toward a first payment with no other offer.
   // An open Checkout already holds its credit, so the notice is only for a new one.
   const firstPaymentCents =
@@ -884,10 +914,12 @@ export function BillingSettingsView({
                           i18n.language
                         );
                         const offerText = t(
-                          'referral.offerBadge',
+                          'billing.promoYearlyOfferBadge',
                           discountBadgeValues(promoOffer!.upgradeToYearlyDiscountPercent!)
                         );
-                        return customUpgradeName ? `${customUpgradeName} · ${offerText}` : offerText;
+                        return customUpgradeName
+                          ? `${customUpgradeName} · ${offerText}`
+                          : offerText;
                       })()}
                     </Badge>
                   ) : null}
@@ -1032,7 +1064,12 @@ export function BillingSettingsView({
               ) : (
                 <div {...stylex.props(styles.strip)}>
                   <Tabs.List>
-                    <Tabs.Tab value="year">{t('billing.yearly')}</Tabs.Tab>
+                    <Tabs.Tab value="year">
+                      {t('billing.yearly')}
+                      <span {...stylex.props(styles.tabSaveTag)}>
+                        {t('billing.yearlySaveBadge')}
+                      </span>
+                    </Tabs.Tab>
                     <Tabs.Tab value="month">{t('billing.monthly')}</Tabs.Tab>
                   </Tabs.List>
                 </div>
@@ -1040,8 +1077,11 @@ export function BillingSettingsView({
               <Tabs.Panel value={interval} className={stylex.props(styles.pricePanel).className}>
                 <div {...stylex.props(styles.price)}>
                   <span {...stylex.props(styles.priceValue)}>
-                    {interval === 'year' ? yearlyPerMonthPrice : monthlyPrice}
+                    {discountedPerSeatMonthPrice ?? regularPerSeatMonthPrice}
                   </span>
+                  {discountedPerSeatMonthPrice ? (
+                    <s {...stylex.props(styles.priceStrike)}>{regularPerSeatMonthPrice}</s>
+                  ) : null}
                   <span {...stylex.props(styles.priceUnit)}>{t('billing.perSeatMonth')}</span>
                   {selectedOfferLabel ? <Badge>{selectedOfferLabel}</Badge> : null}
                 </div>

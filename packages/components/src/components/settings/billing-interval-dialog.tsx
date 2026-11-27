@@ -98,7 +98,7 @@ export function BillingIntervalDialog({
         preview.promoKind === 'campaign_once' && preview.promoDiscountPercent
           ? customPromoName
             ? `${customPromoName} (${t(
-                'referral.offerBadge',
+                'billing.promoYearlyOfferBadge',
                 discountBadgeValues(preview.promoDiscountPercent)
               )})`
             : t(

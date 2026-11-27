@@ -237,7 +237,7 @@ it('discloses one-time upgrade discount on the net upgrade amount and standard r
       })
     )
   );
-  expect(document.body.textContent).toContain('Promotional discount (20% off)');
+  expect(document.body.textContent).toContain('Promotional discount (extra 20% off yearly)');
   expect(document.body.textContent).toContain('-$18.20');
   expect(document.body.textContent).toContain('$72.80');
   expect(document.body.textContent).toContain('at the standard rate ($96.00/year)');
@@ -268,5 +268,5 @@ it('discloses one-time upgrade discount on the net upgrade amount and standard r
       })
     )
   );
-  expect(document.body.textContent).toContain('Thanksgiving Special (20% off)');
+  expect(document.body.textContent).toContain('Thanksgiving Special (Extra 20% off yearly)');
 });

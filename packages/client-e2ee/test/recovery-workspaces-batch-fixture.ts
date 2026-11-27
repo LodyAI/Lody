@@ -69,6 +69,7 @@ let loseAppendReply = false;
 let lastBeginRequestHex: string | null = null;
 let emptyMailbox = false;
 let historyReads = 0;
+let entryReads = 0;
 let stagingReads = 0;
 let inlineAppendHistory: 'none' | 'contiguous' | 'gap' = 'none';
 let mailboxFetches: Array<{ workspaceId: string; recipient: string; kind?: string }> = [];
@@ -149,7 +150,15 @@ async function server(path: string, args: Record<string, unknown>) {
     entries.set(entry.entryId, entry);
     return { ok: true };
   }
-  if (path === 'e2eeRecoveryVault:readEntry') return entries.get(String(args.entryId)) ?? null;
+  if (path === 'e2eeRecoveryVault:readEntry') {
+    entryReads++;
+    return entries.get(String(args.entryId)) ?? null;
+  }
+  if (path === 'e2eeRecoveryVault:readEntries') {
+    const ids = args.entryIds as string[];
+    if (ids.length > 8) throw new Error('e2ee_recovery_vault_invalid');
+    return ids.map((id) => entries.get(String(id)) ?? null);
+  }
   if (path === 'e2eeRecoveryVault:readIndex') return index;
   if (path === 'e2eeRecoveryVault:compareAndSwapIndex') {
     index = args.next as RecoveryVaultCiphertextDto;
@@ -485,6 +494,7 @@ export function setInlineAppendHistory(mode: 'none' | 'contiguous' | 'gap') {
 }
 export function resetIoCounters() {
   historyReads = 0;
+  entryReads = 0;
   stagingReads = 0;
   mailboxFetches = [];
   mailboxStatuses = [];
@@ -497,6 +507,7 @@ export function state() {
     stage,
     blocked,
     historyReads,
+    entryReads,
     stagingReads,
     mailboxFetches: [...mailboxFetches],
     mailboxStatuses: [...mailboxStatuses],

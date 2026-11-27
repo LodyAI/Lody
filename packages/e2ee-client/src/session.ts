@@ -446,7 +446,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         const received = yield* receiver.fetchAndInstall(null, 100);
         return { refreshRequired: received.refreshRequired ?? false };
       });
-    const distributeTo = (ctx: Context.Context<Keys>, recipients?: readonly string[]) =>
+    const confirmedDeliveredDevices = new Map<string, number>();
+    const distributeTo = (
+      ctx: Context.Context<Keys>,
+      recipients?: readonly string[],
+      epoch?: number
+    ) =>
       Effect.gen(function* () {
         // Only this device's deliveries, as on the desktop: reconcile targets,
         // resume pending sends, acknowledge ended tasks. Receive and repair stay
@@ -455,7 +460,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         yield* distributor.reconcileCurrentEpoch(100, null, recipients);
         yield* distributor.resumePendingDeliveries(100, null);
         const ended = yield* distributor.results(100, null);
-        for (const item of ended.items) yield* distributor.acknowledge(item.id);
+        const delivered: string[] = [];
+        for (const item of ended.items) {
+          if (item.outcome === 'Observed' && (epoch === undefined || item.epoch === epoch)) {
+            delivered.push(item.recipient);
+            confirmedDeliveredDevices.set(item.recipient, item.epoch);
+          }
+          yield* distributor.acknowledge(item.id);
+        }
+        return delivered;
       });
     const keyRound = (mode: PersonalKeyRoundMode = 'full', recipients?: readonly string[]) =>
       serialRound(
@@ -464,13 +477,13 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             const view = yield* admitted(),
               epoch = view.inspectState().epoch.number;
             if (mode === 'distribute') {
-              yield* distributeTo(ctx, recipients);
-              return { refreshRequired: false };
+              const delivered = yield* distributeTo(ctx, recipients, epoch);
+              return { refreshRequired: false, delivered };
             }
             if (mode === 'receive') {
               // Only this device's own key, from a staged group or the mailbox. Reports,
               // distribution and repair stay with a full round.
-              return yield* receiveStep(ctx);
+              return { ...(yield* receiveStep(ctx)), delivered: [] as readonly string[] };
             }
             return {
               refreshRequired: yield* maintenance!(
@@ -478,6 +491,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                 receiveFromStaging(ctx, view, epoch),
                 recipients
               ),
+              delivered: [] as readonly string[],
             };
           })
         )
@@ -594,8 +608,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           const slot = remote.success;
           if (slot.genesis !== genesis || slot.epoch !== epoch || slot.recipient !== recipient)
             return 'e2ee_key_recipient_ineligible';
-          if (slot.status === 'EnvelopeStored' || slot.status === 'InstallationReported')
+          if (slot.status === 'EnvelopeStored' || slot.status === 'InstallationReported') {
+            confirmedDeliveredDevices.set(recipient, epoch);
             return 'delivered';
+          }
           if (slot.status === 'NeedsEnvelope') return 'e2ee_key_not_sent';
           if (slot.status === 'Obsolete') return 'e2ee_key_epoch_changed';
           return 'e2ee_key_recipient_ineligible';
@@ -644,6 +660,11 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             if (membershipId === selfMembership || !state.members.has(membershipId)) continue;
             if (epoch === 0 && membershipId === ownerMembership) continue;
             if (seen.has(membershipId)) continue;
+            if (
+              confirmedDeliveredDevices.get(recipient) === epoch &&
+              !pendingRecipients.has(recipient)
+            )
+              continue;
             const evidence = yield* keyDeliveryEvidence(recipient);
             if (evidence === 'delivered') continue;
             if (evidence === 'e2ee_key_not_sent' || pendingRecipients.has(recipient)) {
@@ -1308,14 +1329,21 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         run(
           Effect.gen(function* () {
             if (mode !== 'explicit') return yield* fail('invalid-input');
-            const port = yield* membersPort();
-            const material = yield* port.read(memberAccess(), requestId);
-            if (
-              material.workspaceId !== prepared.binding.workspaceId ||
-              material.requestId !== requestId
-            )
-              return yield* fail('conflict');
-            const proof = yield* memberProof(material.keyPackageHex);
+            const pinned = memberPreviews.get(requestId);
+            let keyPackageHex: string;
+            if (pinned !== undefined) {
+              keyPackageHex = pinned;
+            } else {
+              const port = yield* membersPort();
+              const material = yield* port.read(memberAccess(), requestId);
+              if (
+                material.workspaceId !== prepared.binding.workspaceId ||
+                material.requestId !== requestId
+              )
+                return yield* fail('conflict');
+              keyPackageHex = material.keyPackageHex;
+            }
+            const proof = yield* memberProof(keyPackageHex);
             // The signed request's own id must be the approved id.
             if (toHex(proof.request.requestId.toBytes()) !== requestId)
               return yield* fail('conflict');
@@ -1331,8 +1359,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               return null;
             }
             // Only the package this session listed and showed for this very request may be signed.
-            if (memberPreviews.get(requestId) !== material.keyPackageHex)
-              return yield* fail('conflict');
+            if (memberPreviews.get(requestId) !== keyPackageHex) return yield* fail('conflict');
             return admitMember(proof.request);
           })
         ),
@@ -1396,7 +1423,9 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           recoverySerial.withPermit(
             withKeys((ctx) =>
               Effect.gen(function* () {
-                yield* serialRound(control.refresh());
+                if (!input.skipInitialRefresh) {
+                  yield* serialRound(control.refresh());
+                }
                 const view = yield* admitted();
                 const workflow = yield* makeWorkspaceRecovery({
                   vault: input.vault,

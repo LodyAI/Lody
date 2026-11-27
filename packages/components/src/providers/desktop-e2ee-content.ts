@@ -89,8 +89,13 @@ export function createE2eeContent(input: {
   /** Credential-authenticated member removal or revocation of this device. */
   onMemberRemoved?: (reason: E2eeAccessLoss) => void;
   onPhase?: (phase: WorkspaceEpochPhase) => void;
+  /** Optional token prefetched in parallel with native.open; still validated here after open. */
+  prefetchedStreamsToken?: Promise<Awaited<
+    ReturnType<E2eeWorkspaceRuntime['contentStreamsToken']>
+  > | null>;
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
+  let prefetchedToken = input.prefetchedStreamsToken;
   let bucketId: string | null = null;
   let statusEpoch = input.epoch;
   let currentKeyMissing = false;
@@ -335,17 +340,25 @@ export function createE2eeContent(input: {
         const request = LoroStreamsTokenRequestSchema.parse(JSON.parse(String(init?.body)));
         if (request.workspaceId !== input.workspaceId)
           throw new Error('e2ee_content_configuration');
-        const response = await untilAborted(
-          (rpcOnly
-            ? input.runtime.contentStreamsToken(input.workspaceId, request.rejectedToken, true)
-            : input.runtime.contentStreamsToken(input.workspaceId, request.rejectedToken)
-          ).catch((error) => {
-            // Access loss stays observed even when this request was abandoned.
-            observeRemoval(error);
-            throw error;
-          }),
-          [signal, init?.signal]
-        );
+        const prefetched =
+          !rpcOnly && !request.rejectedToken && prefetchedToken ? prefetchedToken : undefined;
+        if (prefetched) prefetchedToken = undefined;
+        const prefetchedResponse = prefetched
+          ? await untilAborted(prefetched, [signal, init?.signal])
+          : null;
+        const response =
+          prefetchedResponse ??
+          (await untilAborted(
+            (rpcOnly
+              ? input.runtime.contentStreamsToken(input.workspaceId, request.rejectedToken, true)
+              : input.runtime.contentStreamsToken(input.workspaceId, request.rejectedToken)
+            ).catch((error) => {
+              // Access loss stays observed even when this request was abandoned.
+              observeRemoval(error);
+              throw error;
+            }),
+            [signal, init?.signal]
+          ));
         assertActive();
         if (
           !response.bucketId ||

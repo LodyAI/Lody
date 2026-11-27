@@ -2,7 +2,10 @@ import { z } from 'zod';
 import { createLocalStorageCache } from '@/lib/local-storage-cache';
 import type { BillingOverviewData } from './billing-setting-pure';
 
-const promoNameSchema = z.union([z.string(), z.record(z.string(), z.string())]).nullable().optional();
+const promoNameSchema = z
+  .union([z.string(), z.record(z.string(), z.string())])
+  .nullable()
+  .optional();
 
 const promoPolicySchema = z.object({
   campaignId: z.string(),

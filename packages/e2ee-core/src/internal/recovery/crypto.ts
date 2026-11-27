@@ -337,6 +337,87 @@ export const encryptPasswordWrap = (
       (wrapSecret) => Effect.sync(() => wrapSecret.fill(0))
     );
   });
+export const encryptPasswordWrapAndVerify = <E, R>(
+  passwordBytes: Uint8Array,
+  vaultId: string,
+  entryId: string,
+  plaintext: Uint8Array,
+  kdf: PasswordKdfParams,
+  persistAndReadBack: (entry: VaultCiphertext) => Effect.Effect<VaultCiphertext | null, E, R>
+): Effect.Effect<void, RecoveryVaultError | E, R> =>
+  Effect.gen(function* () {
+    yield* attempt(() => {
+      fromHex(vaultId);
+      fromHex(entryId);
+      if (!validPasswordKdf(kdf)) throw vaultError('invalid-input');
+    });
+    const salt = yield* attempt(() => random(32));
+    const secret = yield* Effect.tryPromise({
+      try: () => derivePasswordSecret(passwordBytes, vaultId, entryId, salt, kdf),
+      catch: () => vaultError('invalid-input'),
+    });
+    yield* Effect.acquireUseRelease(
+      Effect.succeed(secret),
+      (wrapSecret) =>
+        Effect.gen(function* () {
+          const entry = yield* attempt(() => {
+            const inner = encryptVault(
+              wrapSecret,
+              vaultId,
+              { entryId, revision: 0, previous: null, purpose: 'password-wrap' },
+              plaintext
+            );
+            return ownCiphertext({
+              entryId,
+              revision: 0,
+              body: canonical(['password-wrap-v1', 1, salt, kdf.m, kdf.t, kdf.p, inner.body]),
+            });
+          });
+          const stored = yield* persistAndReadBack(entry);
+          if (
+            !stored ||
+            stored.entryId !== entry.entryId ||
+            stored.revision !== entry.revision ||
+            !bytesEqual(stored.body, entry.body)
+          )
+            return yield* vaultError('storage');
+          const parsed = yield* Effect.try({
+            try: () => {
+              const outer = ownCiphertext(stored);
+              const [, , readSalt, m, t, p, innerBody] = Result.getOrThrow(
+                Schema.decodeUnknownResult(PasswordEnvelopeSchema)(parseCanonical(outer.body))
+              );
+              if (
+                !bytesEqual(readSalt, salt) ||
+                m !== kdf.m ||
+                t !== kdf.t ||
+                p !== kdf.p ||
+                !validPasswordKdf({ m, t, p })
+              )
+                throw vaultError('authentication');
+              return ownCiphertext({
+                entryId: outer.entryId,
+                revision: outer.revision,
+                body: innerBody,
+              });
+            },
+            catch: () => vaultError('authentication'),
+          });
+          yield* Effect.acquireUseRelease(
+            Effect.try({
+              try: () => decryptVault(wrapSecret, vaultId, parsed, 'password-wrap'),
+              catch: () => vaultError('authentication'),
+            }),
+            (opened) =>
+              bytesEqual(opened, plaintext)
+                ? Effect.void
+                : Effect.fail(vaultError('authentication')),
+            (opened) => Effect.sync(() => opened.fill(0))
+          );
+        }),
+      (wrapSecret) => Effect.sync(() => wrapSecret.fill(0))
+    );
+  });
 export const decryptPasswordWrap = (
   passwordBytes: Uint8Array,
   vaultId: string,

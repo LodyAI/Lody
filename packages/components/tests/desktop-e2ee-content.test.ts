@@ -766,4 +766,65 @@ describe('shared portable content lifetime', () => {
       Object.defineProperty(AbortSignal, 'any', any);
     }
   });
+
+  it('consumes a prefetched streams token on first request and still validates bucketId', async () => {
+    let calls = 0;
+    const runtime = {
+      contentStreamsToken: async () => {
+        calls += 1;
+        return {
+          token: 'fallback-token',
+          bucketId: 'protected-content',
+          gatewayBaseUrl: 'https://streams.example.test',
+          expiresIn: 900,
+          expiresAt: 1_900_000_000_000,
+        };
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    const access = createDesktopE2eeContent({
+      runtime,
+      workspaceId: 'prefetched-workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => 'account-token',
+      prefetchedStreamsToken: Promise.resolve({
+        token: 'prefetched-token',
+        bucketId: 'protected-content',
+        gatewayBaseUrl: 'https://streams.example.test',
+        expiresIn: 600,
+        expiresAt: 1_900_000_000_000,
+      }),
+    });
+    const provider = access.e2ee.createTokenProvider(new AbortController().signal);
+    try {
+      expect(await provider.getToken()).toBe('prefetched-token');
+      expect(calls).toBe(0);
+      expect(access.e2ee.bucketId()).toBe('protected-content');
+    } finally {
+      await provider.close();
+      await access.close();
+    }
+
+    const badAccess = createDesktopE2eeContent({
+      runtime,
+      workspaceId: 'prefetched-workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => 'account-token',
+      prefetchedStreamsToken: Promise.resolve({
+        token: 'bad-token',
+        bucketId: 'lody',
+        gatewayBaseUrl: 'https://streams.example.test',
+        expiresIn: 600,
+        expiresAt: 1_900_000_000_000,
+      }),
+    });
+    const badProvider = badAccess.e2ee.createTokenProvider(new AbortController().signal);
+    try {
+      await expect(badProvider.getToken()).rejects.toThrow('e2ee_content_configuration');
+    } finally {
+      await badProvider.close();
+      await badAccess.close();
+    }
+  });
 });

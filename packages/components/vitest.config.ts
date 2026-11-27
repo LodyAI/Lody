@@ -41,6 +41,8 @@ const isolatedFiles = new Set([
   'tests/session-tab-bar.test.tsx',
   'tests/dropdown-menu.test.tsx',
   'tests/prompt-shortcut-form.test.tsx',
+  'tests/session-access-control.test.tsx',
+  'tests/session-file-binary-preview.test.tsx',
 ]);
 const reusable = { node: [] as string[], jsdom: [] as string[] };
 for (const file of testFiles) {

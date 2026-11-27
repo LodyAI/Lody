@@ -202,7 +202,8 @@ it('discloses promotional seat-expansion discount before deadline and reverts im
     });
 
     await act(async () => root.render(createElement(SeatCostNotice, { preview })));
-    expect(container.textContent).toContain('Black Friday · 20% off');
+    expect(container.textContent).toContain('Black Friday · Extra 20% off');
+    expect(container.textContent).toContain('extra 20% off the annual rate');
     expect(container.querySelector('s')?.textContent).toContain('31.20');
     expect(container.textContent).toContain('24.96');
     expect(container.textContent).toContain('Renews at standard rate');

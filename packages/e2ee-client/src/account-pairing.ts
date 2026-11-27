@@ -57,7 +57,7 @@ const NO_INVITATION = new Uint8Array([0]);
 const isHistoryRow = (digest: Uint8Array) => digest.every((byte) => byte === 0);
 const WORKSPACE_CONCURRENCY = 4;
 /** Default bound on waiting for first key delivery attempts before publishing. */
-const FIRST_KEY_DELIVERY_WAIT_MS = 1_500;
+const FIRST_KEY_DELIVERY_WAIT_MS = 400;
 /** Typed refusals the UI explains (`@lody/platform` `E2eeAccountPairingErrorCode`). */
 export type AccountPairingRefusal =
   | 'pairing-tampered'

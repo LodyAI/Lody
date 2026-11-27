@@ -14,6 +14,7 @@ import { McpDefaultsRecovery } from './mcp-defaults-recovery';
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval, localAgentRunsWorkspace } from '../e2ee-local-agent-approval';
+import { E2eeRecoveryNotice } from '../e2ee-recovery-notice';
 import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
@@ -6962,12 +6963,28 @@ function WorkspaceChatLanding({
         localAgentRunning={localAgentRunsWorkspace(localCliState, runtime.workspaceId)}
       />
     ) : null;
+  const e2eeRecoveryNoticeNode =
+    !isEmbedded && runtime?.contentMode === 'e2ee' ? (
+      <E2eeRecoveryNotice
+        key={`recovery:${runtime.accountId}:${runtime.workspaceId}`}
+        workspaceId={runtime.workspaceId}
+        accountId={runtime.accountId}
+        onSetup={() =>
+          void navigate({
+            to: '/workspace/e2ee/$workspaceId',
+            params: { workspaceId: runtime.workspaceId },
+            search: { tab: 'recovery' },
+          })
+        }
+      />
+    ) : null;
   // Pi migration and the sharing review are page guidance; an embedded
   // landing keeps only the notices that concern the send itself.
   const landingSharingReviewNoticeNode = isEmbedded ? null : sharingReviewNoticeNode;
   const composerNoticeNode =
     mcpSelection.defaultsFailed ||
     e2eeLocalAgentNode ||
+    e2eeRecoveryNoticeNode ||
     landingSharingReviewNoticeNode ||
     sessionLimitNoticeNode ||
     (!isEmbedded && canMigratePi) ? (
@@ -6989,6 +7006,7 @@ function WorkspaceChatLanding({
           />
         ) : null}
         {e2eeLocalAgentNode}
+        {e2eeRecoveryNoticeNode}
         {landingSharingReviewNoticeNode}
         {sessionLimitNoticeNode}
       </>

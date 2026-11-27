@@ -6,6 +6,7 @@ import {
   computeDiscountedPlusPricing,
   computeNextPublicPromoRefreshDelayMs,
   formatLandingPromoBannerCopy,
+  formatPublicPromoBadge,
   formatPublicPromoNote,
   parsePublicPromoSnapshot,
   resolvePublicPromoEndpoint,
@@ -69,8 +70,17 @@ test('computes first-period Plus rates without altering standard renewal amounts
   assert.equal(pricing.yearlyPerMonth, 6.4);
   assert.equal(pricing.monthlyTotalCents, 800);
   assert.equal(pricing.monthlyPerMonth, 8);
-  assert.match(formatPublicPromoNote({ isYearly: true, promo: snapshot.active!, locale: 'zh' })!, /\$76\.80/);
-  assert.match(formatLandingPromoBannerCopy(snapshot.active!, 'zh').message, /立享 8 折/);
+  assert.equal(formatPublicPromoBadge(20, 'zh', { isYearly: true }), '折上 8 折');
+  assert.equal(formatPublicPromoBadge(20, 'zh', { isYearly: false }), '限时 8 折');
+  assert.equal(formatPublicPromoBadge(20, 'en', { isYearly: true }), 'Extra 20% off');
+  assert.match(
+    formatPublicPromoNote({ isYearly: true, promo: snapshot.active!, locale: 'zh' })!,
+    /年付 8 折基础上再享 8 折（相当于月付 6\.4 折）.*\$76\.80/
+  );
+  assert.match(
+    formatLandingPromoBannerCopy(snapshot.active!, 'zh').message,
+    /享年付折上 8 折（相当于月付 6\.4 折）、月付 8 折/
+  );
 });
 
 test('banner copy reflects configured intervals and feature flags without overpromising', () => {
@@ -80,7 +90,7 @@ test('banner copy reflects configured intervals and feature flags without overpr
     endsAt: Date.parse('2026-12-01T00:00:00+08:00'),
   };
 
-  // Unequal monthly (40%) and yearly (10%) with seatExpansion=false: must say "up to" / "低至"
+  // Unequal monthly (40%) and yearly (10%) with seatExpansion=false: must state exact yearly stack & monthly rate
   // and must NOT mention seat expansion.
   const unequal = {
     ...base,
@@ -90,13 +100,19 @@ test('banner copy reflects configured intervals and feature flags without overpr
     seatExpansion: false,
   };
   const unequalEn = formatLandingPromoBannerCopy(unequal, 'en');
-  assert.equal(unequalEn.badge, 'Up to 40% off');
-  assert.match(unequalEn.message, /up to 40% off your first Plus payment & monthly-to-yearly upgrades/);
+  assert.equal(unequalEn.badge, 'Extra 10% off yearly');
+  assert.match(
+    unequalEn.message,
+    /extra 10% off annual \(28% off monthly\) & 40% off monthly on your first Plus payment & monthly-to-yearly upgrades/
+  );
   assert.doesNotMatch(unequalEn.message, /seat/);
 
   const unequalZh = formatLandingPromoBannerCopy(unequal, 'zh');
-  assert.equal(unequalZh.badge, '低至 6 折');
-  assert.match(unequalZh.message, /首笔订阅与月转年升级低至 6 折/);
+  assert.equal(unequalZh.badge, '年付折上 9 折');
+  assert.match(
+    unequalZh.message,
+    /首笔订阅与月转年升级享年付折上 9 折（相当于月付 7\.2 折）、月付 6 折/
+  );
   assert.doesNotMatch(unequalZh.message, /席位|扩席/);
 
   // Monthly-only tier with upgradeToYearly=true: cannot discount yearly upgrades when yearly is null.
@@ -108,6 +124,7 @@ test('banner copy reflects configured intervals and feature flags without overpr
     seatExpansion: false,
   };
   const monthlyEn = formatLandingPromoBannerCopy(monthlyOnly, 'en');
+  assert.equal(monthlyEn.badge, '20% off');
   assert.match(monthlyEn.message, /20% off your first Plus monthly payment/);
   assert.doesNotMatch(monthlyEn.message, /yearly|annual|upgrade|seat/);
 
@@ -122,7 +139,7 @@ test('banner copy reflects configured intervals and feature flags without overpr
     },
     'zh'
   );
-  assert.match(seatOnlyZh.message, /首笔订阅与新增成员席位立享 8 折/);
+  assert.match(seatOnlyZh.message, /首笔订阅与新增成员席位享年付折上 8 折（相当于月付 6\.4 折）、月付 8 折/);
   assert.doesNotMatch(seatOnlyZh.message, /月转年/);
 });
 
@@ -202,7 +219,10 @@ test('supports optional custom string and localized campaign names with locale f
   assert.equal(resolvePublicPromoName(localized.active, 'en'), 'Black Friday');
   assert.equal(resolvePublicPromoName(localized.active, 'ja'), 'Black Friday');
   assert.match(formatLandingPromoBannerCopy(localized.active!, 'zh').message, /^黑五特惠 · Lody Plus：/);
-  assert.match(formatLandingPromoBannerCopy(localized.active!, 'en').message, /^Black Friday: 20% off/);
+  assert.match(
+    formatLandingPromoBannerCopy(localized.active!, 'en').message,
+    /^Black Friday: extra 20% off annual \(36% off monthly\)/
+  );
 
   const plain = parsePublicPromoSnapshot({
     active: {
