@@ -58,25 +58,21 @@ export function LocalHtmlPreviewFrame({
   );
 }
 
-/** Asks once per preview entry; all options start checked and can be unchecked before confirming. */
+/** Asks once per preview entry; JavaScript starts checked and can be unchecked before confirming. */
 export function LocalHtmlPreviewConsentDialog({
   open,
   fileName,
-  workspaceRoot,
   onConfirm,
   onCancel,
 }: {
   readonly open: boolean;
   readonly fileName: string;
-  readonly workspaceRoot?: string | null;
-  readonly onConfirm: (allowScripts: boolean, workspaceRoot?: string) => void;
+  readonly onConfirm: (allowScripts: boolean) => void;
   readonly onCancel: () => void;
 }) {
   const { t } = useTranslation();
   const [allowScripts, setAllowScripts] = useState(true);
   const checkboxId = useId();
-  const workspaceCheckboxId = useId();
-  const [allowWorkspaceResources, setAllowWorkspaceResources] = useState(true);
   return (
     <AlertDialog.Root
       open={open}
@@ -94,7 +90,7 @@ export function LocalHtmlPreviewConsentDialog({
           <AlertDialog.Description>
             {t(
               'sessions.fileViewer.htmlPreview.consentDescription',
-              'The page opens from the file on disk and may load files from its own folder, such as stylesheets and images. It runs isolated from Lody.'
+              'The page opens from the file on disk and may load local files, such as stylesheets and images. It runs isolated from Lody.'
             )}
           </AlertDialog.Description>
         </AlertDialog.Header>
@@ -109,40 +105,17 @@ export function LocalHtmlPreviewConsentDialog({
             <span {...stylex.props(styles.optionHint)}>
               {t(
                 'sessions.fileViewer.htmlPreview.allowScriptsHint',
-                'Only allow this for pages you trust. Scripts can make network requests.'
+                'Only allow this for pages you trust. Scripts can read local files and make network requests.'
               )}
             </span>
           </span>
         </label>
-        {workspaceRoot && (
-          <label htmlFor={workspaceCheckboxId} {...stylex.props(styles.option)}>
-            <Checkbox
-              id={workspaceCheckboxId}
-              checked={allowWorkspaceResources}
-              onCheckedChange={(next) => setAllowWorkspaceResources(next === true)}
-            />
-            <span>
-              {t(
-                'sessions.fileViewer.htmlPreview.allowWorkspaceResources',
-                'Allow this page to read files in {{folder}}',
-                { folder: workspaceRoot }
-              )}
-            </span>
-          </label>
-        )}
         <AlertDialog.Footer>
           <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
           {/* Not `AlertDialog.Action`: that is a `Close`, whose close request would
               reach `onOpenChange` as a cancellation. Confirming moves the caller's
               state on, which closes this controlled dialog. */}
-          <Button
-            onClick={() =>
-              onConfirm(
-                allowScripts,
-                allowWorkspaceResources ? (workspaceRoot ?? undefined) : undefined
-              )
-            }
-          >
+          <Button onClick={() => onConfirm(allowScripts)}>
             {t('sessions.fileViewer.preview.show', 'Preview')}
           </Button>
         </AlertDialog.Footer>
@@ -189,7 +162,7 @@ export function useLocalHtmlPreview({
   }, [enabled, hostPath]);
 
   const confirm = useCallback(
-    (allowScripts: boolean, workspaceRoot?: string) => {
+    (allowScripts: boolean) => {
       if (hostPath === null) return;
       const request = ++requestRef.current;
       setState({ status: 'opening' });
@@ -201,7 +174,6 @@ export function useLocalHtmlPreview({
                 machineId,
                 path: hostPath,
                 allowScripts,
-                ...(workspaceRoot ? { workspaceRoot, allowWorkspaceResources: true } : {}),
               })
             : null;
           if (request !== requestRef.current) return;

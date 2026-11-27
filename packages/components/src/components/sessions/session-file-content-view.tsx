@@ -25,7 +25,6 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import {
   getMachineFlockLocalProjects,
-  resolveSessionFilePath,
   type CodeCollabContentUnavailableReason,
   type SessionId,
   type SessionMeta,
@@ -1240,14 +1239,6 @@ function SessionFileContentViewImpl({
       data.status === 'ready' &&
       data.snapshot.kind === 'paged-text');
   const showHtmlRendered = isActiveSurface && canPreviewHtml && htmlRenderMode === 'rendered';
-  const workspaceRoot = sessionFileActions.workspacePath;
-  const nestedWorkspaceFile =
-    workspaceRoot &&
-    localHtmlHostPath &&
-    resolveSessionFilePath(
-      [{ id: 'main', absolutePath: workspaceRoot }],
-      localHtmlHostPath
-    )?.relativePath.includes('/');
   const handleLocalHtmlCancel = useCallback(() => setHtmlRenderMode('code'), []);
   const handleLocalHtmlUnavailable = useCallback(
     () => setLocalHtmlUnavailablePath(normalizedPath),
@@ -2208,10 +2199,9 @@ function SessionFileContentViewImpl({
       ) : null}
       {useLocalHtml && localHtmlPreview.state.status === 'confirming' ? (
         <LocalHtmlPreviewConsentDialog
-          key={JSON.stringify([localHtmlHostPath, workspaceRoot])}
+          key={localHtmlHostPath}
           open
           fileName={normalizedPath.split('/').pop() ?? normalizedPath}
-          workspaceRoot={nestedWorkspaceFile ? workspaceRoot : null}
           onConfirm={localHtmlPreview.confirm}
           onCancel={localHtmlPreview.cancel}
         />

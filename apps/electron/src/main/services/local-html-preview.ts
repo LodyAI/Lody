@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
-import { createReadStream, realpathSync } from 'node:fs'
+import { createReadStream } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
-import { dirname, extname, isAbsolute, join, relative, sep } from 'node:path'
+import { extname, isAbsolute, join, parse, relative, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { z } from 'zod'
 import { resolveFilePreviewPath } from '@lody/shared/node/file-preview-path-policy'
@@ -13,8 +13,7 @@ export const LocalHtmlPreviewRequestSchema = z
     machineId: z.string().min(1),
     path: z.string().min(1),
     workspaceRoot: z.string().nullable().optional(),
-    allowScripts: z.boolean(),
-    allowWorkspaceResources: z.boolean().optional()
+    allowScripts: z.boolean()
   })
   .strict()
 
@@ -83,10 +82,10 @@ const MIME_TYPES: Readonly<Record<string, string>> = {
 }
 
 /**
- * Serves a local HTML file and its sibling resources from a per-preview origin
+ * Serves a local HTML file and local regular files from a per-preview origin
  * (`lody-html-preview://<random token>/`). The token is the only capability:
- * it never encodes a filesystem path, only reaches files under the authorized
- * resource directory, and dies with the renderer document that requested it.
+ * it isolates the preview from the renderer and dies with the renderer document
+ * that requested it.
  */
 export class LocalHtmlPreviewSites {
   private readonly sites = new Map<string, Site>()
@@ -96,17 +95,21 @@ export class LocalHtmlPreviewSites {
   }
 
   /** `absolutePath` must already be symlink-resolved and authorized by the caller. */
-  open(
-    owner: number,
-    absolutePath: string,
-    allowScripts: boolean,
-    root = dirname(absolutePath)
-  ): string {
+  open(owner: number, absolutePath: string, allowScripts: boolean): string {
     const owned = [...this.sites].filter(([, site]) => site.owner === owner)
     if (owned.length >= MAX_SITES_PER_OWNER) this.sites.delete(owned[0][0])
     const token = randomBytes(16).toString('hex')
+    const root = parse(absolutePath).root
     this.sites.set(token, { owner, root, allowScripts })
-    return `${HTML_PREVIEW_SCHEME}://${token}/${relative(root, absolutePath).split(sep).map(encodeURIComponent).join('/')}`
+    const encodedRest = relative(root, absolutePath)
+      .split(sep)
+      .filter(Boolean)
+      .map(encodeURIComponent)
+      .join('/')
+    const urlPath = /^[A-Za-z]:[\\/]$/u.test(root)
+      ? `${root.slice(0, 2)}/${encodedRest}`
+      : encodedRest
+    return `${HTML_PREVIEW_SCHEME}://${token}/${urlPath}`
   }
 
   async respond(request: Request): Promise<Response> {
@@ -145,21 +148,19 @@ async function resolveSiteFile(root: string, pathname: string) {
     } catch {
       return null
     }
-    // Dot segments are traversal or hidden files (`.env`, `.git`); neither is page content.
-    if (segment.startsWith('.') || /[\\/\0]/u.test(segment)) return null
+    if (segment === '.' || segment === '..' || /[\\/\0]/u.test(segment)) return null
     segments.push(segment)
   }
   if (segments.length === 0) return null
+  let candidate: string
+  if (/^[A-Za-z]:[\\/]$/u.test(root) && /^[A-Za-z]:$/u.test(segments[0])) {
+    if (segments.length === 1) return null
+    candidate = join(`${segments[0]}\\`, ...segments.slice(1))
+  } else {
+    candidate = join(root, ...segments)
+  }
   try {
-    const resolved = await realpath(join(root, ...segments))
-    if (!resolved.startsWith(root.endsWith(sep) ? root : root + sep)) return null
-    // A visible symlink (`config.txt -> .env`) must not reach a hidden file either.
-    if (
-      relative(root, resolved)
-        .split(sep)
-        .some((part) => part.startsWith('.'))
-    )
-      return null
+    const resolved = await realpath(candidate)
     const info = await stat(resolved)
     return info.isFile() ? { path: resolved, size: info.size } : null
   } catch {
@@ -189,34 +190,8 @@ export function openLocalHtmlPreview(
     options: { allowArbitraryPaths: true }
   })
   if (!resolution.ok) return { status: 'error', ...resolution.rejection }
-  const { absolutePath } = resolution.resolved
-  let root = dirname(absolutePath)
-  if (request.allowWorkspaceResources) {
-    if (!request.workspaceRoot || resolution.resolved.external)
-      return {
-        status: 'error',
-        code: 'path_not_allowed',
-        message: 'The HTML file must be inside the selected workspace.'
-      }
-    try {
-      root = realpathSync.native(request.workspaceRoot)
-    } catch {
-      return {
-        status: 'error',
-        code: 'workspace_root_unavailable',
-        message: 'The selected workspace is unavailable.'
-      }
-    }
-    const prefix = root.endsWith(sep) ? root : root + sep
-    if (!absolutePath.startsWith(prefix))
-      return {
-        status: 'error',
-        code: 'path_not_allowed',
-        message: 'The HTML file is outside the selected workspace.'
-      }
-  }
   return {
     status: 'ok',
-    url: sites.open(owner, absolutePath, request.allowScripts, root)
+    url: sites.open(owner, resolution.resolved.absolutePath, request.allowScripts)
   }
 }

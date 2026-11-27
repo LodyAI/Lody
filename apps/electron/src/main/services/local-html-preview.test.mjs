@@ -71,46 +71,52 @@ void test('local HTML preview with scripts allowed omits the script-blocking pol
   assert.equal(response.headers.get('content-security-policy'), null)
 })
 
-void test('a nested page can load workspace assets only with the workspace resource grant', async (t) => {
+void test('local HTML preview serves pages and assets across parent, sibling, and dot directories', async (t) => {
   const { dir, page } = await site(t)
   await mkdir(join(dir, 'shared'))
   await writeFile(join(dir, 'shared', 'app.mjs'), 'export default 42')
+  await mkdir(join(dir, '.cache'))
+  await writeFile(
+    join(dir, '.cache', 'lody-black-friday.html'),
+    '<script type="module" src="../shared/app.mjs"></script>'
+  )
+  await symlink(join(dir, 'outside.txt'), join(page, 'link.txt'))
   const sites = new LocalHtmlPreviewSites()
-  const request = {
-    machineId: 'local',
-    path: join(page, 'index.html'),
-    workspaceRoot: dir,
-    allowScripts: true
-  }
-  const limited = openLocalHtmlPreview(sites, 1, request, 'local')
-  assert.equal((await get(sites, new URL('../shared/app.mjs', limited.url))).status, 404)
-  const granted = openLocalHtmlPreview(
+  const opened = openLocalHtmlPreview(
     sites,
     1,
-    { ...request, allowWorkspaceResources: true },
+    {
+      machineId: 'local',
+      path: join(dir, '.cache', 'lody-black-friday.html'),
+      allowScripts: true
+    },
     'local'
   )
-  assert.equal(new URL(granted.url).pathname, '/page/index.html')
-  const module = await get(sites, new URL('../shared/app.mjs', granted.url))
+  assert.equal(opened.status, 'ok')
+  const html = await get(sites, opened.url)
+  assert.equal(html.status, 200)
+  assert.match(await html.text(), /shared\/app\.mjs/u)
+
+  const module = await get(sites, new URL('../shared/app.mjs', opened.url))
+  assert.equal(module.status, 200)
   assert.equal(await module.text(), 'export default 42')
-  assert.equal((await get(sites, new URL('/page/.env', granted.url))).status, 404)
-  const outside = openLocalHtmlPreview(
+
+  const pagePreview = openLocalHtmlPreview(
     sites,
     1,
-    { ...request, allowWorkspaceResources: true, workspaceRoot: join(dir, 'shared') },
+    { machineId: 'local', path: join(page, 'index.html'), allowScripts: true },
     'local'
   )
-  assert.equal(outside.status, 'error')
+  assert.equal(
+    await (await get(sites, new URL('../outside.txt', pagePreview.url))).text(),
+    'outside'
+  )
+  assert.equal(await (await get(sites, new URL('link.txt', pagePreview.url))).text(), 'outside')
+  assert.equal(await (await get(sites, new URL('.env', pagePreview.url))).text(), 'SECRET=1')
 })
 
-void test('local HTML preview never leaves the page folder or exposes hidden files', async (t) => {
-  const { dir, page } = await site(t)
-  await symlink(join(dir, 'outside.txt'), join(page, 'link.txt'))
-  // Visible names that resolve to hidden files or folders stay hidden.
-  await symlink(join(page, '.env'), join(page, 'config.txt'))
-  await mkdir(join(page, '.git'))
-  await writeFile(join(page, '.git', 'config'), '[remote]')
-  await symlink(join(page, '.git'), join(page, 'repo'))
+void test('local HTML preview rejects directories, invalid segments, unknown tokens, and non-GET methods', async (t) => {
+  const { page } = await site(t)
   const sites = new LocalHtmlPreviewSites()
   const opened = openLocalHtmlPreview(
     sites,
@@ -120,13 +126,10 @@ void test('local HTML preview never leaves the page folder or exposes hidden fil
   )
   const origin = originOf(opened.url)
   for (const path of [
-    '/../outside.txt',
     '/%2e%2e/outside.txt',
-    '/.env',
-    '/link.txt',
-    '/config.txt',
-    '/repo/config',
-    '/assets',
+    '/%2e/index.html',
+    '/%2f/index.html',
+    new URL('assets', opened.url).pathname,
     '/'
   ]) {
     assert.equal((await get(sites, origin + path)).status, 404, path)

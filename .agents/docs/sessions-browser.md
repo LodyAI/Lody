@@ -63,19 +63,17 @@ this page is the full text of the rules summarised there.
   file is on this desktop's machine and `useSessionFileActions().resolveHostPath` yields its
   absolute path. Large HTML files keep a paged, read-only source view and open the complete
   file from disk through the same preview protocol. Each entry into rendered mode first shows a consent dialog with its "Allow
-  JavaScript" and (for nested pages) workspace-resource checkboxes checked by default; the user can uncheck either before confirming. Electron main (`machineRpc.openHtmlPreview`) serves
-  the file's folder unless workspace resources are authorized, in which case it serves the displayed workspace
-  folder for that preview, preserving the page’s workspace-relative URL and asset paths. Both
-  choices serve content from a fresh `lody-html-preview://<random token>/` origin. Relative CSS,
-  scripts and images load, and reload re-reads disk. Without consent the iframe sandbox is
+  JavaScript" checkbox checked by default; the user can uncheck it before confirming. Electron main (`machineRpc.openHtmlPreview`) serves
+  local regular files from a fresh `lody-html-preview://<random token>/` origin. Relative CSS,
+  scripts and images load, including from sibling, parent and hidden directories, and reload re-reads disk. Without consent the iframe sandbox is
   empty and the response carries `script-src 'none'`. With consent the sandbox adds scripts,
   same-origin and forms, never modals, popups or top navigation. The unique origin keeps that
   cross-origin to the renderer. Main's `will-frame-navigate` guard keeps a preview frame on
   `lody-html-preview:` URLs, and the default session refuses every permission a preview requests. The renderer CSP admits the scheme only in `frame-src`. Main
-  refuses dot-files and paths outside the folder, judged after resolving symlinks, and other machines; a
+  refuses non-regular files and other machines; a
   null answer falls back to `srcdoc` for complete text or to the paged source for large files. This mode has no annotation or script toggle,
   shows the saved file rather than unsaved editor text, and with scripts allowed the page can
-  reach the network. Remote and Web sessions keep the `srcdoc` path.
+  read local files and reach the network. Remote and Web sessions keep the `srcdoc` path.
   The standalone mobile project browser treats repository HTML as untrusted: it opens the
   read-only preview with the eye toggle and runs scripts only behind an explicit "Run
   scripts" opt-in (`StaticHtmlScriptPreview`, no annotation), on any engine that supports it.
