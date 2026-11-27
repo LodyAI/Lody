@@ -39,6 +39,7 @@ import {
   classifyE2eeControlFailure,
   e2eeControlDiagnostics,
 } from '../src/lib/e2ee-control-failure';
+import { withAccountPairingCode } from '../src/lib/e2ee-account-pairing-ipc';
 import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
 
 class MemoryStorage implements Storage {
@@ -841,3 +842,36 @@ it.each([
     });
   }
 );
+
+it('classifies desktop e2ee_storage and custody_locked as local/custody failures, never server', () => {
+  expect(classifyE2eeControlFailure(new Error('e2ee_storage'))).toEqual({
+    kind: 'local-identity',
+    code: 'e2ee_storage',
+  });
+  expect(
+    classifyE2eeControlFailure(
+      new Error("Error invoking remote method 'e2ee.open': Error: e2ee_custody_locked")
+    )
+  ).toEqual({
+    kind: 'custody-locked',
+    code: 'e2ee_custody_locked',
+  });
+});
+
+it('restores account pairing refusal codes and attemptsLeft across Electron IPC', async () => {
+  for (const [message, expected] of [
+    ['Error: e2ee_pairing-update-required', { code: 'pairing-update-required' }],
+    ['Error: e2ee_pairing-code-locked', { code: 'pairing-code-locked' }],
+    ['Error: e2ee_pairing-unavailable', { code: 'pairing-unavailable' }],
+    ['Error: e2ee_pairing-rate-limited', { code: 'pairing-rate-limited' }],
+    [
+      "Error invoking remote method 'e2ee.approveAccountPairing': Error: e2ee_pairing-code-mismatch:2",
+      { code: 'pairing-code-mismatch', attemptsLeft: 2 },
+    ],
+  ] as const) {
+    const err = await withAccountPairingCode(Promise.reject(new Error(message))).catch(
+      (cause: unknown) => cause
+    );
+    expect(err).toMatchObject(expected);
+  }
+});

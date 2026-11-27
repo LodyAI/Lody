@@ -1816,3 +1816,371 @@ void test('after workspace creation (length 1, no prior cursor), ingesting inlin
   assert.equal(historyCalls.length, 2)
   assert.deepEqual(ingestedPages, [1, 2, 0, 0])
 })
+
+void test('pairingCall preserves refusal codes and attemptsLeft, and recentAccountSecurityEvents wraps cloud client failures', async () => {
+  const sender = Object.assign(new EventEmitter(), {
+    id: 41,
+    isDestroyed: () => false,
+    send: () => {}
+  })
+  const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+    ...e2eeIpcDependencies(
+      {
+        desktopE2eeCloudClient: async () => {
+          throw new Error('e2ee_account_unavailable')
+        },
+        releaseDesktopE2eeReader: () => {}
+      },
+      sender
+    ),
+    '../../services/e2ee-recovery-vault.mjs': {
+      recoveryVaultEnabled: () => true,
+      recoveryVaultFailure: (error) =>
+        new Error(`wrapped:${error instanceof Error ? error.message : String(error)}`),
+      recentAccountSecurityEvents: () => Effect.succeed([])
+    }
+  })
+  const ipc = new E2eeIpc()
+  await assert.rejects(
+    ipc.pairingCall(async () => {
+      throw Object.assign(new Error('mismatch'), { code: 'pairing-code-mismatch', attemptsLeft: 2 })
+    }),
+    /^Error: e2ee_pairing-code-mismatch:2$/
+  )
+  await assert.rejects(
+    ipc.pairingCall(async () => {
+      throw Object.assign(new Error('locked'), { code: 'pairing-code-locked' })
+    }),
+    /^Error: e2ee_pairing-code-locked$/
+  )
+  await assert.rejects(
+    ipc.pairingCall(async () => {
+      throw Object.assign(new Error('update'), { code: 'pairing-update-required' })
+    }),
+    /^Error: e2ee_pairing-update-required$/
+  )
+  await assert.rejects(ipc.recentAccountSecurityEvents(), /wrapped:e2ee_account_unavailable/)
+})
+
+void test('approveMemberJoin throws a controlled error when appendRecord fails and the join is uncommitted', async () => {
+  const f = await memberIpcFixture({
+    client: {
+      memberRead: () =>
+        Effect.succeed({
+          workspaceId: 'team',
+          requestId: approvalRequest,
+          state: 'pending',
+          keyPackageHex: 'aa'
+        }),
+      appendRecord: () =>
+        Effect.fail(new BackendError({ service: 'E2eeCloud', reason: 'conflict' }))
+    },
+    host: {
+      prepareMemberAdmission: () =>
+        Effect.succeed({
+          workspaceId: 'team',
+          requestId: approvalRequest,
+          recordHex: 'bb'
+        })
+    }
+  })
+  await assert.rejects(
+    f.ipc.approveMemberJoin('team', approvalRequest, 'explicit'),
+    /^Error: e2ee_conflict$/
+  )
+})
+
+void test('readIdentity joins a pendingClose drain before reopening instead of failing closed', async () => {
+  const sender = Object.assign(new EventEmitter(), {
+    id: 42,
+    isDestroyed: () => false,
+    send: () => {}
+  })
+  let closing = true
+  let drained = false
+  let openCalls = 0
+  const owner = {
+    accountId: 'A',
+    readers: new Map(),
+    readerEpochs: new Map(),
+    host: {
+      pendingClose: () =>
+        Effect.succeed(
+          closing
+            ? Effect.sync(() => {
+                closing = false
+                drained = true
+              })
+            : undefined
+        ),
+      open: () => {
+        openCalls += 1
+        if (closing) return Effect.fail(new Error('e2ee_closed'))
+        return Effect.succeed({ workspaceId: 'team', genesisHash: '11'.repeat(32) })
+      },
+      beginCloseWorkspace: () => Effect.succeed(Effect.void)
+    }
+  }
+  const { E2eeIpc } = await load(
+    '../ipc/services/e2ee-ipc.ts',
+    e2eeIpcDependencies(
+      {
+        withDesktopE2eeAccount: (work) => Effect.runPromise(work(owner)),
+        releaseDesktopE2eeReader: () => {}
+      },
+      sender
+    )
+  )
+  const ipc = new E2eeIpc()
+  const identity = await ipc.readIdentity({ accountId: 'A', workspaceId: 'team' })
+  assert.equal(drained, true)
+  assert.equal(openCalls, 1)
+  assert.deepEqual(plain(identity), { workspaceId: 'team', genesisHash: '11'.repeat(32) })
+})
+
+void test('senderEpoch prevents a stale reload cleanup from removing a reloaded page reader', async () => {
+  const sender = Object.assign(new EventEmitter(), {
+    id: 43,
+    isDestroyed: () => false,
+    send: () => {}
+  })
+  const readers = new Map()
+  const readerEpochs = new Map()
+  const queuedReleases = []
+  const owner = {
+    accountId: 'A',
+    readers,
+    readerEpochs,
+    bootstrap: { removedReason: () => Effect.succeed(null) },
+    host: {
+      pendingClose: () => Effect.succeed(undefined),
+      open: () => Effect.succeed({ workspaceId: 'team', genesisHash: '11'.repeat(32) }),
+      status: () => Effect.succeed('ready'),
+      beginCloseWorkspace: () => Effect.succeed(Effect.void)
+    }
+  }
+  const { E2eeIpc } = await load(
+    '../ipc/services/e2ee-ipc.ts',
+    e2eeIpcDependencies(
+      {
+        withDesktopE2eeAccount: (work) => Effect.runPromise(work(owner)),
+        releaseDesktopE2eeReader: (senderId, maxEpoch) => {
+          queuedReleases.push(() => {
+            const wsReaders = owner.readers.get('team')
+            const recorded = owner.readerEpochs.get('team')?.get(senderId)
+            if (maxEpoch !== undefined && recorded !== undefined && recorded > maxEpoch) return
+            wsReaders?.delete(senderId)
+            owner.readerEpochs.get('team')?.delete(senderId)
+          })
+        }
+      },
+      sender
+    )
+  )
+  const ipc = new E2eeIpc()
+  await ipc.open('team')
+  assert.equal(readers.get('team')?.get(43), 1)
+  // Reload queues release for epoch 1, then reloaded page opens under epoch 2 before cleanup runs.
+  sender.emit('did-start-navigation', {}, 'synthetic-reload', false, true)
+  await ipc.open('team')
+  assert.equal(readers.get('team')?.get(43), 1)
+  for (const runRelease of queuedReleases) runRelease()
+  assert.equal(readers.get('team')?.get(43), 1)
+  assert.equal(await ipc.status('team'), 'ready')
+})
+
+void test('account pairing release detaches via beginCloseWorkspace inside the lock and drains outside it', async () => {
+  const { makeDesktopAccountPairingWorkspaces } = await import('./e2ee-account-pairing-host.mts')
+  let inLock = false
+  let beginInLock = false
+  let drainInLock = null
+  const events = []
+  const workspaces = makeDesktopAccountPairingWorkspaces({
+    accountId: 'A',
+    cloud: {
+      history: () => Effect.die('unused'),
+      appendRecord: () => Effect.die('unused'),
+      keyServices: () => Effect.die('unused'),
+      pairingSubmit: () => Effect.die('unused'),
+      pairingRead: () => Effect.die('unused'),
+      pairingDecline: () => Effect.die('unused'),
+      pairingPublish: () => Effect.die('unused'),
+      pairingClaim: () => Effect.die('unused')
+    },
+    withOwner: async (_workspaceId, work) => {
+      inLock = true
+      try {
+        return await Effect.runPromise(
+          work({
+            accountId: 'A',
+            readers: new Map(),
+            host: {
+              status: () =>
+                Effect.succeed({
+                  deviceKind: 'personal',
+                  genesisHash: '11'.repeat(32),
+                  signingPublicKey: '22'.repeat(32)
+                }),
+              signAccountAdmission: () => Effect.die('unused'),
+              accountInvitation: () => Effect.die('unused'),
+              ingestLedgerRecords: () => Effect.die('unused'),
+              ledgerView: () => Effect.die('unused'),
+              open: () => Effect.die('unused'),
+              beginCloseWorkspace: () =>
+                Effect.sync(() => {
+                  beginInLock = inLock
+                  events.push('begin')
+                  return Effect.sync(() => {
+                    drainInLock = inLock
+                    events.push('drain')
+                  })
+                }),
+              closeWorkspace: () => Effect.die('must not close synchronously inside lock'),
+              keyRound: () => Effect.die('unused')
+            },
+            bootstrap: {
+              deviceCredential: () => Effect.die('unused'),
+              accountPairingIdentity: () => Effect.die('unused'),
+              preparePersonalJoin: () => Effect.die('unused'),
+              acceptPersonalJoin: () => Effect.die('unused'),
+              acceptPersonalHistory: () => Effect.die('unused'),
+              pendingPersonalJoin: () => Effect.die('unused')
+            }
+          })
+        )
+      } finally {
+        inLock = false
+      }
+    },
+    run: (effect) => Effect.runPromise(effect),
+    workspaces: () => [{ workspaceId: 'team', name: 'Team', genesisHash: '11'.repeat(32) }]
+  })
+  const approvers = await Effect.runPromise(workspaces.approverWorkspaces())
+  assert.equal(approvers.length, 1)
+  await Effect.runPromise(approvers[0].release())
+  assert.equal(beginInLock, true)
+  assert.equal(drainInLock, false)
+  assert.deepEqual(events, ['begin', 'drain'])
+})
+
+void test('keyDelivery.wake reschedules overdue retries immediately and interrupts hung pre-sleep passes', async () => {
+  const { makeDesktopKeyDelivery } = await import('./e2ee-key-delivery.mts')
+  let now = 1_000
+  const clock = fakeKeyDeliveryTimers()
+  let attempts = 0
+  let hangFirst = true
+  let hungStarted
+  const firstHung = new Promise((resolve) => {
+    hungStarted = resolve
+  })
+  let failSecond = true
+  const delivery = makeDesktopKeyDelivery({
+    identity: () => ({ userId: 'A', generation: 1 }),
+    now: () => now,
+    timers: () => clock.timers,
+    remember: () => {},
+    code: () => 'e2ee_network',
+    scope: () => (work) =>
+      Effect.runPromise(
+        work({
+          accountId: 'A',
+          readers: new Map(),
+          bootstrap: { deviceCredential: () => Effect.succeed('cred') },
+          host: {
+            open: () => Effect.void,
+            beginCloseWorkspace: () => Effect.succeed(Effect.void),
+            status: () => Effect.succeed({ hasCurrentKey: true, position: 'p1' }),
+            keyDeliveryTarget: () => Effect.succeed(true),
+            distributeKeys: () =>
+              Effect.suspend(() => {
+                attempts += 1
+                if (hangFirst) {
+                  hangFirst = false
+                  hungStarted()
+                  return Effect.never
+                }
+                if (failSecond) {
+                  failSecond = false
+                  return Effect.fail(new Error('e2ee_network'))
+                }
+                return Effect.void
+              }),
+            keyDeliveryEvidence: () => Effect.succeed('delivered')
+          }
+        })
+      ),
+    cloud: async () => ({
+      accountId: 'A',
+      client: {
+        mailbox: () => ({}),
+        staging: () => ({}),
+        history: () => Effect.succeed({ recordsHex: [], nextCursor: null })
+      }
+    }),
+    run: (_accountId, effect) => Effect.runPromise(effect)
+  })
+  delivery.track('A', 'team', approvalRequest, approvalDevice)
+  await firstHung
+  // Wake interrupts the hung pre-sleep pass and schedules an immediate retry.
+  delivery.wake()
+  await delivery.idle('A', 'team')
+  assert.equal(clock.pending.length, 1)
+  assert.equal(clock.pending[0].ms, 0)
+  clock.pending.shift().run()
+  await delivery.idle('A', 'team')
+  assert.equal(attempts, 2)
+  assert.equal(delivery.slots.get('A\nteam')?.requests.get(approvalRequest)?.state, 'failed')
+  // Advance wall clock past retryAt (simulating sleep) without firing the stale timer; wake runs now.
+  now += KEY_DELIVERY_RETRY_DELAYS[0] + 60_000
+  delivery.wake()
+  await delivery.idle('A', 'team')
+  assert.equal(attempts, 3)
+  assert.equal(delivery.slots.get('A\nteam')?.requests.get(approvalRequest)?.state, 'delivered')
+})
+
+void test('makeDesktopIrohClient.reset closes stale pre-sleep endpoint so next prepare opens a fresh one', async () => {
+  const { makeDesktopIrohClient } = await import('./e2ee-iroh.mts')
+  let opened = 0
+  let closed = 0
+  const machineKey = 'ab'.repeat(32)
+  const fakeNative = {
+    openEndpoint: async () => {
+      const id = ++opened
+      return {
+        id,
+        online: async () => true,
+        hasConnection: async () => false,
+        warm: async () => {},
+        call: async () => ({ nextReply: async () => null, cancel: () => {} }),
+        close: async () => {
+          closed += 1
+        }
+      }
+    }
+  }
+  const fakeLedger = {
+    inspectState: () => ({
+      devices: new Map([[machineKey, { kind: 'machine', machineId: 'm1' }]])
+    })
+  }
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeDesktopIrohClient({
+          native: fakeNative,
+          relays: { urls: ['https://relay.example.invalid'] },
+          withSeed: (open) => Effect.promise(() => open(new Uint8Array(32))),
+          ledger: () => Effect.succeed(fakeLedger)
+        })
+        yield* client.prepare('m1')
+        assert.equal(opened, 1)
+        assert.ok(yield* client.peek('m1'))
+        yield* client.reset()
+        assert.equal(yield* client.peek('m1'), undefined)
+        yield* client.prepare('m1')
+        assert.equal(opened, 2)
+      })
+    )
+  )
+  assert.equal(closed, 2)
+})

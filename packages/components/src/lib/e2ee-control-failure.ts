@@ -135,8 +135,10 @@ export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
     return { kind: 'progress-conflict', code: 'local-evidence-conflict' };
   if (message.includes('e2ee_genesis_conflict') || message.includes('e2ee_conflict'))
     return { kind: 'identity-conflict', code: 'pin-mismatch' };
+  if (/\be2ee_custody_locked\b/.test(message))
+    return { kind: 'custody-locked', code: 'e2ee_custody_locked' };
   const local =
-    /\be2ee_(permissions|identity-lost|corrupt|rewrap-failed|custody_unavailable|identity-busy|local-history-recovery-required|trusted-pin-unavailable|restart-required)\b/.exec(
+    /\be2ee_(permissions|identity-lost|corrupt|rewrap-failed|custody_unavailable|identity-busy|local-history-recovery-required|trusted-pin-unavailable|restart-required|storage)\b/.exec(
       message
     );
   if (local) return { kind: 'local-identity', code: `e2ee_${local[1]}` };

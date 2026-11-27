@@ -83,6 +83,7 @@ type Account = {
   cloud?: E2eeCloudClient
   closeFailed?: boolean
   readers: Map<string, Map<number, number>>
+  readerEpochs: Map<string, Map<number, number>>
   fenceLoss: (
     workspaceId: string,
     reason: 'member_removed' | 'device_revoked',
@@ -416,6 +417,7 @@ function runAccountOperation<A>(
                   bootstrap,
                   host,
                   readers: new Map<string, Map<number, number>>(),
+                  readerEpochs: new Map<string, Map<number, number>>(),
                   fenceLoss: (workspaceId, reason, generation) =>
                     fenceLoss(owned, workspaceId, reason, generation)
                 }
@@ -561,8 +563,10 @@ export function closeDesktopE2eeAccount(options?: {
   )
 }
 
-/** A destroyed renderer cannot retain a workspace or submit further requests. */
-export function releaseDesktopE2eeReader(senderId: number): void {
+/** A destroyed renderer cannot retain a workspace or submit further requests.
+ * When `maxEpoch` is supplied, readers registered by a newer reload epoch of the
+ * same `WebContents` are preserved so stale teardown never drops a new page. */
+export function releaseDesktopE2eeReader(senderId: number, maxEpoch?: number): void {
   // Readers are mutated only by turns on their owner's directory. Include busy
   // directories so a cold open admitted before this release is drained, as before.
   const detach = accountTurn(
@@ -575,10 +579,16 @@ export function releaseDesktopE2eeReader(senderId: number): void {
             const current = owners.get(directory)
             if (!current) return cleanup
             for (const [workspaceId, readers] of current.readers) {
+              if (!readers.has(senderId)) continue
+              const recordedEpoch = current.readerEpochs.get(workspaceId)?.get(senderId)
+              if (maxEpoch !== undefined && recordedEpoch !== undefined && recordedEpoch > maxEpoch)
+                continue
               readers.delete(senderId)
+              current.readerEpochs.get(workspaceId)?.delete(senderId)
               if (readers.size === 0) {
                 cleanup.push(yield* current.host.beginCloseWorkspace(workspaceId))
                 current.readers.delete(workspaceId)
+                current.readerEpochs.delete(workspaceId)
               }
             }
             return cleanup
@@ -603,6 +613,18 @@ export function releaseDesktopE2eeReader(senderId: number): void {
   ).catch(() => {
     console.warn('[E2EE] Reader cleanup pending', { code: 'e2ee_cleanup_failed' })
   })
+}
+
+/** Resets pre-sleep iroh endpoints across open owners after OS resume/unlock. */
+export function resetDesktopE2eeIrohOnWake(): void {
+  const active = [...owners.values()].filter((owner) => !owner.closeFailed)
+  if (active.length === 0) return
+  void Effect.runPromise(
+    Effect.forEach(active, (owner) => Effect.ignore(owner.host.resetIroh()), {
+      concurrency: 'unbounded',
+      discard: true
+    })
+  ).catch(() => undefined)
 }
 
 /** The quit barrier can leave the application open; failed owners stay fenced. */
@@ -965,10 +987,17 @@ function publicE2eeFailure(error: unknown): Error {
     'identity-lost',
     'account_unavailable',
     'custody_unavailable',
+    'custody_locked',
     'missing-binding',
+    'pairing-elsewhere',
     'pairing-tampered',
     'pairing-expired',
     'pairing-used',
+    'pairing-unavailable',
+    'pairing-rate-limited',
+    'pairing-update-required',
+    'pairing-code-mismatch',
+    'pairing-code-locked',
     'member_removed',
     'member_invitation_invalid',
     'member_invitation_endorser_ineligible',
@@ -996,7 +1025,9 @@ function publicE2eeFailure(error: unknown): Error {
     'rotation_candidate_unavailable',
     'management_unauthorized',
     'management_operator_required',
+    'management_pending',
     'management_retry',
+    'self_service_rate_limited',
     'workspace_transfer_active_subscription',
     'workspace_transfer_payment_required',
     'restart-required',
@@ -1004,6 +1035,44 @@ function publicE2eeFailure(error: unknown): Error {
     'trusted-pin-unavailable'
   ])
   if (code === 'restart-required') return accountFailure(code)
+  if (code === 'pairing-code-mismatch') {
+    const attemptsLeft =
+      error &&
+      typeof error === 'object' &&
+      'attemptsLeft' in error &&
+      typeof error.attemptsLeft === 'number' &&
+      Number.isSafeInteger(error.attemptsLeft) &&
+      error.attemptsLeft >= 0
+        ? error.attemptsLeft
+        : undefined
+    return Object.assign(
+      new Error(
+        attemptsLeft !== undefined
+          ? `e2ee_pairing-code-mismatch:${attemptsLeft}`
+          : 'e2ee_pairing-code-mismatch'
+      ),
+      attemptsLeft !== undefined ? { code, attemptsLeft } : { code }
+    )
+  }
+  if (code === 'self_service_rate_limited') {
+    const retryAt =
+      error &&
+      typeof error === 'object' &&
+      'retryAt' in error &&
+      typeof error.retryAt === 'number' &&
+      Number.isSafeInteger(error.retryAt) &&
+      error.retryAt >= 0
+        ? error.retryAt
+        : undefined
+    return Object.assign(
+      new Error(
+        retryAt !== undefined
+          ? `e2ee_self_service_rate_limited:${retryAt}`
+          : 'e2ee_self_service_rate_limited'
+      ),
+      retryAt !== undefined ? { code, retryAt } : { code }
+    )
+  }
   return new Error(
     typeof code === 'string' && allowed.has(code) ? `e2ee_${code}` : 'e2ee_host_operation_failed'
   )

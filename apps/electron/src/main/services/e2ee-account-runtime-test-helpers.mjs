@@ -198,15 +198,20 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
                                       work
                                     ) => work()
                                   }
-                                : id === '../auth-fetch'
-                                  ? loadSync(
-                                      '../auth-fetch.ts',
-                                      dependencies,
-                                      console,
-                                      env,
-                                      globals
-                                    )
-                                  : require(id)
+                                : id === '../../power-state-broadcast'
+                                  ? {
+                                      subscribePowerState: () => () => {},
+                                      notifyPowerState: () => {}
+                                    }
+                                  : id === '../auth-fetch'
+                                    ? loadSync(
+                                        '../auth-fetch.ts',
+                                        dependencies,
+                                        console,
+                                        env,
+                                        globals
+                                      )
+                                    : require(id)
   })
   return exports
 }

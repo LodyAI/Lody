@@ -17,6 +17,31 @@ export interface DesktopSafeStorage {
   decryptStringAsync(value: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>
 }
 
+const SAFE_STORAGE_UNAVAILABLE =
+  /keychain|lock|unlock|cancel|denied|deny|permission|interaction not allowed|auth(?:entication)? failed|errsec|secret service|kwallet|safe storage|not available|unavailable/i
+
+function classifySafeStorageError(
+  error: unknown,
+  storage: DesktopSafeStorage
+): NodeE2eeCustodyError {
+  if (error instanceof NodeE2eeCustodyError) return error
+  try {
+    if (!storage.isEncryptionAvailable()) return new NodeE2eeCustodyError({ code: 'unavailable' })
+  } catch {
+    return new NodeE2eeCustodyError({ code: 'unavailable' })
+  }
+  const errCode =
+    error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+      ? error.code
+      : ''
+  if (errCode === 'EACCES' || errCode === 'EPERM')
+    return new NodeE2eeCustodyError({ code: 'unavailable' })
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  if (SAFE_STORAGE_UNAVAILABLE.test(message))
+    return new NodeE2eeCustodyError({ code: 'unavailable' })
+  return new NodeE2eeCustodyError({ code: 'storage' })
+}
+
 /** Electron backend qualification stays here; the shared algorithm never guesses host backend names. */
 export const makeDesktopE2eeCustody = Effect.fnUntraced(function* (input: {
   readonly directory: string
@@ -51,8 +76,20 @@ export const makeDesktopE2eeCustody = Effect.fnUntraced(function* (input: {
     directory: input.directory,
     wrapper: {
       protection: 'os-keystore',
-      wrap: (value) => storage.encryptStringAsync(value),
-      unwrap: (value) => storage.decryptStringAsync(Buffer.from(value))
+      wrap: async (value) => {
+        try {
+          return await storage.encryptStringAsync(value)
+        } catch (error) {
+          throw classifySafeStorageError(error, storage)
+        }
+      },
+      unwrap: async (value) => {
+        try {
+          return await storage.decryptStringAsync(Buffer.from(value))
+        } catch (error) {
+          throw classifySafeStorageError(error, storage)
+        }
+      }
     }
   })
 })

@@ -922,3 +922,31 @@ void test('recovers a journaled replacement after a crash when only the old nati
   assert.deepEqual(await readFile(file), Buffer.from(journal.replacement, 'hex'))
   assert.deepEqual(await readdir(directory), ['kek.safe-storage', 'kek.safe-storage.rewrap-lock'])
 })
+
+void test('safeStorage lock or permission denial reports unavailable without modifying the wrapped KEK', async (t) => {
+  const directory = await fixture(t)
+  await execute(makeDesktopE2eeCustody({ directory, platform: 'darwin', safeStorage: backend() }))
+  const wrapped = await readFile(join(directory, 'kek.safe-storage'))
+  for (const error of [
+    new Error('Keychain is locked (errSecInteractionNotAllowed)'),
+    new Error('User denied access to safe storage'),
+    Object.assign(new Error('access denied'), { code: 'EACCES' })
+  ]) {
+    const locked = await execute(
+      Effect.result(
+        makeDesktopE2eeCustody({
+          directory,
+          platform: 'darwin',
+          safeStorage: backend({
+            decryptStringAsync: async () => {
+              throw error
+            }
+          })
+        })
+      )
+    )
+    assert.equal(locked._tag, 'Failure')
+    assert.equal(locked.failure?.code, 'unavailable')
+    assert.deepEqual(await readFile(join(directory, 'kek.safe-storage')), wrapped)
+  }
+})

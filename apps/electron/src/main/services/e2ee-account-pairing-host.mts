@@ -112,6 +112,7 @@ export interface AccountPairingOwner {
     ): Effect.Effect<unknown, unknown>
     ledgerView(workspaceId: string): Effect.Effect<{ recordsHex: readonly string[] }, unknown>
     open(workspaceId: string): Effect.Effect<unknown, unknown>
+    beginCloseWorkspace?(workspaceId: string): Effect.Effect<Effect.Effect<void, unknown>, unknown>
     closeWorkspace(workspaceId: string): Effect.Effect<unknown, unknown>
     keyRound(
       workspaceId: string,
@@ -244,13 +245,19 @@ export function makeDesktopAccountPairingWorkspaces(
       )
     )
   }
-  /** Closes the runtime entry this workflow opened, unless a window is reading it. */
+  /** Closes the runtime entry this workflow opened, unless a window is reading it.
+   * Detaches under the account lock and drains outside it so close cannot re-enter. */
   const release = (workspaceId: string) =>
     owner(workspaceId, (current) =>
       current.readers.get(workspaceId)?.size
-        ? Effect.void
-        : current.host.closeWorkspace(workspaceId)
-    ).pipe(Effect.ignore)
+        ? Effect.succeed<Effect.Effect<void, unknown> | null>(null)
+        : current.host.beginCloseWorkspace
+          ? current.host.beginCloseWorkspace(workspaceId)
+          : Effect.succeed(current.host.closeWorkspace(workspaceId))
+    ).pipe(
+      Effect.flatMap((drain) => (drain ? promise(() => input.run(drain)) : Effect.void)),
+      Effect.ignore
+    )
   function transient<A>(workspaceId: string, work: Effect.Effect<A, unknown>) {
     return Effect.ensuring(work, release(workspaceId))
   }

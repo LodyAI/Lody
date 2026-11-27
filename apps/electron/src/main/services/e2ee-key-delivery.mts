@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { Cause, Deferred, Effect } from 'effect'
+import { Cause, Deferred, Effect, Fiber } from 'effect'
 import { KEY_DELIVERY_RETRY_DELAYS } from '@lody/e2ee-client/account-requester'
 import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 import type {
@@ -65,6 +65,8 @@ type KeyDeliverySlot = {
   generation: number | undefined
   /** Settles when the slot's fiber ends; `idle` and reentry use it. */
   running?: Promise<void>
+  fiber?: Fiber.Fiber<void, never>
+  waking?: boolean
   again: boolean
   timer?: unknown
   autoRetries: number
@@ -378,11 +380,21 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
   /** After the slot's fiber ends, however it ends. */
   function finish(accountId: string, workspaceId: string, slot: KeyDeliverySlot) {
     slot.running = undefined
+    slot.fiber = undefined
+    const waking = slot.waking === true
+    slot.waking = false
     // An unexpected exception must not leave a request shown as sending forever:
     // anything still delivering becomes retryable on the next due poll.
     const now = nowOrZero()
     for (const [requestId, delivery] of slot.requests) {
       if (delivery.state !== 'delivering') continue
+      if (waking) {
+        delivery.state = 'pending'
+        delivery.retryAt = 0
+        delete delivery.code
+        slot.autoRetries = 0
+        continue
+      }
       delivery.attempts += 1
       delivery.state = 'failed'
       delivery.code = KEY_DELIVERY_INTERRUPTED
@@ -413,7 +425,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     let settle!: () => void
     const running = new Promise<void>((resolve) => (settle = resolve))
     slot.running = running
-    Effect.runFork(
+    slot.fiber = Effect.runFork(
       passes(accountId, workspaceId, slot).pipe(
         Effect.catchCause((cause) => remembering(Cause.squash(cause))),
         Effect.ensuring(
@@ -428,6 +440,40 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
       )
     )
     return running
+  }
+  /** Re-evaluates due retries and interrupts pre-sleep in-flight passes on OS wake. */
+  function wake() {
+    const now = nowOrZero()
+    for (const [key, slot] of [...slots.entries()]) {
+      const [accountId, workspaceId] = key.split('\n') as [string, string]
+      if (!current(accountId, slot)) {
+        drop(accountId, workspaceId)
+        continue
+      }
+      if (slot.running) {
+        slot.waking = true
+        slot.again = true
+        if (slot.fiber) Effect.runFork(Fiber.interrupt(slot.fiber))
+        continue
+      }
+      if (slot.timer !== undefined) {
+        ports.timers().clear(slot.timer)
+        slot.timer = undefined
+      }
+      const hasDue = [...slot.requests.values()].some(
+        (delivery) =>
+          delivery.state === 'pending' ||
+          (delivery.state === 'failed' &&
+            delivery.retryAt <= now &&
+            !TERMINAL_KEY_DELIVERY.has(delivery.code ?? ''))
+      )
+      if (hasDue) {
+        slot.autoRetries = 0
+        void run(accountId, workspaceId)
+      } else {
+        schedule(accountId, workspaceId)
+      }
+    }
   }
   /** One key round under a main-owned reader, so closing every window cannot stop it.
    * Ingests relay history first, runs the round for devices the local verified ledger
@@ -667,6 +713,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     dropWorkspace,
     ingest,
     idle,
+    wake,
     prepareInline
   }
 }

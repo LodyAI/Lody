@@ -48,7 +48,7 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
   let opening: Deferred.Deferred<IrohEndpoint, unknown> | undefined
   let liveEndpoint: IrohEndpoint | undefined
   let closed = false
-  const warming = new Set<string>()
+  let warming = new Set<string>()
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       closed = true
@@ -77,6 +77,12 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
     if (Exit.isFailure(opened) && opening === deferred) opening = undefined
     if (Exit.isSuccess(opened)) {
       const live = opened.value
+      if (closed || opening !== deferred) {
+        yield* Effect.promise(() => live.close().catch(() => undefined))
+        const resetExit = Exit.fail(new Error('iroh_reset'))
+        yield* Deferred.done(deferred, resetExit)
+        return yield* resetExit
+      }
       liveEndpoint = live
       // Observation only: whether a home relay connected within 15 seconds.
       yield* Effect.forkIn(
@@ -114,6 +120,30 @@ export const makeDesktopIrohClient = Effect.fnUntraced(function* (options: {
         const key = yield* target(machineId)
         const live = yield* endpoint
         return makeIrohRoute(live, key, warming)
+      }),
+    /** Drops pre-sleep endpoint and warming state so the next call dials fresh sockets. */
+    reset: () =>
+      Effect.gen(function* () {
+        if (closed) return
+        warming = new Set<string>()
+        const staleOpening = opening
+        const staleLive = liveEndpoint
+        opening = undefined
+        liveEndpoint = undefined
+        if (staleLive) {
+          yield* Effect.promise(() => staleLive.close().catch(() => undefined))
+        } else if (staleOpening) {
+          yield* Effect.forkIn(
+            Effect.exit(Deferred.await(staleOpening)).pipe(
+              Effect.flatMap((settled) =>
+                Exit.isSuccess(settled)
+                  ? Effect.promise(() => settled.value.close().catch(() => undefined))
+                  : Effect.void
+              )
+            ),
+            scope
+          )
+        }
       })
   }
 })

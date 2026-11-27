@@ -11,15 +11,28 @@ export function accountPairingHints(state: WorkspacesState) {
   );
 }
 
-const REFUSAL = /\be2ee_(pairing-(?:tampered|expired|used|unavailable|rate-limited|elsewhere))\b/;
+const REFUSAL =
+  /\be2ee_(pairing-(?:tampered|expired|used|unavailable|rate-limited|elsewhere|update-required|code-mismatch|code-locked))(?::(\d+))?\b/;
 /** Electron IPC carries only the message; restore the typed refusal the UI reads
  * through `accountPairingErrorCode`. Other failures pass through unchanged. */
 export async function withAccountPairingCode<A>(call: Promise<A>): Promise<A> {
   try {
     return await call;
   } catch (error) {
-    const code = error instanceof Error ? REFUSAL.exec(error.message)?.[1] : undefined;
-    if (code && error instanceof Error) Object.assign(error, { code });
+    const match = error instanceof Error ? REFUSAL.exec(error.message) : null;
+    const code = match?.[1];
+    if (code && error instanceof Error) {
+      const attemptsLeft =
+        code === 'pairing-code-mismatch' && match?.[2] !== undefined
+          ? Number.parseInt(match[2], 10)
+          : undefined;
+      Object.assign(
+        error,
+        attemptsLeft !== undefined && Number.isSafeInteger(attemptsLeft)
+          ? { code, attemptsLeft }
+          : { code }
+      );
+    }
     throw error;
   }
 }

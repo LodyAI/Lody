@@ -29,6 +29,7 @@ import {
 } from '../../services/e2ee-bootstrap.mjs'
 import {
   releaseDesktopE2eeReader,
+  resetDesktopE2eeIrohOnWake,
   resetDesktopE2eeIdentity,
   recordDesktopE2eeCreated,
   prepareDesktopE2eeCreation,
@@ -42,6 +43,7 @@ import {
   desktopE2eeHasWorkspaceIdentity,
   desktopE2eeRecoveryJournalPath
 } from '../../services/e2ee-account-runtime'
+import { subscribePowerState } from '../../power-state-broadcast'
 import {
   makeDesktopAccountPairingHost,
   type AccountPairingCloud,
@@ -164,6 +166,8 @@ const observedSenders = new WeakSet<Electron.WebContents>()
 /** Windows that may hold readers; they get a re-read hint when main records a loss. */
 const readerWindows = new Map<number, Electron.WebContents>()
 const readerLifetimes = new WeakMap<Electron.WebContents, object>()
+/** Monotonic reload/crash epoch per WebContents so stale cleanup never drops a new page's reader. */
+const senderEpochs = new WeakMap<Electron.WebContents, number>()
 function pairingSession(value: string) {
   if (typeof value !== 'string' || !/^[0-9a-f]{32}$/.test(value))
     throw new Error('e2ee_invalid-input')
@@ -237,6 +241,9 @@ const PAIRING_REFUSALS = new Set([
   'pairing-tampered',
   'pairing-expired',
   'pairing-used',
+  'pairing-update-required',
+  'pairing-code-mismatch',
+  'pairing-code-locked',
   // Relay refusals the new device explains: switched off on this deployment, or
   // too many new requests this hour.
   'pairing-unavailable',
@@ -272,11 +279,14 @@ function sender() {
   if (isLocalPlatform()) throw new Error('e2ee_unavailable')
   if (!observedSenders.has(event.sender)) {
     observedSenders.add(event.sender)
+    senderEpochs.set(event.sender, 1)
     const id = event.sender.id
     readerWindows.set(id, event.sender)
     const release = () => {
+      const epoch = senderEpochs.get(event.sender) ?? 1
+      senderEpochs.set(event.sender, epoch + 1)
       readerLifetimes.delete(event.sender)
-      releaseDesktopE2eeReader(id)
+      releaseDesktopE2eeReader(id, epoch)
     }
     event.sender.once('destroyed', () => {
       readerWindows.delete(id)
@@ -422,6 +432,14 @@ export class E2eeIpc extends ProductWindowIpcService {
     cloud: desktopE2eeCloudClient,
     run: runDesktopE2eeOperation
   })
+  constructor() {
+    super()
+    subscribePowerState?.((state) => {
+      if (state !== 'resume' && state !== 'unlock-screen') return
+      this.keyDelivery.wake()
+      resetDesktopE2eeIrohOnWake?.()
+    })
+  }
   private readonly agentPairing = makeDesktopAgentPairing({
     withAccount: withDesktopE2eeAccount,
     cloud: desktopE2eeCloudClient,
@@ -883,7 +901,35 @@ export class E2eeIpc extends ProductWindowIpcService {
       cloud.client.memberRead({ ...access, requestId })
     )
     if (result.state !== 'committed') {
-      this.pairingFailure = primary
+      if (primary !== undefined) {
+        this.pairingFailure = primary
+        const message = primary instanceof Error ? primary.message : ''
+        const explicit = /^(e2ee_[a-z0-9_-]{1,64}(?::\d+)?)(?=$|:)/.exec(message)?.[1]
+        if (explicit) throw new Error(explicit)
+        const code =
+          primary &&
+          typeof primary === 'object' &&
+          'code' in primary &&
+          typeof primary.code === 'string'
+            ? primary.code
+            : undefined
+        if (code && /^[a-z0-9_-]{1,64}$/.test(code))
+          throw new Error(code.startsWith('e2ee_') ? code : `e2ee_${code}`)
+        const reason =
+          primary &&
+          typeof primary === 'object' &&
+          'reason' in primary &&
+          typeof primary.reason === 'string'
+            ? primary.reason
+            : undefined
+        throw new Error(
+          reason === 'conflict'
+            ? 'e2ee_conflict'
+            : reason === 'unauthorized'
+              ? 'e2ee_unauthorized'
+              : 'e2ee_member_approval_failed'
+        )
+      }
       return { admitted: false, keyPending: true }
     }
     // Delivery continues in main and cannot undo admission; its state is readable below.
@@ -1615,8 +1661,22 @@ export class E2eeIpc extends ProductWindowIpcService {
       const code =
         error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined
       // Raw causes stay in main; the IPC decorator logs rejected Errors.
-      // eslint-disable-next-line preserve-caught-error
-      if (code && PAIRING_REFUSALS.has(code)) throw new Error(`e2ee_${code}`)
+      if (code && PAIRING_REFUSALS.has(code)) {
+        const attemptsLeft =
+          code === 'pairing-code-mismatch' &&
+          error &&
+          typeof error === 'object' &&
+          'attemptsLeft' in error &&
+          typeof error.attemptsLeft === 'number' &&
+          Number.isSafeInteger(error.attemptsLeft) &&
+          error.attemptsLeft >= 0
+            ? error.attemptsLeft
+            : undefined
+        // eslint-disable-next-line preserve-caught-error
+        throw new Error(
+          attemptsLeft !== undefined ? `e2ee_${code}:${attemptsLeft}` : `e2ee_${code}`
+        )
+      }
       // eslint-disable-next-line preserve-caught-error
       throw new Error('e2ee_host_operation_failed')
     }
@@ -2618,6 +2678,8 @@ export class E2eeIpc extends ProductWindowIpcService {
         : getIpcServiceDeps().authService.getCachedSessionIdentity()
     if (expectedAccountId !== undefined && identity?.userId !== expectedAccountId)
       throw new Error('e2ee_account_mismatch')
+    const window = readerWindows.get(id)
+    const epoch = window ? (senderEpochs.get(window) ?? 1) : 1
     let accountId: string | undefined
     let proofIdentity: typeof identity
     // Join at most one drain of a reader this account just released for this
@@ -2643,6 +2705,8 @@ export class E2eeIpc extends ProductWindowIpcService {
                 const closing = yield* owner.host.pendingClose(workspaceId)
                 if (closing) return { kind: 'closing', closing } as const
               }
+              if (window && (window.isDestroyed() || (senderEpochs.get(window) ?? 1) !== epoch))
+                return yield* Effect.fail(new Error('e2ee_closed'))
               const status = yield* owner.host.open(workspaceId, observed, proof)
               const latest =
                 expectedAccountId === undefined && !proofIdentity
@@ -2660,9 +2724,19 @@ export class E2eeIpc extends ProductWindowIpcService {
                   latest?.generation !== proofIdentity.generation)
               )
                 return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+              if (window && (window.isDestroyed() || (senderEpochs.get(window) ?? 1) !== epoch))
+                return yield* Effect.fail(new Error('e2ee_closed'))
               const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
-              readers.set(id, (readers.get(id) ?? 0) + 1)
+              const epochs = owner.readerEpochs?.get(workspaceId) ?? new Map<number, number>()
+              const previousEpoch = epochs.get(id)
+              const nextCount =
+                previousEpoch !== undefined && previousEpoch < epoch
+                  ? 1
+                  : (readers.get(id) ?? 0) + 1
+              readers.set(id, nextCount)
               owner.readers.set(workspaceId, readers)
+              epochs.set(id, epoch)
+              owner.readerEpochs?.set(workspaceId, epochs)
               return {
                 kind: 'opened',
                 opened:
@@ -2754,11 +2828,13 @@ export class E2eeIpc extends ProductWindowIpcService {
           if (count > 1) readers!.set(id, count - 1)
           else {
             readers?.delete(id)
+            owner.readerEpochs?.get(workspaceId)?.delete(id)
             if (readers && window) readerTokens.get(readers)?.delete(window)
           }
           if (readers?.size === 0) {
             const drain = yield* owner.host.beginCloseWorkspace(workspaceId)
             owner.readers.delete(workspaceId)
+            owner.readerEpochs?.delete(workspaceId)
             return drain
           }
           return Effect.void
@@ -2779,25 +2855,43 @@ export class E2eeIpc extends ProductWindowIpcService {
     if (!input || typeof input.accountId !== 'string' || typeof input.workspaceId !== 'string')
       throw new Error('e2ee_invalid-input')
     const { accountId, workspaceId } = input
-    const captured = await withDesktopE2eeAccount(
-      (owner) =>
-        Effect.gen(function* () {
-          if (owner.accountId !== accountId)
-            return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-          const status = yield* owner.host.open(workspaceId)
-          // The account lock protects this temporary read. Existing window readers
-          // keep their host; otherwise detach here and drain outside that lock.
-          const cleanup = owner.readers.get(workspaceId)?.size
-            ? Effect.void
-            : yield* owner.host.beginCloseWorkspace(workspaceId)
-          return {
-            identity: { workspaceId: status.workspaceId, genesisHash: status.genesisHash },
-            cleanup
-          }
-        }),
-      workspaceId,
-      false
-    )
+    let drained = false
+    const attempt = () =>
+      withDesktopE2eeAccount(
+        (owner) =>
+          Effect.gen(function* () {
+            if (owner.accountId !== accountId)
+              return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+            if (!drained) {
+              const closing = yield* owner.host.pendingClose(workspaceId)
+              if (closing) return { kind: 'closing' as const, closing }
+            }
+            const status = yield* owner.host.open(workspaceId)
+            // The account lock protects this temporary read. Existing window readers
+            // keep their host; otherwise detach here and drain outside that lock.
+            const cleanup = owner.readers.get(workspaceId)?.size
+              ? Effect.void
+              : yield* owner.host.beginCloseWorkspace(workspaceId)
+            return {
+              kind: 'read' as const,
+              identity: { workspaceId: status.workspaceId, genesisHash: status.genesisHash },
+              cleanup
+            }
+          }),
+        workspaceId,
+        false
+      )
+    let captured = await attempt()
+    if (captured.kind === 'closing') {
+      drained = true
+      await Effect.runPromise(captured.closing).catch(() => {
+        throw new Error(
+          'e2ee_restart-required: Restart Lody to finish releasing encrypted resources.'
+        )
+      })
+      captured = await attempt()
+      if (captured.kind !== 'read') throw new Error('e2ee_closed')
+    }
     await Effect.runPromise(captured.cleanup).catch(() => {
       throw new Error('e2ee_cleanup_failed')
     })
@@ -3167,12 +3261,12 @@ export class E2eeIpc extends ProductWindowIpcService {
   async recentAccountSecurityEvents() {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
-    const { client } = await desktopE2eeCloudClient()
-    return Effect.runPromise(recentAccountSecurityEvents(client.accountSecurityEvents())).catch(
-      (error) => {
-        throw recoveryVaultFailure(error)
-      }
-    )
+    try {
+      const { client } = await desktopE2eeCloudClient()
+      return await Effect.runPromise(recentAccountSecurityEvents(client.accountSecurityEvents()))
+    } catch (error) {
+      throw recoveryVaultFailure(error)
+    }
   }
   /** What replacing the recovery vault would cover from this device, plus active methods. */
   @IpcMethod()
