@@ -222,12 +222,30 @@ const previewMachines: MachineMeta[] = [
     sessions: [],
   },
 ];
-const previewAccess = previewMachines.map((machine) => ({
-  machineId: machine.id,
-  ownerUserId: previewOwnerId,
-  sharedWithTeam: machine.id !== 'windows-daemon-retired',
-  updatedAt: 1,
-}));
+/** A teammate's shared machine, so the fleet list's Owner column names someone else. */
+const previewTeammateId = 'settings-story-teammate';
+const previewTeammateMachine: MachineMeta = {
+  id: 'linux-build-server' as MachineId,
+  name: 'Linux 构建服务器',
+  ownerUserId: previewTeammateId,
+  os: 'Ubuntu 24.04',
+  cliVersion: '0.104.0',
+  sessions: [],
+};
+const previewAccess = [
+  ...previewMachines.map((machine) => ({
+    machineId: machine.id,
+    ownerUserId: previewOwnerId,
+    sharedWithTeam: machine.id !== 'windows-daemon-retired',
+    updatedAt: 1,
+  })),
+  {
+    machineId: previewTeammateMachine.id,
+    ownerUserId: previewTeammateId,
+    sharedWithTeam: true,
+    updatedAt: 1,
+  },
+];
 const previewQueries: Record<string, unknown> = {
   'machines:listVisibleMachines': previewAccess,
   'localProjects:listVisibleLocalProjects': [],
@@ -237,10 +255,9 @@ const previewQueries: Record<string, unknown> = {
 /** Nothing is shared: every machine is the owner's private machine. */
 const privatePreviewQueries: Record<string, unknown> = {
   ...previewQueries,
-  'machines:listVisibleMachines': previewAccess.map((access) => ({
-    ...access,
-    sharedWithTeam: false,
-  })),
+  'machines:listVisibleMachines': previewAccess
+    .filter((access) => access.ownerUserId === previewOwnerId)
+    .map((access) => ({ ...access, sharedWithTeam: false })),
 };
 const createPreviewCloudApi = (queries: Record<string, unknown>): CloudApi => ({
   useQuery: (operation, args) => (args === 'skip' ? undefined : (queries[operation.name] as never)),
@@ -401,22 +418,29 @@ function MachinesCatalogFixture({
     next.set(settingsSelectedMachineIdAtom, initialSelectedMachineId);
     next.set(
       machineMetaCacheAtom,
-      Object.fromEntries(previewMachines.map((machine) => [getMachineRoomId(machine.id), machine]))
+      Object.fromEntries(
+        [...previewMachines, ...(allPrivate ? [] : [previewTeammateMachine])].map((machine) => [
+          getMachineRoomId(machine.id),
+          machine,
+        ])
+      )
     );
     next.set(lodyPresenceSyncStateAtom, 'synced');
     next.set(lodyPresenceNowMsAtom, getServerNow());
     next.set(
       lodyPresenceStatesAtom,
       Object.fromEntries(
-        [previewSourceId, 'macbook-development' as MachineId].map((machineId) => [
-          getLodyMachinePresenceKey(machineId, 'preview' as LodyPresenceInstanceId),
-          {
-            kind: 'machine',
-            machineId,
-            instanceId: 'preview' as LodyPresenceInstanceId,
-            updatedAt: getServerNow(),
-          },
-        ])
+        [previewSourceId, 'macbook-development' as MachineId, previewTeammateMachine.id].map(
+          (machineId) => [
+            getLodyMachinePresenceKey(machineId, 'preview' as LodyPresenceInstanceId),
+            {
+              kind: 'machine',
+              machineId,
+              instanceId: 'preview' as LodyPresenceInstanceId,
+              updatedAt: getServerNow(),
+            },
+          ]
+        )
       )
     );
     return next;

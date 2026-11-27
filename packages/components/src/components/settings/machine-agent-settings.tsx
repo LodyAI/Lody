@@ -115,7 +115,7 @@ import {
   WorkspaceMachineFleetRow,
   type WorkspaceMachineAccordionMeta,
 } from './workspace-machine-accordion';
-import { CompactSection } from './compact-layout';
+import { CompactSection, SettingsEmptyList } from './compact-layout';
 import { filterMachineFleetItems, type MachineFleetFilterPreset } from './machine-fleet-filter';
 import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
 import { SettingsLineTabs } from './settings-line-tabs';
@@ -316,17 +316,6 @@ const styles = stylex.create({
     backgroundColor: colors.trayRaised,
     color: colors.label,
     boxShadow: `0 0 0 0.5px ${colors.separator}, 0 1px 2px rgba(0, 0, 0, 0.06)`,
-  },
-  emptyNote: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: space[2],
-    paddingInline: space[4],
-    paddingBlock: space[8],
-    textAlign: 'center',
-    fontSize: uiText.footnoteSize,
-    color: colors.secondaryLabel,
   },
   privateSection: { display: 'flex', flexDirection: 'column', gap: space[3], paddingTop: space[3] },
   privateHeading: { paddingInline: space[1] },
@@ -2083,7 +2072,6 @@ export function MachineAgentSettings({
           <div {...stylex.props(styles.fleetSearchWrap)}>
             <Input
               size="small"
-              type="search"
               leading={<Search aria-hidden {...stylex.props(styles.fleetSearchIcon)} />}
               value={fleetQuery}
               onChange={(event) => setFleetQuery(event.target.value)}
@@ -2120,23 +2108,26 @@ export function MachineAgentSettings({
         </div>
 
         {fleetEmpty ? (
-          <div {...stylex.props(surface.card, styles.emptyNote)}>
+          <SettingsEmptyList
+            action={
+              fleetHasFilter ? (
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => {
+                    setFleetPreset('all');
+                    setFleetQuery('');
+                  }}
+                >
+                  {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
+                </Button>
+              ) : undefined
+            }
+          >
             {allFleetItems.length === 0
               ? emptyMachinesLabel
               : t('settings.agent.machineTabs.filter.noMatch', 'No machines match these filters.')}
-            {fleetHasFilter ? (
-              <Button
-                variant="link"
-                size="small"
-                onClick={() => {
-                  setFleetPreset('all');
-                  setFleetQuery('');
-                }}
-              >
-                {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
-              </Button>
-            ) : null}
-          </div>
+          </SettingsEmptyList>
         ) : (
           <div {...stylex.props(styles.stack)}>
             {filteredFleetShared.length > 0 ? (
