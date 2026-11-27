@@ -3139,6 +3139,7 @@ describe('remote machine command', () => {
     async (permanentStatus) => {
       const directory = await mkdtemp(join(tmpdir(), `remote-machine-http-${permanentStatus}-`));
       vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      vi.stubEnv('LODY_PLATFORM', 'cloud');
       vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
       const legacy = await import('../src/lib/e2ee/workspace-legacy');
       const { pairRemoteMachineLegacy } = await import('../src/lib/e2ee/remote-pairing');
@@ -3281,6 +3282,7 @@ describe('remote machine command', () => {
   it('propagates activation abort to underlying cloud-cli-port requests and blocks activation.json after deadline', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remote-machine-activate-signal-'));
     vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    vi.stubEnv('LODY_PLATFORM', 'cloud');
     vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
     const { createCloudE2eePort } = await import('../src/lib/cloud-cli-port');
     const originalFetch = globalThis.fetch;
