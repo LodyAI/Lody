@@ -563,3 +563,18 @@ function MachineOnlineStatusPreview() {
 export const OnlineStatusMotion: Story = {
   render: () => <MachineOnlineStatusPreview />,
 };
+
+/** The nested desktop detail's one card for a machine's folders and agents. */
+export const ConnectedResourcesCard: Story = {
+  render: () => (
+    <MachineConnectedResources
+      machineId={'machine-mbp' as MachineId}
+      configs={agentConfigs('machine-mbp' as MachineId)}
+      preloadedProjects={connectedProjects('machine-mbp' as MachineId)}
+      projectsLoading={false}
+      readOnly
+      flush
+      onManageAgents={fn()}
+    />
+  ),
+};

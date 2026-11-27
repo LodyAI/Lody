@@ -25,7 +25,7 @@ export const field = stylex.defineVars({
   labelLeading: text.footnoteLeading,
   labelWeight: '500',
   gap: space[1.5],
-  ringWidth: '2px',
+  ringWidth: '1px',
   textareaMinHeight: '72px',
   // A checkbox and a radio are the rules' "16px things", so they take the mini
   // radius; a radio overrides it with a full round because it is a circle.
@@ -46,7 +46,7 @@ export const field = stylex.defineVars({
   // The family API shares the system state, including the label and help.
   disabledOpacity: control.disabledOpacity,
   background: colors.wellBackground,
-  well: shadow.inset,
+  well: `inset 0 0 0 1px color-mix(in oklab, ${colors.label} 10%, transparent)`,
   value: colors.label,
   label: colors.label,
   placeholder: colors.tertiaryLabel,
@@ -54,7 +54,7 @@ export const field = stylex.defineVars({
   // The chevron on a trigger and any icon at rest: a hint, not a label.
   icon: colors.tertiaryLabel,
   error: colors.destructive,
-  ring: colors.accent,
+  ring: `color-mix(in oklab, ${colors.label} 34%, transparent)`,
   invalidRing: colors.destructive,
   // Stored state is the accent fill: a checked box and a switch that is on take
   // the `accent` fill with `background` on top of it, and the raised ink edge
@@ -78,14 +78,14 @@ export const field = stylex.defineVars({
  */
 export const fieldPaletteTheme = stylex.createTheme(field, {
   background: colors.wellBackground,
-  well: shadow.inset,
+  well: `inset 0 0 0 1px color-mix(in oklab, ${colors.label} 10%, transparent)`,
   value: colors.label,
   label: colors.label,
   placeholder: colors.tertiaryLabel,
   hint: colors.tertiaryLabel,
   icon: colors.tertiaryLabel,
   error: colors.destructive,
-  ring: colors.accent,
+  ring: `color-mix(in oklab, ${colors.label} 34%, transparent)`,
   invalidRing: colors.destructive,
   checkedFill: colors.accent,
   checkedMark: colors.background,
