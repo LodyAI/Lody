@@ -611,6 +611,7 @@ describe('encrypted one-shot commands', () => {
       expect(received[0]).toMatchObject({
         requesterUserId: 'user-1',
         requesterMachineId: 'machine-self',
+        deadlineAtMs: expect.any(Number),
         request: {
           workspaceId: 'workspace-1',
           machineId: 'machine-remote',
@@ -645,6 +646,75 @@ describe('encrypted one-shot commands', () => {
       });
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+
+    const oldDaemonSocket = path.join(dir, 'old-daemon.sock');
+    const oldDaemon = http.createServer((_req, res) => {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'not_found' }));
+    });
+    await new Promise<void>((resolve) => oldDaemon.listen(oldDaemonSocket, resolve));
+    try {
+      const fallbackResult = await withMachineRpcClient(
+        {
+          auth: {
+            token: 'synthetic-token',
+            userId: 'user-1',
+            userName: 'User',
+            userEmail: 'user@example.test',
+            machineId: 'machine-self' as MachineId,
+            machineName: 'host',
+          },
+          workspaceId: 'workspace-1' as WorkspaceId,
+          machineId: 'machine-remote' as MachineId,
+          localIpcOptions: { socketPath: oldDaemonSocket },
+        },
+        (client) =>
+          client.requestSessionCancel({
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            timeoutMs: 5_000,
+          })
+      );
+      expect(fallbackResult).toMatchObject({
+        sessionId: 'session-1',
+        success: false,
+      });
+      expect(fallbackResult?.error).not.toBe('not_found');
+    } finally {
+      await new Promise<void>((resolve) => oldDaemon.close(() => resolve()));
+    }
+
+    const crashSocket = path.join(dir, 'crash-daemon.sock');
+    const crashDaemon = http.createServer((req) => {
+      req.socket.destroy();
+    });
+    await new Promise<void>((resolve) => crashDaemon.listen(crashSocket, resolve));
+    try {
+      const crashedResult = await withMachineRpcClient(
+        {
+          auth: {
+            token: 'synthetic-token',
+            userId: 'user-1',
+            userName: 'User',
+            userEmail: 'user@example.test',
+            machineId: 'machine-self' as MachineId,
+            machineName: 'host',
+          },
+          workspaceId: 'workspace-1' as WorkspaceId,
+          machineId: 'machine-remote' as MachineId,
+          localIpcOptions: { socketPath: crashSocket },
+        },
+        (client) =>
+          client.requestSessionCancel({
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            timeoutMs: 5_000,
+          })
+      );
+      expect(crashedResult).toBeNull();
+    } finally {
+      await new Promise<void>((resolve) => crashDaemon.close(() => resolve()));
     }
   });
 });

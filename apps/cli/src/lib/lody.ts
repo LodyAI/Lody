@@ -673,9 +673,10 @@ export class Lody {
 
   async dispatchRemoteMachineRpcProxy(
     message: LocalMachineRpcRequestValidated,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    deadlineAtMs?: number
   ): Promise<LocalMachineRpcResponse> {
-    return await this.runtime.dispatchRemoteMachineRpcProxy(message, signal);
+    return await this.runtime.dispatchRemoteMachineRpcProxy(message, signal, deadlineAtMs);
   }
 
   isControlPlaneReady(): boolean {

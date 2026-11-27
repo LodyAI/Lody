@@ -2086,11 +2086,23 @@ export class LodyFleet {
       };
     }
 
+    if (message.deadlineAtMs !== undefined && getServerNow() >= message.deadlineAtMs) {
+      return {
+        ok: false,
+        code: 'timeout',
+        error: 'RPC deadline expired before dispatch',
+      };
+    }
+
     if (message.request.machineId === this.machineId) {
       return await runtime.lody.dispatchLocalMachineRpc(message.request, signal);
     }
 
-    return await runtime.lody.dispatchRemoteMachineRpcProxy(message.request, signal);
+    return await runtime.lody.dispatchRemoteMachineRpcProxy(
+      message.request,
+      signal,
+      message.deadlineAtMs
+    );
   }
 
   // Resolves the push-based data-plane engine for a workspace the CLI socket

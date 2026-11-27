@@ -454,10 +454,11 @@ export class MachineRuntime {
 
   async dispatchRemoteMachineRpcProxy(
     message: LocalMachineRpcRequestValidated,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    deadlineAtMs?: number
   ): Promise<LocalMachineRpcResponse> {
     const handler = this.requireHandler();
-    return await handler.handleRemoteMachineRpcProxy(message, signal);
+    return await handler.handleRemoteMachineRpcProxy(message, signal, deadlineAtMs);
   }
 
   private initializeGCManager(): void {

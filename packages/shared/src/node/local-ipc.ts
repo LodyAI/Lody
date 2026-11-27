@@ -1174,7 +1174,18 @@ function makeControlClient(
           message,
           requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
         ),
-        ({ response, payload }) => parseMachineRpcResponse(response, payload)
+        ({ response, payload }) => {
+          if (response.status === 404 || response.status === 501) {
+            return Effect.fail(
+              new IpcProtocolError({
+                message: `Local daemon machine RPC proxy unavailable (HTTP ${response.status})`,
+                status: response.status,
+                responseBody: payload,
+              })
+            );
+          }
+          return parseMachineRpcResponse(response, payload);
+        }
       ),
   };
 }
@@ -1187,11 +1198,13 @@ function runFileToConnectError(error: unknown): IpcConnectError {
   ) {
     return new IpcConnectError({
       message: `Local daemon run-file unavailable: ${error.path}`,
+      beforeConnect: true,
       cause: error,
     });
   }
   return new IpcConnectError({
     message: formatUnknownError(error),
+    beforeConnect: true,
     cause: error,
   });
 }

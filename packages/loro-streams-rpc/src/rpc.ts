@@ -3182,6 +3182,7 @@ export class LoroStreamsMachineRpcClient {
     method: LoroStreamsRpcMethod;
     params: unknown;
     timeoutMs: number;
+    expiresAt?: number;
     signal?: AbortSignal;
   }): Promise<LoroStreamsMachineRpcRawOutcome | null> {
     if (this.stopped || args.signal?.aborted) return null;
@@ -3189,9 +3190,11 @@ export class LoroStreamsMachineRpcClient {
     await this.responseDispatcher.start();
     if (this.stopped || args.signal?.aborted) return null;
 
-    const requestId = crypto.randomUUID();
-    const timeoutMs = Math.max(0, args.timeoutMs);
     const now = Math.round(this.options.now?.() ?? Date.now());
+    const expiresAt = args.expiresAt ?? now + Math.max(0, args.timeoutMs);
+    const timeoutMs = Math.max(0, expiresAt - now);
+    if (args.expiresAt !== undefined && timeoutMs <= 0) return null;
+    const requestId = crypto.randomUUID();
     const startedAtMs = Date.now();
     let rawOutcome: LoroStreamsMachineRpcRawOutcome | null = null;
     const promise = this.responseDispatcher.registerPending(requestId, {
@@ -3223,7 +3226,7 @@ export class LoroStreamsMachineRpcClient {
         workspaceId: this.options.workspaceId,
         replyTo: this.responseDispatcher.getResponseStreamId(),
         sentAt: now,
-        expiresAt: now + timeoutMs,
+        expiresAt,
         method: args.method,
         params: args.params,
       } as LoroStreamsRpcRequest;

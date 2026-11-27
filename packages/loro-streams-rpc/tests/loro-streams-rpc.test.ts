@@ -4319,10 +4319,21 @@ describe('LoroStreamsMachineRpcClient proxyCall and callRaw', () => {
     });
 
     try {
+      const expired = await client.callRaw({
+        method: 'machine/status',
+        params: {},
+        timeoutMs: 5_000,
+        expiresAt: Date.now() - 1_000,
+      });
+      expect(expired).toBeNull();
+      expect(streamClient.appendJson).not.toHaveBeenCalled();
+
+      const explicitExpiresAt = Date.now() + 2_500;
       const outcome = await client.callRaw({
         method: 'machine/status',
         params: {},
         timeoutMs: 5_000,
+        expiresAt: explicitExpiresAt,
       });
       expect(outcome).toEqual({
         ok: true,
@@ -4332,6 +4343,10 @@ describe('LoroStreamsMachineRpcClient proxyCall and callRaw', () => {
           success: true,
         },
       });
+      expect(streamClient.appendJson).toHaveBeenCalledWith(
+        'workspace-1:rpc:req:machine-remote',
+        expect.objectContaining({ expiresAt: explicitExpiresAt })
+      );
     } finally {
       client.stop();
       dispatcher.stop();

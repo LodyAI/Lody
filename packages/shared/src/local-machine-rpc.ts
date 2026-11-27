@@ -1029,6 +1029,7 @@ export const LocalMachineRpcProxyRequestSchema = z
   .object({
     requesterUserId: z.string().trim().min(1),
     requesterMachineId: z.string().trim().min(1),
+    deadlineAtMs: z.number().int().positive().optional(),
     request: LocalMachineRpcRequestSchema,
   })
   .strict();

@@ -8244,7 +8244,8 @@ export class MessageHandler {
 
   async handleRemoteMachineRpcProxy(
     request: LocalMachineRpcRequestValidated,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    deadlineAtMs?: number
   ): Promise<LocalMachineRpcResponse> {
     if (
       this.cleanedUp ||
@@ -8264,59 +8265,77 @@ export class MessageHandler {
           this.machineRpcTokenProvider
         );
       }
-      if (this.cleanedUp) {
-        return {
-          ok: false,
-          code: 'remote_rpc_unavailable',
-          error: 'Remote machine RPC proxy unavailable',
-        };
-      }
-      const streamClient = this.machineRpcJsonStreamClient;
-      if (!this.machineRpcResponseDispatcher) {
-        this.machineRpcResponseDispatcher = new LoroStreamsRpcResponseDispatcher({
-          workspaceId: this.workspaceId,
-          streamClient,
-          responseStreamId: `${getLoroWorkspaceRpcResponseStreamId(this.workspaceId)}:${uuidV4()}`,
-          logger: this.logger,
-          retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
-          logLabel: `daemon-proxy:${this.workspaceId}`,
-          precreateResponseStream: true,
-        });
-      }
-      const client = new LoroStreamsMachineRpcClient({
-        workspaceId: this.workspaceId,
-        machineId: request.machineId,
-        streamClient,
-        responseDispatcher: this.machineRpcResponseDispatcher,
-        rpcVersion: LORO_STREAMS_RPC_VERSION,
-        retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
-        now: getServerNow,
-        logger: this.logger,
-      });
-      try {
-        const outcome = await client.callRaw({
-          method: request.method as import('@lody/loro-streams-rpc').LoroStreamsRpcMethod,
-          params: request.params,
-          timeoutMs: request.timeoutMs ?? 30_000,
-          signal,
-        });
-        if (!outcome) {
-          return {
-            ok: false,
-            code: 'timeout',
-            error: `Machine ${request.machineId} did not answer the RPC request.`,
-          };
-        }
-        return outcome as LocalMachineRpcResponse;
-      } finally {
-        client.stop();
-      }
     } catch (error) {
       return {
         ok: false,
         code: 'remote_rpc_unavailable',
         error: formatErrorMessage(error),
       };
+    }
+    if (this.cleanedUp) {
+      return {
+        ok: false,
+        code: 'remote_rpc_unavailable',
+        error: 'Remote machine RPC proxy unavailable',
+      };
+    }
+    const remainingMs =
+      deadlineAtMs !== undefined
+        ? Math.round(deadlineAtMs - getServerNow())
+        : (request.timeoutMs ?? 30_000);
+    if (deadlineAtMs !== undefined && remainingMs <= 0) {
+      return {
+        ok: false,
+        code: 'timeout',
+        error: `Machine ${request.machineId} did not answer before the RPC deadline.`,
+      };
+    }
+    const streamClient = this.machineRpcJsonStreamClient;
+    if (!this.machineRpcResponseDispatcher) {
+      this.machineRpcResponseDispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: this.workspaceId,
+        streamClient,
+        responseStreamId: `${getLoroWorkspaceRpcResponseStreamId(this.workspaceId)}:${uuidV4()}`,
+        logger: this.logger,
+        retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
+        logLabel: `daemon-proxy:${this.workspaceId}`,
+        precreateResponseStream: true,
+      });
+    }
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: this.workspaceId,
+      machineId: request.machineId,
+      streamClient,
+      responseDispatcher: this.machineRpcResponseDispatcher,
+      rpcVersion: LORO_STREAMS_RPC_VERSION,
+      retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
+      now: getServerNow,
+      logger: this.logger,
+    });
+    try {
+      const outcome = await client.callRaw({
+        method: request.method as import('@lody/loro-streams-rpc').LoroStreamsRpcMethod,
+        params: request.params,
+        timeoutMs: remainingMs,
+        ...(deadlineAtMs !== undefined ? { expiresAt: deadlineAtMs } : {}),
+        signal,
+      });
+      if (!outcome) {
+        return {
+          ok: false,
+          code: 'timeout',
+          error: `Machine ${request.machineId} did not answer the RPC request.`,
+        };
+      }
+      return outcome as LocalMachineRpcResponse;
+    } catch (error) {
+      return {
+        ok: false,
+        code: 'request_failed',
+        error: formatErrorMessage(error),
+      };
+    } finally {
+      client.stop();
     }
   }
 

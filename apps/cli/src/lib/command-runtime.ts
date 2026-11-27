@@ -472,23 +472,26 @@ export async function withMachineRpcClient<T>(
       if (!parsedRequest.success) {
         return 'fallback';
       }
+      const deadlineAtMs = timeoutMs > 0 ? Math.round(getServerNow() + timeoutMs) : undefined;
       const outcome = await Effect.runPromise(
         Effect.result(
           makeLocalControlClientAuto(args.localIpcOptions).machineRpcProxy(
             {
               requesterUserId: args.auth.userId,
               requesterMachineId: args.auth.machineId,
+              ...(deadlineAtMs !== undefined ? { deadlineAtMs } : {}),
               request: parsedRequest.data,
             },
-            { timeoutMs: timeoutMs + 5_000 }
+            { timeoutMs: Math.max(1, timeoutMs) }
           )
         )
       );
       if (outcome._tag === 'Failure') {
-        if (
-          outcome.failure instanceof IpcConnectError ||
-          outcome.failure instanceof IpcProtocolError
-        ) {
+        const isSafePreDispatchFallback =
+          (outcome.failure instanceof IpcConnectError && outcome.failure.beforeConnect === true) ||
+          (outcome.failure instanceof IpcProtocolError &&
+            (outcome.failure.status === 404 || outcome.failure.status === 501));
+        if (isSafePreDispatchFallback) {
           daemonUnavailable = true;
           return 'fallback';
         }
