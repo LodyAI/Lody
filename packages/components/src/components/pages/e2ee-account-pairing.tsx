@@ -497,15 +497,10 @@ export function E2eeAccountPairingKeyRetry(props: { onRetry: () => void }) {
 
 type ApproveRuntime = Pick<
   E2eeWorkspaceRuntime,
-  | 'accountPairingCode'
-  | 'subscribeAccountPairingApproval'
-  | 'inspectAccountPairing'
-  | 'approveAccountPairing'
-  | 'declineAccountPairing'
+  'inspectAccountPairing' | 'approveAccountPairing' | 'declineAccountPairing'
 >;
 type ApprovePhase =
   | { kind: 'enter' }
-  | { kind: 'showing'; pairingString: string; expiresAt: number; lookupId?: string }
   | { kind: 'confirm'; pairingString: string; preview: E2eeAccountPairingPreview }
   | { kind: 'done'; result: E2eeAccountPairingApproval; preview: E2eeAccountPairingPreview }
   | { kind: 'declined' };
@@ -515,7 +510,7 @@ type ApprovePhase =
  * request before anything is shown; the user then reads the fixed warning, sees the
  * named target and its scope, and may deselect any workspace before approving.
  */
-export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; pollMs?: number }) {
+export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime }) {
   const { runtime } = props;
   const { t } = useTranslation();
   const live = useLive();
@@ -559,28 +554,6 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
     setInput(scanned);
     check(scanned);
   });
-  const shownLookupId = phase.kind === 'showing' ? phase.lookupId : undefined;
-  const subscribeApproval = useMemo(
-    () =>
-      shownLookupId && runtime.subscribeAccountPairingApproval
-        ? (changed: () => void) => runtime.subscribeAccountPairingApproval!(shownLookupId, changed)
-        : undefined,
-    [shownLookupId, runtime]
-  );
-  usePoll(
-    phase.kind === 'showing' && Boolean(runtime.inspectAccountPairing),
-    props.pollMs ?? POLL_MS,
-    async () => {
-      if (phase.kind !== 'showing') return;
-      try {
-        const preview = await runtime.inspectAccountPairing!(phase.pairingString);
-        if (preview && live.current) confirm(phase.pairingString, preview);
-      } catch (failure) {
-        if (live.current) setError(failureKey(failure));
-      }
-    },
-    subscribeApproval
-  );
   if (!runtime.inspectAccountPairing || !runtime.approveAccountPairing) return null;
   const reset = () => {
     setPhase({ kind: 'enter' });
@@ -632,46 +605,6 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
             <Button disabled={!input.trim() || busy} onClick={() => check(input)}>
               {busy && <Spinner size="small" />}
               {t('e2ee.accountPair.approve.check')}
-            </Button>
-            {runtime.accountPairingCode && (
-              <Button
-                variant="ghost"
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    const offer = await runtime.accountPairingCode!();
-                    if (live.current) setPhase({ kind: 'showing', ...offer });
-                  })
-                }
-              >
-                {t('e2ee.accountPair.approve.showInstead')}
-              </Button>
-            )}
-          </div>
-        </>
-      )}
-      {phase.kind === 'showing' && (
-        <>
-          <p>{t('e2ee.accountPair.approve.showing')}</p>
-          <div {...stylex.props(styles.qr)}>
-            <LedgerQrCode
-              payload={qrPayload(phase.pairingString)}
-              size={200}
-              label={t('e2ee.accountPair.code.label')}
-            />
-          </div>
-          <div {...stylex.props(styles.actions)}>
-            <p data-testid="e2ee-account-pairing-string" {...stylex.props(styles.code)}>
-              {phase.pairingString}
-            </p>
-            <CopyCodeButton value={phase.pairingString} />
-          </div>
-          <p role="status" {...stylex.props(styles.muted)}>
-            {t('e2ee.accountPair.request.waiting', { time: time(phase.expiresAt) })}
-          </p>
-          <div {...stylex.props(styles.actions)}>
-            <Button variant="ghost" onClick={reset}>
-              {t('common.cancel')}
             </Button>
           </div>
         </>

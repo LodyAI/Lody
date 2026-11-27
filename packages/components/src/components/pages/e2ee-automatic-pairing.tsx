@@ -866,15 +866,6 @@ export function E2eeAutomaticPairingPage({
                   {t(mobile ? 'e2ee.auto.awaiting.help' : 'e2ee.auto.awaiting.desktopHelp')}
                 </p>
                 {scanButton('e2ee.auto.scanJoin')}
-                {!mobile && onManual && (
-                  <Button
-                    xstyle={themeStyles.spaced3}
-                    variant="secondary"
-                    onClick={() => cancel(true)}
-                  >
-                    {t('e2ee.auto.offline')}
-                  </Button>
-                )}
                 {qrSupported && (
                   <p {...stylex.props(themeStyles.hint12)}>
                     <QrCode size={12} aria-hidden="true" {...stylex.props(themeStyles.layout4)} />

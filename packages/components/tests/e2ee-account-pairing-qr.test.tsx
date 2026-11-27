@@ -1194,7 +1194,7 @@ describe('pairing hardening', () => {
       )
     );
     await flush();
-    await click('e2ee.auto.offline');
+    await click('e2ee.auto.manual');
     expect(manual).toBe(1);
   });
 

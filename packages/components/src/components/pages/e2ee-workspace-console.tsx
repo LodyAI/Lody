@@ -49,7 +49,6 @@ import { setWorkspaceContextAtom } from '@/atoms';
 import { mintAdmittedWorkspaceTicket } from '@/atoms/workspace-context';
 import { runtimeInitializingAtom } from '@/atoms/control-connection';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
-import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
 import {
   E2eeAccountPairingKeyRetry,
   E2eeAccountPairingRequest,
@@ -1142,25 +1141,17 @@ export function E2eeWorkspaceConsole({
         {...(manualPairing && port.runtime.startAutomaticPairing
           ? { onAutomatic: () => setManualPairingFor(null) }
           : {})}
-      >
-        <E2eeAccountPairingRequest
-          key={identity + ':account-pairing'}
-          runtime={port.runtime}
-          workspaceId={workspaceId}
-          // Web asks first: a browser is often shared or public.
-          autoStart={isElectronRenderer() || isNativeAppShell()}
-          onJoined={onAccountPairingJoined}
-        />
-        <E2eePersonalPairing
-          key={identity}
-          accountId={accountId}
-          workspaceId={workspaceId}
-          runtime={port.runtime}
-          canApprove={false}
-          approved={false}
-          onJoined={refresh}
-        />
-      </E2eeDeviceApprovalGuide>
+        pairing={
+          <E2eeAccountPairingRequest
+            key={identity + ':account-pairing'}
+            runtime={port.runtime}
+            workspaceId={workspaceId}
+            // Web asks first: a browser is often shared or public.
+            autoStart={isElectronRenderer() || isNativeAppShell()}
+            onJoined={onAccountPairingJoined}
+          />
+        }
+      />
     );
   const notices = (
     <>
@@ -1278,25 +1269,6 @@ export function E2eeWorkspaceConsole({
             key={identity + ':account-pairing'}
             runtime={port.runtime}
             defaultShowQr={showPairingCode === true}
-          />
-        </E2eeConsoleSection>
-      )}
-      {/* The per-workspace exchange is only for hosts without account pairing;
-          beside it, it would be a second, competing way to add the same device. */}
-      {port?.runtime && accountId && !port.runtime.inspectAccountPairing && (
-        <E2eeConsoleSection tab="devices">
-          <E2eePersonalPairing
-            key={identity}
-            accountId={accountId}
-            workspaceId={workspaceId}
-            runtime={port.runtime}
-            canApprove={Boolean(current?.history?.locallyPinned)}
-            approved={Boolean(
-              current?.scope === scope &&
-              !current.failure &&
-              current.nativeStatus?.deviceKind === 'personal'
-            )}
-            onJoined={refresh}
           />
         </E2eeConsoleSection>
       )}
