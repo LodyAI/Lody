@@ -1,7 +1,7 @@
 {
   "version": 1,
   "scopes": {
-    "apps/cli": 7379,
+    "apps/cli": 7380,
     "apps/electron": 1551,
     "apps/mobile": 7,
     "apps/mobile-capacitor": 296,
@@ -14,7 +14,7 @@
     "packages/cloud-api": 0,
     "packages/code-review-helper": 232,
     "packages/code-review-viewer": 0,
-    "packages/components": 19052,
+    "packages/components": 19049,
     "packages/e2ee-client": 546,
     "packages/e2ee-core": 548,
     "packages/e2ee-lab": 378,
