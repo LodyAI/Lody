@@ -94,10 +94,12 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  // Keep the sidebar mounted while its transform and flex footprint transition
-  // together. The margin transition lets the content pane resize smoothly;
-  // retaining the sidebar avoids rebuilding every session row on each Cmd+B.
-  // LoroSidebar clamps its persisted default. The hidden wrapper must release
+  // The page slides over a still sidebar: the column keeps its place and width,
+  // and the content pane pulls left over it with a negative margin. The pane
+  // (not the column) carries z-10 so the covering edge paints above the rows
+  // it passes. Keep the sidebar mounted through the transition; unmounting it
+  // would rebuild every session row on each Cmd+B.
+  // LoroSidebar clamps its persisted default. The hidden pane must release
   // that same actual width, or an old out-of-range preference leaves a gap.
   const sidebarSlideWidth = Math.min(
     Math.max(
@@ -135,12 +137,18 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
       ) : (
         <div
           ref={sidebarRef}
-          className="relative z-10 h-full shrink-0"
+          className="relative h-full shrink-0"
           style={{
             width: fold ? visibleSidebarWidth : undefined,
-            transform: `translateX(${sidebarVisible ? 0 : -visibleSidebarWidth}px)`,
-            marginRight: sidebarVisible ? (fold?.width ?? 0) : -visibleSidebarWidth,
-            transitionProperty: 'transform, margin-right',
+            // Inside a hardware fold the panes never overlap: the column slides
+            // out of its own left panel while the page keeps the right one.
+            transform: fold ? `translateX(${sidebarVisible ? 0 : -visibleSidebarWidth}px)` : undefined,
+            marginRight: fold
+              ? sidebarVisible
+                ? fold.width
+                : -visibleSidebarWidth
+              : undefined,
+            transitionProperty: fold ? 'transform, margin-right' : undefined,
             transitionDuration: shouldReduceMotion ? '0ms' : '220ms',
             transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
           }}
@@ -158,8 +166,19 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           // Capture before inert can blur the opener during the open commit.
           returnFocusRef.current = event.target;
         }}
-        style={fold && !sidebarVisible ? { marginLeft: fold.left + fold.width } : undefined}
-        className="relative flex min-w-0 flex-1 overflow-hidden"
+        style={{
+          marginLeft: fold
+            ? sidebarVisible
+              ? undefined
+              : fold.left + fold.width
+            : sidebarVisible
+              ? undefined
+              : -sidebarSlideWidth,
+          transitionProperty: 'margin-left',
+          transitionDuration: shouldReduceMotion ? '0ms' : '220ms',
+          transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
+        }}
+        className="relative z-10 flex min-w-0 flex-1 overflow-hidden"
       >
         <WindowDragStrip />
         <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>

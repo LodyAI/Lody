@@ -172,6 +172,36 @@ describe('desktop sidebar toggle', () => {
     expect(input.value).toBe('unsaved filter');
   });
 
+  it('slides the page over a still sidebar column', () => {
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, false);
+    store.set(sidebarLastWidthAtom, 300);
+    render(
+      <Provider store={store}>
+        <WebWorkspaceLayout>
+          <div data-content="" />
+        </WebWorkspaceLayout>
+      </Provider>
+    );
+
+    const sidebar = container!.querySelector<HTMLElement>('[data-sidebar-identity]')!;
+    const wrapper = sidebar.parentElement!;
+    const content = container!.querySelector<HTMLElement>(
+      `[data-focus-scope="${WORKSPACE_FOCUS_SCOPES.content}"]`
+    )!;
+
+    flushSync(() => store.set(sidebarCollapsedAtom, true));
+    // The column never moves and keeps its full flex footprint; the pane
+    // releases exactly the column width by pulling left over it.
+    expect(wrapper.style.transform).toBe('');
+    expect(wrapper.style.marginRight).toBe('');
+    expect(content.style.marginLeft).toBe('-300px');
+
+    flushSync(() => store.set(sidebarCollapsedAtom, false));
+    expect(wrapper.style.transform).toBe('');
+    expect(content.style.marginLeft).toBe('');
+  });
+
   it('keeps workspace panes on opposite sides of a changing fold without saving its width', async () => {
     const store = createStore();
     store.set(sidebarCollapsedAtom, false);
@@ -199,13 +229,16 @@ describe('desktop sidebar toggle', () => {
     expect(store.get(sidebarLastWidthAtom)).toBe(300);
     await act(async () => store.set(sidebarCollapsedAtom, true));
     expect(wrapper.style.marginRight).toBe('-455.5px');
+    expect(wrapper.style.transform).toBe('translateX(-455.5px)');
     expect(content.style.marginLeft).toBe('495.5px');
     await act(async () => {
       window.__LODY_VERTICAL_DIVISION__ = null;
       window.dispatchEvent(new Event('lody:division-change'));
     });
     expect(wrapper.style.width).toBe('');
-    expect(content.style.marginLeft).toBe('');
+    // The fold is gone: back on one pane, the still-hidden page slides over
+    // the sidebar column instead of holding the right panel.
+    expect(content.style.marginLeft).toBe('-300px');
     expect(container!.querySelector('[data-sidebar-identity]')).toBe(sidebar);
   });
 });
