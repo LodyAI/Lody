@@ -101,13 +101,18 @@ import { v4 as uuidV4 } from 'uuid';
 import { describeRoostHistoryFailure } from '@/session/roost-history-diagnostics';
 import {
   createLoroStreamsJsonStreamClient,
+  getLoroWorkspaceRpcResponseStreamId,
+  LoroStreamsMachineRpcClient,
   LoroStreamsMachineRpcServer,
   LoroStreamsRpcHandlerError,
+  LoroStreamsRpcResponseDispatcher,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
+  type LoroStreamsJsonStreamClient,
   type LocalProjectGitStateRpcResponse,
   type LocalProjectListBranchesRpcResponse,
 } from '@lody/loro-streams-rpc';
+import { resolveCliLoroStreamsWebSocketEnabled } from '@/platform/presence';
 import {
   HistoryWriteError,
   HistoryEntryWriteSchema,
@@ -1004,6 +1009,8 @@ export class MessageHandler {
   };
   private localWorkspaceCatalog: LocalWorkspaceCatalogService;
   private machineRpcServer: LoroStreamsMachineRpcServer | null = null;
+  private machineRpcJsonStreamClient: LoroStreamsJsonStreamClient | null = null;
+  private machineRpcResponseDispatcher: LoroStreamsRpcResponseDispatcher | null = null;
   private encryptedQueryServer: LoroStreamsMachineRpcServer | null = null;
 
   async readEncryptedMachineRequest(
@@ -4042,6 +4049,14 @@ export class MessageHandler {
         workspaceId: this.workspaceId,
       });
       this.machineRpcTokenProvider = streamsTokenProvider ?? null;
+      const streamsWebSocketEnabled = resolveCliLoroStreamsWebSocketEnabled(
+        undefined,
+        process.env.LODY_LORO_STREAMS_WS_ENABLED
+      );
+      const wsAuthCallback =
+        streamsWebSocketEnabled && streamsTokenProvider
+          ? streamsTokenProvider.createAuthCallback()
+          : undefined;
       const jsonStreamClient = streamsTokenProvider
         ? createLoroStreamsJsonStreamClient({
             bucketId: LORO_STREAMS_BUCKET_ID,
@@ -4050,12 +4065,33 @@ export class MessageHandler {
               streamsTokenProvider.getGatewayBaseUrl() ??
               this.machineRpcGatewayBaseUrl ??
               undefined,
+            ...(streamsWebSocketEnabled
+              ? {
+                  webSocket: {
+                    enabled: true,
+                    authPoolKey: this.workspaceId,
+                    ...(wsAuthCallback
+                      ? {
+                          auth: async ({
+                            reason,
+                            previousToken,
+                          }: import('@lody/shared').LoroStreamsWebSocketAuthContext) =>
+                            await wsAuthCallback({
+                              reason: reason === 'reauth' ? 'unauthorized' : 'request',
+                              previousToken,
+                            }),
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
             fetchImpl: cliHttpFetch,
             timeout: {
               connectTimeoutMs: rpcConnectTimeoutMs,
             },
           })
         : undefined;
+      this.machineRpcJsonStreamClient = jsonStreamClient ?? null;
       const fileReader = this.encryptedFileReader ?? this.filePreviewService;
       const codeReader = this.encryptedCodeCollabReader ?? this.codeCollabV2Service;
       const queryServer = new LoroStreamsMachineRpcServer({
@@ -8203,6 +8239,84 @@ export class MessageHandler {
         return { ok: true, result: error.toRpcError() };
       }
       return { ok: false, error: formatErrorMessage(error) };
+    }
+  }
+
+  async handleRemoteMachineRpcProxy(
+    request: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
+  ): Promise<LocalMachineRpcResponse> {
+    if (
+      this.cleanedUp ||
+      this.hostsEncryptedWorkspace?.() ||
+      !this.machineRpcJsonStreamClient ||
+      !this.machineRpcTokenProvider
+    ) {
+      return {
+        ok: false,
+        code: 'remote_rpc_unavailable',
+        error: 'Remote machine RPC proxy unavailable',
+      };
+    }
+    try {
+      if (!this.machineRpcGatewayBaseUrl) {
+        this.machineRpcGatewayBaseUrl = await prepareCliStreamsGatewayBaseUrl(
+          this.machineRpcTokenProvider
+        );
+      }
+      if (this.cleanedUp) {
+        return {
+          ok: false,
+          code: 'remote_rpc_unavailable',
+          error: 'Remote machine RPC proxy unavailable',
+        };
+      }
+      const streamClient = this.machineRpcJsonStreamClient;
+      if (!this.machineRpcResponseDispatcher) {
+        this.machineRpcResponseDispatcher = new LoroStreamsRpcResponseDispatcher({
+          workspaceId: this.workspaceId,
+          streamClient,
+          responseStreamId: `${getLoroWorkspaceRpcResponseStreamId(this.workspaceId)}:${uuidV4()}`,
+          logger: this.logger,
+          retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
+          logLabel: `daemon-proxy:${this.workspaceId}`,
+          precreateResponseStream: true,
+        });
+      }
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: this.workspaceId,
+        machineId: request.machineId,
+        streamClient,
+        responseDispatcher: this.machineRpcResponseDispatcher,
+        rpcVersion: LORO_STREAMS_RPC_VERSION,
+        retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
+        now: getServerNow,
+        logger: this.logger,
+      });
+      try {
+        const outcome = await client.callRaw({
+          method: request.method as import('@lody/loro-streams-rpc').LoroStreamsRpcMethod,
+          params: request.params,
+          timeoutMs: request.timeoutMs ?? 30_000,
+          signal,
+        });
+        if (!outcome) {
+          return {
+            ok: false,
+            code: 'timeout',
+            error: `Machine ${request.machineId} did not answer the RPC request.`,
+          };
+        }
+        return outcome as LocalMachineRpcResponse;
+      } finally {
+        client.stop();
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        code: 'remote_rpc_unavailable',
+        error: formatErrorMessage(error),
+      };
     }
   }
 
@@ -12663,6 +12777,8 @@ export class MessageHandler {
     await Promise.allSettled(this.localImageBackfills.values());
     this.cancelPendingPermissionRequests();
     this.machineRpcServer?.stop();
+    this.machineRpcResponseDispatcher?.stop();
+    this.machineRpcResponseDispatcher = null;
     this.encryptedQueryServer?.stop();
     this.sessionDispatchWatcher.stop();
     this.diffBlobReader?.dispose();

@@ -429,6 +429,8 @@ export class LodyFleet {
       },
       dispatchMachineRpc: async (message, signal) =>
         await this.dispatchLocalMachineRpc(message, signal),
+      dispatchMachineRpcProxy: async (message, signal) =>
+        await this.dispatchLocalMachineRpcProxy(message, signal),
       dispatchWorkspaceBundle: async (message) => {
         const runtime = await this.resolveWorkspaceRuntime(message.workspaceId as WorkspaceId);
         const { handleWorkspaceBundleControl } = await import('./workspace-bundle/control');
@@ -2056,6 +2058,39 @@ export class LodyFleet {
     }
 
     return await runtime.lody.dispatchLocalMachineRpc(message, signal);
+  }
+
+  private async dispatchLocalMachineRpcProxy(
+    message: import('@lody/shared').LocalMachineRpcProxyRequestValidated,
+    signal?: AbortSignal
+  ): Promise<import('@lody/shared').LocalMachineRpcResponse> {
+    if (message.requesterUserId !== this.userId || message.requesterMachineId !== this.machineId) {
+      return {
+        ok: false,
+        code: 'daemon_identity_mismatch',
+        error: 'Daemon identity mismatch',
+      };
+    }
+
+    const pendingStart = this.startInFlight.get(message.request.workspaceId);
+    if (pendingStart) {
+      await pendingStart;
+    }
+
+    const runtime = this.runtimes.get(message.request.workspaceId);
+    if (!runtime) {
+      return {
+        ok: false,
+        code: 'workspace_runtime_unavailable',
+        error: `workspace_runtime_unavailable:${message.request.workspaceId}`,
+      };
+    }
+
+    if (message.request.machineId === this.machineId) {
+      return await runtime.lody.dispatchLocalMachineRpc(message.request, signal);
+    }
+
+    return await runtime.lody.dispatchRemoteMachineRpcProxy(message.request, signal);
   }
 
   // Resolves the push-based data-plane engine for a workspace the CLI socket

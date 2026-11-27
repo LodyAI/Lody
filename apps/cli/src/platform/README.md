@@ -29,10 +29,16 @@ Streams WS defaults off; cloud CLI builds can bake a default with
 `LODY_LORO_STREAMS_WS_ENABLED=true` or `1` (used by nightly CLI/SEA releases),
 while runtime `LODY_LORO_STREAMS_WS_ENABLED` overrides that compiled default and
 explicit `webSocketEnabled` overrides the environment. The same resolved switch
-covers presence and the daemon's durable workspace transport
-(`lib/loro/streams-transport.ts`): live reads and appends of meta, Session and
-Flock rooms share one gateway WebSocket per workspace, while bootstrap, catch-up
-and snapshots stay on HTTP and each room falls back to HTTP on any WS failure.
+covers presence, machine monitor, prompt suggestions, Machine RPC, and the
+daemon's durable workspace transport (`lib/loro/streams-transport.ts`): live
+reads and appends of meta, Session, Flock, ephemeral, and RPC streams share one
+gateway WebSocket per workspace, while bootstrap, catch-up and snapshots stay on
+HTTP and each room falls back to HTTP on any WS failure. Short-lived CLI
+commands using `withMachineRpcClient` first try the running local daemon's
+`/machine-rpc-proxy` IPC route (verifying requester user/machine identity,
+handling local-machine RPCs in-process, and proxying remote-machine RPCs over
+the daemon's shared workspace WebSocket and response dispatcher) before falling
+back to a direct client.
 The main gateway and workspace pool key are separate from the retained presence
 HTTP shard.
 `presence-legacy.ts:createPresenceWebSocketAuthLegacy` is the SDK callback

@@ -4,6 +4,8 @@ import {
   createServerTimeFetcher,
   getLoroStreamsShardUrls,
   LORO_STREAMS_BUCKET_ID,
+  loroStreamsWebSocketOptions,
+  LocalMachineRpcRequestSchema,
   getServerNow,
   sessionHistoryWriteIntentDigest,
   type SessionHistoryReadResponse,
@@ -47,10 +49,14 @@ import { createRoostRpcSessionServices } from '@/session/roost-rpc-session';
 import {
   callEncryptedReadFeature,
   createLoroStreamsJsonStreamClient,
+  isOwnerScopedEncryptedRpcMethod,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
   LoroStreamsMachineRpcClient,
+  type LoroStreamsJsonStreamClient,
+  type LoroStreamsRpcMethod,
 } from '@lody/loro-streams-rpc';
+import { resolveCliLoroStreamsWebSocketEnabled } from '@/platform/presence';
 import { prepareCliStreamsGatewayBaseUrl } from '@/lib/loro/streams-access';
 import { getCliHttpFetch } from '@/utils/http-transport';
 import { listWorkspacesForToken, type WorkspaceSummary } from '@/lib/workspace';
@@ -357,34 +363,149 @@ export async function resolveWorkspaceOrThrow(
   );
 }
 
+const DAEMON_RPC_PROXY_FALLBACK_CODES = new Set([
+  'daemon_identity_mismatch',
+  'workspace_runtime_unavailable',
+  'remote_rpc_unavailable',
+]);
+
+function isDaemonRpcProxyEligibleMethod(method: LoroStreamsRpcMethod): boolean {
+  if (isOwnerScopedEncryptedRpcMethod(method)) return false;
+  if (
+    method === 'session/history-read' ||
+    method === 'session/history-write' ||
+    method === 'session/history-subscribe' ||
+    method === 'session/history-unsubscribe'
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export async function withMachineRpcClient<T>(
-  args: { auth: AuthContext; workspaceId: WorkspaceId; machineId: MachineId },
+  args: {
+    auth: AuthContext;
+    workspaceId: WorkspaceId;
+    machineId: MachineId;
+    localIpcOptions?: LocalIpcDiscoveryOptions;
+  },
   fn: (client: LoroStreamsMachineRpcClient) => Promise<T>
 ): Promise<T> {
   const encrypted = resolveEncryptedMachineRpc(args.workspaceId);
   if (encrypted) return await withEncryptedMachineRpcClient(args, encrypted, fn);
-  if (!LODY_AUTH_URL) throw new Error('Cloud machine RPC requires LODY_AUTH_URL');
   const logger = getLogger('session');
-  const streamsTokenProvider = createCloudStreamsTokenPort({
-    token: args.auth.token,
-    authBaseUrl: LODY_AUTH_URL,
-    authSiteUrl: LODY_AUTH_SITE_URL,
-    logger,
-  }).createTokenProviderLegacy({ workspaceId: args.workspaceId });
-  const baseUrl = await prepareCliStreamsGatewayBaseUrl(streamsTokenProvider);
-  const configuredTimeout = Number.parseInt(process.env.LODY_LORO_RPC_CONNECT_TIMEOUT_MS ?? '', 10);
-  const streamClient = createLoroStreamsJsonStreamClient({
-    bucketId: LORO_STREAMS_BUCKET_ID,
-    getToken: () => streamsTokenProvider.getToken(),
-    getBaseUrl: () => streamsTokenProvider.getGatewayBaseUrl() ?? baseUrl,
-    shardUrls: getLoroStreamsShardUrls(baseUrl, streamsTokenProvider.getShardHostSuffix()),
-    fetchImpl: getCliHttpFetch({ logger }),
-    timeout: { connectTimeoutMs: configuredTimeout > 0 ? configuredTimeout : 30_000 },
-  });
+  const webSocketEnabled = resolveCliLoroStreamsWebSocketEnabled(
+    undefined,
+    process.env.LODY_LORO_STREAMS_WS_ENABLED
+  );
+
+  let directStreamClientPromise: Promise<LoroStreamsJsonStreamClient> | null = null;
+  const getDirectStreamClient = (): Promise<LoroStreamsJsonStreamClient> => {
+    if (!directStreamClientPromise) {
+      directStreamClientPromise = (async () => {
+        if (!LODY_AUTH_URL) throw new Error('Cloud machine RPC requires LODY_AUTH_URL');
+        const streamsTokenProvider = createCloudStreamsTokenPort({
+          token: args.auth.token,
+          authBaseUrl: LODY_AUTH_URL,
+          authSiteUrl: LODY_AUTH_SITE_URL,
+          logger,
+        }).createTokenProviderLegacy({ workspaceId: args.workspaceId });
+        const baseUrl = await prepareCliStreamsGatewayBaseUrl(streamsTokenProvider);
+        const configuredTimeout = Number.parseInt(
+          process.env.LODY_LORO_RPC_CONNECT_TIMEOUT_MS ?? '',
+          10
+        );
+        const wsAuthCallback = webSocketEnabled
+          ? streamsTokenProvider.createAuthCallback()
+          : undefined;
+        return createLoroStreamsJsonStreamClient({
+          bucketId: LORO_STREAMS_BUCKET_ID,
+          getToken: () => streamsTokenProvider.getToken(),
+          getBaseUrl: () => streamsTokenProvider.getGatewayBaseUrl() ?? baseUrl,
+          ...loroStreamsWebSocketOptions(
+            webSocketEnabled,
+            baseUrl,
+            args.workspaceId,
+            wsAuthCallback
+              ? async ({ reason, previousToken }) =>
+                  await wsAuthCallback({
+                    reason: reason === 'reauth' ? 'unauthorized' : 'request',
+                    previousToken,
+                  })
+              : undefined
+          ),
+          shardUrls: getLoroStreamsShardUrls(baseUrl, streamsTokenProvider.getShardHostSuffix()),
+          fetchImpl: getCliHttpFetch({ logger }),
+          timeout: { connectTimeoutMs: configuredTimeout > 0 ? configuredTimeout : 30_000 },
+        });
+      })();
+    }
+    return directStreamClientPromise;
+  };
+
+  const lazyDirectStreamClient: LoroStreamsJsonStreamClient = {
+    webSocketEnabled,
+    ensureJsonStream: async (streamId, retentionSeconds) =>
+      await (await getDirectStreamClient()).ensureJsonStream(streamId, retentionSeconds),
+    appendJson: async (streamId, payload) =>
+      await (await getDirectStreamClient()).appendJson(streamId, payload),
+    readJsonLive: async (streamId, state, onBatch, liveOptions) =>
+      await (await getDirectStreamClient()).readJsonLive(streamId, state, onBatch, liveOptions),
+  };
+
+  let daemonUnavailable = false;
   const client = new LoroStreamsMachineRpcClient({
     workspaceId: args.workspaceId,
     machineId: args.machineId,
-    streamClient,
+    streamClient: lazyDirectStreamClient,
+    proxyCall: async (method, params, timeoutMs) => {
+      if (daemonUnavailable || !isDaemonRpcProxyEligibleMethod(method)) {
+        return 'fallback';
+      }
+      const parsedRequest = LocalMachineRpcRequestSchema.safeParse({
+        machineId: args.machineId,
+        workspaceId: args.workspaceId,
+        method,
+        params,
+        ...(timeoutMs > 0 ? { timeoutMs } : {}),
+      });
+      if (!parsedRequest.success) {
+        return 'fallback';
+      }
+      const outcome = await Effect.runPromise(
+        Effect.result(
+          makeLocalControlClientAuto(args.localIpcOptions).machineRpcProxy(
+            {
+              requesterUserId: args.auth.userId,
+              requesterMachineId: args.auth.machineId,
+              request: parsedRequest.data,
+            },
+            { timeoutMs: timeoutMs + 5_000 }
+          )
+        )
+      );
+      if (outcome._tag === 'Failure') {
+        if (
+          outcome.failure instanceof IpcConnectError ||
+          outcome.failure instanceof IpcProtocolError
+        ) {
+          daemonUnavailable = true;
+          return 'fallback';
+        }
+        return null;
+      }
+      const response = outcome.success;
+      if (!response.ok) {
+        if (response.code === 'timeout') {
+          return null;
+        }
+        if (response.code && DAEMON_RPC_PROXY_FALLBACK_CODES.has(response.code)) {
+          daemonUnavailable = true;
+          return 'fallback';
+        }
+      }
+      return response;
+    },
     rpcVersion: LORO_STREAMS_RPC_VERSION,
     retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
     now: getServerNow,

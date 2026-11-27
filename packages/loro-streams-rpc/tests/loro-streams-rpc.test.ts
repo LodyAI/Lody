@@ -4188,3 +4188,153 @@ describe('LoroStreamsRpcResponseDispatcher response loop', () => {
     }
   });
 });
+
+describe('LoroStreamsMachineRpcClient proxyCall and callRaw', () => {
+  it('uses proxyCall without opening a response stream and falls back lazily to streamClient', async () => {
+    const appended: unknown[] = [];
+    let readStarted = 0;
+    let dispatcher: LoroStreamsRpcResponseDispatcher | undefined;
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async () => {}),
+      appendJson: vi.fn(async (_streamId, payload) => {
+        appended.push(payload);
+        const req = payload as { id: string; method: string; machineId: string };
+        await dispatcher?.acceptAuthenticatedResponse({
+          jsonrpc: '2.0',
+          id: req.id,
+          rpcVersion: '1',
+          machineId: req.machineId,
+          method: req.method as 'session/cancel',
+          result: {
+            type: 'session/cancel_response',
+            sessionId: 'session-fallback',
+            success: true,
+          },
+        });
+        return 'next-offset';
+      }),
+      readJsonLive: vi.fn(async (_streamId, _state, _onBatch, options) => {
+        readStarted += 1;
+        await new Promise((_resolve, reject) =>
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        );
+      }),
+    };
+    dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+      responseStreamId: 'workspace-1:rpc:res:proxy-test',
+    });
+
+    const proxyOutcomes: Array<
+      | { ok: true; result: unknown }
+      | { ok: false; error: string; code?: string }
+      | 'fallback'
+      | null
+    > = [
+      {
+        ok: true,
+        result: {
+          type: 'session/cancel_response',
+          sessionId: 'session-proxy',
+          success: true,
+        },
+      },
+      'fallback',
+    ];
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-remote',
+      streamClient,
+      responseDispatcher: dispatcher,
+      proxyCall: async () => proxyOutcomes.shift() ?? null,
+    });
+
+    try {
+      await client.start();
+      expect(readStarted).toBe(0);
+
+      const proxied = await client.requestSessionCancel({
+        sessionId: 'session-proxy' as SessionId,
+        turnId: 'turn-1',
+        timeoutMs: 5_000,
+      });
+      expect(proxied).toMatchObject({ sessionId: 'session-proxy', success: true });
+      expect(readStarted).toBe(0);
+      expect(appended).toHaveLength(0);
+
+      const fallback = await client.requestSessionCancel({
+        sessionId: 'session-fallback' as SessionId,
+        turnId: 'turn-2',
+        timeoutMs: 5_000,
+      });
+      expect(fallback).toMatchObject({ sessionId: 'session-fallback', success: true });
+      expect(appended).toHaveLength(1);
+    } finally {
+      client.stop();
+      dispatcher.stop();
+    }
+  });
+
+  it('callRaw forwards validated requests over a shared responseDispatcher and preserves raw outcomes', async () => {
+    let dispatcher: LoroStreamsRpcResponseDispatcher | undefined;
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async () => {}),
+      appendJson: vi.fn(async (_streamId, payload) => {
+        const req = payload as { id: string; method: string; machineId: string };
+        await dispatcher?.acceptAuthenticatedResponse({
+          jsonrpc: '2.0',
+          id: req.id,
+          rpcVersion: '1',
+          machineId: req.machineId,
+          method: req.method as 'machine/status',
+          result: {
+            type: 'machine/status_response',
+            machineId: req.machineId,
+            success: true,
+          },
+        });
+        return 'next-offset';
+      }),
+      readJsonLive: vi.fn(async (_streamId, _state, _onBatch, options) => {
+        await new Promise((_resolve, reject) =>
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        );
+      }),
+    };
+    dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+      responseStreamId: 'workspace-1:rpc:res:raw-test',
+    });
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-remote',
+      streamClient,
+      responseDispatcher: dispatcher,
+    });
+
+    try {
+      const outcome = await client.callRaw({
+        method: 'machine/status',
+        params: {},
+        timeoutMs: 5_000,
+      });
+      expect(outcome).toEqual({
+        ok: true,
+        result: {
+          type: 'machine/status_response',
+          machineId: 'machine-remote',
+          success: true,
+        },
+      });
+    } finally {
+      client.stop();
+      dispatcher.stop();
+    }
+  });
+});

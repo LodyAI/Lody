@@ -1198,6 +1198,10 @@ export class LoroDocumentManager {
     );
     this.remoteStreamsTokens = streamsTokens;
     if (this.encryptedWorkspace) await streamsTokens.legacy.getToken();
+    const streamsWebSocketEnabled = resolveCliLoroStreamsWebSocketEnabled(
+      undefined,
+      process.env.LODY_LORO_STREAMS_WS_ENABLED
+    );
     const streamsTransport = await createCliStreamsTransport({
       incompleteRecoveryScope: this.incompleteRecoveryScope,
       incompleteRecoveryStore: createCliIncompleteRecoveryStore(
@@ -1209,10 +1213,7 @@ export class LoroDocumentManager {
       content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
       bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,
-      webSocketEnabled: resolveCliLoroStreamsWebSocketEnabled(
-        undefined,
-        process.env.LODY_LORO_STREAMS_WS_ENABLED
-      ),
+      webSocketEnabled: streamsWebSocketEnabled,
       tokenProvider: streamsTokens.legacy,
       repo: this.repo,
       documentRemoteCursorStore: this.documentRemoteCursorStore,
@@ -1256,6 +1257,7 @@ export class LoroDocumentManager {
           streamsBaseUrl: streamsTransport.gatewayBaseUrl,
           auth: streamsTokens.native.createAuthCallback(),
           shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+          webSocketEnabled: streamsWebSocketEnabled,
           ...(this.encryptedWorkspace ? { bucketId: this.encryptedWorkspace.bucketId() } : {}),
         });
         if (this.encryptedWorkspace) {
@@ -1271,11 +1273,13 @@ export class LoroDocumentManager {
             streamsBaseUrl: streamsTransport.gatewayBaseUrl,
             auth: streamsTransport.tokenProvider.createAuthCallback(),
             shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+            webSocketEnabled: streamsWebSocketEnabled,
           });
           this.machineMonitorRuntime?.attachStreams({
             streamsBaseUrl: streamsTransport.gatewayBaseUrl,
             auth: streamsTransport.tokenProvider.createAuthCallback(),
             shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+            webSocketEnabled: streamsWebSocketEnabled,
           });
         }
       }

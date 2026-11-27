@@ -42,7 +42,9 @@ import type { CliRuntimeState } from '../electron-ipc';
 import { CliRuntimeStateSchema } from '../electron-ipc';
 import {
   LOCAL_MACHINE_RPC_PATH,
+  LOCAL_MACHINE_RPC_PROXY_PATH,
   LocalMachineRpcResponseSchema,
+  type LocalMachineRpcProxyRequest,
   type LocalMachineRpcRequest,
   type LocalMachineRpcResponse,
 } from '../local-machine-rpc';
@@ -241,6 +243,10 @@ export type LocalControlClientService = {
   ) => Effect.Effect<LocalProjectControlResponse, IpcError>;
   machineRpc: (
     message: LocalMachineRpcRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<LocalMachineRpcResponse, IpcError>;
+  machineRpcProxy: (
+    message: LocalMachineRpcProxyRequest,
     options?: LocalIpcRequestOptions
   ) => Effect.Effect<LocalMachineRpcResponse, IpcError>;
 };
@@ -1156,6 +1162,15 @@ function makeControlClient(
       Effect.flatMap(
         post(
           LOCAL_MACHINE_RPC_PATH,
+          message,
+          requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) => parseMachineRpcResponse(response, payload)
+      ),
+    machineRpcProxy: (message, requestOptions) =>
+      Effect.flatMap(
+        post(
+          LOCAL_MACHINE_RPC_PROXY_PATH,
           message,
           requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
         ),

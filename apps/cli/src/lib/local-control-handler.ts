@@ -32,13 +32,16 @@ import {
 } from '@lody/shared/automations';
 import {
   LOCAL_MACHINE_RPC_PATH,
+  LOCAL_MACHINE_RPC_PROXY_PATH,
   LocalMachineRpcResponseSchema,
   LocalProjectControlRequestSchema,
   LocalProjectControlResponseSchema,
   LocalSessionControlResponseSchema,
+  safeParseLocalMachineRpcProxyRequest,
   safeParseLocalMachineRpcRequest,
   safeParseLocalProjectControlRequest,
   safeParseLocalSessionControlRequest,
+  type LocalMachineRpcProxyRequestValidated,
   type LocalMachineRpcRequestValidated,
   type LocalMachineRpcResponse,
   type LocalProjectControlRequestValidated,
@@ -80,6 +83,10 @@ export interface LocalSessionControlConfig {
   ) => Promise<LocalProjectControlResponse>;
   dispatchMachineRpc?: (
     message: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
+  ) => Promise<LocalMachineRpcResponse>;
+  dispatchMachineRpcProxy?: (
+    message: LocalMachineRpcProxyRequestValidated,
     signal?: AbortSignal
   ) => Promise<LocalMachineRpcResponse>;
 }
@@ -322,6 +329,46 @@ async function handleMachineRpcRequest(
   }
 }
 
+async function handleMachineRpcProxyRequest(
+  config: LocalSessionControlConfig,
+  rawBody: string,
+  requestId: number,
+  signal?: AbortSignal
+): Promise<LocalControlHandlerResponse> {
+  const parsed = safeParseLocalMachineRpcProxyRequest(rawBody);
+  if (!parsed.success) {
+    config.logger.debug(`[local-control:${requestId}] machine rpc proxy rejected: invalid_request`);
+    return handlerResponse(400, { ok: false, error: 'invalid_request' });
+  }
+  const message = parsed.data;
+  if (message.requesterMachineId !== config.machineId) {
+    config.logger.debug(
+      `[local-control:${requestId}] machine rpc proxy requester mismatch: expected=${config.machineId} actual=${message.requesterMachineId}`
+    );
+    return handlerResponse(200, {
+      ok: false,
+      code: 'daemon_identity_mismatch',
+      error: 'Daemon identity mismatch',
+    });
+  }
+  if (!config.dispatchMachineRpcProxy) {
+    return handlerResponse(501, { ok: false, error: 'method_unavailable' });
+  }
+  try {
+    const response = await config.dispatchMachineRpcProxy(message, signal);
+    const validated = LocalMachineRpcResponseSchema.safeParse(response).success;
+    if (!validated) {
+      config.logger.error('Local machine RPC proxy produced invalid response payload');
+      return handlerResponse(500, { ok: false, error: 'invalid_response' });
+    }
+    return handlerResponse(200, response as unknown as Record<string, unknown>);
+  } catch (error) {
+    const failureMessage = formatErrorMessage(error);
+    config.logger.debug(`Local machine RPC proxy dispatch failed: ${failureMessage}`);
+    return handlerResponse(500, { ok: false, error: failureMessage });
+  }
+}
+
 /**
  * A control route whose request names this machine: invalid JSON or schema is 400,
  * another machine 403, an absent dispatcher 501 and a thrown dispatcher 500.
@@ -476,6 +523,14 @@ export class LocalControlHandler {
     }
     if (request.path === LOCAL_MACHINE_RPC_PATH) {
       return handleMachineRpcRequest(
+        this.config,
+        request.rawBody,
+        request.requestId,
+        request.signal
+      );
+    }
+    if (request.path === LOCAL_MACHINE_RPC_PROXY_PATH) {
+      return handleMachineRpcProxyRequest(
         this.config,
         request.rawBody,
         request.requestId,

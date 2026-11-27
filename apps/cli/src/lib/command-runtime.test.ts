@@ -542,4 +542,110 @@ describe('encrypted one-shot commands', () => {
     const other = new Error('e2ee_binding_conflict');
     expect(describeEncryptedCommandFailure('workspace', other)).toBe(other);
   });
+
+  it('reuses the local daemon /machine-rpc-proxy for withMachineRpcClient and falls back when identity mismatches', async () => {
+    const http = await import('node:http');
+    const { createLocalSessionControlRequestHandler } = await import('./local-session-control');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-rpc-proxy-'));
+    tempDirs.push(dir);
+    const socketPath = path.join(dir, 'control.sock');
+    const received: unknown[] = [];
+
+    const server = http.createServer(
+      createLocalSessionControlRequestHandler({
+        machineId: 'machine-self' as MachineId,
+        logger: {
+          trace: () => {},
+          debug: () => {},
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+        } as never,
+        dispatchSession: async () => [],
+        dispatchProject: async () => ({ ok: false, type: 'local-project/add', error: 'unused' }),
+        dispatchMachineRpcProxy: async (message) => {
+          received.push(message);
+          if (message.requesterUserId !== 'user-1') {
+            return {
+              ok: false,
+              code: 'daemon_identity_mismatch',
+              error: 'Daemon identity mismatch',
+            };
+          }
+          return {
+            ok: true,
+            result: {
+              type: 'session/cancel_response',
+              sessionId: 'session-1',
+              success: true,
+            },
+          };
+        },
+      })
+    );
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    try {
+      const response = await withMachineRpcClient(
+        {
+          auth: {
+            token: 'synthetic-token',
+            userId: 'user-1',
+            userName: 'User',
+            userEmail: 'user@example.test',
+            machineId: 'machine-self' as MachineId,
+            machineName: 'host',
+          },
+          workspaceId: 'workspace-1' as WorkspaceId,
+          machineId: 'machine-remote' as MachineId,
+          localIpcOptions: { socketPath },
+        },
+        (client) =>
+          client.requestSessionCancel({
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            timeoutMs: 5_000,
+          })
+      );
+      expect(response).toMatchObject({ sessionId: 'session-1', success: true });
+      expect(received).toHaveLength(1);
+      expect(received[0]).toMatchObject({
+        requesterUserId: 'user-1',
+        requesterMachineId: 'machine-self',
+        request: {
+          workspaceId: 'workspace-1',
+          machineId: 'machine-remote',
+          method: 'session/cancel',
+        },
+      });
+
+      // Mismatched requester falls back to direct Streams (which reports missing LODY_AUTH_URL in local tests).
+      const mismatched = await withMachineRpcClient(
+        {
+          auth: {
+            token: 'synthetic-token',
+            userId: 'user-other',
+            userName: 'Other',
+            userEmail: 'other@example.test',
+            machineId: 'machine-self' as MachineId,
+            machineName: 'host',
+          },
+          workspaceId: 'workspace-1' as WorkspaceId,
+          machineId: 'machine-remote' as MachineId,
+          localIpcOptions: { socketPath },
+        },
+        (client) =>
+          client.requestSessionCancel({
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            timeoutMs: 5_000,
+          })
+      );
+      expect(mismatched).toMatchObject({
+        sessionId: 'session-1',
+        success: false,
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });

@@ -671,6 +671,13 @@ export class Lody {
     return await this.runtime.dispatchLocalMachineRpc(message, signal);
   }
 
+  async dispatchRemoteMachineRpcProxy(
+    message: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
+  ): Promise<LocalMachineRpcResponse> {
+    return await this.runtime.dispatchRemoteMachineRpcProxy(message, signal);
+  }
+
   isControlPlaneReady(): boolean {
     // Ready == nothing needs recovering. Deliberately NOT gated on
     // `isTransportConnected()`: that is the raw aggregate status, which reads
