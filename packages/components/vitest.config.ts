@@ -32,6 +32,8 @@ const testFiles = ['tests', 'src'].flatMap((directory) =>
 // Module mocks also need a fresh registry; all other files can reuse their graph.
 const isolatedFiles = new Set([
   'tests/avatar-cache.test.ts',
+  // Pre-React telemetry starts with fresh in-memory usage-sharing state.
+  'tests/boot-failure.test.ts',
   'tests/client-log.test.tsx',
   'tests/boot-shell.test.tsx',
   'tests/cached-avatar-img.test.ts',

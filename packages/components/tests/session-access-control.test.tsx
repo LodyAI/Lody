@@ -216,7 +216,20 @@ describe('SessionAccessControl', () => {
       writable: true,
       value: ControlledImage,
     });
+    vi.useFakeTimers({
+      toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'setTimeout', 'clearTimeout'],
+    });
     try {
+      async function pressKey(key: string) {
+        await act(async () => {
+          document.activeElement!.dispatchEvent(
+            new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+          );
+        });
+        // Base UI schedules menu focus on an animation frame.
+        await act(async () => vi.advanceTimersToNextFrame());
+      }
+
       const added: string[] = [];
       await render({
         state: {
@@ -239,7 +252,8 @@ describe('SessionAccessControl', () => {
         },
       });
       await openPanel();
-      await act(async () => panelButton('Add member').click());
+      await act(async () => panelButton('Add member').focus());
+      await pressKey('ArrowDown');
 
       const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
       // Only candidates not already in the owner/member list are shown.
@@ -280,31 +294,16 @@ describe('SessionAccessControl', () => {
       expect(zoeAvatar!.querySelector('img')).toBeNull();
       expect(zoeAvatar!.textContent).toBe('ZC');
 
-      // Keyboard navigation (ArrowDown + typeahead matching member name, not initials prefix) + Enter selects candidate.
-      const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
-      expect(menu).not.toBeNull();
-      await act(async () => {
-        (document.activeElement ?? menu).dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
-        );
-      });
+      expect(document.activeElement).toBe(grace);
+      await pressKey('ArrowDown');
       expect(document.activeElement).toBe(marco);
-      await act(async () => {
-        (document.activeElement ?? menu).dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'z', bubbles: true, cancelable: true })
-        );
-        (document.activeElement ?? menu).dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'o', bubbles: true, cancelable: true })
-        );
-      });
+      await pressKey('z');
+      await pressKey('o');
       expect(document.activeElement).toBe(zoe);
-      await act(async () => {
-        zoe.dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-        );
-      });
+      await pressKey('Enter');
       expect(added).toEqual(['zoe']);
     } finally {
+      vi.useRealTimers();
       Object.defineProperty(window, 'Image', {
         configurable: true,
         writable: true,
