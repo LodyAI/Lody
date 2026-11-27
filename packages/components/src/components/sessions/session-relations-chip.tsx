@@ -16,7 +16,7 @@ import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
-import { MessagesSquare } from 'lucide-react';
+import { CircleStop, MessagesSquare } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getSessionLaunchConfigLegacyFields, type SessionId, type SessionMeta } from '@lody/shared';
 
@@ -37,26 +37,45 @@ import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { useWorkingHandOver } from '@/ui/working-status-mark';
 import { PopoverActionChip } from './info-chip';
 
+// Branches meet a 28px pill's centre (2px gap + 2px row inset + 14px); the
+// trunk runs under the parent's agent icon (2px inset + 8px padding + 7px).
+const ROW_CENTER = '18px';
+const TRUNK_INSET = '17px';
+
 const styles = stylex.create({
   relationRow: { display: 'flex', minWidth: 0, gap: themeSpace[1] },
-  children: { marginLeft: '14px' },
-  child: { position: 'relative', paddingLeft: themeSpace[4], paddingTop: themeSpace[1] },
+  children: { marginLeft: TRUNK_INSET },
+  child: { position: 'relative', paddingLeft: themeSpace[4], paddingTop: '2px' },
   trunk: {
     position: 'absolute',
     left: 0,
     top: 0,
+    bottom: 0,
     width: '1px',
     backgroundColor: themeColors.border,
   },
-  trunkEnd: { height: '18px' },
-  trunkContinued: { bottom: 0 },
   branch: {
     position: 'absolute',
     left: 0,
-    top: '18px',
+    top: ROW_CENTER,
     height: '1px',
     width: themeSpace[3],
     backgroundColor: themeColors.border,
+  },
+  /** The last child turns the trunk into a rounded elbow instead of a T. */
+  elbow: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    height: ROW_CENTER,
+    width: themeSpace[3],
+    borderLeftWidth: '1px',
+    borderBottomWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: themeColors.border,
+    borderTopWidth: 0,
+    borderRightWidth: 0,
+    borderBottomLeftRadius: '6px',
   },
   pill: {
     display: 'flex',
@@ -66,25 +85,31 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: themeSpace[2],
     borderRadius: themeRadius.md,
-    borderWidth: '1px',
-    borderStyle: 'solid',
+    borderWidth: 0,
     paddingInline: themeSpace[2],
     textAlign: 'left',
     fontSize: themeFontSize.xs,
     lineHeight: themeLineHeight.xs,
-    transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    color: themeColors.mutedForeground,
+    outlineOffset: '-1px',
+    transitionProperty: 'color, background-color',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
   current: {
-    borderColor: 'hsl(var(--foreground) / 0.15)',
-    backgroundColor: colors.selectedFill,
+    backgroundColor: 'hsl(var(--foreground) / 0.1)',
+    color: themeColors.foreground,
     fontWeight: themeFontWeight.medium,
   },
   other: {
-    borderColor: 'hsl(var(--border) / 0.6)',
-    backgroundColor: { default: null, ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
+    backgroundColor: {
+      default: 'hsl(var(--muted-foreground) / 0.04)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.12)' },
+    },
+    color: {
+      default: themeColors.mutedForeground,
+      '@media (hover: hover)': { ':hover': themeColors.foreground },
+    },
   },
   agent: {
     height: themeSpace[3.5],
@@ -101,26 +126,48 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    color: themeColors.foreground,
   },
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[2],
-    padding: space[2],
+    minHeight: themeSpace[9],
+    paddingBlock: space[1],
+    paddingInlineStart: space[4],
+    paddingInlineEnd: space[1.5],
     flexWrap: 'wrap',
-    borderBottom: `1px solid ${colors.separator}`,
   },
   label: { fontSize: text.footnoteSize, color: colors.secondaryLabel },
+  /** Muted until reached for; the confirmation carries the warning. */
+  stop: {
+    gap: space[1],
+    // Button's `xstyle` accepts only flat conditions, not nested `@media`.
+    color: { default: colors.secondaryLabel, ':hover': colors.destructive },
+  },
+  stopIcon: { width: 12, height: 12, flexShrink: 0 },
   confirmation: { display: 'flex', flexDirection: 'column', gap: space[3], maxWidth: 320 },
   actions: { display: 'flex', justifyContent: 'flex-end', gap: space[2] },
-  status: { padding: space[2], fontSize: text.footnoteSize, color: colors.secondaryLabel },
+  status: {
+    marginInline: space[2],
+    marginBottom: space[1],
+    paddingBlock: space[1.5],
+    paddingInline: space[2],
+    borderRadius: themeRadius.md,
+    backgroundColor: 'hsl(var(--muted-foreground) / 0.08)',
+    fontSize: text.footnoteSize,
+    color: colors.secondaryLabel,
+  },
   error: { padding: space[2], fontSize: text.footnoteSize, color: colors.destructive },
-  tree: { maxHeight: 320, overflowY: 'auto', padding: space[1.5] },
+  tree: {
+    maxHeight: 320,
+    overflowY: 'auto',
+    paddingInline: space[1.5],
+    paddingBottom: space[1.5],
+  },
   scroll: { minWidth: 0, width: '100%' },
   hiddenTrack: { display: 'none' },
-  row: { display: 'flex', gap: space[1], padding: `calc(${space[1]} / 2)` },
+  row: { display: 'flex', gap: space[1], padding: '2px' },
   fade: (left: string, right: string) => ({
     maskImage: `linear-gradient(to right, transparent, black ${left}, black calc(100% - ${right}), transparent)`,
   }),
@@ -237,8 +284,9 @@ export function SessionRelationsChip({
                   }}
                 >
                   <Popover.Trigger
-                    render={<Button size="mini" variant="ghost" tone="destructive" />}
+                    render={<Button size="mini" variant="ghost" xstyle={styles.stop} />}
                   >
+                    <CircleStop aria-hidden="true" {...stylex.props(styles.stopIcon)} />
                     {t(
                       'sessions.relations.stopCollaboration',
                       'Stop all conversation collaboration'
@@ -400,14 +448,14 @@ function RelationTreeRow({
         <div {...stylex.props(styles.children)}>
           {node.children.map((child, index) => (
             <div key={child.session.id} {...stylex.props(styles.child)}>
-              <span
-                aria-hidden="true"
-                {...stylex.props(
-                  styles.trunk,
-                  index === node.children.length - 1 ? styles.trunkEnd : styles.trunkContinued
-                )}
-              />
-              <span aria-hidden="true" {...stylex.props(styles.branch)} />
+              {index === node.children.length - 1 ? (
+                <span aria-hidden="true" {...stylex.props(styles.elbow)} />
+              ) : (
+                <>
+                  <span aria-hidden="true" {...stylex.props(styles.trunk)} />
+                  <span aria-hidden="true" {...stylex.props(styles.branch)} />
+                </>
+              )}
               <RelationTreeRow
                 node={child}
                 currentSessionId={currentSessionId}
