@@ -10,6 +10,7 @@ import {
   reconcilePendingE2eeWorkspaces,
 } from '../src/lib/create-e2ee-workspace';
 import type { PlatformE2eeWorkspaces } from '@lody/platform';
+import { isListedEncryptedWorkspace } from '../src/components/e2ee/encrypted-workspace-mark';
 import {
   clearPendingE2eeWorkspace,
   hasPendingE2eeCreationForSlug,
@@ -506,7 +507,7 @@ describe('FTUE storage classification and optimistic workspace creation', () => 
     const refreshPending = new Promise<void>((resolve) => {
       releaseRefresh = resolve;
     });
-    const optimistic: Array<{ id: string; name: string; slug: string }> = [];
+    const optimistic: unknown[] = [];
     let refreshCalled = 0;
     const port = createCloudE2eeWorkspaces({
       session: () => ({
@@ -565,7 +566,18 @@ describe('FTUE storage classification and optimistic workspace creation', () => 
       developerMode: true,
     });
     expect(created.workspaceId).toBe('ws-fast');
-    expect(optimistic).toEqual([{ id: 'ws-fast', name: 'Fast Vault', slug: 'fast-vault' }]);
+    expect(optimistic).toEqual([
+      {
+        id: 'ws-fast',
+        name: 'Fast Vault',
+        slug: 'fast-vault',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: hash,
+        genesisHash: hash,
+      },
+    ]);
+    expect(isListedEncryptedWorkspace(optimistic[0])).toBe(true);
     await Promise.resolve();
     expect(refreshCalled).toBe(1);
     releaseRefresh();

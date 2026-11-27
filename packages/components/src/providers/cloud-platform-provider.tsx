@@ -406,15 +406,7 @@ export function CloudPlatformProvider({
           return;
         workspacesStore.set({
           ...current,
-          workspaces: [
-            ...current.workspaces,
-            {
-              id: workspace.id,
-              name: workspace.name,
-              slug: workspace.slug,
-              role: 'owner',
-            },
-          ],
+          workspaces: [...current.workspaces, toWorkspaceSummary(workspace, 'owner')],
         });
       },
       refreshWorkspaces: async () => {

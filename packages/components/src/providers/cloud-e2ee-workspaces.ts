@@ -92,7 +92,15 @@ export function createCloudE2eeWorkspaces(input: {
   >;
   prepareCreation?: PlatformE2eeWorkspaces['prepareCreation'];
   runtime?: PlatformE2eeWorkspaces['runtime'];
-  onWorkspaceCreated?: (workspace: { id: string; name: string; slug: string }) => void;
+  onWorkspaceCreated?: (workspace: {
+    id: string;
+    name: string;
+    slug: string;
+    contentMode: 'e2ee';
+    contentModeVersion: number;
+    cryptoOrgId: string;
+    genesisHash: string;
+  }) => void;
   refreshWorkspaces: () => Promise<void>;
   actionTimeoutMs?: number;
 }): PlatformE2eeWorkspaces {
@@ -242,6 +250,10 @@ export function createCloudE2eeWorkspaces(input: {
         id: result.workspaceId,
         name: result.name,
         slug: result.slug,
+        contentMode: result.contentMode,
+        contentModeVersion: result.contentModeVersion,
+        cryptoOrgId: result.cryptoOrgId,
+        genesisHash: result.genesisHash,
       });
       void Promise.resolve()
         .then(() => input.refreshWorkspaces())
