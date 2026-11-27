@@ -192,7 +192,10 @@ describe('desktop sidebar toggle', () => {
 
     flushSync(() => store.set(sidebarCollapsedAtom, true));
     // The column never moves and keeps its full flex footprint; the pane
-    // releases exactly the column width by pulling left over it.
+    // releases exactly the column width by pulling left over it. The column
+    // carries z-0 so the sidebar's inner Electron z-20 cannot escape the
+    // stacking context and paint over the passing pane.
+    expect(wrapper.className).toContain('z-0');
     expect(wrapper.style.transform).toBe('');
     expect(wrapper.style.marginRight).toBe('');
     expect(content.style.marginLeft).toBe('-300px');

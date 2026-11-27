@@ -137,7 +137,11 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
       ) : (
         <div
           ref={sidebarRef}
-          className="relative h-full shrink-0"
+          // z-0 confines the sidebar's inner z-20 (Electron traffic-light
+          // helper) inside this stacking context. Without it that z-20 would
+          // outrank the covering content pane's z-10 and the slide-over would
+          // paint the rows on top of the card passing over them.
+          className="relative z-0 h-full shrink-0"
           style={{
             width: fold ? visibleSidebarWidth : undefined,
             // Inside a hardware fold the panes never overlap: the column slides
