@@ -207,8 +207,6 @@ it('discloses promotional seat-expansion discount before deadline and reverts im
     expect(container.textContent).toContain('Renews at standard rate');
     expect(container.textContent).toContain('576.00');
 
-    // Cross the promotional boundary without a new server payload: expired promo
-    // badge and discount disappear immediately in favor of the standard proration.
     await act(async () => {
       vi.advanceTimersByTime(60_000);
     });

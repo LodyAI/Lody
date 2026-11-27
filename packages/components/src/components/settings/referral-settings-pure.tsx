@@ -20,6 +20,7 @@ import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { Dialog } from '@/ui/dialog';
 import { CompactSection } from './compact-layout';
+import { discountBadgeValues } from './discount-badge-values';
 import { formatUsd } from './billing-setting-pure';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
@@ -590,12 +591,7 @@ function policyValues(policy?: ReferralPolicy) {
   };
 }
 
-export function discountBadgeValues(discountPercent: number) {
-  return {
-    discount: discountPercent,
-    rate: (100 - discountPercent) / 10,
-  };
-}
+export { discountBadgeValues };
 
 /**
  * Time-bound promotional first-payment discount, using the same layout and

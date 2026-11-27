@@ -146,7 +146,6 @@ describe('campaign checkout display', () => {
       seatExpansion: true,
     };
 
-    // Holiday 20% beats default 10% referral, and suppresses wallet credit on Checkout.
     await act(async () =>
       root.render(
         <BillingSettingsView
@@ -174,7 +173,6 @@ describe('campaign checkout display', () => {
     expect(container.textContent).toContain('$76.80');
     expect(container.textContent).not.toContain('Referral credit applied');
 
-    // Referral 25% campaign beats Holiday 20%.
     await act(async () =>
       root.render(
         <BillingSettingsView
@@ -201,7 +199,6 @@ describe('campaign checkout display', () => {
     expect(container.textContent).toContain('Referral discount');
     expect(container.textContent).toContain('$72');
 
-    // Active monthly subscriber sees the upgrade discount badge beside Switch to yearly.
     await act(async () =>
       root.render(
         <BillingSettingsView
@@ -229,8 +226,6 @@ describe('campaign checkout display', () => {
     expect(container.textContent).toContain('Switch to yearly');
     expect(container.textContent).toContain('20% off');
 
-    // Gift-period workspace scheduling post-gift renewal (`canScheduleAfterGift`)
-    // surfaces the promotional first-period discount even when a referral prop exists.
     await act(async () =>
       root.render(
         <BillingSettingsView

@@ -14,7 +14,7 @@ import { Select } from '@lody/ui/select';
 import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import { Dialog } from '@/ui/dialog';
 import { settingsSurface as surface } from './surface';
-import { discountBadgeValues } from './referral-settings-pure';
+import { discountBadgeValues } from './discount-badge-values';
 
 const styles = stylex.create({
   form: { display: 'flex', flexDirection: 'column', gap: space[4] },

@@ -628,8 +628,6 @@ export function BillingSettingsView({
   const yearlyPerMonthPrice = formatUsd(Math.round(overview.pricing.yearlyAmountCents / 12));
   const selectedOfferLabel =
     interval === 'month' && overview.pricing.monthlyOfferKey ? t('billing.founderPrice') : null;
-  // The newcomer and holiday discounts never stack with a locked offer price;
-  // when both are available, checkout picks the higher discount automatically.
   const selectedOfferKey =
     interval === 'year' ? overview.pricing.yearlyOfferKey : overview.pricing.monthlyOfferKey;
   const promoOffer = overview.pricing.promo ?? null;
