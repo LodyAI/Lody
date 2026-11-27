@@ -40,7 +40,14 @@ const styles = stylex.create({
     borderTopColor: colors.separator,
     paddingTop: space[3],
   },
-  disclosureTrigger: { alignSelf: 'flex-start' },
+  // A long label wraps inside the card on a narrow phone instead of running past it.
+  disclosureTrigger: {
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    whiteSpace: 'normal',
+    textAlign: 'start',
+  },
+  disclosureIcon: { flexShrink: 0 },
   callout: {
     display: 'flex',
     alignItems: 'center',
@@ -88,13 +95,14 @@ export function E2eeAddDeviceCard(props: { runtime: AddDeviceRuntime }) {
                 <Button
                   variant="ghost"
                   size="small"
+                  height="auto"
                   data-testid="e2ee-add-device-manual"
                   xstyle={styles.disclosureTrigger}
                 />
               }
             >
               {t('e2ee.addDevice.manual')}
-              <ChevronDown size={14} aria-hidden="true" />
+              <ChevronDown size={14} aria-hidden="true" {...stylex.props(styles.disclosureIcon)} />
             </Collapsible.Trigger>
             <Collapsible.Panel>
               <E2eeAccountPairingApprove runtime={props.runtime} embedded />
