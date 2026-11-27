@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect';
+import { Deferred, Effect, Result } from 'effect';
 import { InstalledKeyError } from '@lody/e2ee-core';
 import {
   Bytes,
@@ -49,8 +49,8 @@ const ledgerState = (view: LedgerView) => `${view.inspectState().epoch.number}:$
  */
 export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
   const now = options.now ?? Date.now;
-  let flight: { state: string; cooldownMs: number; done: Promise<void> } | undefined;
-  let exhausted: { state: string; until: number } | undefined;
+  let flight: { state: string; done: Deferred.Deferred<void> } | undefined;
+  let exhausted: { state: string; at: number } | undefined;
   const observe = (event: LedgerCatchUpEvent) => {
     try {
       options.observe?.(event);
@@ -90,33 +90,30 @@ export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
       )
     );
   };
-  // One wait per verified ledger state, shared by concurrent frames.
-  const join = (state: string, cooldownMs: number) => {
+  const join = Effect.fnUntraced(function* (state: string) {
     if (flight?.state === state) {
-      flight.cooldownMs = Math.min(flight.cooldownMs, cooldownMs);
-      return flight.done;
+      yield* Deferred.await(flight.done);
+      return;
     }
-    const current = {
-      state,
-      cooldownMs,
-      done: undefined as unknown as Promise<void>,
-    };
-    current.done = (async () => {
-      await Effect.runPromise(
-        Effect.exit(
-          Effect.promise(() => options.catchUp()).pipe(
-            Effect.timeout(options.timeoutMs ?? CATCH_UP_TIMEOUT_MS)
-          )
-        )
-      );
-      const after = await Effect.runPromise(Effect.result(options.ledger()));
-      if (Result.isFailure(after) || ledgerState(after.success) === state)
-        exhausted = { state, until: now() + current.cooldownMs };
-      if (flight === current) flight = undefined;
-    })();
+    const done = yield* Deferred.make<void>();
+    const current = { state, done };
     flight = current;
-    return current.done;
-  };
+    yield* Effect.ensuring(
+      Effect.gen(function* () {
+        yield* Effect.exit(
+          Effect.promise(() => options.catchUp()).pipe(
+            Effect.timeoutOption(options.timeoutMs ?? CATCH_UP_TIMEOUT_MS)
+          )
+        );
+        const after = yield* Effect.result(options.ledger());
+        if (Result.isFailure(after) || ledgerState(after.success) === state)
+          exhausted = { state, at: now() };
+      }),
+      Effect.sync(() => {
+        if (flight === current) flight = undefined;
+      }).pipe(Effect.andThen(Deferred.succeed(done, undefined)), Effect.ignore)
+    );
+  });
 
   return <A, E>(open: (machineId: string, frameHex: string) => Effect.Effect<A, E>) =>
     (machineId: string, frameHex: string): Effect.Effect<A, E> =>
@@ -149,15 +146,15 @@ export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
               return yield* Effect.fail(error);
             }
             const state = ledgerState(view.success);
-            if (exhausted?.state === state && now() < exhausted.until) {
-              report('cooldown');
-              return yield* Effect.fail(error);
-            }
             const cooldownMs =
               frameEpoch === localEpoch && missingKey
                 ? (options.missingKeyCooldownMs ?? MISSING_KEY_COOLDOWN_MS)
                 : (options.cooldownMs ?? CATCH_UP_COOLDOWN_MS);
-            yield* Effect.promise(() => join(state, cooldownMs));
+            if (exhausted?.state === state && now() - exhausted.at < cooldownMs) {
+              report('cooldown');
+              return yield* Effect.fail(error);
+            }
+            yield* join(state);
             return yield* open(machineId, frameHex).pipe(
               Effect.tap(() =>
                 Effect.sync(() => {

@@ -102,43 +102,74 @@ describe('dispatch open after an epoch rotation', () => {
     expect(new Set(m.events.map((event) => event.outcome))).toEqual(new Set(['unauthenticated']));
   });
 
-  it('uses a short 4s cooldown for same-epoch missing-key requests instead of the 60s epoch cooldown', async () => {
+  it('enforces independent 4s missing-key and 60s newer-epoch cooldowns on the same catch-up owner', async () => {
     let clock = 10_000;
-    const missingKeyMachine = machine({
-      error: new InstalledKeyError({ reason: 'missing-key' }),
+    const f = encryptedRpcFixture();
+    fixtures.push(f);
+    let catchUps = 0;
+    const events: LedgerCatchUpEvent[] = [];
+    const wrap = makeLedgerCatchUp({
+      genesis: hex(f.ledger.context.genesis.toBytes()),
+      resource: e2eeRpcResource,
+      ledger: f.ledger.ledger,
       now: () => clock,
+      catchUp: async () => {
+        catchUps++;
+      },
+      observe: (event) => events.push(event),
     });
-    const currentEpochFrame = await missingKeyMachine.seal(0);
+    const openMissingKey = wrap(() =>
+      Effect.fail(new InstalledKeyError({ reason: 'missing-key' }))
+    );
+    const openNewerEpoch = wrap(() => Effect.fail(new ContentError({ code: 'unauthorized' })));
+    const seal = (epoch: number) =>
+      Effect.runPromise(
+        sealRpcRequestContent({
+          scope: {
+            genesis: hex(f.ledger.context.genesis.toBytes()),
+            resource: e2eeRpcResource(f.machineId),
+            epoch,
+          },
+          epochKey: Result.getOrThrow(Bytes.epochKey(copyEpochKeyBytes(f.ledger.secret))),
+          signer: f.ledger.owner.signer,
+          plaintext: new Uint8Array([1, 2, 3]),
+        })
+      ).then(hex);
 
-    expect(Exit.isFailure(await missingKeyMachine.open(currentEpochFrame))).toBe(true);
-    expect(missingKeyMachine.catchUps()).toBe(1);
+    const currentEpochFrame = await seal(0);
+    const newerEpochFrame = await seal(1);
+
+    // 1. Newer-epoch failure at t=10_000 cools down newer-epoch for 60s, but missing-key only for 4s.
+    expect(
+      Exit.isFailure(await Effect.runPromiseExit(openNewerEpoch(f.machineId, newerEpochFrame)))
+    ).toBe(true);
+    expect(catchUps).toBe(1);
 
     clock += 3_999;
-    expect(Exit.isFailure(await missingKeyMachine.open(currentEpochFrame))).toBe(true);
-    expect(missingKeyMachine.catchUps()).toBe(1);
-    expect(missingKeyMachine.events.at(-1)?.outcome).toBe('cooldown');
+    expect(
+      Exit.isFailure(await Effect.runPromiseExit(openMissingKey(f.machineId, currentEpochFrame)))
+    ).toBe(true);
+    expect(catchUps).toBe(1);
+    expect(events.at(-1)?.outcome).toBe('cooldown');
 
     clock += 1;
-    expect(Exit.isFailure(await missingKeyMachine.open(currentEpochFrame))).toBe(true);
-    expect(missingKeyMachine.catchUps()).toBe(2);
+    expect(
+      Exit.isFailure(await Effect.runPromiseExit(openMissingKey(f.machineId, currentEpochFrame)))
+    ).toBe(true);
+    expect(catchUps).toBe(2);
 
-    let futureClock = 10_000;
-    const newerEpochMachine = machine({
-      error: new ContentError({ code: 'unauthorized' }),
-      now: () => futureClock,
-    });
-    const newerEpochFrame = await newerEpochMachine.seal(1);
+    // 2. Missing-key failure at t=14_000 does not drop newer-epoch's 60s cooldown.
+    clock += 59_999;
+    expect(
+      Exit.isFailure(await Effect.runPromiseExit(openNewerEpoch(f.machineId, newerEpochFrame)))
+    ).toBe(true);
+    expect(catchUps).toBe(2);
+    expect(events.at(-1)?.outcome).toBe('cooldown');
 
-    expect(Exit.isFailure(await newerEpochMachine.open(newerEpochFrame))).toBe(true);
-    expect(newerEpochMachine.catchUps()).toBe(1);
-
-    futureClock += 59_999;
-    expect(Exit.isFailure(await newerEpochMachine.open(newerEpochFrame))).toBe(true);
-    expect(newerEpochMachine.catchUps()).toBe(1);
-    expect(newerEpochMachine.events.at(-1)?.outcome).toBe('cooldown');
-
-    futureClock += 1;
-    expect(Exit.isFailure(await newerEpochMachine.open(newerEpochFrame))).toBe(true);
-    expect(newerEpochMachine.catchUps()).toBe(2);
+    clock += 1;
+    expect(
+      Exit.isFailure(await Effect.runPromiseExit(openNewerEpoch(f.machineId, newerEpochFrame)))
+    ).toBe(true);
+    expect(catchUps).toBe(3);
   });
 });

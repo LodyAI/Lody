@@ -158,7 +158,10 @@
 - Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
   fresh approval/KEK. OS/unknown stays OS.
 
-Verify member removal and persist its receipt before custody release. Drain execution/sync; erase scoped content under identity lease/pairing mutex. Retry before open, preserve projects, and rejoin with fresh keys. [Roost cleanup](../../session/README.md#encrypted-roost-history).
+Verify member removal and persist its receipt before custody release. Drain execution/sync; erase scoped content under identity lease and `pairing-mutex.sqlite` (fail-closed on `busy`; never open `pairings.sqlite` outside `pairing-journal.ts`). Erase `roost/` and `custody/` before `remote-bootstrap.json`/`activation.json`/`binding.json`, replay `removed.json` before `openWorkspace` and `loadCliE2eeMachineBootstrapLegacy`, unlink corrupt journals during terminal erasure, preserve projects, and rejoin with fresh keys. [Roost cleanup](../../session/README.md#encrypted-roost-history).
+- Pass `AbortSignal` explicitly on `CloudE2eePort` methods (no `AsyncLocalStorage` or hidden symbols); fence `publishActivation` (`link`/`rename`) and `completeRemotePairing` against cancellation and expiry.
+- Remote pairing retries only `RetryablePairingError` within its bounded budget and never re-calls `claim` after admission.
+- `waiting-key` schedules exponential refresh retry; RPC catch-up uses independent `at`-based 4s (`missing-key`) vs 60s (newer-epoch) cooldowns; `LodyFleet` parks `e2ee_device_revoked` in `waitingForPairing`.
 
 - `client-loss-observer.ts` is read-only E2E diagnostics, requiring nonrelease build
   opt-in and runtime `LODY_E2E=1`. Bind baseline requester identity to verified ledger

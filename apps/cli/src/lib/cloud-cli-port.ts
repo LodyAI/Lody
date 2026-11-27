@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { hostname, type as osType, release as osRelease } from 'node:os';
 import { getLodyCLIVersion } from '@/utils';
 import { syncAccountUsageSharing } from '@lody/shared/node/usage-sharing';
@@ -348,12 +347,9 @@ export function createCloudE2eePort(
       });
   };
   const irohRelays = irohRelaysFromEnv();
-  const WITH_CLOUD_E2EE_SIGNAL = Symbol.for('lody.cloudE2ee.withSignal');
-  const cloudE2eeRequestSignal = new AsyncLocalStorage<AbortSignal>();
-  const cloudRequestSignal = (timeoutMs: number): AbortSignal => {
-    const ambient = cloudE2eeRequestSignal.getStore();
+  const withTimeoutSignal = (timeoutMs: number, signal?: AbortSignal): AbortSignal => {
     const timeout = AbortSignal.timeout(timeoutMs);
-    return ambient ? AbortSignal.any([ambient, timeout]) : timeout;
+    return signal ? AbortSignal.any([signal, timeout]) : timeout;
   };
   const authBaseUrl = normalizeBaseUrl(options.authBaseUrl);
   const fetchImpl = getCliHttpFetch({ logger: options.logger });
@@ -474,354 +470,363 @@ export function createCloudE2eePort(
     }
     map.set(key, value);
   };
-  return Object.assign(
-    {
-      ...(irohRelays ? { irohRelays } : {}),
-      machineSharing: {
-        readHead: async (input) =>
-          sharingReplySchemas.readHead.parse(
-            await inlineVersionReadHead(input, (args) =>
-              client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readHead, {
-                ...args,
-                ...(options.token === undefined ? {} : { cliToken: options.token }),
-              })
-            )
-          ),
-        readVersion: async (input) =>
-          sharingReplySchemas.readVersion.parse(
-            await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readVersion, {
-              ...input,
+  return {
+    ...(irohRelays ? { irohRelays } : {}),
+    machineSharing: {
+      readHead: async (input) =>
+        sharingReplySchemas.readHead.parse(
+          await inlineVersionReadHead(input, (args) =>
+            client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readHead, {
+              ...args,
               ...(options.token === undefined ? {} : { cliToken: options.token }),
             })
-          ),
-        readRequest: async (input) =>
-          sharingReplySchemas.readRequest.parse(
-            await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readRequest, {
-              ...input,
-              ...(options.token === undefined ? {} : { cliToken: options.token }),
-            })
-          ),
-        commit: async (input) =>
-          sharingReplySchemas.commit.parse(
-            await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.commit, {
-              ...input,
-              ...(options.token === undefined ? {} : { cliToken: options.token }),
-            })
-          ),
-      },
-      ...(options.token === undefined
-        ? {
-            completeMachinePairing: async (input: {
+          )
+        ),
+      readVersion: async (input) =>
+        sharingReplySchemas.readVersion.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readVersion, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+      readRequest: async (input) =>
+        sharingReplySchemas.readRequest.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readRequest, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+      commit: async (input) =>
+        sharingReplySchemas.commit.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.commit, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+    },
+    ...(options.token === undefined
+      ? {
+          completeMachinePairing: async (
+            input: {
               workspaceId: string;
               credential: string;
               pairingSessionId: string;
-            }) => {
-              const reply = await inlineMachineComplete(input, (args) =>
-                client(cloudRequestSignal(30_000)).mutation(api.e2eeMachinePairing.complete, args)
-              );
-              if (
-                typeof reply === 'object' &&
-                reply !== null &&
-                'bootstrap' in reply &&
-                reply.bootstrap !== undefined
-              ) {
-                const parsedBootstrap = machineBootstrapReplySchema.safeParse(reply.bootstrap);
-                if (parsedBootstrap.success) {
-                  stashInlineMachineBootstrap(
-                    machineBootstrapCacheKey(authBaseUrl, input.workspaceId, input.credential),
-                    parsedBootstrap.data
-                  );
-                }
-              }
             },
-          }
-        : {}),
-      readExecutionOriginPage: async (input, signal) => {
-        const token = await getContentToken(
-          { workspaceId: input.workspaceId, credential: input.credential },
-          signal
-        );
-        const streamId = getLoroStreamIdForDocId(input.workspaceId as WorkspaceId, input.docId);
-        const streams = new StreamsClient({
-          url: `${getLoroStreamsBaseUrl(token.gatewayBaseUrl)}/ds/${encodeURIComponent(token.bucketId)}/${encodeURIComponent(streamId)}`,
-          fetch: fetchImpl,
-          auth: token.token,
-        });
-        const result = await streams.readBackwardMessages({
-          before: input.before,
-          pageBytes: 256 * 1024,
-          maxMessageBytes: 64 * 1024 * 1024,
-          signal,
-        });
-        if (!result.ok) throw result.result;
-        return {
-          messages: result.result.messages,
-          before: result.result.startOffset,
-          atStart: result.result.atRetainedStart,
-        };
-      },
-      getHistory: async (input) => {
-        let status: number | undefined;
-        try {
-          const result = e2eeHistoryPageSchema.parse(
-            await client(cloudRequestSignal(30_000), (value) => {
-              status = value;
-            }).action(api.e2eeWorkspaces.history, {
-              ...input,
-              ...(options.token === undefined ? {} : { cliToken: options.token }),
-            })
-          );
-          reportDisplay({ workspaceId: input.workspaceId, credential: input.credential });
-          return result;
-        } catch (cause) {
-          try {
-            return classifyE2eeRejection(cause);
-          } catch (classified) {
-            throw ledgerReadFailure(classified, status);
-          }
-        }
-      },
-      getContentToken: (input) => getContentToken(input, cloudRequestSignal(30_000)),
-      readEpochGroup: (input) =>
-        client(cloudRequestSignal(30_000)).query(api.e2eeEpochStaging.readGroup, {
-          workspaceId: input.workspaceId,
-          credential: input.credential,
-          // Native discovery also retains the publication signer. The wire key
-          // has exactly four fields; the receiver authenticates the originals.
-          key: {
-            genesis: input.key.genesis,
-            epoch: input.key.epoch,
-            commitment: input.key.commitment,
-            recordHash: input.key.recordHash,
-          },
-          ...(options.token === undefined ? {} : { cliToken: options.token }),
-        }),
-      mailboxCall: async (method, input) => {
-        const connection = client(cloudRequestSignal(30_000));
-        const common = z.object({ workspaceId: z.string(), credential: z.string() });
-        const slot = z.object({
-          genesis: z.string(),
-          epoch: z.number().int().nonnegative(),
-          recipient: z.string(),
-        });
-        const accessOf = (parsed: { workspaceId: string; credential: string }) => ({
-          workspaceId: parsed.workspaceId,
-          credential: parsed.credential,
-          ...(options.token === undefined ? {} : { cliToken: options.token }),
-        });
-        const accessKeyOf = (parsed: { workspaceId: string; credential: string }) =>
-          `${parsed.workspaceId}\0${parsed.credential}\0${options.token ?? ''}`;
-        const readKey = (workspaceId: string, credential: string, id: string) =>
-          `${workspaceId}\0${credential}\0${options.token ?? ''}\0${id}`;
-        const statusKey = (
-          workspaceId: string,
-          credential: string,
-          target: { genesis: string; epoch: number; recipient: string }
-        ) =>
-          `${workspaceId}\0${credential}\0${options.token ?? ''}\0${target.genesis}\0${target.epoch}\0${target.recipient}`;
-        let reply: unknown;
-        switch (method) {
-          case 'put': {
-            const parsedPut = common.extend({ id: z.string(), frameHex: z.string() }).parse(input);
-            const accessArgs = accessOf(parsedPut);
-            selfStatusCache.invalidateAccess(accessArgs);
-            withinRoundCache.invalidateAccess(accessArgs);
-            const rawReply = await inlineMailboxPut(
-              {
-                ...parsedPut,
-                ...(options.token === undefined ? {} : { cliToken: options.token }),
-              },
-              (args) => connection.mutation(api.e2eeMailbox.put, args)
+            signal?: AbortSignal
+          ) => {
+            const reply = await inlineMachineComplete(input, (args) =>
+              client(withTimeoutSignal(30_000, signal)).mutation(
+                api.e2eeMachinePairing.complete,
+                args
+              )
             );
-            const receipt = e2eeMailboxReplySchemas.put.parse(rawReply);
-            if (receipt !== null) {
-              cacheBounded(
-                inlineMailboxReads,
-                readKey(parsedPut.workspaceId, parsedPut.credential, parsedPut.id),
-                receipt.frameHex
-              );
-              cacheBounded(
-                inlineMailboxStatuses,
-                statusKey(parsedPut.workspaceId, parsedPut.credential, receipt.slot),
-                receipt.slot
-              );
-              selfStatusCache.invalidateSlot(accessArgs, receipt.slot);
-              withinRoundCache.invalidateSlot(accessArgs, receipt.slot);
-            } else {
-              selfStatusCache.invalidateAccess(accessArgs);
-              withinRoundCache.invalidateAccess(accessArgs);
-            }
-            reply = null;
-            break;
-          }
-          case 'report': {
-            const parsedReport = common
-              .extend({ reportHex: z.string(), publicationHex: z.string().optional() })
-              .parse(input);
-            const accessArgs = accessOf(parsedReport);
-            selfStatusCache.invalidateAccess(accessArgs);
-            withinRoundCache.invalidateAccess(accessArgs);
-            reply = await connection.mutation(api.e2eeMailbox.report, {
-              ...parsedReport,
-              ...(options.token === undefined ? {} : { cliToken: options.token }),
-            });
-            selfStatusCache.invalidateAccess(accessArgs);
-            withinRoundCache.invalidateAccess(accessArgs);
-            break;
-          }
-          case 'repair': {
-            const parsedRepair = common
-              .extend({ slot, id: z.string(), rejectedDigest: z.string().optional() })
-              .parse(input);
-            const accessArgs = accessOf(parsedRepair);
-            inlineMailboxStatuses.delete(
-              statusKey(parsedRepair.workspaceId, parsedRepair.credential, parsedRepair.slot)
-            );
-            selfStatusCache.invalidateSlot(accessArgs, parsedRepair.slot);
-            withinRoundCache.invalidateSlot(accessArgs, parsedRepair.slot);
-            reply = await connection.mutation(api.e2eeMailbox.repair, {
-              ...parsedRepair,
-              ...(options.token === undefined ? {} : { cliToken: options.token }),
-            });
-            selfStatusCache.invalidateSlot(accessArgs, parsedRepair.slot);
-            withinRoundCache.invalidateSlot(accessArgs, parsedRepair.slot);
-            break;
-          }
-          case 'read': {
-            const parsedRead = common.extend({ id: z.string() }).parse(input);
-            const cacheKey = readKey(parsedRead.workspaceId, parsedRead.credential, parsedRead.id);
-            if (inlineMailboxReads.has(cacheKey)) {
-              reply = inlineMailboxReads.get(cacheKey)!;
-              inlineMailboxReads.delete(cacheKey);
-            } else {
-              reply = await connection.query(api.e2eeMailbox.read, {
-                ...parsedRead,
-                ...(options.token === undefined ? {} : { cliToken: options.token }),
-              });
-            }
-            break;
-          }
-          case 'fetch': {
-            const parsedFetch = common
-              .extend({
-                epoch: z.number().int().nonnegative(),
-                cursor: z.string().nullable(),
-                limit: z.number().int().min(1).max(100),
-              })
-              .parse(input);
-            const accessArgs = accessOf(parsedFetch);
-            reply = await inlineMailboxFetch(
-              {
-                ...parsedFetch,
-                ...(options.token === undefined ? {} : { cliToken: options.token }),
-              },
-              (args) => connection.query(api.e2eeMailbox.fetch, args)
-            );
-            const parsedReply = e2eeMailboxReplySchemas.fetch.parse(reply);
-            if (parsedReply.slot !== undefined && parsedReply.slot.epoch === parsedFetch.epoch) {
-              cacheBounded(selfRecipients, accessKeyOf(parsedFetch), parsedReply.slot.recipient);
-              selfStatusCache.set(accessArgs, parsedReply.slot);
-            }
-            break;
-          }
-          case 'status': {
-            const parsedStatus = common.extend({ slot }).parse(input);
-            const accessArgs = accessOf(parsedStatus);
-            const cacheKey = statusKey(
-              parsedStatus.workspaceId,
-              parsedStatus.credential,
-              parsedStatus.slot
-            );
-            if (inlineMailboxStatuses.has(cacheKey)) {
-              reply = inlineMailboxStatuses.get(cacheKey)!;
-              inlineMailboxStatuses.delete(cacheKey);
-            } else {
-              const cachedStatus =
-                selfStatusCache.get(accessArgs, parsedStatus.slot) ??
-                withinRoundCache.get(accessArgs, parsedStatus.slot);
-              if (cachedStatus !== undefined) {
-                reply = cachedStatus;
-              } else {
-                let usedSingle = false;
-                const ambientSignal = cloudE2eeRequestSignal.getStore();
-                const statusSignal = () => {
-                  const timeout = AbortSignal.timeout(30_000);
-                  return ambientSignal ? AbortSignal.any([ambientSignal, timeout]) : timeout;
-                };
-                const statusReply = await batchMailboxStatus(
-                  { ...accessArgs, slot: parsedStatus.slot },
-                  {
-                    single: async (args) => {
-                      usedSingle = true;
-                      return e2eeMailboxReplySchemas.status.parse(
-                        await client(statusSignal()).query(api.e2eeMailbox.status, args)
-                      );
-                    },
-                    batch: async (args) =>
-                      e2eeMailboxReplySchemas.batchStatus.parse(
-                        await client(statusSignal()).query(api.e2eeMailbox.batchStatus, args)
-                      ),
-                  }
+            if (
+              typeof reply === 'object' &&
+              reply !== null &&
+              'bootstrap' in reply &&
+              reply.bootstrap !== undefined
+            ) {
+              const parsedBootstrap = machineBootstrapReplySchema.safeParse(reply.bootstrap);
+              if (parsedBootstrap.success) {
+                stashInlineMachineBootstrap(
+                  machineBootstrapCacheKey(authBaseUrl, input.workspaceId, input.credential),
+                  parsedBootstrap.data
                 );
-                if (usedSingle) {
-                  if (
-                    selfRecipients.get(accessKeyOf(parsedStatus)) === parsedStatus.slot.recipient
-                  ) {
-                    selfStatusCache.set(accessArgs, statusReply);
-                  } else {
-                    withinRoundCache.set(accessArgs, statusReply);
-                  }
-                }
-                reply = statusReply;
               }
             }
-            break;
+          },
+        }
+      : {}),
+    readExecutionOriginPage: async (input, signal) => {
+      const token = await getContentToken(
+        { workspaceId: input.workspaceId, credential: input.credential },
+        signal
+      );
+      const streamId = getLoroStreamIdForDocId(input.workspaceId as WorkspaceId, input.docId);
+      const streams = new StreamsClient({
+        url: `${getLoroStreamsBaseUrl(token.gatewayBaseUrl)}/ds/${encodeURIComponent(token.bucketId)}/${encodeURIComponent(streamId)}`,
+        fetch: fetchImpl,
+        auth: token.token,
+      });
+      const result = await streams.readBackwardMessages({
+        before: input.before,
+        pageBytes: 256 * 1024,
+        maxMessageBytes: 64 * 1024 * 1024,
+        signal,
+      });
+      if (!result.ok) throw result.result;
+      return {
+        messages: result.result.messages,
+        before: result.result.startOffset,
+        atStart: result.result.atRetainedStart,
+      };
+    },
+    getHistory: async (input, signal) => {
+      let status: number | undefined;
+      try {
+        const result = e2eeHistoryPageSchema.parse(
+          await client(withTimeoutSignal(30_000, signal), (value) => {
+            status = value;
+          }).action(api.e2eeWorkspaces.history, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        );
+        reportDisplay({ workspaceId: input.workspaceId, credential: input.credential });
+        return result;
+      } catch (cause) {
+        try {
+          return classifyE2eeRejection(cause);
+        } catch (classified) {
+          throw ledgerReadFailure(classified, status);
+        }
+      }
+    },
+    getContentToken: (input, signal) => getContentToken(input, withTimeoutSignal(30_000, signal)),
+    readEpochGroup: (input, signal) =>
+      client(withTimeoutSignal(30_000, signal)).query(api.e2eeEpochStaging.readGroup, {
+        workspaceId: input.workspaceId,
+        credential: input.credential,
+        // Native discovery also retains the publication signer. The wire key
+        // has exactly four fields; the receiver authenticates the originals.
+        key: {
+          genesis: input.key.genesis,
+          epoch: input.key.epoch,
+          commitment: input.key.commitment,
+          recordHash: input.key.recordHash,
+        },
+        ...(options.token === undefined ? {} : { cliToken: options.token }),
+      }),
+    mailboxCall: async (method, input, signal) => {
+      const connection = client(withTimeoutSignal(30_000, signal));
+      const common = z.object({ workspaceId: z.string(), credential: z.string() });
+      const slot = z.object({
+        genesis: z.string(),
+        epoch: z.number().int().nonnegative(),
+        recipient: z.string(),
+      });
+      const accessOf = (parsed: { workspaceId: string; credential: string }) => ({
+        workspaceId: parsed.workspaceId,
+        credential: parsed.credential,
+        ...(options.token === undefined ? {} : { cliToken: options.token }),
+      });
+      const accessKeyOf = (parsed: { workspaceId: string; credential: string }) =>
+        `${parsed.workspaceId}\0${parsed.credential}\0${options.token ?? ''}`;
+      const readKey = (workspaceId: string, credential: string, id: string) =>
+        `${workspaceId}\0${credential}\0${options.token ?? ''}\0${id}`;
+      const statusKey = (
+        workspaceId: string,
+        credential: string,
+        target: { genesis: string; epoch: number; recipient: string }
+      ) =>
+        `${workspaceId}\0${credential}\0${options.token ?? ''}\0${target.genesis}\0${target.epoch}\0${target.recipient}`;
+      let reply: unknown;
+      switch (method) {
+        case 'put': {
+          const parsedPut = common.extend({ id: z.string(), frameHex: z.string() }).parse(input);
+          const accessArgs = accessOf(parsedPut);
+          selfStatusCache.invalidateAccess(accessArgs);
+          withinRoundCache.invalidateAccess(accessArgs);
+          const rawReply = await inlineMailboxPut(
+            {
+              ...parsedPut,
+              ...(options.token === undefined ? {} : { cliToken: options.token }),
+            },
+            (args) => connection.mutation(api.e2eeMailbox.put, args)
+          );
+          const receipt = e2eeMailboxReplySchemas.put.parse(rawReply);
+          if (receipt !== null) {
+            cacheBounded(
+              inlineMailboxReads,
+              readKey(parsedPut.workspaceId, parsedPut.credential, parsedPut.id),
+              receipt.frameHex
+            );
+            cacheBounded(
+              inlineMailboxStatuses,
+              statusKey(parsedPut.workspaceId, parsedPut.credential, receipt.slot),
+              receipt.slot
+            );
+            selfStatusCache.invalidateSlot(accessArgs, receipt.slot);
+            withinRoundCache.invalidateSlot(accessArgs, receipt.slot);
+          } else {
+            selfStatusCache.invalidateAccess(accessArgs);
+            withinRoundCache.invalidateAccess(accessArgs);
           }
-          case 'batchStatus': {
-            const parsedBatch = common.extend({ slots: z.array(slot) }).parse(input);
-            reply = await connection.query(api.e2eeMailbox.batchStatus, {
-              ...parsedBatch,
+          reply = null;
+          break;
+        }
+        case 'report': {
+          const parsedReport = common
+            .extend({ reportHex: z.string(), publicationHex: z.string().optional() })
+            .parse(input);
+          const accessArgs = accessOf(parsedReport);
+          selfStatusCache.invalidateAccess(accessArgs);
+          withinRoundCache.invalidateAccess(accessArgs);
+          reply = await connection.mutation(api.e2eeMailbox.report, {
+            ...parsedReport,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          });
+          selfStatusCache.invalidateAccess(accessArgs);
+          withinRoundCache.invalidateAccess(accessArgs);
+          break;
+        }
+        case 'repair': {
+          const parsedRepair = common
+            .extend({ slot, id: z.string(), rejectedDigest: z.string().optional() })
+            .parse(input);
+          const accessArgs = accessOf(parsedRepair);
+          inlineMailboxStatuses.delete(
+            statusKey(parsedRepair.workspaceId, parsedRepair.credential, parsedRepair.slot)
+          );
+          selfStatusCache.invalidateSlot(accessArgs, parsedRepair.slot);
+          withinRoundCache.invalidateSlot(accessArgs, parsedRepair.slot);
+          reply = await connection.mutation(api.e2eeMailbox.repair, {
+            ...parsedRepair,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          });
+          selfStatusCache.invalidateSlot(accessArgs, parsedRepair.slot);
+          withinRoundCache.invalidateSlot(accessArgs, parsedRepair.slot);
+          break;
+        }
+        case 'read': {
+          const parsedRead = common.extend({ id: z.string() }).parse(input);
+          const cacheKey = readKey(parsedRead.workspaceId, parsedRead.credential, parsedRead.id);
+          if (inlineMailboxReads.has(cacheKey)) {
+            reply = inlineMailboxReads.get(cacheKey)!;
+            inlineMailboxReads.delete(cacheKey);
+          } else {
+            reply = await connection.query(api.e2eeMailbox.read, {
+              ...parsedRead,
               ...(options.token === undefined ? {} : { cliToken: options.token }),
             });
-            break;
           }
-          default:
-            throw new Error('e2ee_unknown_method');
+          break;
         }
-        return e2eeMailboxReplySchemas[method].parse(reply);
-      },
-      createContentTokenProvider: (input) =>
-        Effect.gen(function* () {
-          let bucketId: string | undefined;
-          const ports = makeLoroStreamsTokenWebPorts({
-            credential: Effect.succeed(input.credential),
-            fetchImpl: async (_endpoint, init) => {
-              const request = z
-                .object({ workspaceId: z.string(), rejectedToken: z.string().optional() })
-                .strict()
-                .parse(JSON.parse(String(init?.body)));
-              if (request.workspaceId !== input.workspaceId)
-                throw new Error('e2ee_content_context_mismatch');
-              const token = await getContentToken(
-                { ...input, rejectedToken: request.rejectedToken },
-                init?.signal ?? AbortSignal.timeout(30_000)
-              );
-              bucketId = token.bucketId;
-              return Response.json(token);
+        case 'fetch': {
+          const parsedFetch = common
+            .extend({
+              epoch: z.number().int().nonnegative(),
+              cursor: z.string().nullable(),
+              limit: z.number().int().min(1).max(100),
+            })
+            .parse(input);
+          const accessArgs = accessOf(parsedFetch);
+          reply = await inlineMailboxFetch(
+            {
+              ...parsedFetch,
+              ...(options.token === undefined ? {} : { cliToken: options.token }),
             },
+            (args) => connection.query(api.e2eeMailbox.fetch, args)
+          );
+          const parsedReply = e2eeMailboxReplySchemas.fetch.parse(reply);
+          if (parsedReply.slot !== undefined && parsedReply.slot.epoch === parsedFetch.epoch) {
+            cacheBounded(selfRecipients, accessKeyOf(parsedFetch), parsedReply.slot.recipient);
+            selfStatusCache.set(accessArgs, parsedReply.slot);
+          }
+          break;
+        }
+        case 'status': {
+          const parsedStatus = common.extend({ slot }).parse(input);
+          const accessArgs = accessOf(parsedStatus);
+          const cacheKey = statusKey(
+            parsedStatus.workspaceId,
+            parsedStatus.credential,
+            parsedStatus.slot
+          );
+          if (inlineMailboxStatuses.has(cacheKey)) {
+            reply = inlineMailboxStatuses.get(cacheKey)!;
+            inlineMailboxStatuses.delete(cacheKey);
+          } else {
+            const cachedStatus =
+              selfStatusCache.get(accessArgs, parsedStatus.slot) ??
+              withinRoundCache.get(accessArgs, parsedStatus.slot);
+            if (cachedStatus !== undefined) {
+              reply = cachedStatus;
+            } else {
+              let usedSingle = false;
+              const statusReply = signal
+                ? await (async () => {
+                    usedSingle = true;
+                    return e2eeMailboxReplySchemas.status.parse(
+                      await client(withTimeoutSignal(30_000, signal)).query(
+                        api.e2eeMailbox.status,
+                        { ...accessArgs, slot: parsedStatus.slot }
+                      )
+                    );
+                  })()
+                : await batchMailboxStatus(
+                    { ...accessArgs, slot: parsedStatus.slot },
+                    {
+                      single: async (args) => {
+                        usedSingle = true;
+                        return e2eeMailboxReplySchemas.status.parse(
+                          await client(AbortSignal.timeout(30_000)).query(
+                            api.e2eeMailbox.status,
+                            args
+                          )
+                        );
+                      },
+                      batch: async (args) =>
+                        e2eeMailboxReplySchemas.batchStatus.parse(
+                          await client(AbortSignal.timeout(30_000)).query(
+                            api.e2eeMailbox.batchStatus,
+                            args
+                          )
+                        ),
+                    }
+                  );
+              if (usedSingle) {
+                if (selfRecipients.get(accessKeyOf(parsedStatus)) === parsedStatus.slot.recipient) {
+                  selfStatusCache.set(accessArgs, statusReply);
+                } else {
+                  withinRoundCache.set(accessArgs, statusReply);
+                }
+              }
+              reply = statusReply;
+            }
+          }
+          break;
+        }
+        case 'batchStatus': {
+          const parsedBatch = common.extend({ slots: z.array(slot) }).parse(input);
+          reply = await connection.query(api.e2eeMailbox.batchStatus, {
+            ...parsedBatch,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
           });
-          const provider = yield* makeLoroStreamsTokenProvider({
-            endpoint: authBaseUrl,
-            workspaceId: input.workspaceId,
-          }).pipe(Effect.provideService(LoroStreamsTokenPorts, ports));
-          return { ...provider, getBucketId: () => bucketId };
-        }),
-    } satisfies CloudE2eePort,
-    {
-      [WITH_CLOUD_E2EE_SIGNAL]: <T>(signal: AbortSignal, fn: () => Promise<T>) =>
-        cloudE2eeRequestSignal.run(signal, fn),
-    }
-  );
+          break;
+        }
+        default:
+          throw new Error('e2ee_unknown_method');
+      }
+      return e2eeMailboxReplySchemas[method].parse(reply);
+    },
+    createContentTokenProvider: (input) =>
+      Effect.gen(function* () {
+        let bucketId: string | undefined;
+        const ports = makeLoroStreamsTokenWebPorts({
+          credential: Effect.succeed(input.credential),
+          fetchImpl: async (_endpoint, init) => {
+            const request = z
+              .object({ workspaceId: z.string(), rejectedToken: z.string().optional() })
+              .strict()
+              .parse(JSON.parse(String(init?.body)));
+            if (request.workspaceId !== input.workspaceId)
+              throw new Error('e2ee_content_context_mismatch');
+            const token = await getContentToken(
+              { ...input, rejectedToken: request.rejectedToken },
+              init?.signal ?? AbortSignal.timeout(30_000)
+            );
+            bucketId = token.bucketId;
+            return Response.json(token);
+          },
+        });
+        const provider = yield* makeLoroStreamsTokenProvider({
+          endpoint: authBaseUrl,
+          workspaceId: input.workspaceId,
+        }).pipe(Effect.provideService(LoroStreamsTokenPorts, ports));
+        return { ...provider, getBucketId: () => bucketId };
+      }),
+  };
 }
 
 /** Official-build assembly point. No cloud client may be constructed by Fleet. */
@@ -1254,33 +1259,33 @@ export function createCloudE2eeMachinePort(options: {
             },
           }
         : {}),
-      getHistory: (input) => {
+      getHistory: (input, signal) => {
         bound(input);
-        return e2ee.getHistory(input);
+        return e2ee.getHistory(input, signal);
       },
-      getContentToken: (input) => {
+      getContentToken: (input, signal) => {
         bound(input);
-        return e2ee.getContentToken(input);
+        return e2ee.getContentToken(input, signal);
       },
       ...(readEpochGroup
         ? {
-            readEpochGroup: (input) => {
+            readEpochGroup: (input, signal) => {
               bound(input);
-              return readEpochGroup(input);
+              return readEpochGroup(input, signal);
             },
           }
         : {}),
       ...(completeMachinePairing
         ? {
-            completeMachinePairing: async (input) => {
+            completeMachinePairing: async (input, signal) => {
               bound(input);
-              await completeMachinePairing(input);
+              await completeMachinePairing(input, signal);
             },
           }
         : {}),
-      mailboxCall: (method, input) => {
+      mailboxCall: (method, input, signal) => {
         bound(input);
-        return e2ee.mailboxCall(method, input);
+        return e2ee.mailboxCall(method, input, signal);
       },
     },
     access: {

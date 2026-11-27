@@ -1,5 +1,5 @@
 import { setTimeout as pause } from 'node:timers/promises';
-import { Result } from 'effect';
+import { Data, Effect, Result } from 'effect';
 import { verifySignature } from '@lody/e2ee-core/protocol';
 import {
   RemoteMachineOfferSchema,
@@ -8,6 +8,7 @@ import {
   remoteMachineSummary,
 } from '@lody/shared/e2ee-remote-pairing';
 import { LocalE2eePrepareResponseSchema } from '@lody/shared/e2ee-local-pairing';
+import { isTransientHttpStatus, isTransportInterruption } from '../cloud-e2ee-errors';
 import {
   prepareCliE2eeMachineLegacy,
   activateCliE2eeWorkspaceLegacy,
@@ -15,6 +16,7 @@ import {
 } from './workspace-legacy';
 import type { CloudE2eePort } from '@lody/platform';
 import type { MachineKeyring } from './custody';
+
 const raw = (s: string) => new Uint8Array(Buffer.from(s, 'hex'));
 const POLL_MS = 1500;
 const KEY_RETRY_MAX_MS = 15_000;
@@ -26,38 +28,112 @@ const CLAIM_RETRY_MAX_MS = 15_000;
 const CLAIM_RETRY_BUDGET_MS = 60_000;
 const CLAIM_RETRY_MAX_ATTEMPTS = 8;
 
-const TRANSIENT_NETWORK_CODES = new Set([
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'ETIMEDOUT',
-  'EAI_AGAIN',
-  'ENOTFOUND',
-  'UND_ERR_CONNECT_TIMEOUT',
-  'UND_ERR_HEADERS_TIMEOUT',
-  'UND_ERR_SOCKET',
-]);
+export type FatalPairingCode =
+  | 'e2ee_pairing_claimed_by_another_machine'
+  | 'e2ee_pairing_expired_create_new_command'
+  | 'e2ee_pairing_cancelled_create_new_command'
+  | 'e2ee_pairing_conflict_create_new_command'
+  | 'e2ee_pairing_conflict'
+  | 'e2ee_pairing_superseded_create_new_command'
+  | 'e2ee_pairing_invalid_command'
+  | 'e2ee_binding_conflict'
+  | 'e2ee_member_removed';
 
-const TRANSIENT_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
+export type RetryablePairingCode =
+  | 'e2ee_waiting_for_key'
+  | 'e2ee_pairing_unavailable_retry_same_command';
 
-function isTransientClaimError(error: unknown, signal: AbortSignal): boolean {
-  if (signal.aborted) return false;
+export class FatalPairingError extends Data.TaggedError('FatalPairingError')<{
+  readonly code: FatalPairingCode;
+  readonly cause?: unknown;
+}> {
+  override get message() {
+    return this.code;
+  }
+}
+
+export class RetryablePairingError extends Data.TaggedError('RetryablePairingError')<{
+  readonly code: RetryablePairingCode;
+  readonly cause?: unknown;
+}> {
+  override get message() {
+    return this.code;
+  }
+}
+
+function classifyClaimError(error: unknown, signal: AbortSignal): unknown {
+  if (signal.aborted) return error;
   if (typeof error === 'object' && error !== null && 'status' in error) {
     const status = (error as { status?: unknown }).status;
-    if (typeof status === 'number') return TRANSIENT_HTTP_STATUSES.has(status);
+    if (typeof status === 'number') {
+      return isTransientHttpStatus(status)
+        ? new RetryablePairingError({
+            code: 'e2ee_pairing_unavailable_retry_same_command',
+            cause: error,
+          })
+        : error;
+    }
   }
-  if (!(error instanceof Error)) return false;
-  if (error instanceof TypeError) return true;
-  if (error.name === 'TimeoutError' || error.name === 'AbortError') return true;
-  const code = (error as NodeJS.ErrnoException).code;
-  if (typeof code === 'string' && TRANSIENT_NETWORK_CODES.has(code)) return true;
-  return /(?:^|\b)(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|fetch failed|network)/i.test(
-    error.message
-  );
+  if (error instanceof TypeError || (error instanceof Error && isTransportInterruption(error))) {
+    return new RetryablePairingError({
+      code: 'e2ee_pairing_unavailable_retry_same_command',
+      cause: error,
+    });
+  }
+  return error;
 }
+
+const retryBounded = <A>(
+  work: (remainingMs: number) => Effect.Effect<A, unknown>,
+  opts: {
+    baseMs: number;
+    maxMs: number;
+    budgetMs: number;
+    maxAttempts?: number;
+    timeoutCode: RetryablePairingCode;
+    now: () => number;
+    signal: AbortSignal;
+    wait: (signal: AbortSignal, delayMs: number) => Promise<void>;
+    onRetry?: (error: RetryablePairingError) => void;
+  }
+): Effect.Effect<A, unknown> =>
+  Effect.gen(function* () {
+    const deadline = opts.now() + opts.budgetMs;
+    let delayMs = opts.baseMs;
+    let attempts = 0;
+    let lastError: unknown;
+    for (;;) {
+      opts.signal.throwIfAborted();
+      const remainingBefore = deadline - opts.now();
+      if (remainingBefore <= 0) {
+        return yield* Effect.fail(
+          lastError ?? new RetryablePairingError({ code: opts.timeoutCode })
+        );
+      }
+      const attempt = yield* Effect.result(work(remainingBefore));
+      if (Result.isSuccess(attempt)) return attempt.success;
+      const error = attempt.failure;
+      opts.signal.throwIfAborted();
+      if (!(error instanceof RetryablePairingError)) return yield* Effect.fail(error);
+      lastError = error.cause ?? error;
+      attempts += 1;
+      const remainingAfter = deadline - opts.now();
+      if (remainingAfter <= 0 || (opts.maxAttempts !== undefined && attempts >= opts.maxAttempts)) {
+        return yield* Effect.fail(lastError);
+      }
+      opts.onRetry?.(error);
+      yield* Effect.tryPromise({
+        try: () => opts.wait(opts.signal, Math.min(delayMs, remainingAfter)),
+        catch: (cause) => cause,
+      });
+      delayMs = Math.min(delayMs * 2, opts.maxMs);
+    }
+  });
+
 /** Verify the executable command before any custody access or network operation. */
 export function decodeRemoteMachineOffer(encoded: string) {
   if (encoded.length > 32768 || !/^[A-Za-z0-9_-]+$/.test(encoded))
-    throw new Error('e2ee_pairing_invalid_command');
+    throw new FatalPairingError({ code: 'e2ee_pairing_invalid_command' });
   const offer = RemoteMachineOfferSchema.parse(
     JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
   );
@@ -70,9 +146,10 @@ export function decodeRemoteMachineOffer(encoded: string) {
       )
     )
   )
-    throw new Error('e2ee_pairing_invalid_command');
+    throw new FatalPairingError({ code: 'e2ee_pairing_invalid_command' });
   return offer;
 }
+
 /** Command-owned facade over the existing custody and activation owners. No account login/key is created. */
 export async function pairRemoteMachineLegacy(options: {
   encodedOffer: string;
@@ -92,10 +169,6 @@ export async function pairRemoteMachineLegacy(options: {
 }) {
   const wait = options.wait ?? ((signal, delayMs) => pause(delayMs, undefined, { signal }));
   const now = options.now ?? Date.now;
-  let keyRetryMs = POLL_MS;
-  let claimRetryStartedAt: number | undefined;
-  let claimRetryAttempts = 0;
-  let claimRetryMs = CLAIM_RETRY_BASE_MS;
   const offer = decodeRemoteMachineOffer(options.encodedOffer);
   const prepared = await prepareCliE2eeMachineLegacy({
     ...offer,
@@ -103,7 +176,8 @@ export async function pairRemoteMachineLegacy(options: {
     keyring: options.keyring,
     cloud: options.cloud,
   });
-  if ('superseded' in prepared) throw new Error('e2ee_pairing_superseded_create_new_command');
+  if ('superseded' in prepared)
+    throw new FatalPairingError({ code: 'e2ee_pairing_superseded_create_new_command' });
   const material = LocalE2eePrepareResponseSchema.parse({
     ...prepared,
     machineId: options.machineId,
@@ -118,101 +192,126 @@ export async function pairRemoteMachineLegacy(options: {
     token: offer.token,
     material,
   });
-  for (;;) {
-    options.signal.throwIfAborted();
-    let rawStatus: unknown;
-    try {
-      rawStatus = await options.claim(body, options.signal);
-    } catch (error) {
-      if (!isTransientClaimError(error, options.signal)) throw error;
-      claimRetryStartedAt ??= now();
-      claimRetryAttempts += 1;
-      if (
-        claimRetryAttempts >= CLAIM_RETRY_MAX_ATTEMPTS ||
-        now() - claimRetryStartedAt >= CLAIM_RETRY_BUDGET_MS
-      )
-        throw error;
-      await wait(options.signal, claimRetryMs);
-      claimRetryMs = Math.min(claimRetryMs * 2, CLAIM_RETRY_MAX_MS);
-      continue;
-    }
-    claimRetryStartedAt = undefined;
-    claimRetryAttempts = 0;
-    claimRetryMs = CLAIM_RETRY_BASE_MS;
-    const status = RemoteMachineStatusSchema.parse(rawStatus);
-    if (status.pairingSessionId !== offer.pairingSessionId)
-      throw new Error('e2ee_pairing_conflict');
-    // Another machine's claim on the same command, before or after ours; never admit it.
-    if (
-      (status.material && JSON.stringify(status.material) !== JSON.stringify(material)) ||
-      (status.status === 'conflict' && status.noAdmissionReserved === true)
-    )
-      throw new Error('e2ee_pairing_claimed_by_another_machine');
-    options.show({
-      summary,
-      protection: material.protection,
-      location: status.location,
-      status: status.status,
-    });
-    if (['cancelled', 'expired', 'conflict'].includes(status.status))
-      throw new Error(`e2ee_pairing_${status.status}_create_new_command`);
-    if (status.status === 'admitted' || status.status === 'ready') {
-      const keyWaitDeadline = now() + KEY_WAIT_MS;
+
+  return Effect.runPromise(
+    Effect.gen(function* () {
       for (;;) {
         options.signal.throwIfAborted();
-        const remainingMs = keyWaitDeadline - now();
-        if (remainingMs <= 0) throw new Error('e2ee_waiting_for_key');
-        try {
-          await activateCliE2eeWorkspaceLegacy({
-            accountId: offer.accountId,
-            workspaceId: offer.workspaceId,
-            genesisHash: offer.genesisHash,
-            pairingSessionId: offer.pairingSessionId,
-            frontendSigningPublicKey: offer.frontendSigningPublicKey,
-            expectedSigningPublicKey: material.signingPublicKey,
-            cloud: options.cloud,
-            onUnavailable: () => undefined,
-            keyring: options.keyring,
-            signal: options.signal,
-            timeoutMs: remainingMs,
+        const rawStatus = yield* retryBounded(
+          () =>
+            Effect.tryPromise({
+              try: () => options.claim(body, options.signal),
+              catch: (error) => classifyClaimError(error, options.signal),
+            }),
+          {
+            baseMs: CLAIM_RETRY_BASE_MS,
+            maxMs: CLAIM_RETRY_MAX_MS,
+            budgetMs: CLAIM_RETRY_BUDGET_MS,
+            maxAttempts: CLAIM_RETRY_MAX_ATTEMPTS,
+            timeoutCode: 'e2ee_pairing_unavailable_retry_same_command',
             now,
-          });
-          break;
-        } catch (error) {
+            signal: options.signal,
+            wait,
+          }
+        );
+        const status = RemoteMachineStatusSchema.parse(rawStatus);
+        if (status.pairingSessionId !== offer.pairingSessionId)
+          return yield* Effect.fail(new FatalPairingError({ code: 'e2ee_pairing_conflict' }));
+        // Another machine's claim on the same command, before or after ours; never admit it.
+        if (
+          (status.material && JSON.stringify(status.material) !== JSON.stringify(material)) ||
+          (status.status === 'conflict' && status.noAdmissionReserved === true)
+        )
+          return yield* Effect.fail(
+            new FatalPairingError({ code: 'e2ee_pairing_claimed_by_another_machine' })
+          );
+        options.show({
+          summary,
+          protection: material.protection,
+          location: status.location,
+          status: status.status,
+        });
+        if (
+          status.status === 'cancelled' ||
+          status.status === 'expired' ||
+          status.status === 'conflict'
+        )
+          return yield* Effect.fail(
+            new FatalPairingError({
+              code: `e2ee_pairing_${status.status}_create_new_command`,
+            })
+          );
+        if (status.status === 'admitted' || status.status === 'ready') {
+          yield* retryBounded(
+            (remainingMs) =>
+              Effect.tryPromise({
+                try: () =>
+                  activateCliE2eeWorkspaceLegacy({
+                    accountId: offer.accountId,
+                    workspaceId: offer.workspaceId,
+                    genesisHash: offer.genesisHash,
+                    pairingSessionId: offer.pairingSessionId,
+                    frontendSigningPublicKey: offer.frontendSigningPublicKey,
+                    expectedSigningPublicKey: material.signingPublicKey,
+                    cloud: options.cloud,
+                    onUnavailable: () => undefined,
+                    keyring: options.keyring,
+                    signal: options.signal,
+                    timeoutMs: remainingMs,
+                    now,
+                  }),
+                catch: (error) =>
+                  error instanceof Error && error.message === 'e2ee_waiting_for_key'
+                    ? new RetryablePairingError({ code: 'e2ee_waiting_for_key', cause: error })
+                    : error,
+              }),
+            {
+              baseMs: POLL_MS,
+              maxMs: KEY_RETRY_MAX_MS,
+              budgetMs: KEY_WAIT_MS,
+              timeoutCode: 'e2ee_waiting_for_key',
+              now,
+              signal: options.signal,
+              wait,
+              onRetry: () =>
+                options.show({
+                  summary,
+                  protection: material.protection,
+                  location: status.location,
+                  status: 'waiting-for-key',
+                }),
+            }
+          );
           options.signal.throwIfAborted();
-          if (!(error instanceof Error && error.message === 'e2ee_waiting_for_key')) throw error;
-          if (now() >= keyWaitDeadline) throw error;
-          options.show({
-            summary,
-            protection: material.protection,
-            location: status.location,
-            status: 'waiting-for-key',
+          yield* Effect.tryPromise({
+            try: () =>
+              retainCliE2eeMachineBootstrapLegacy(
+                {
+                  accountId: offer.accountId,
+                  workspaceId: offer.workspaceId,
+                  genesisHash: offer.genesisHash,
+                  signingPublicKey: material.signingPublicKey,
+                  machineId: options.machineId,
+                  deploymentUrl: offer.deploymentUrl,
+                },
+                options.keyring
+              ),
+            catch: (cause) => cause,
           });
-          await wait(options.signal, Math.min(keyRetryMs, Math.max(1, keyWaitDeadline - now())));
-          keyRetryMs = Math.min(keyRetryMs * 2, KEY_RETRY_MAX_MS);
+          options.signal.throwIfAborted();
+          return {
+            reference: `${offer.accountId}/${offer.workspaceId}`,
+            workspaceId: offer.workspaceId,
+            machineId: options.machineId,
+            summary,
+            ready: true as const,
+          };
         }
+        yield* Effect.tryPromise({
+          try: () => wait(options.signal, POLL_MS),
+          catch: (cause) => cause,
+        });
       }
-      options.signal.throwIfAborted();
-      await retainCliE2eeMachineBootstrapLegacy(
-        {
-          accountId: offer.accountId,
-          workspaceId: offer.workspaceId,
-          genesisHash: offer.genesisHash,
-          signingPublicKey: material.signingPublicKey,
-          machineId: options.machineId,
-          deploymentUrl: offer.deploymentUrl,
-        },
-        options.keyring
-      );
-      options.signal.throwIfAborted();
-      return {
-        reference: `${offer.accountId}/${offer.workspaceId}`,
-        workspaceId: offer.workspaceId,
-        machineId: options.machineId,
-        summary,
-        ready: true as const,
-      };
-    }
-    await wait(options.signal, POLL_MS);
-  }
+    })
+  );
 }

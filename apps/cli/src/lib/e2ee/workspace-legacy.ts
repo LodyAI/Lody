@@ -64,9 +64,8 @@ import { createPresenceWebSocketAuthLegacy } from '@/lib/loro/presence-legacy';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { randomBytes } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
-import { link, lstat, mkdir, open, readFile, rename, unlink, rm } from 'node:fs/promises';
+import { link, mkdir, open, readFile, rename, rm, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { Effect, Exit, Scope, Result, Fiber, Schedule } from 'effect';
 import { z } from 'zod';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
@@ -80,7 +79,16 @@ import {
   createWorkspaceEpochTransitionLegacy,
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
-import { clearCachedCliE2eeKeyring, makeCliE2eeCustody, type MachineKeyring } from './custody';
+import { makeCliE2eeCustody, type MachineKeyring } from './custody';
+import {
+  eraseRemovedWorkspace,
+  readRemoval,
+  readRevokedDevice,
+  recordRemovalReceipt,
+  repositoryDirectory,
+  roostDirectoryExists,
+  wipeRevokedRoost,
+} from './removal-erasure';
 import { cliE2eeIdentityDirectory } from './retained-binding';
 export { cliE2eeIdentityDirectory };
 import { authorityStamp, type AuthorityStamp } from './authority-clock';
@@ -109,116 +117,6 @@ const Binding = z
   .strict();
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 const bytes = (value: string) => new Uint8Array(Buffer.from(value, 'hex'));
-// This repo belongs to the same account/workspace lease as custody, and to
-// this exact retained device. Removal never touches a workspace-global repo.
-const repositoryDirectory = (directory: string, genesisHash: string, signingPublicKey: string) =>
-  join(directory, 'content', genesisHash, signingPublicKey);
-
-const Removed = z
-  .object({
-    genesisHash: z.string().regex(/^[0-9a-f]{64}$/),
-    signingPublicKey: z.string().regex(/^[0-9a-f]{64}$/),
-    membershipId: z
-      .string()
-      .regex(/^[0-9a-f]{32}$/)
-      .nullable()
-      .optional(),
-  })
-  .strict();
-function readMembershipIdFromPairingJournal(
-  directory: string,
-  genesisHash: string,
-  signingPublicKey: string
-): string | null {
-  const dbPath = join(directory, 'pairings.sqlite');
-  if (!existsSync(dbPath)) return null;
-  try {
-    const db = new DatabaseSync(dbPath, { readOnly: true });
-    try {
-      const extract = (row: { context?: unknown; material?: unknown } | undefined) => {
-        if (!row || typeof row.context !== 'string' || typeof row.material !== 'string')
-          return null;
-        const ctx = JSON.parse(row.context) as {
-          genesisHash?: unknown;
-          membershipId?: unknown;
-        };
-        const mat = JSON.parse(row.material) as { signingPublicKey?: unknown };
-        if (
-          ctx.genesisHash === genesisHash &&
-          mat.signingPublicKey === signingPublicKey &&
-          typeof ctx.membershipId === 'string' &&
-          /^[0-9a-f]{32}$/.test(ctx.membershipId)
-        )
-          return ctx.membershipId;
-        return null;
-      };
-      const current = db
-        .prepare(
-          'SELECT p.context, p.material FROM current_identity c JOIN pairings p ON p.session = c.session WHERE c.singleton = 1'
-        )
-        .get() as { context?: unknown; material?: unknown } | undefined;
-      const fromCurrent = extract(current);
-      if (fromCurrent) return fromCurrent;
-      const rows = db
-        .prepare('SELECT context, material FROM pairings WHERE material IS NOT NULL')
-        .all() as Array<{ context?: unknown; material?: unknown }>;
-      for (const row of rows) {
-        const match = extract(row);
-        if (match) return match;
-      }
-      return null;
-    } finally {
-      db.close();
-    }
-  } catch {
-    return null;
-  }
-}
-async function readRemoval(directory: string) {
-  try {
-    return Removed.parse(JSON.parse(await readFile(join(directory, 'removed.json'), 'utf8')));
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw cause;
-  }
-}
-const RevokedDevice = Removed.omit({ membershipId: true });
-async function readRevokedDevice(directory: string) {
-  try {
-    return RevokedDevice.parse(
-      JSON.parse(await readFile(join(directory, 'revoked-device.json'), 'utf8'))
-    );
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw cause;
-  }
-}
-
-async function roostDirectoryExists(path: string) {
-  try {
-    await lstat(path);
-    return true;
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw cause;
-  }
-}
-
-async function wipeRevokedRoost(directory: string, receipt: z.infer<typeof RevokedDevice>) {
-  const path = join(
-    repositoryDirectory(directory, receipt.genesisHash, receipt.signingPublicKey),
-    'roost'
-  );
-  if (!(await roostDirectoryExists(path))) return;
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        yield* leaseE2eeIdentity(directory, true);
-        yield* Effect.tryPromise(() => rm(path, { recursive: true, force: true }));
-      })
-    )
-  );
-}
 const machineDevicePath = (directory: string, genesisHash: string) =>
   join(directory, 'custody', `${genesisHash}.machine.device`);
 /**
@@ -290,86 +188,6 @@ async function retireRevokedMachineIdentity(
   return undefined;
 }
 
-/** Only after the caller's workspace owners drain. The pairing mutex excludes a
- * replacement identity during the exact-key check and deletion. Keep a public
- * terminal receipt so interrupted erasure retries before any later attachment. */
-async function eraseRemovedWorkspace(
-  options: Pick<
-    CliE2eeWorkspaceOptions,
-    'accountId' | 'workspaceId' | 'keyring' | 'expectedSigningPublicKey'
-  >
-) {
-  const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
-  const removed = await readRemoval(directory);
-  if (
-    !removed ||
-    (options.expectedSigningPublicKey &&
-      options.expectedSigningPublicKey !== removed.signingPublicKey)
-  )
-    return false;
-  const removal = removed;
-  return executeRemoval();
-  async function executeRemoval() {
-    return Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          yield* leaseE2eeIdentity(directory, true);
-          const journalResult = yield* Effect.result(openMachinePairingJournal(directory));
-          const original = join(directory, 'custody', `${removal.genesisHash}.machine.device`);
-          const exists = yield* Effect.tryPromise({
-            try: async () => {
-              try {
-                await readFile(original);
-                return true;
-              } catch (cause) {
-                if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return false;
-                throw cause;
-              }
-            },
-            catch: (cause) => cause,
-          });
-          if (exists) {
-            const same = yield* Effect.scoped(
-              Effect.gen(function* () {
-                const custody = yield* makeCliE2eeCustody({
-                  directory: join(directory, 'custody'),
-                  keyring: options.keyring,
-                });
-                const { Bytes } = yield* Effect.promise(() => import('@lody/e2ee-core/protocol'));
-                const genesis = yield* Effect.fromResult(
-                  Bytes.genesisHash(bytes(removal.genesisHash))
-                );
-                const device = yield* custody.openDevice(genesis);
-                return hex(device.publicKey.toBytes()) === removal.signingPublicKey;
-              })
-            );
-            if (!same) return false;
-          }
-          // The mutex and empty journal remain; user project/worktree directories are outside this scope.
-          yield* Effect.promise(async () => {
-            await rm(
-              repositoryDirectory(directory, removal.genesisHash, removal.signingPublicKey),
-              {
-                recursive: true,
-                force: true,
-              }
-            );
-            for (const name of ['custody', 'runtime'])
-              await rm(join(directory, name), { recursive: true, force: true });
-            clearCachedCliE2eeKeyring(join(directory, 'custody'));
-            for (const name of ['remote-bootstrap.json', 'activation.json', 'binding.json'])
-              await rm(join(directory, name), { recursive: true, force: true });
-          });
-          if (Result.isSuccess(journalResult)) {
-            yield* Effect.result(journalResult.success.eraseRemovedMember());
-          }
-          return true;
-        })
-      )
-    );
-  }
-}
-
 /** Public pairing evidence is retained only through the trusted local approval
  * path. This operation neither admits a device nor obtains cloud credentials. */
 export async function retainCliE2eeWorkspaceBinding(
@@ -419,7 +237,8 @@ async function retainBinding(accountId: string, input: z.input<typeof Binding>) 
 function mailbox(
   port: CloudE2eePort,
   workspaceId: string,
-  credential: string
+  credential: string,
+  signal?: AbortSignal
 ): KeyMailbox['Service'] {
   const call = <A>(work: () => Promise<A>) =>
     Effect.tryPromise({
@@ -430,38 +249,46 @@ function mailbox(
   return {
     put: (id, frame) =>
       call(async () => {
-        await port.mailboxCall('put', { ...access, id, frameHex: hex(frame) });
+        await port.mailboxCall('put', { ...access, id, frameHex: hex(frame) }, signal);
       }),
     read: (id) =>
       call(async () => {
-        const value = await port.mailboxCall('read', { ...access, id });
+        const value = await port.mailboxCall('read', { ...access, id }, signal);
         return value === null ? null : bytes(value);
       }),
     report: (report, publication) =>
       call(async () => {
-        await port.mailboxCall('report', {
-          ...access,
-          reportHex: hex(report),
-          ...(publication ? { publicationHex: hex(publication) } : {}),
-        });
+        await port.mailboxCall(
+          'report',
+          {
+            ...access,
+            reportHex: hex(report),
+            ...(publication ? { publicationHex: hex(publication) } : {}),
+          },
+          signal
+        );
       }),
     fetch: (epoch, cursor, limit) =>
       call(async () => {
-        const page = await port.mailboxCall('fetch', { ...access, epoch, cursor, limit });
+        const page = await port.mailboxCall('fetch', { ...access, epoch, cursor, limit }, signal);
         return {
           ...page,
           items: page.items.map((item) => ({ sender: item.sender, frame: bytes(item.frameHex) })),
         };
       }),
-    status: (slot) => call(() => port.mailboxCall('status', { ...access, slot })),
+    status: (slot) => call(() => port.mailboxCall('status', { ...access, slot }, signal)),
     repair: (slot, id, rejectedDigest) =>
       call(async () => {
-        await port.mailboxCall('repair', {
-          ...access,
-          slot,
-          id,
-          ...(rejectedDigest ? { rejectedDigest } : {}),
-        });
+        await port.mailboxCall(
+          'repair',
+          {
+            ...access,
+            slot,
+            id,
+            ...(rejectedDigest ? { rejectedDigest } : {}),
+          },
+          signal
+        );
       }),
   };
 }
@@ -477,7 +304,10 @@ export async function prepareCliE2eeMachineLegacy(
     cliE2eeIdentityDirectory(options.accountId, options.workspaceId)
   );
   if (priorRemoval) {
-    if (priorRemoval.membershipId && priorRemoval.membershipId === options.membershipId)
+    if (
+      priorRemoval.membership.kind === 'known' &&
+      priorRemoval.membership.id === options.membershipId
+    )
       throw new Error('e2ee_member_removed');
     if (await eraseRemovedWorkspace(options))
       await unlink(
@@ -602,6 +432,7 @@ type CliE2eeWorkspaceOptions = {
    * `recorded` is true only when the exact removal receipt was durably written. */
   onRemoved?: (reason: 'member-removed' | 'device-revoked', recorded: boolean) => Promise<void>;
   keyring?: MachineKeyring;
+  signal?: AbortSignal;
 };
 const Activation = z
   .object({
@@ -653,19 +484,64 @@ export async function validateCliE2eePairingIntentLegacy(options: {
   );
 }
 
+/** Native Effect activation; leases identity, propagates cancellation/timeout to cloud I/O,
+ * closes temporary native owner before writing `activation.json`, and fences commit on expiry/abort. */
+export const activateCliE2eeWorkspace = Effect.fnUntraced(function* (options: ActivationOptions) {
+  const now = options.now ?? Date.now;
+  const deadline = options.timeoutMs === undefined ? undefined : now() + options.timeoutMs;
+  const assertCanCommit = (signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    options.signal?.throwIfAborted();
+    if (deadline !== undefined && now() >= deadline) throw new Error('e2ee_waiting_for_key');
+  };
+  return yield* Effect.scoped(
+    Effect.gen(function* () {
+      yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
+      const work = Effect.tryPromise({
+        try: async (fiberSignal) => {
+          const activeSignal = options.signal
+            ? AbortSignal.any([fiberSignal, options.signal])
+            : fiberSignal;
+          assertCanCommit(activeSignal);
+          const pending = await openWorkspace(
+            { ...options, signal: activeSignal },
+            false,
+            pairingIntent(options)
+          );
+          let marker: z.infer<typeof Activation>;
+          try {
+            await pending.refresh();
+            assertCanCommit(activeSignal);
+            marker = await verifiedActivation(pending, options);
+          } finally {
+            // Publish the Fleet startup hint only after the temporary native owner has
+            // actually released its SQLite/custody resources.
+            await pending.close();
+          }
+          assertCanCommit(activeSignal);
+          await publishActivation(options, marker, () => assertCanCommit(activeSignal));
+          if (options.remotePairing !== false) {
+            assertCanCommit(activeSignal);
+            await pending.completeRemotePairing(options.pairingSessionId, activeSignal);
+          }
+        },
+        catch: (error) => error,
+      });
+      return yield* options.timeoutMs !== undefined
+        ? work.pipe(
+            Effect.timeoutOrElse({
+              duration: Math.max(0, options.timeoutMs),
+              orElse: () => Effect.fail(new Error('e2ee_waiting_for_key')),
+            })
+          )
+        : work;
+    })
+  );
+});
+
 /** @deprecated Promise entry; retain the identity lease through activation publication. */
 export async function activateCliE2eeWorkspaceLegacy(options: ActivationOptions) {
-  return Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
-        return yield* Effect.tryPromise({
-          try: () => activateWorkspace(options),
-          catch: (error) => error,
-        });
-      })
-    )
-  );
+  return Effect.runPromise(activateCliE2eeWorkspace(options));
 }
 
 type ActivationOptions = CliE2eeWorkspaceOptions & {
@@ -702,49 +578,6 @@ async function verifiedActivation(pending: PairingOwner, options: ActivationOpti
   });
 }
 
-const WITH_CLOUD_E2EE_SIGNAL = Symbol.for('lody.cloudE2ee.withSignal');
-type SignalScopedCloudPort = CloudE2eePort & {
-  [WITH_CLOUD_E2EE_SIGNAL]?: <T>(signal: AbortSignal, fn: () => Promise<T>) => Promise<T>;
-};
-
-function runWithCloudSignal<T>(
-  cloud: CloudE2eePort,
-  signal: AbortSignal | undefined,
-  fn: () => Promise<T>
-): Promise<T> {
-  const scoped = (cloud as SignalScopedCloudPort)[WITH_CLOUD_E2EE_SIGNAL];
-  return signal && scoped ? scoped(signal, fn) : fn();
-}
-
-function makeActivationSignal(
-  signal?: AbortSignal,
-  timeoutMs?: number
-): { signal?: AbortSignal; dispose: () => void } {
-  if (!signal && timeoutMs === undefined) return { signal: undefined, dispose: () => {} };
-  const controller = new AbortController();
-  const onAbort = () =>
-    controller.abort(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
-  if (signal) {
-    if (signal.aborted) onAbort();
-    else signal.addEventListener('abort', onAbort, { once: true });
-  }
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  if (timeoutMs !== undefined && !controller.signal.aborted) {
-    timer = setTimeout(
-      () => controller.abort(new Error('e2ee_waiting_for_key')),
-      Math.max(0, timeoutMs)
-    );
-    timer.unref?.();
-  }
-  return {
-    signal: controller.signal,
-    dispose: () => {
-      if (timer !== undefined) clearTimeout(timer);
-      if (signal) signal.removeEventListener('abort', onAbort);
-    },
-  };
-}
-
 /** The startup hint. Written under the identity lease and only after verification. */
 async function publishActivation(
   options: ActivationOptions,
@@ -775,60 +608,6 @@ async function publishActivation(
   } finally {
     await handle.close().catch(() => undefined);
     await unlink(temporary).catch(() => undefined);
-  }
-}
-
-async function raceActivationCancellation<A>(work: Promise<A>, signal?: AbortSignal): Promise<A> {
-  signal?.throwIfAborted();
-  if (!signal) return work;
-  let onAbort: (() => void) | undefined;
-  const cancelled = new Promise<never>((_, reject) => {
-    onAbort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([work, cancelled]);
-  } finally {
-    if (onAbort) signal.removeEventListener('abort', onAbort);
-  }
-}
-
-/** Verify actual admission and install the current key before allowing Fleet to attach rooms.
- * The marker is only a startup hint: subsequent authorization still comes from core's verified ledger. */
-async function activateWorkspace(options: ActivationOptions) {
-  const now = options.now ?? Date.now;
-  const deadline = options.timeoutMs === undefined ? undefined : now() + options.timeoutMs;
-  const assertNotCancelledOrExpired = () => {
-    options.signal?.throwIfAborted();
-    if (deadline !== undefined && now() >= deadline) throw new Error('e2ee_waiting_for_key');
-  };
-  assertNotCancelledOrExpired();
-  const activationSignal = makeActivationSignal(options.signal, options.timeoutMs);
-  try {
-    await runWithCloudSignal(options.cloud, activationSignal.signal, async () => {
-      const pending = await openWorkspace(options, false, pairingIntent(options));
-      let marker: z.infer<typeof Activation>;
-      try {
-        await raceActivationCancellation(pending.refresh(), activationSignal.signal);
-        assertNotCancelledOrExpired();
-        marker = await verifiedActivation(pending, options);
-      } finally {
-        // Publish the Fleet startup hint only after the temporary native owner has
-        // actually released its SQLite/custody resources.
-        await pending.close();
-      }
-      assertNotCancelledOrExpired();
-      await publishActivation(options, marker, assertNotCancelledOrExpired);
-      if (options.remotePairing !== false) {
-        assertNotCancelledOrExpired();
-        await raceActivationCancellation(
-          pending.completeRemotePairing(options.pairingSessionId),
-          activationSignal.signal
-        );
-      }
-    });
-  } finally {
-    activationSignal.dispose();
   }
 }
 
@@ -1015,12 +794,16 @@ async function openWorkspaceOwned(
               },
             }
           : {}),
-        mailbox: mailbox(options.cloud, options.workspaceId, credential),
+        mailbox: mailbox(options.cloud, options.workspaceId, credential, options.signal),
         staging: readEpochGroup
           ? {
               readGroup: (key) =>
                 Effect.tryPromise({
-                  try: () => readEpochGroup({ workspaceId: options.workspaceId, credential, key }),
+                  try: () =>
+                    readEpochGroup(
+                      { workspaceId: options.workspaceId, credential, key },
+                      options.signal
+                    ),
                   catch: () =>
                     new BackendError({ service: 'EpochStagingStore', reason: 'unavailable' }),
                 }).pipe(
@@ -1527,58 +1310,14 @@ async function openWorkspaceOwned(
       const removedStatus = memberRemoved ? await run(opened.runtime.status()) : undefined;
       return await Effect.runPromise(
         Effect.scoped(
-          Effect.gen(function* () {
-            yield* Effect.result(openMachinePairingJournal(directory));
-            const { Bytes } = yield* Effect.promise(() => import('@lody/e2ee-core/protocol'));
-            const genesis = yield* Effect.fromResult(Bytes.genesisHash(bytes(options.genesisHash)));
-            const current = yield* opened.custody.openDevice(genesis);
-            if (
-              hex(current.publicKey.toBytes()) !== opened.signingPublicKey ||
-              (yield* opened.custody.deviceCredential(genesis, current.publicKey)) !==
-                opened.credential
-            )
-              return false;
-            // A revoked device keeps membership: its receipt only retires this identity
-            // so the next pairing creates a new one; it never erases the workspace.
-            const membershipId = removedStatus
-              ? (removedStatus.membershipId ??
-                lastKnownMembershipId ??
-                readMembershipIdFromPairingJournal(
-                  directory,
-                  options.genesisHash,
-                  opened.signingPublicKey
-                ))
-              : undefined;
-            const receipt = removedStatus
-              ? Removed.parse({
-                  genesisHash: options.genesisHash,
-                  signingPublicKey: opened.signingPublicKey,
-                  membershipId: membershipId ?? null,
-                })
-              : RevokedDevice.parse({
-                  genesisHash: options.genesisHash,
-                  signingPublicKey: opened.signingPublicKey,
-                });
-            yield* Effect.promise(async () => {
-              const temporary = join(
-                directory,
-                `removed-${randomBytes(16).toString('hex')}.pending`
-              );
-              const file = await open(temporary, 'wx', 0o600);
-              try {
-                await file.writeFile(JSON.stringify(receipt));
-                await file.sync();
-                await file.close();
-                await rename(
-                  temporary,
-                  join(directory, removedStatus ? 'removed.json' : 'revoked-device.json')
-                );
-              } finally {
-                await file.close().catch(() => undefined);
-                await unlink(temporary).catch(() => undefined);
-              }
-            });
-            return true;
+          recordRemovalReceipt({
+            directory,
+            genesisHash: options.genesisHash,
+            signingPublicKey: opened.signingPublicKey,
+            credential: opened.credential,
+            custody: opened.custody,
+            kind: memberRemoved ? 'member-removed' : 'device-revoked',
+            knownMembershipId: removedStatus?.membershipId ?? lastKnownMembershipId,
           })
         )
       );
@@ -1606,6 +1345,7 @@ async function openWorkspaceOwned(
       if (failures.length > 1) throw new AggregateError(failures, 'e2ee_removal_failed');
       if (deviceRevoked && recorded)
         await wipeRevokedRoost(directory, {
+          kind: 'device-revoked',
           genesisHash: options.genesisHash,
           signingPublicKey: opened.signingPublicKey,
         });
@@ -1690,21 +1430,28 @@ async function openWorkspaceOwned(
           let checkpoint: Parameters<CloudE2eePort['getHistory']>[0]['checkpoint'];
           do {
             const page = await options.cloud
-              .getHistory({
-                workspaceId: options.workspaceId,
-                credential: opened.credential,
-                ...(cursor
-                  ? { cursor, checkpoint }
-                  : status.position
-                    ? { after: status.position }
-                    : {}),
-              })
+              .getHistory(
+                {
+                  workspaceId: options.workspaceId,
+                  credential: opened.credential,
+                  ...(cursor
+                    ? { cursor, checkpoint }
+                    : status.position
+                      ? { after: status.position }
+                      : {}),
+                },
+                options.signal
+              )
               .catch(async (historyError: unknown) => {
+                if (options.signal?.aborted) throw historyError;
                 try {
-                  await options.cloud.getContentToken({
-                    workspaceId: options.workspaceId,
-                    credential: opened.credential,
-                  });
+                  await options.cloud.getContentToken(
+                    {
+                      workspaceId: options.workspaceId,
+                      credential: opened.credential,
+                    },
+                    options.signal
+                  );
                 } catch (cause) {
                   if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause))
                     throw cause;
@@ -2378,12 +2125,15 @@ async function openWorkspaceOwned(
     },
     /** Join the current refresh without requesting another round. */
     settleRefresh: () => refresh ?? Promise.resolve(),
-    completeRemotePairing: (pairingSessionId: string) =>
-      options.cloud.completeMachinePairing?.({
-        workspaceId: options.workspaceId,
-        credential: opened.credential,
-        pairingSessionId,
-      }) ?? Promise.resolve(),
+    completeRemotePairing: (pairingSessionId: string, signal?: AbortSignal) =>
+      options.cloud.completeMachinePairing?.(
+        {
+          workspaceId: options.workspaceId,
+          credential: opened.credential,
+          pairingSessionId,
+        },
+        signal ?? options.signal
+      ) ?? Promise.resolve(),
     content,
     tokens,
     bucketId: () => bucket?.(),

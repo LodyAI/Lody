@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open, readdir } from 'node:fs/promises';
+import { open, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Data, Effect, Result, type Scope } from 'effect';
@@ -72,9 +72,11 @@ const io = <A>(work: () => Promise<A>) =>
           ? failure('identity-lost', cause)
           : ['EACCES', 'EPERM'].includes((cause as NodeJS.ErrnoException)?.code ?? '')
             ? failure('permissions', cause)
-            : [11, 26].includes((cause as { errcode?: number })?.errcode ?? -1)
-              ? failure('corrupt', cause)
-              : failure('storage', cause),
+            : [5, 6].includes((cause as { errcode?: number })?.errcode ?? -1)
+              ? failure('busy', cause)
+              : [11, 26].includes((cause as { errcode?: number })?.errcode ?? -1)
+                ? failure('corrupt', cause)
+                : failure('storage', cause),
   });
 type Row = {
   context: string;
@@ -108,9 +110,8 @@ async function openOwned(path: string) {
   return db;
 }
 
-/** Per-workspace native journal; its separate SQLite mutex protects signing and
- * durable readback, never network I/O. No local operation retires an emitted proof. */
-export const openMachinePairingJournal = Effect.fnUntraced(function* (directory: string) {
+/** Exclusive per-workspace SQLite mutex; always fails closed on `busy`. */
+export const acquirePairingMutex = Effect.fnUntraced(function* (directory: string) {
   const mutex = yield* Effect.acquireRelease(
     io(() => openOwned(join(directory, 'pairing-mutex.sqlite'))),
     (connection) => Effect.sync(() => connection.close())
@@ -125,6 +126,17 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
     }),
     () => sql(() => mutex.exec('ROLLBACK')).pipe(Effect.orDie)
   );
+});
+
+/** Unlink a corrupt journal DB while already holding `acquirePairingMutex`. */
+export const resetCorruptPairingJournalLocked = (directory: string) =>
+  io(async () => {
+    for (const suffix of ['', '-wal', '-shm'])
+      await rm(join(directory, `pairings.sqlite${suffix}`), { force: true });
+  });
+
+/** Open `pairings.sqlite` while already holding `acquirePairingMutex`. */
+export const openMachinePairingJournalLocked = Effect.fnUntraced(function* (directory: string) {
   const db = yield* Effect.acquireRelease(
     io(() => openOwned(join(directory, 'pairings.sqlite'))),
     (connection) => Effect.sync(() => connection.close())
@@ -201,6 +213,39 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
       throw failure('corrupt');
   };
   return {
+    /** Look up the retained membershipId for a published machine identity. */
+    membershipIdForDevice: (genesisHash: string, signingPublicKey: string) =>
+      sql(() => {
+        const extract = (row: { context?: unknown; material?: unknown } | undefined) => {
+          if (!row || typeof row.context !== 'string' || typeof row.material !== 'string')
+            return null;
+          const ctx = ContextSchema.safeParse(JSON.parse(row.context));
+          const mat = MaterialSchema.safeParse(JSON.parse(row.material));
+          if (
+            ctx.success &&
+            mat.success &&
+            ctx.data.genesisHash === genesisHash &&
+            mat.data.signingPublicKey === signingPublicKey
+          )
+            return ctx.data.membershipId;
+          return null;
+        };
+        const current = db
+          .prepare(
+            'SELECT p.context, p.material FROM current_identity c JOIN pairings p ON p.session = c.session WHERE c.singleton = 1'
+          )
+          .get() as { context?: unknown; material?: unknown } | undefined;
+        const fromCurrent = extract(current);
+        if (fromCurrent) return fromCurrent;
+        const rows = db
+          .prepare('SELECT context, material FROM pairings WHERE material IS NOT NULL')
+          .all() as Array<{ context?: unknown; material?: unknown }>;
+        for (const row of rows) {
+          const match = extract(row);
+          if (match) return match;
+        }
+        return null;
+      }),
     /** Terminal member removal, under this journal's existing cross-process mutex. */
     eraseRemovedMember: () =>
       sql(() => {
@@ -574,4 +619,11 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
       });
     }),
   };
+});
+
+/** Per-workspace native journal; its separate SQLite mutex protects signing and
+ * durable readback, never network I/O. No local operation retires an emitted proof. */
+export const openMachinePairingJournal = Effect.fnUntraced(function* (directory: string) {
+  yield* acquirePairingMutex(directory);
+  return yield* openMachinePairingJournalLocked(directory);
 });
