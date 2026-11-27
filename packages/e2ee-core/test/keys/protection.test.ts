@@ -1136,4 +1136,84 @@ describe('protected store repair and read-only authority pins', () => {
       disposeEpochKey(key2);
     }
   });
+
+  it('prevents a suspended read from backfilling stale cache entries after invalidate() or returning a key after revocation', async () => {
+    const f = envelopeFixture(),
+      native = synthetic(),
+      dbPath = file();
+    let pauseFirst = false;
+    let unprotectCalls = 0;
+    let enteredA!: () => void;
+    let releaseA!: () => void;
+    const waitEnteredA = () =>
+      new Promise<void>((resolve) => {
+        enteredA = resolve;
+      });
+    let gateA = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const gatedProtector: NativeEpochProtector = {
+      ...native.protector,
+      unprotect: async (blob) => {
+        unprotectCalls++;
+        const out = await native.protector.unprotect(blob);
+        if (pauseFirst) {
+          pauseFirst = false;
+          enteredA();
+          await gateA;
+        }
+        return out;
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const store = yield* makeSqliteProtectedEpochKeys({
+            ...config(f, gatedProtector),
+            path: dbPath,
+            mode: 'create',
+          });
+          yield* store.saveAndReload(0, f.secret);
+          const history = yield* makeInstalledEpochHistory({
+            genesis: f.context.genesis,
+            ledger: f.ledger,
+            installed: store,
+          });
+          unprotectCalls = 0;
+
+          const pEntered1 = waitEnteredA();
+          gateA = new Promise<void>((resolve) => {
+            releaseA = resolve;
+          });
+          pauseFirst = true;
+          const fiberA = yield* Effect.forkChild(history.read(0));
+          yield* Effect.promise(() => pEntered1);
+          history.invalidate?.();
+          releaseA();
+          const keyA = yield* Fiber.join(fiberA);
+          disposeEpochKey(keyA);
+
+          const callsBeforeSubsequent = unprotectCalls;
+          const keyAfter = yield* history.read(0);
+          disposeEpochKey(keyAfter);
+          expect(unprotectCalls).toBe(callsBeforeSubsequent + 1);
+
+          history.invalidate?.();
+          const pEntered2 = waitEnteredA();
+          gateA = new Promise<void>((resolve) => {
+            releaseA = resolve;
+          });
+          pauseFirst = true;
+          const fiberRevoked = yield* Effect.forkChild(history.read(0));
+          yield* Effect.promise(() => pEntered2);
+          f.append([5, f.phone.raw]);
+          history.invalidate?.();
+          releaseA();
+          const revokedExit = yield* Fiber.await(fiberRevoked);
+          expect(Exit.isFailure(revokedExit)).toBe(true);
+        })
+      )
+    );
+    wiped(native.plains);
+  });
 });

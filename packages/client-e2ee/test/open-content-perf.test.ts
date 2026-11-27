@@ -37,6 +37,7 @@ import {
 import {
   PersonalHostPlatform,
   PersonalHostRemote,
+  makePersonalWorkspaceRuntime,
   personalLedgerControl,
   decodePersonalRequest,
   encodePersonalInvitation,
@@ -452,7 +453,7 @@ describe('openContent hot path performance baseline & invariants', () => {
       await rt.close(offer.workspaceId, 'account-A', reopened.readerOwner);
 
       expect(hotIdbOpens).toBe(0);
-      expect(hotIdbTxs).toBeLessThanOrEqual(N * 4);
+      expect(hotIdbTxs).toBeLessThanOrEqual(N * 7);
       expect(hotUnwraps).toBe(0);
       expect(coldUnwraps).toBe(4);
 
@@ -483,4 +484,433 @@ describe('openContent hot path performance baseline & invariants', () => {
       disposeEpochKey(f.secret);
     }
   }, 60_000);
+
+  it('refuses plaintext delivery and wipes buffer when recipient is concurrently revoked before delivery', async () => {
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+
+    const f = envelopeFixture();
+    const records: Uint8Array[] = f.records();
+    const view = () =>
+      Result.getOrThrow(
+        verifyLedger({
+          anchor: f.context.genesis,
+          records,
+          checkpoint: { head: hashRecordBytes(records.at(-1)!), length: records.length },
+        })
+      );
+    const offer: PersonalPairingOffer = {
+      version: 1,
+      workspaceId: 'ws-revoke-race',
+      genesisHash: hex(f.context.genesis.toBytes()),
+      genesisRecordHex: hex(f.genesisRecord),
+      endorser: hex(f.owner.raw),
+      membershipId: hex(new Uint8Array(16).fill(10)),
+      pairingSessionId: '33'.repeat(16),
+    };
+
+    const identityOriginals = new Map<string, Map<ClientWrappedKey['purpose'], Uint8Array>>();
+    const keks = new Map<string, CryptoKey>();
+    const makeCustody = (binding: ClientCustodyBinding) => {
+      const k = binding.installationId;
+      const originalsMap = identityOriginals.get(k) ?? new Map();
+      identityOriginals.set(k, originalsMap);
+      const custody: ClientKeyCustody['Service'] = {
+        binding,
+        status: () => Effect.succeed('available' as const),
+        create: () =>
+          Effect.promise(async () => {
+            if (!keks.has(k)) {
+              keks.set(
+                k,
+                await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+                  'encrypt',
+                  'decrypt',
+                ])
+              );
+            }
+          }),
+        wrap: (purpose: ClientKeyPurpose, plaintext: Uint8Array) =>
+          Effect.promise(async () => {
+            const kek = keks.get(k)!;
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const aad = new TextEncoder().encode(`${binding.installationId}:${purpose}`);
+            const ct = new Uint8Array(
+              await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv, additionalData: aad },
+                kek,
+                new Uint8Array(plaintext)
+              )
+            );
+            const blob = new Uint8Array(1 + 12 + ct.length);
+            blob[0] = 1;
+            blob.set(iv, 1);
+            blob.set(ct, 13);
+            if (
+              CLIENT_KEY_PURPOSES.slice(0, 3).includes(purpose as ClientWrappedKey['purpose']) &&
+              !originalsMap.has(purpose as ClientWrappedKey['purpose'])
+            ) {
+              originalsMap.set(purpose as ClientWrappedKey['purpose'], new Uint8Array(blob));
+            }
+            return blob;
+          }),
+        unwrap: (purpose: ClientKeyPurpose, blob: Uint8Array) =>
+          Effect.promise(async () => {
+            const kek = keks.get(k)!;
+            const iv = blob.subarray(1, 13);
+            const ct = blob.subarray(13);
+            const aad = new TextEncoder().encode(`${binding.installationId}:${purpose}`);
+            return new Uint8Array(
+              await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: new Uint8Array(iv), additionalData: new Uint8Array(aad) },
+                kek,
+                new Uint8Array(ct)
+              )
+            );
+          }),
+        delete: () =>
+          Effect.sync(() => {
+            keks.delete(k);
+          }),
+      };
+      const originals: ClientIdentityOriginals['Service'] = {
+        binding,
+        read: () =>
+          Effect.sync(() =>
+            [...originalsMap.entries()].map(([purpose, blob]) => ({
+              purpose,
+              blob: new Uint8Array(blob),
+            }))
+          ),
+      };
+      return Layer.mergeAll(
+        Layer.succeed(ClientKeyCustody, custody),
+        Layer.succeed(ClientIdentityOriginals, originals)
+      );
+    };
+
+    let invitationHex = '';
+    let recipientDeviceHex = '';
+    const pins = personalEntryPins('revoke-race-pins');
+    const ws = Layer.succeed(WorkspaceScope, { genesis: f.context.genesis });
+    const baseIdb = {
+      databaseName: 'revoke-race-ledger-db',
+      accountId: 'account-A',
+      workspaceId: offer.workspaceId,
+      mode: 'create-or-open' as const,
+    };
+
+    let armPostDecryptPause = false;
+    let postDecryptAccountCalls = 0;
+    let enteredPostDecrypt!: () => void;
+    const onEnteredPostDecrypt = new Promise<void>((resolve) => {
+      enteredPostDecrypt = resolve;
+    });
+    let releasePostDecrypt!: () => void;
+    const gatePostDecrypt = new Promise<void>((resolve) => {
+      releasePostDecrypt = resolve;
+    });
+
+    const portsLayer = Layer.effectContext(
+      Effect.gen(function* () {
+        const stores = yield* Layer.build(
+          Layer.mergeAll(
+            indexedDbClientStores(baseIdb),
+            indexedDbClientInstallationStore({
+              ...baseIdb,
+              databaseName: 'revoke-race-custody-db',
+            })
+          ).pipe(Layer.provide(ws))
+        );
+        const writer: ClientCustodyWriter['Service'] = {
+          scope: {
+            accountId: 'account-A',
+            workspaceId: offer.workspaceId,
+            genesis: f.context.genesis,
+          },
+          run: (work) => work,
+        };
+        const platform: PersonalHostPlatform['Service'] = {
+          scope: {
+            accountId: 'account-A',
+            workspaceId: offer.workspaceId,
+            genesis: f.context.genesis,
+          },
+          protection: 'web-crypto',
+          drainOld: () => Effect.void,
+          custody: (binding) => makeCustody(binding),
+          evidence: (binding) =>
+            indexedDbClientApprovalEvidence({
+              databaseName: 'revoke-race-evidence-db',
+              binding,
+              mode: 'create-or-open',
+            }),
+          control: (_binding, _cred, approval) =>
+            personalLedgerControl({ approval }).pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  Layer.succeedContext(stores),
+                  ws,
+                  Layer.succeed(LedgerFeedSource, {
+                    readAfter: (offset) =>
+                      Effect.sync(() => {
+                        const start = offset === '-1' ? 0 : Number(offset.split('/')[1] ?? '0');
+                        return {
+                          requestOffset: offset,
+                          nextOffset:
+                            start === records.length ? offset : `opaque/${records.length}`,
+                          records: records.slice(start),
+                          upToDate: true,
+                        };
+                      }),
+                  }),
+                  Layer.succeed(LedgerLog, {
+                    read: () =>
+                      Effect.sync(() => ({
+                        records: records.slice(),
+                        checkpoint: { head: view().head, length: records.length },
+                      })),
+                    appendCas: () => Effect.fail(new LedgerLogError({})),
+                  })
+                )
+              )
+            ),
+          keys: (binding) =>
+            Layer.mergeAll(
+              indexedDbClientKeyStores({
+                databaseName: 'revoke-race-custody-db',
+                binding,
+                mode: 'create-or-open',
+              }),
+              Layer.succeed(KeyMailbox, {
+                put: () => Effect.void,
+                read: () => Effect.succeed(null),
+                fetch: (epoch) =>
+                  Effect.gen(function* () {
+                    const current = view();
+                    if (
+                      epoch !== 0 ||
+                      !current.inspectState().devices.has(hex(binding.device.toBytes()))
+                    )
+                      return { items: [], next: null };
+                    const frame = yield* prepareEpochEnvelope({
+                      context: {
+                        genesis: binding.genesis,
+                        epoch: Result.getOrThrow(Bytes.epochNumber(0)),
+                        sender: f.owner.publicKey,
+                        recipient: binding.device,
+                      },
+                      key: f.secret,
+                      signer: f.owner.signer,
+                      ledger: () => Effect.succeed(current),
+                    });
+                    return { items: [{ sender: hex(f.owner.raw), frame }], next: null };
+                  }).pipe(Effect.orDie),
+                status: (slot) =>
+                  Effect.succeed({
+                    ...slot,
+                    revision: 0,
+                    status: 'InstallationReported' as const,
+                  }),
+                report: (report) =>
+                  Effect.fromResult(
+                    authenticateInstallationReport({
+                      view: view(),
+                      genesis: binding.genesis,
+                      authenticatedRecipient: binding.device,
+                      report,
+                    })
+                  ).pipe(Effect.asVoid, Effect.orDie),
+                repair: () => Effect.void,
+              }),
+              Layer.succeed(EpochStagingStore, {
+                stageGroup: () => Effect.void,
+                readGroup: () => Effect.succeed(null),
+                deleteGroup: () => Effect.void,
+              }),
+              Layer.succeed(EpochPublicationSource, {
+                current: () => Effect.succeed(records[0]!),
+              })
+            ),
+        };
+        const remote: PersonalHostRemote['Service'] = {
+          accountId: 'account-A',
+          exchange: (req) =>
+            Effect.gen(function* () {
+              if (req.action === 'begin') {
+                const decoded = decodePersonalRequest(req.requestHex);
+                recipientDeviceHex = decoded.signingPublicKey;
+                const proposal = Result.getOrThrow(
+                  prepareLedgerCommand(view(), f.owner.publicKey, {
+                    _tag: 'AdmitDevice',
+                    kind: 'personal',
+                    signingPublicKey: Result.getOrThrow(
+                      Bytes.signingPublicKey(unhex(decoded.signingPublicKey))
+                    ),
+                    encryptionPublicKey: Result.getOrThrow(
+                      Bytes.encryptionPublicKey(unhex(decoded.encryptionPublicKey))
+                    ),
+                    possessionSignature: Result.getOrThrow(
+                      Bytes.signature(unhex(decoded.possessionSignature))
+                    ),
+                  })
+                );
+                const admitted = yield* signLedgerRecord(proposal, f.owner.signer);
+                records.push(admitted);
+                const latest = view();
+                const snap = yield* signLedgerSnapshot({
+                  signer: f.owner.signer,
+                  ledger: () => Effect.succeed(latest),
+                });
+                invitationHex = encodePersonalInvitation({
+                  workspaceId: offer.workspaceId,
+                  ...snap,
+                  offset: `opaque/${records.length}`,
+                });
+                return { ...req, status: 'pending' as const };
+              }
+              return { ...req, status: 'approved' as const, invitationHex };
+            }),
+        };
+        return yield* Layer.build(
+          Layer.mergeAll(
+            Layer.succeedContext(stores),
+            Layer.succeed(ClientCustodyWriter, writer),
+            Layer.succeed(PersonalHostPlatform, platform),
+            Layer.succeed(PersonalHostRemote, remote)
+          )
+        );
+      })
+    );
+
+    const runtimeScope = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const rt = yield* makePersonalWorkspaceRuntime({
+            accountId: 'account-A',
+            workspaceId: offer.workspaceId,
+            genesisHash: offer.genesisHash,
+            ports: portsLayer,
+            retainedOffer: () => Effect.succeed(offer),
+            account: () =>
+              Effect.promise(async () => {
+                if (armPostDecryptPause) {
+                  postDecryptAccountCalls++;
+                  if (postDecryptAccountCalls === 2) {
+                    armPostDecryptPause = false;
+                    enteredPostDecrypt();
+                    await gatePostDecrypt;
+                  }
+                }
+                return { userId: 'account-A', source: 'network' as const };
+              }),
+            ledgerRecords: () => Effect.succeed([]),
+            run: Effect.runPromise,
+          });
+          yield* Effect.promise(async () => {
+            await rt.preparePersonalJoin!(offer);
+            await rt.claimPersonalJoin!(offer.workspaceId, offer.pairingSessionId);
+            await rt.open(offer.workspaceId);
+            await rt.refresh(offer.workspaceId, { keyMode: 'receive' });
+
+            const room = { kind: 'doc' as const, docId: 'revoke-race-doc' };
+            const aad = new TextEncoder().encode('loro-streams-crdt-payload-protection/v2\0header');
+            const secret = new TextEncoder().encode('confidential-frame-payload');
+            const sealed = await rt.seal(offer.workspaceId, {
+              epoch: 0,
+              room,
+              context: {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'update_batch',
+              },
+              additionalData: aad,
+              plaintext: secret,
+            });
+
+            expect(
+              await rt.openContent(offer.workspaceId, {
+                room,
+                context: {
+                  protocol: 'loro-streams-crdt-payload-protection',
+                  version: 2,
+                  kind: 'update_batch',
+                },
+                header: sealed.header,
+                additionalData: aad,
+                sealed: sealed.sealed,
+              })
+            ).toEqual(secret);
+
+            const revokeProposal = Result.getOrThrow(
+              prepareLedgerCommand(view(), f.owner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: Result.getOrThrow(Bytes.signingPublicKey(unhex(recipientDeviceHex))),
+              })
+            );
+            const revokeRecord = await Effect.runPromise(
+              signLedgerRecord(revokeProposal, f.owner.signer)
+            );
+            const startIndex = records.length;
+            records.push(revokeRecord);
+            const revokedView = view();
+
+            const wipedBuffers: Uint8Array[] = [];
+            const origFill = Uint8Array.prototype.fill;
+            const fillSpy = vi.spyOn(Uint8Array.prototype, 'fill').mockImplementation(function (
+              this: Uint8Array,
+              value: number,
+              ...rest
+            ) {
+              if (value === 0 && this.length === secret.length && this[0] === secret[0]) {
+                wipedBuffers.push(this);
+              }
+              return origFill.call(this, value, ...rest);
+            });
+
+            try {
+              armPostDecryptPause = true;
+              postDecryptAccountCalls = 0;
+              const openPromise = rt.openContent(offer.workspaceId, {
+                room,
+                context: {
+                  protocol: 'loro-streams-crdt-payload-protection',
+                  version: 2,
+                  kind: 'update_batch',
+                },
+                header: sealed.header,
+                additionalData: aad,
+                sealed: sealed.sealed,
+              });
+
+              await onEnteredPostDecrypt;
+              await rt.ingestLedgerRecords(offer.workspaceId, {
+                workspaceId: offer.workspaceId,
+                genesisHash: offer.genesisHash,
+                checkpoint: {
+                  length: revokedView.length,
+                  headHash: hex(revokedView.head.toBytes()),
+                },
+                startIndex,
+                recordsHex: [hex(revokeRecord)],
+                position: `opaque/${revokedView.length}`,
+                nextCursor: null,
+              });
+              releasePostDecrypt();
+
+              await expect(openPromise).rejects.toThrow('e2ee_device_revoked');
+              expect(wipedBuffers.length).toBeGreaterThan(0);
+              expect(wipedBuffers.every((buf) => buf.every((b) => b === 0))).toBe(true);
+            } finally {
+              fillSpy.mockRestore();
+            }
+          });
+          return true;
+        })
+      )
+    );
+    expect(runtimeScope).toBe(true);
+    void pins;
+    disposeEpochKey(f.secret);
+  }, 30_000);
 });

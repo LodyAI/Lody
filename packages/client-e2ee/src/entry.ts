@@ -381,7 +381,8 @@ export function personalEntry(options: PersonalEntryOptions) {
       workspaceId: string,
       source?: PersonalPairingOffer | ((accountId: string) => PersonalPairingOffer),
       live: () => boolean = () => true,
-      kind?: 'member'
+      kind?: 'member',
+      fastPath = false
     ) => {
       if (closed) throw fail('closed');
       if (source && typeof source !== 'function' && Result.isFailure(verifyPersonalOffer(source)))
@@ -394,7 +395,7 @@ export function personalEntry(options: PersonalEntryOptions) {
       if (!live()) throw fail('closed');
       if (!accountId) throw fail('scope-mismatch');
       const id = key(accountId, workspaceId);
-      if (source === undefined) {
+      if (fastPath && source === undefined) {
         const active = records.get(id);
         if (active && !active.retired) {
           const runtime = await active.ready;
@@ -508,9 +509,16 @@ export function personalEntry(options: PersonalEntryOptions) {
     const invoke = async <A>(
       workspaceId: string,
       work: (runtime: E2eeWorkspaceRuntime) => Promise<A>,
-      inspect?: (value: unknown) => AccessLoss | null
+      inspect?: (value: unknown) => AccessLoss | null,
+      fastPath = false
     ) => {
-      const { entry, runtime, accountId } = await get(workspaceId);
+      const { entry, runtime, accountId } = await get(
+        workspaceId,
+        undefined,
+        undefined,
+        undefined,
+        fastPath
+      );
       const value = await work(runtime).catch((error: unknown) => project(entry, accountId, error));
       const loss = inspect?.(value) ?? null;
       if (loss && (await lose(entry, accountId))) throw new Error(loss);
@@ -761,7 +769,7 @@ export function personalEntry(options: PersonalEntryOptions) {
           plaintext: new Uint8Array(input.plaintext),
         };
         try {
-          return await invoke(id, (runtime) => runtime.seal(id, captured));
+          return await invoke(id, (runtime) => runtime.seal(id, captured), undefined, true);
         } finally {
           // The public runtime owns its separate native-call copy.
           captured.plaintext.fill(0);
@@ -778,7 +786,7 @@ export function personalEntry(options: PersonalEntryOptions) {
           sealed: new Uint8Array(input.sealed),
         };
         try {
-          return await invoke(id, (runtime) => runtime.openContent(id, captured));
+          return await invoke(id, (runtime) => runtime.openContent(id, captured), undefined, true);
         } finally {
           captured.header.fill(0);
           captured.additionalData.fill(0);

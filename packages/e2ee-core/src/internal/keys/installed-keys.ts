@@ -314,7 +314,9 @@ export class InstalledEpochHistory extends Context.Service<
       const cache = new Map<number, Uint8Array>();
       let cachedHead: Uint8Array | null = null;
       let cachedLength = -1;
+      let cacheGeneration = 0;
       const wipeCache = () => {
+        cacheGeneration++;
         for (const raw of cache.values()) raw.fill(0);
         cache.clear();
         cachedHead = null;
@@ -327,8 +329,13 @@ export class InstalledEpochHistory extends Context.Service<
           cache.delete(epoch);
         }
       };
-      const putCached = (view: LedgerView, epoch: number, key: Bytes.EpochKey) => {
-        if (gate.isClosed()) return;
+      const putCached = (
+        startGeneration: number,
+        view: LedgerView,
+        epoch: number,
+        key: Bytes.EpochKey
+      ) => {
+        if (gate.isClosed() || startGeneration !== cacheGeneration) return;
         const headBytes = view.head.toBytes();
         if (cachedLength !== view.length || !cachedHead || !bytesEqual(cachedHead, headBytes)) {
           wipeCache();
@@ -342,6 +349,39 @@ export class InstalledEpochHistory extends Context.Service<
         }
         cache.set(epoch, copyEpochKeyBytes(key));
       };
+      const finalizeRead = Effect.fnUntraced(function* (
+        startGeneration: number,
+        view: LedgerView,
+        epoch: number,
+        key: Bytes.EpochKey
+      ) {
+        if (gate.isClosed()) {
+          disposeEpochKey(key);
+          wipeCache();
+          return yield* fail('closed');
+        }
+        if (startGeneration !== cacheGeneration) {
+          const rechecked = yield* Effect.result(installed.check(epoch));
+          if (Result.isFailure(rechecked)) {
+            disposeEpochKey(key);
+            if (
+              rechecked.failure.reason === 'unauthorized' ||
+              rechecked.failure.reason === 'rollback' ||
+              rechecked.failure.reason === 'closed'
+            )
+              wipeCache();
+            return yield* rechecked.failure;
+          }
+          if (gate.isClosed()) {
+            disposeEpochKey(key);
+            wipeCache();
+            return yield* fail('closed');
+          }
+          return key;
+        }
+        putCached(startGeneration, view, epoch, key);
+        return key;
+      });
       yield* Effect.addFinalizer(() => Effect.sync(wipeCache));
       const gate = yield* makeAdmissionGate(() => fail('closed'));
       yield* Effect.addFinalizer(() => Effect.sync(wipeCache));
@@ -419,15 +459,10 @@ export class InstalledEpochHistory extends Context.Service<
                   );
                 }
               }
+              const readGeneration = cacheGeneration;
               const existing = yield* Effect.result(installed.read(epoch));
               if (Result.isSuccess(existing)) {
-                if (gate.isClosed()) {
-                  disposeEpochKey(existing.success);
-                  wipeCache();
-                  return yield* fail('closed');
-                }
-                putCached(view, epoch, existing.success);
-                return existing.success;
+                return yield* finalizeRead(readGeneration, view, epoch, existing.success);
               }
               // Retry only genuinely missing installed data, never corrupt/permission/storage failures.
               if (existing.failure.reason !== 'missing-key') {
@@ -446,29 +481,30 @@ export class InstalledEpochHistory extends Context.Service<
               if (!state || epoch > state.epoch.number) return yield* existing.failure;
               return yield* recoverSerial.withPermit(
                 Effect.gen(function* () {
+                  const retryView = yield* current();
+                  const retryHead = retryView.head.toBytes();
+                  if (
+                    cachedLength !== retryView.length ||
+                    !cachedHead ||
+                    !bytesEqual(cachedHead, retryHead)
+                  ) {
+                    wipeCache();
+                    cachedHead = retryHead;
+                    cachedLength = retryView.length;
+                  }
+                  const retryGeneration = cacheGeneration;
                   const retry = yield* Effect.result(installed.read(epoch));
                   if (Result.isSuccess(retry)) {
-                    if (gate.isClosed()) {
-                      disposeEpochKey(retry.success);
-                      wipeCache();
-                      return yield* fail('closed');
-                    }
-                    putCached(view, epoch, retry.success);
-                    return retry.success;
+                    return yield* finalizeRead(retryGeneration, retryView, epoch, retry.success);
                   }
                   if (retry.failure.reason !== 'missing-key') return yield* retry.failure;
                   const latestView = yield* current();
                   const latestState = internalViewState(latestView);
                   if (!latestState || epoch > latestState.epoch.number) return yield* retry.failure;
                   yield* recover(latestView, epoch + 1);
+                  const recoveredGeneration = cacheGeneration;
                   const recovered = yield* installed.read(epoch);
-                  if (gate.isClosed()) {
-                    disposeEpochKey(recovered);
-                    wipeCache();
-                    return yield* fail('closed');
-                  }
-                  putCached(latestView, epoch, recovered);
-                  return recovered;
+                  return yield* finalizeRead(recoveredGeneration, latestView, epoch, recovered);
                 })
               );
             })

@@ -1044,13 +1044,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               );
               return yield* Effect.acquireUseRelease(
                 work,
-                (value) =>
-                  Effect.gen(function* () {
-                    yield* guard(workspaceId);
-                    if (entry !== lease || lease.closing || !lease.readers.size)
-                      return yield* fail('closed');
-                    return value;
-                  }),
+                (value) => check(lease, 'admitted').pipe(Effect.as(value)),
                 (value, outcome) =>
                   Effect.sync(() => {
                     if (Exit.isFailure(outcome)) value.fill(0);

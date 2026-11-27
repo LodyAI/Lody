@@ -2,9 +2,7 @@ import { Context, Effect, Layer, Option, Result } from 'effect';
 import {
   LedgerFeed,
   LedgerFeedError,
-  VerifiedLedger,
   type LedgerFeedOrigin,
-  type LedgerFeedState,
   type WorkspaceInvitationSnapshot,
   type LedgerView,
 } from '@lody/e2ee-core';
@@ -24,8 +22,6 @@ import {
   LedgerLog,
   LedgerLogError,
   LedgerPinStore,
-  LedgerViewSource,
-  LedgerViewSourceError,
   SubmissionJournal,
   WorkspaceScope,
 } from '@lody/e2ee-core/services';
@@ -128,33 +124,6 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         }).pipe(Layer.provide(feedDeps))
       );
       const feed = Context.get(services, LedgerFeed);
-      const rebaseVerifiedCtx = yield* Layer.build(
-        VerifiedLedger.layer.pipe(
-          Layer.provide(
-            Layer.mergeAll(
-              Layer.succeed(WorkspaceScope, { genesis }),
-              Layer.succeed(LedgerPinStore, pins),
-              Layer.succeed(LedgerViewSource, {
-                current: () =>
-                  feed.current().pipe(
-                    Effect.map((state) => state.view),
-                    Effect.mapError((cause) => new LedgerViewSourceError({ cause }))
-                  ),
-              })
-            )
-          )
-        )
-      );
-      const rebaseVerified = Context.get(rebaseVerifiedCtx, VerifiedLedger);
-      const REBASE_SUFFIX_THRESHOLD = 32;
-      let compactedAt = tail ? tail.count : originView.length;
-      const maybeRebase = Effect.fnUntraced(function* (state: LedgerFeedState) {
-        if (state.bootstrap || state.view.length - compactedAt < REBASE_SUFFIX_THRESHOLD) return;
-        const result = yield* Effect.result(
-          feed.rebase().pipe(Effect.provideService(VerifiedLedger, rebaseVerified))
-        );
-        if (Result.isSuccess(result)) compactedAt = state.view.length;
-      });
       const advanceFeed = Effect.fnUntraced(function* () {
         const suffix: Uint8Array[] = [];
         let total = 0,
@@ -178,10 +147,7 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
           const head = page.records.length ? hashRecordBytes(page.records.at(-1)) : state.view.head;
           const next = yield* feed.accept(page, { head, length });
           for (const record of added) suffix.push(new Uint8Array(record));
-          if (page.upToDate) {
-            yield* maybeRebase(next);
-            return { next, suffix };
-          }
+          if (page.upToDate) return { next, suffix };
         }
         return yield* new LedgerFeedError({ code: 'read-too-large' });
       });
@@ -253,7 +219,6 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
               { head: hashRecordBytes(records.at(-1)!), length: end }
             );
           }
-          yield* maybeRebase(yield* feed.current());
         }
         // Re-verified persisted state can satisfy an already installed approval offline.
         yield* current();
@@ -261,8 +226,7 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
       return Context.make(LedgerSync, {
         current,
         refresh,
-        ingest: (page, checkpoint) =>
-          feed.accept(page, checkpoint).pipe(Effect.tap((next) => maybeRebase(next))),
+        ingest: (page, checkpoint) => feed.accept(page, checkpoint),
       }).pipe(
         Context.add(LedgerPinStore, pins),
         Context.add(SubmissionJournal, submissions),

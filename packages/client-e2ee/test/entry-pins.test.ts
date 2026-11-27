@@ -256,3 +256,54 @@ it('claimMemberJoin retains the open reader after admission so retries skip clai
     await owner.close();
   }
 });
+
+it('retires stale entry.offer when another tab replaces a cancelled offer before claimPersonalJoin', async () => {
+  const pins = personalEntryPins('cross-tab-offer-replace-pins');
+  const offer1 = await offerFor('ws-cross-tab', 31);
+  const offer2: PersonalPairingOffer = {
+    ...offer1,
+    pairingSessionId: '44'.repeat(16),
+  };
+  await Effect.runPromise(pins.prepare('acc-1', offer1));
+  const session = createStore<PlatformSessionState>(signedIn('acc-1'));
+  let claimCount = 0;
+  vi.mocked(makePersonalWorkspaceRuntime).mockImplementation(() =>
+    Effect.succeed({
+      claimPersonalJoin: async (_id: string, pairingId: string) => {
+        claimCount++;
+        return {
+          ready: pairingId === offer2.pairingSessionId,
+          status:
+            pairingId === offer2.pairingSessionId ? ('approved' as const) : ('pending' as const),
+        };
+      },
+    } as unknown as Effect.Success<ReturnType<typeof makePersonalWorkspaceRuntime>>)
+  );
+  const owner = personalEntry({
+    run: Effect.runPromise,
+    pins,
+    ports: () => Layer.effectContext(Effect.die('synthetic runtime owns the device')),
+    ledgerRecords: () => () => Effect.succeed([]),
+  });
+  try {
+    const runtime = owner.createRuntime({ session })!;
+    expect(await runtime.claimPersonalJoin!(offer1.workspaceId, offer1.pairingSessionId)).toEqual({
+      ready: false,
+      status: 'pending',
+    });
+
+    await Effect.runPromise(pins.finish('acc-1', offer1, 'cancelled'));
+    await Effect.runPromise(pins.prepare('acc-1', offer2));
+
+    expect(await runtime.claimPersonalJoin!(offer2.workspaceId, offer2.pairingSessionId)).toEqual({
+      ready: true,
+      status: 'approved',
+    });
+    expect(claimCount).toBe(2);
+    const saved = await Effect.runPromise(pins.read('acc-1', offer2.workspaceId));
+    expect(saved?.phase).toBe('ready');
+    expect(saved?.offer.pairingSessionId).toBe(offer2.pairingSessionId);
+  } finally {
+    await owner.close();
+  }
+});

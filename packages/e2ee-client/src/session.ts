@@ -340,8 +340,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     });
     const ledger = Effect.fnUntraced(function* () {
       yield* guard;
+      const versionBefore = invalidationVersion;
       const view = yield* verified.current();
       yield* Effect.fromResult(requireLedgerContinuation(approval.view, view));
+      if (invalidationVersion !== versionBefore) {
+        const fresh = yield* rawVerified.current();
+        yield* Effect.fromResult(requireLedgerContinuation(approval.view, fresh));
+        yield* guard;
+        return fresh;
+      }
       yield* guard;
       return view;
     });
@@ -1697,7 +1704,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             })
           )
         ),
-      ledger: () => run(ledger()),
+      ledger: () => withReadCycle(run(ledger())),
       /** Public signed proof already verified and retained for this approval. */
       approvalOriginals: () =>
         run(
