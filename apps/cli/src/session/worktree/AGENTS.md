@@ -104,13 +104,19 @@ and file responsibilities: [../README.md](../README.md).
   branch is reserved for an explicit `restoreBranchName` from the same Session.
 - Script history callbacks wait at most 1s and warn on failure; only script execution determines success.
 - Worktree setup scripts are per worktree-directory lifetime: session runtime restore after
-  idle GC must skip setup when the session's worktree directory already exists, but setup still
-  runs when a missing worktree directory is materialized again.
+  idle GC must skip setup when the session's worktree directory already exists unless settled
+  artifact cleanup removed its build/dependency directories (recorded by its local
+  `artifact-cleaned` marker), and setup still runs when a missing worktree directory is
+  materialized again.
 - `worktree-config-resolver.ts` follows the durable launch-config rule in
   [../AGENTS.md](../AGENTS.md): do not write per-session `sessionLaunchConfig`.
 - Worktree archive/delete keeps branches and requires a backup commit. `worktree-gc.ts`
   reconciles Session state (no command/acknowledgement): only archived/deleted root owners
-  after complete metadata; unknown stays intact.
+  remove worktrees after complete metadata; unknown stays intact. Root owners that remain
+  in the Settled tier past the 24h grace period with no active/starting runtime or shared
+  workdir terminals have only their gitignored build-artifact directories
+  (`worktree-artifact-cleaner.ts`, excluding recovery/user-state dirs, nested `.git` repos,
+  and symlinks) removed while keeping the worktree and branch intact.
   Chat workdirs: delete recursively for deleted roots; archive uses empty-only `rmdir`.
   Contract: specs/session-worktree-lifecycle.md.
 

@@ -1314,6 +1314,10 @@ export class LodyFleet {
             [...this.runtimes.values()].some((runtime) => runtime.workspace.contentMode === 'e2ee'),
           prepareManagedUpgrade: this.prepareManagedUpgrade,
           closeSessionTerminals: (sessionId) => this.terminalPtyService.closeSession(sessionId),
+          hasSessionTerminals: (sessionId, workdir) =>
+            workdir
+              ? this.terminalPtyService.hasActiveTerminalForWorkdir(workdir, sessionId)
+              : this.terminalPtyService.list(sessionId).length > 0,
           readHostedPresenceStates: () => this.readHostedPresenceStates(),
           cleanupLocalProjectWorktreeSetupIfUnreferenced: (localProjectId) =>
             this.cleanupLocalProjectWorktreeSetupIfUnreferenced(localProjectId),

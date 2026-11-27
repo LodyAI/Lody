@@ -362,7 +362,11 @@ import {
 } from 'src/agent/agent-client';
 import type { SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager, WorktreeManager } from '@/session/worktree/worktree-manager';
-import { WorktreeGarbageCollector, type WorktreeOwnerState } from '@/session/worktree/worktree-gc';
+import {
+  resolveSettledSinceMs,
+  WorktreeGarbageCollector,
+  type WorktreeOwnerState,
+} from '@/session/worktree/worktree-gc';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
 import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
 import {
@@ -761,6 +765,7 @@ export interface MessageHandlerConfig {
   ) => Promise<string>;
   supportRegistryAgentTypes?: string[];
   closeSessionTerminals?: (sessionId: SessionId) => void;
+  hasSessionTerminals?: (sessionId: SessionId, workdir?: string) => boolean;
   /**
    * Presence snapshots of every workspace this daemon hosts, so a desktop focused
    * on another hosted workspace also suppresses this workspace's mobile push.
@@ -872,6 +877,7 @@ export class MessageHandler {
   private cliVersion: string;
   private supportRegistryAgentTypes: string[];
   private closeSessionTerminals?: (sessionId: SessionId) => void;
+  private hasSessionTerminals?: (sessionId: SessionId, workdir?: string) => boolean;
   private readHostedPresenceStates?: () => LodyPresenceStateMap[];
   private cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
@@ -918,6 +924,7 @@ export class MessageHandler {
   private readonly worktreeGc: WorktreeGarbageCollector;
   private worktreeGcTimer: NodeJS.Timeout | null = null;
   private detachWorktreeGcSyncListener: (() => void) | null = null;
+  private localProjectWorktreeRemovalInFlight = 0;
   private readonly deleteLocalProjectInFlight = new Set<LocalProjectId>();
   private machineFlockCommandWatcher: MachineFlockCommandWatcher;
   // Desktop local-transport backfill: in-flight task keys (`${sessionId}:${fileId}`)
@@ -3581,6 +3588,7 @@ export class MessageHandler {
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
+    this.hasSessionTerminals = config.hasSessionTerminals;
     this.readHostedPresenceStates = config.readHostedPresenceStates;
     this.cleanupLocalProjectWorktreeSetupIfUnreferenced =
       config.cleanupLocalProjectWorktreeSetupIfUnreferenced;
@@ -3926,9 +3934,9 @@ export class MessageHandler {
       hasCompleteMetadata: () =>
         this.cloudPort.kind === 'local' || this.workspaceDocument.hasCompletedInitialMetaSync(),
       readOwnerState: (sessionId) => this.readWorktreeOwnerState(sessionId),
-      isRuntimeActive: (sessionId) =>
-        this.sessionManager.isArchiveInFlight(sessionId) ||
-        this.sessionManager.hasSession(sessionId),
+      isRuntimeActive: (sessionId, worktreePath) =>
+        this.isWorktreeRuntimeActive(sessionId, worktreePath),
+      now: () => getServerNow(),
       runCleanupScript: (input) => this.runArchivedWorktreeCleanupScript(input),
       archiveProjectGroup: (input) =>
         archiveProjectGroup({
@@ -5160,6 +5168,16 @@ export class MessageHandler {
       });
   }
 
+  private isWorktreeRuntimeActive(sessionId: SessionId, worktreePath?: string): boolean {
+    if (this.localProjectWorktreeRemovalInFlight > 0) {
+      return true;
+    }
+    if (this.sessionManager.isWorktreeSessionBusy(sessionId)) {
+      return true;
+    }
+    return this.hasSessionTerminals?.(sessionId, worktreePath) === true;
+  }
+
   private async readWorktreeOwnerState(sessionId: SessionId): Promise<WorktreeOwnerState> {
     const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
     if (!snapshot) {
@@ -5171,6 +5189,12 @@ export class MessageHandler {
     }
     if (meta?.isArchived === true && !meta.parentSessionId) {
       return { kind: 'archived', meta };
+    }
+    if (meta) {
+      const settledSinceMs = resolveSettledSinceMs(meta, getServerNow());
+      if (settledSinceMs !== null) {
+        return { kind: 'settled', meta, settledSinceMs };
+      }
     }
     return { kind: 'active' };
   }
@@ -5509,6 +5533,19 @@ export class MessageHandler {
   }
 
   private async deleteLocalProjectResources(
+    localProjectId: LocalProjectId,
+    command: MachineDeleteLocalProjectCommand
+  ): Promise<MachineDeleteLocalProjectCommand['cleanupResult'] | undefined> {
+    this.localProjectWorktreeRemovalInFlight += 1;
+    try {
+      await this.worktreeGc.waitForIdle?.();
+      return await this.deleteLocalProjectResourcesInner(localProjectId, command);
+    } finally {
+      this.localProjectWorktreeRemovalInFlight -= 1;
+    }
+  }
+
+  private async deleteLocalProjectResourcesInner(
     localProjectId: LocalProjectId,
     command: MachineDeleteLocalProjectCommand
   ): Promise<MachineDeleteLocalProjectCommand['cleanupResult'] | undefined> {

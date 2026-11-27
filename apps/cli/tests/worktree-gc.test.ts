@@ -3,10 +3,23 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { type RepoId, type SessionId, type SessionMeta, SessionStatusFactory } from '@lody/shared';
+import {
+  STATUS_VIEW_SETTLE_INACTIVITY_MS,
+  type RepoId,
+  type SessionId,
+  type SessionMeta,
+  SessionStatusFactory,
+} from '@lody/shared';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 
 import {
+  cleanWorktreeArtifacts,
+  DEFAULT_ARTIFACT_DIR_NAMES,
+  hasWorktreeArtifactsCleaned,
+} from '../src/session/worktree/worktree-artifact-cleaner';
+import {
+  resolveSettledSinceMs,
+  SETTLED_ARTIFACT_CLEANUP_GRACE_MS,
   WorktreeGarbageCollector,
   type WorktreeGcDeps,
   type WorktreeOwnerState,
@@ -133,7 +146,12 @@ describe('WorktreeGarbageCollector', () => {
       }
     );
 
-    expect(await gc.sweep()).toEqual({ scanned: 1, removed: [sessionId], failed: [] });
+    expect(await gc.sweep()).toEqual({
+      scanned: 1,
+      removed: [sessionId],
+      artifactsCleaned: [],
+      failed: [],
+    });
     expect(fs.existsSync(workdir)).toBe(false);
     expect(fs.existsSync(hookMarker)).toBe(false);
   });
@@ -154,7 +172,12 @@ describe('WorktreeGarbageCollector', () => {
       recordArchivedBranch: async () => fs.writeFileSync(path.join(full, 'hook-ran'), ''),
     });
 
-    expect(await gc.sweep()).toEqual({ scanned: 2, removed: [emptyId], failed: [] });
+    expect(await gc.sweep()).toEqual({
+      scanned: 2,
+      removed: [emptyId],
+      artifactsCleaned: [],
+      failed: [],
+    });
     expect(fs.existsSync(empty)).toBe(false);
     expect(fs.readdirSync(full)).toEqual(['artifact.txt']);
     expect(fs.readFileSync(path.join(full, 'artifact.txt'), 'utf8')).toBe('keep until deletion');
@@ -166,7 +189,12 @@ describe('WorktreeGarbageCollector', () => {
         throw Object.assign(new Error('directory not empty'), { code: 'EEXIST' });
       return rmdir(target, options);
     });
-    expect(await gc.sweep()).toEqual({ scanned: 1, removed: [], failed: [] });
+    expect(await gc.sweep()).toEqual({
+      scanned: 1,
+      removed: [],
+      artifactsCleaned: [],
+      failed: [],
+    });
     expect(fs.readFileSync(path.join(full, 'artifact.txt'), 'utf8')).toBe('keep until deletion');
     expect(warnings).toEqual([]);
 
@@ -183,7 +211,12 @@ describe('WorktreeGarbageCollector', () => {
     const unknown = createChatWorkdir(unknownId);
     const { gc } = createGc({ [activeId]: { kind: 'active' } });
 
-    expect(await gc.sweep()).toEqual({ scanned: 2, removed: [], failed: [] });
+    expect(await gc.sweep()).toEqual({
+      scanned: 2,
+      removed: [],
+      artifactsCleaned: [],
+      failed: [],
+    });
     expect(fs.existsSync(active)).toBe(true);
     expect(fs.existsSync(unknown)).toBe(true);
   });
@@ -201,7 +234,12 @@ describe('WorktreeGarbageCollector', () => {
     expect((await gc.sweep()).scanned).toBe(0);
     expect(fs.existsSync(workdir)).toBe(true);
     complete = true;
-    expect(await gc.sweep()).toEqual({ scanned: 1, removed: [], failed: [] });
+    expect(await gc.sweep()).toEqual({
+      scanned: 1,
+      removed: [],
+      artifactsCleaned: [],
+      failed: [],
+    });
     expect(fs.existsSync(workdir)).toBe(true);
     running = false;
     expect((await gc.sweep()).removed).toEqual([sessionId]);
@@ -218,7 +256,12 @@ describe('WorktreeGarbageCollector', () => {
     );
 
     expect(fs.existsSync(chatsDir)).toBe(false);
-    expect(await gc.sweep()).toEqual({ scanned: 1, removed: [sessionId], failed: [] });
+    expect(await gc.sweep()).toEqual({
+      scanned: 1,
+      removed: [sessionId],
+      artifactsCleaned: [],
+      failed: [],
+    });
     expect(fs.existsSync(worktree.hostPath)).toBe(false);
     expect(warnings).toEqual([]);
   });
@@ -262,13 +305,19 @@ describe('WorktreeGarbageCollector', () => {
       expect(await gc.sweep()).toEqual({
         scanned: 2,
         removed: [worktreeId],
+        artifactsCleaned: [],
         failed: [sessionId],
       });
       expect(fs.existsSync(worktree.hostPath)).toBe(false);
       expect(fs.existsSync(workdir)).toBe(true);
       failing = false;
       nowMs += 999;
-      expect(await gc.sweep()).toEqual({ scanned: 1, removed: [], failed: [] });
+      expect(await gc.sweep()).toEqual({
+        scanned: 1,
+        removed: [],
+        artifactsCleaned: [],
+        failed: [],
+      });
       expect(fs.existsSync(workdir)).toBe(true);
       nowMs += 1;
       expect((await gc.sweep()).removed).toEqual([sessionId]);
@@ -315,7 +364,12 @@ describe('WorktreeGarbageCollector', () => {
         }
       );
 
-      expect(await gc.sweep()).toEqual({ scanned: 0, removed: [], failed: [] });
+      expect(await gc.sweep()).toEqual({
+        scanned: 0,
+        removed: [],
+        artifactsCleaned: [],
+        failed: [],
+      });
       expect(fs.lstatSync(path.join(chatsDir, sessionId)).isSymbolicLink()).toBe(true);
       expect(fs.readFileSync(path.join(target, 'keep.txt'), 'utf8')).toBe('outside chats');
       expect(fs.readFileSync(path.join(unsafe, 'artifact.txt'), 'utf8')).toBe('keep unsafe');
@@ -621,5 +675,399 @@ describe('WorktreeGarbageCollector', () => {
     await removed;
     expect(sweeps).toBe(2);
     expect(fs.existsSync(worktree.hostPath)).toBe(false);
+  });
+
+  describe('settled worktree code artifact cleanup', () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    it('resolves settled timestamps consistently with statusViewTier rules', () => {
+      const nowMs = 1_800_000_000_000;
+      const explicitAt = nowMs - 2 * DAY_MS;
+
+      expect(
+        resolveSettledSinceMs(
+          sessionMeta('s1' as SessionId, {
+            lastMessageAt: explicitAt - 1_000,
+            settledAt: explicitAt,
+          }),
+          nowMs
+        )
+      ).toBe(explicitAt);
+      expect(
+        resolveSettledSinceMs(
+          sessionMeta('s1' as SessionId, {
+            lastMessageAt: explicitAt + 1_000,
+            settledAt: explicitAt,
+          }),
+          nowMs
+        )
+      ).toBeNull();
+      const inactiveAt = nowMs - STATUS_VIEW_SETTLE_INACTIVITY_MS - DAY_MS;
+      expect(
+        resolveSettledSinceMs(sessionMeta('s2' as SessionId, { lastMessageAt: inactiveAt }), nowMs)
+      ).toBe(inactiveAt + STATUS_VIEW_SETTLE_INACTIVITY_MS);
+      expect(
+        resolveSettledSinceMs(
+          sessionMeta('s2' as SessionId, {
+            lastMessageAt: inactiveAt,
+            focusRestoredAt: nowMs - DAY_MS,
+          }),
+          nowMs
+        )
+      ).toBeNull();
+      expect(
+        resolveSettledSinceMs(
+          sessionMeta('s3' as SessionId, { settledAt: explicitAt, isPinned: true }),
+          nowMs
+        )
+      ).toBeNull();
+      expect(
+        resolveSettledSinceMs(
+          sessionMeta('s3' as SessionId, { settledAt: explicitAt, snoozedUntil: nowMs + 60_000 }),
+          nowMs
+        )
+      ).toBeNull();
+      expect(
+        resolveSettledSinceMs(
+          sessionMeta('s3' as SessionId, {
+            settledAt: explicitAt,
+            parentSessionId: 'root' as SessionId,
+          }),
+          nowMs
+        )
+      ).toBeNull();
+      expect(
+        resolveSettledSinceMs(
+          sessionMeta('s3' as SessionId, { settledAt: explicitAt, isArchived: true }),
+          nowMs
+        )
+      ).toBeNull();
+      expect(
+        resolveSettledSinceMs(
+          sessionMeta('s3' as SessionId, {
+            lastMessageAt: inactiveAt,
+            status: SessionStatusFactory.running(),
+          }),
+          nowMs
+        )
+      ).toBeNull();
+      expect(
+        resolveSettledSinceMs(
+          sessionMeta('s3' as SessionId, {
+            settledAt: explicitAt,
+            status: SessionStatusFactory.requestPermission('tool', 'approve'),
+          }),
+          nowMs
+        )
+      ).toBeNull();
+    });
+
+    it('deletes only gitignored built-in artifact dirs and preserves non-ignored, stateful, and symlinked dirs', async () => {
+      const sessionId = 'gc-artifacts-safety' as SessionId;
+      const { worktree } = await createLocalWorktree(sessionId);
+      fs.writeFileSync(
+        path.join(worktree.hostPath, '.gitignore'),
+        'node_modules/\ndist/\npackages/*/dist/\n.terraform/\ntmp/\n'
+      );
+      fs.mkdirSync(path.join(worktree.hostPath, 'node_modules', 'pkg'), { recursive: true });
+      fs.writeFileSync(path.join(worktree.hostPath, 'node_modules', 'pkg', 'index.js'), 'x');
+      fs.mkdirSync(path.join(worktree.hostPath, 'packages', 'web', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(worktree.hostPath, 'packages', 'web', 'dist', 'app.js'), 'x');
+      fs.mkdirSync(path.join(worktree.hostPath, 'build'), { recursive: true });
+      fs.writeFileSync(path.join(worktree.hostPath, 'build', 'keep.txt'), 'tracked-or-unignored');
+      fs.mkdirSync(path.join(worktree.hostPath, '.terraform'), { recursive: true });
+      fs.writeFileSync(path.join(worktree.hostPath, '.terraform', 'state.tfstate'), 'secret');
+      fs.mkdirSync(path.join(worktree.hostPath, 'tmp'), { recursive: true });
+      fs.writeFileSync(path.join(worktree.hostPath, 'tmp', 'notes.txt'), 'keep');
+      expect(DEFAULT_ARTIFACT_DIR_NAMES.has('.terraform')).toBe(false);
+      expect(DEFAULT_ARTIFACT_DIR_NAMES.has('tmp')).toBe(false);
+      const externalTarget = path.join(testDir, 'external-dir');
+      fs.mkdirSync(externalTarget, { recursive: true });
+      fs.writeFileSync(path.join(externalTarget, 'important.txt'), 'do-not-delete');
+      fs.symlinkSync(externalTarget, path.join(worktree.hostPath, 'dist'));
+      fs.writeFileSync(path.join(worktree.hostPath, 'uncommitted.ts'), 'export const a = 1;');
+
+      const result = await cleanWorktreeArtifacts(worktree.hostPath);
+
+      expect(result.errors).toEqual([]);
+      expect(result.aborted).toBe(false);
+      expect(result.deletedPaths.sort()).toEqual(
+        [
+          path.join(worktree.hostPath, 'node_modules'),
+          path.join(worktree.hostPath, 'packages', 'web', 'dist'),
+        ].sort()
+      );
+      expect(fs.existsSync(path.join(worktree.hostPath, 'node_modules'))).toBe(false);
+      expect(fs.existsSync(path.join(worktree.hostPath, 'packages', 'web', 'dist'))).toBe(false);
+      expect(fs.existsSync(path.join(worktree.hostPath, 'build', 'keep.txt'))).toBe(true);
+      expect(fs.existsSync(path.join(worktree.hostPath, '.terraform', 'state.tfstate'))).toBe(true);
+      expect(fs.existsSync(path.join(worktree.hostPath, 'tmp', 'notes.txt'))).toBe(true);
+      expect(fs.lstatSync(path.join(worktree.hostPath, 'dist')).isSymbolicLink()).toBe(true);
+      expect(fs.existsSync(path.join(externalTarget, 'important.txt'))).toBe(true);
+      expect(fs.existsSync(path.join(worktree.hostPath, 'uncommitted.ts'))).toBe(true);
+      expect(fs.existsSync(path.join(worktree.hostPath, '.git'))).toBe(true);
+    });
+
+    it('cleans nested git repos inside a multi-repo worktree without escaping the worktree root', async () => {
+      const groupRoot = path.join(testDir, 'project-group-worktree');
+      fs.mkdirSync(groupRoot, { recursive: true });
+      const memberA = createLocalRepo(path.join(groupRoot, 'member-a'));
+      fs.writeFileSync(path.join(memberA, '.gitignore'), 'target/\n');
+      fs.mkdirSync(path.join(memberA, 'target', 'debug'), { recursive: true });
+      fs.writeFileSync(path.join(memberA, 'target', 'debug', 'bin'), 'x');
+      fs.mkdirSync(path.join(groupRoot, 'non-git', 'node_modules'), { recursive: true });
+      fs.writeFileSync(path.join(groupRoot, 'non-git', 'node_modules', 'keep.js'), 'x');
+
+      const result = await cleanWorktreeArtifacts(groupRoot);
+      expect(result.errors).toEqual([]);
+      expect(result.deletedPaths).toEqual([path.join(memberA, 'target')]);
+      expect(fs.existsSync(path.join(memberA, 'target'))).toBe(false);
+      expect(fs.existsSync(path.join(groupRoot, 'non-git', 'node_modules', 'keep.js'))).toBe(true);
+    });
+
+    it('waits for the grace period, defers while runtime is active, caches clean state, and re-cleans after reactivation', async () => {
+      const sessionId = 'gc-settled-lifecycle' as SessionId;
+      const { worktree } = await createLocalWorktree(sessionId);
+      fs.writeFileSync(path.join(worktree.hostPath, '.gitignore'), 'node_modules/\ndist/\n');
+      const nodeModules = path.join(worktree.hostPath, 'node_modules');
+      fs.mkdirSync(nodeModules, { recursive: true });
+      fs.writeFileSync(path.join(nodeModules, 'a.js'), '1');
+
+      const settledAt = 10_000_000;
+      let nowMs = settledAt + SETTLED_ARTIFACT_CLEANUP_GRACE_MS - 1;
+      let runtimeActive = false;
+      let ownerState: WorktreeOwnerState = {
+        kind: 'settled',
+        meta: sessionMeta(sessionId, { settledAt }),
+        settledSinceMs: settledAt,
+      };
+      let cleanCalls = 0;
+
+      const { gc } = createGc(
+        {},
+        {
+          now: () => nowMs,
+          readOwnerState: async () => ownerState,
+          isRuntimeActive: () => runtimeActive,
+          cleanArtifacts: async (worktreePath, options) => {
+            cleanCalls += 1;
+            return cleanWorktreeArtifacts(worktreePath, options);
+          },
+        }
+      );
+      const tooSoon = await gc.sweep();
+      expect(tooSoon.artifactsCleaned).toEqual([]);
+      expect(cleanCalls).toBe(0);
+      expect(fs.existsSync(nodeModules)).toBe(true);
+      nowMs = settledAt + SETTLED_ARTIFACT_CLEANUP_GRACE_MS;
+      runtimeActive = true;
+      const whileActive = await gc.sweep();
+      expect(whileActive.artifactsCleaned).toEqual([]);
+      expect(cleanCalls).toBe(0);
+      expect(fs.existsSync(nodeModules)).toBe(true);
+      runtimeActive = false;
+      const cleaned = await gc.sweep();
+      expect(cleaned.artifactsCleaned).toEqual([sessionId]);
+      expect(cleaned.removed).toEqual([]);
+      expect(cleanCalls).toBe(1);
+      expect(fs.existsSync(nodeModules)).toBe(false);
+      expect(fs.existsSync(worktree.hostPath)).toBe(true);
+      const cached = await gc.sweep();
+      expect(cached.artifactsCleaned).toEqual([]);
+      expect(cleanCalls).toBe(1);
+      ownerState = { kind: 'active' };
+      await gc.sweep();
+      const distDir = path.join(worktree.hostPath, 'dist');
+      fs.mkdirSync(distDir, { recursive: true });
+      fs.writeFileSync(path.join(distDir, 'bundle.js'), '2');
+
+      const secondSettledAt = nowMs + 60_000;
+      ownerState = {
+        kind: 'settled',
+        meta: sessionMeta(sessionId, { settledAt: secondSettledAt }),
+        settledSinceMs: secondSettledAt,
+      };
+      nowMs = secondSettledAt + SETTLED_ARTIFACT_CLEANUP_GRACE_MS;
+
+      const cleanedAgain = await gc.sweep();
+      expect(cleanedAgain.artifactsCleaned).toEqual([sessionId]);
+      expect(cleanCalls).toBe(2);
+      expect(fs.existsSync(distDir)).toBe(false);
+    });
+
+    it('backs off and retries when settled artifact cleanup encounters git errors', async () => {
+      const sessionId = 'gc-settled-retry' as SessionId;
+      const { worktree } = await createLocalWorktree(sessionId);
+      fs.mkdirSync(path.join(worktree.hostPath, 'node_modules'), { recursive: true });
+      fs.rmSync(path.join(worktree.hostPath, '.git'), { force: true });
+      fs.mkdirSync(path.join(worktree.hostPath, '.git'));
+
+      const settledAt = 1_000_000;
+      let nowMs = settledAt + SETTLED_ARTIFACT_CLEANUP_GRACE_MS;
+      const { gc } = createGc(
+        {
+          [sessionId]: {
+            kind: 'settled',
+            meta: sessionMeta(sessionId, { settledAt }),
+            settledSinceMs: settledAt,
+          },
+        },
+        { now: () => nowMs, retryBaseDelayMs: 1_000, retryMaxDelayMs: 4_000 }
+      );
+
+      const first = await gc.sweep();
+      expect(first.failed).toEqual([sessionId]);
+      expect(first.artifactsCleaned).toEqual([]);
+      expect(fs.existsSync(path.join(worktree.hostPath, 'node_modules'))).toBe(true);
+
+      nowMs += 500;
+      const tooEarly = await gc.sweep();
+      expect(tooEarly.failed).toEqual([]);
+
+      nowMs += 600;
+      const retried = await gc.sweep();
+      expect(retried.failed).toEqual([sessionId]);
+    });
+
+    it('excludes recovery/config dirs (.ipynb_checkpoints, .swiftpm, .vs, .gradle) and never deletes across nested .git or bare repo boundaries', async () => {
+      expect(DEFAULT_ARTIFACT_DIR_NAMES.has('.ipynb_checkpoints')).toBe(false);
+      expect(DEFAULT_ARTIFACT_DIR_NAMES.has('.swiftpm')).toBe(false);
+      expect(DEFAULT_ARTIFACT_DIR_NAMES.has('.vs')).toBe(false);
+      expect(DEFAULT_ARTIFACT_DIR_NAMES.has('.gradle')).toBe(false);
+
+      const sessionId = 'gc-nested-git-safety' as SessionId;
+      const { worktree } = await createLocalWorktree(sessionId);
+      fs.writeFileSync(
+        path.join(worktree.hostPath, '.gitignore'),
+        '.ipynb_checkpoints/\n.swiftpm/\n.vs/\n.gradle/\ndist/\nbuild/\nout/\n'
+      );
+      for (const dir of ['.ipynb_checkpoints', '.swiftpm', '.vs', '.gradle']) {
+        fs.mkdirSync(path.join(worktree.hostPath, dir), { recursive: true });
+        fs.writeFileSync(path.join(worktree.hostPath, dir, 'keep.json'), '{}');
+      }
+      const nestedAtCandidate = path.join(worktree.hostPath, 'build');
+      fs.mkdirSync(nestedAtCandidate, { recursive: true });
+      runGit(nestedAtCandidate, ['init']);
+      fs.writeFileSync(path.join(nestedAtCandidate, '.gitignore'), 'target/\n');
+      fs.mkdirSync(path.join(nestedAtCandidate, 'target'), { recursive: true });
+      fs.writeFileSync(path.join(nestedAtCandidate, 'target', 'artifact.o'), 'x');
+      fs.writeFileSync(path.join(nestedAtCandidate, 'staged.txt'), 'keep');
+      runGit(nestedAtCandidate, ['add', 'staged.txt']);
+      const nestedInsideCandidate = createLocalRepo(path.join(worktree.hostPath, 'dist', 'sub'));
+      fs.writeFileSync(path.join(nestedInsideCandidate, 'important.txt'), 'keep');
+      runGit(nestedInsideCandidate, ['add', 'important.txt']);
+      const bareInsideCandidate = path.join(worktree.hostPath, 'out', 'fixture.git');
+      fs.mkdirSync(bareInsideCandidate, { recursive: true });
+      runGit(bareInsideCandidate, ['init', '--bare']);
+
+      const result = await cleanWorktreeArtifacts(worktree.hostPath);
+      expect(result.errors).toEqual([]);
+      expect(result.deletedPaths).toEqual([path.join(nestedAtCandidate, 'target')]);
+      expect(fs.existsSync(path.join(nestedAtCandidate, 'staged.txt'))).toBe(true);
+      expect(fs.existsSync(path.join(nestedAtCandidate, '.git'))).toBe(true);
+      expect(fs.existsSync(path.join(nestedInsideCandidate, 'important.txt'))).toBe(true);
+      expect(fs.existsSync(path.join(nestedInsideCandidate, '.git'))).toBe(true);
+      expect(fs.existsSync(path.join(bareInsideCandidate, 'HEAD'))).toBe(true);
+      for (const dir of ['.ipynb_checkpoints', '.swiftpm', '.vs', '.gradle']) {
+        expect(fs.existsSync(path.join(worktree.hostPath, dir, 'keep.json'))).toBe(true);
+      }
+    });
+
+    it('records an artifact-cleaned marker on cleanup, aborts if owner leaves settled mid-sweep, and honors grace after unpinning', async () => {
+      const sessionId = 'gc-marker-and-unpin' as SessionId;
+      const { worktree } = await createLocalWorktree(sessionId);
+      fs.writeFileSync(path.join(worktree.hostPath, '.gitignore'), 'node_modules/\ndist/\n');
+      fs.mkdirSync(path.join(worktree.hostPath, 'node_modules'), { recursive: true });
+      fs.writeFileSync(path.join(worktree.hostPath, 'node_modules', 'a.js'), '1');
+
+      const oldSettledAt = 1_000_000;
+      let nowMs = oldSettledAt + 10 * DAY_MS;
+      let ownerState: WorktreeOwnerState = { kind: 'active' };
+      const { gc } = createGc({}, { now: () => nowMs, readOwnerState: async () => ownerState });
+      await gc.sweep();
+      expect(hasWorktreeArtifactsCleaned(worktree.hostPath)).toBe(false);
+      ownerState = {
+        kind: 'settled',
+        meta: sessionMeta(sessionId, { settledAt: oldSettledAt }),
+        settledSinceMs: oldSettledAt,
+      };
+      nowMs += SETTLED_ARTIFACT_CLEANUP_GRACE_MS - 1;
+      expect((await gc.sweep()).artifactsCleaned).toEqual([]);
+      expect(fs.existsSync(path.join(worktree.hostPath, 'node_modules'))).toBe(true);
+      nowMs += 1;
+      const cleaned = await gc.sweep();
+      expect(cleaned.artifactsCleaned).toEqual([sessionId]);
+      expect(fs.existsSync(path.join(worktree.hostPath, 'node_modules'))).toBe(false);
+      expect(hasWorktreeArtifactsCleaned(worktree.hostPath)).toBe(true);
+    });
+
+    it('surfaces scan readdir errors instead of caching an incomplete cleanup as clean', async () => {
+      const sessionId = 'gc-readdir-error' as SessionId;
+      const { worktree } = await createLocalWorktree(sessionId);
+      const unreadableDir = path.join(worktree.hostPath, 'sub');
+      fs.mkdirSync(unreadableDir, { recursive: true });
+
+      const readdir = fs.promises.readdir;
+      vi.spyOn(fs.promises, 'readdir').mockImplementation((async (
+        target: fs.PathLike,
+        options?: unknown
+      ) => {
+        if (path.resolve(String(target)) === path.resolve(unreadableDir)) {
+          throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+        }
+        return readdir(target, options as never);
+      }) as typeof fs.promises.readdir);
+
+      const settledAt = 1_000_000;
+      const { gc } = createGc(
+        {
+          [sessionId]: {
+            kind: 'settled',
+            meta: sessionMeta(sessionId, { settledAt }),
+            settledSinceMs: settledAt,
+          },
+        },
+        { now: () => settledAt + SETTLED_ARTIFACT_CLEANUP_GRACE_MS }
+      );
+
+      const result = await gc.sweep();
+      expect(result.failed).toEqual([sessionId]);
+      expect(result.artifactsCleaned).toEqual([]);
+    });
+
+    it('writes the artifact-cleaned marker before deleting the first artifact directory', async () => {
+      const sessionId = 'gc-write-ahead-marker' as SessionId;
+      const { worktree } = await createLocalWorktree(sessionId);
+      fs.writeFileSync(path.join(worktree.hostPath, '.gitignore'), 'node_modules/\n');
+      const nodeModules = path.join(worktree.hostPath, 'node_modules');
+      fs.mkdirSync(nodeModules, { recursive: true });
+      fs.writeFileSync(path.join(nodeModules, 'a.js'), '1');
+
+      let markerPresentAtRm = false;
+      const rm = fs.promises.rm;
+      vi.spyOn(fs.promises, 'rm').mockImplementation(async (target, options) => {
+        if (path.resolve(String(target)) === path.resolve(nodeModules)) {
+          markerPresentAtRm = hasWorktreeArtifactsCleaned(worktree.hostPath);
+        }
+        return rm(target, options);
+      });
+
+      const settledAt = 1_000_000;
+      const { gc } = createGc(
+        {
+          [sessionId]: {
+            kind: 'settled',
+            meta: sessionMeta(sessionId, { settledAt }),
+            settledSinceMs: settledAt,
+          },
+        },
+        { now: () => settledAt + SETTLED_ARTIFACT_CLEANUP_GRACE_MS }
+      );
+
+      const cleaned = await gc.sweep();
+      expect(cleaned.artifactsCleaned).toEqual([sessionId]);
+      expect(markerPresentAtRm).toBe(true);
+      expect(hasWorktreeArtifactsCleaned(worktree.hostPath)).toBe(true);
+    });
   });
 });

@@ -101,6 +101,10 @@ import type {
   RateLimitsSnapshot,
   SessionUsageUpdate,
 } from 'acp-extension-core';
+import {
+  clearWorktreeArtifactsCleaned,
+  hasWorktreeArtifactsCleaned,
+} from './worktree/worktree-artifact-cleaner';
 import { getWorktreeManager } from './worktree/worktree-manager';
 import type {
   GitCredentialBrokerAuth,
@@ -408,6 +412,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   /** Per-instance listener teardown for `detachSession`; see `registerSessionEvents`. */
   private readonly sessionEventDetachers = new WeakMap<ISession, () => void>();
   private readonly pendingSessionCreates = new Map<SessionId, Promise<ISession>>();
+  private readonly pendingCreateParentBySession = new Map<SessionId, SessionId>();
   private readonly pendingCreateControllers = new Map<SessionId, AbortController>();
   private readonly pendingTerminationPromises = new Map<SessionId, Promise<void>>();
   private readonly sessionSandboxFactory: SessionSandboxFactory;
@@ -553,6 +558,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     // Register ownership before any startup work so concurrent creates share one attempt.
     const controller = new AbortController();
     this.pendingCreateControllers.set(sessionId, controller);
+    if (config.parentSessionId) {
+      this.pendingCreateParentBySession.set(sessionId, config.parentSessionId);
+    }
     const promise = Promise.resolve()
       .then(
         async () => await this.createSessionInnerWithAgent(config, agentStart, controller.signal)
@@ -560,6 +568,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       .finally(() => {
         if (this.pendingSessionCreates.get(sessionId) === promise) {
           this.pendingSessionCreates.delete(sessionId);
+          this.pendingCreateParentBySession.delete(sessionId);
         }
         if (this.pendingCreateControllers.get(sessionId) === controller) {
           this.pendingCreateControllers.delete(sessionId);
@@ -1823,7 +1832,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(
         `[${config.sessionId}] Worktree details (branch=${worktreeInfo.branch} head=${worktreeInfo.headSha ?? 'unknown'}): host=${worktreeInfo.hostPath}`
       );
-      if (config.resume && worktreeAlreadyExisted) {
+      const artifactsWereCleaned = hasWorktreeArtifactsCleaned(workdir);
+      if (config.resume && worktreeAlreadyExisted && !artifactsWereCleaned) {
         this.logger.debug(
           `[${config.sessionId}] Skipping worktree setup for restored session because the worktree already exists`
         );
@@ -1858,6 +1868,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             onEnd: (event) => setupHistory.onEnd?.(event),
           },
         });
+        if (artifactsWereCleaned) {
+          await clearWorktreeArtifactsCleaned(workdir);
+        }
       }
     } else if (config.parentSessionId) {
       const parentSessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(
@@ -1866,6 +1879,38 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const parentMeta = await parentSessionDoc.getMetaState();
       if (parentMeta?.isWorktree) {
         await sessionDoc.setIsWorktree(true);
+        if (workdir && hasWorktreeArtifactsCleaned(workdir)) {
+          const setupHistory = createWorktreeScriptHistoryRecorder({
+            sessionDoc,
+            sessionId: config.sessionId!,
+            phase: 'setup',
+            logger: this.logger,
+            backend: await createSessionBackend(sessionDoc),
+            insertBeforeEntryId: config.worktreeScriptHistoryInsertBeforeEntryId,
+          });
+          await runWorktreeSetup({
+            config: await this.resolveWorktreeSetupConfig(config),
+            sessionId: config.sessionId!,
+            workspaceId: config.workspaceId,
+            workdir,
+            branch: parentMeta.branchName?.trim() ?? config.branch ?? '',
+            repoFullName: config.githubRepo,
+            localProjectId:
+              config.project?.kind === 'local' ? config.project.localProjectId : undefined,
+            logger: this.logger,
+            events: {
+              onStart: async (event) => {
+                this.reportStartStage(config, 'worktree-setup');
+                await setupHistory.onStart?.(event);
+              },
+              onStepStart: (event) => setupHistory.onStepStart?.(event),
+              onOutput: (event) => setupHistory.onOutput?.(event),
+              onStepEnd: (event) => setupHistory.onStepEnd?.(event),
+              onEnd: (event) => setupHistory.onEnd?.(event),
+            },
+          });
+          await clearWorktreeArtifactsCleaned(workdir);
+        }
       }
       this.logger.debug(
         `[${config.sessionId}] Child session of ${config.parentSessionId}, skipping worktree creation (workdir=${workdir})`
@@ -2016,6 +2061,24 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   hasSession(sessionId: SessionId): boolean {
     return this.sessions.has(sessionId);
+  }
+
+  isWorktreeSessionBusy(rootSessionId: SessionId): boolean {
+    if (
+      this.isArchiveInFlight(rootSessionId) ||
+      this.sessions.has(rootSessionId) ||
+      this.pendingSessionCreates.has(rootSessionId) ||
+      this.pendingTerminationPromises.has(rootSessionId)
+    ) {
+      return true;
+    }
+    if (this.getActiveChildSessionIds(rootSessionId).length > 0) {
+      return true;
+    }
+    for (const parentId of this.pendingCreateParentBySession.values()) {
+      if (parentId === rootSessionId) return true;
+    }
+    return false;
   }
 
   getSession(sessionId: SessionId): ISession | null {

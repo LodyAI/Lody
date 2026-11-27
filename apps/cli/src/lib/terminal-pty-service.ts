@@ -2,6 +2,7 @@ import { observeManagedProcessTree } from './managed-process-observation';
 import { nodeProcessLive } from '@lody/shared/node/process';
 import { toShared } from '@/platform/process-options';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { IPty } from '@lydell/node-pty';
@@ -75,6 +76,7 @@ export type TerminalReplay = {
 
 export interface TerminalPtyServiceApi {
   list(sessionId: string): TerminalSnapshot[];
+  hasActiveTerminalForWorkdir(workdir: string, sessionId?: string): boolean;
   open(params: TerminalOpenParams): Promise<TerminalOpenResult>;
   attach(terminalId: string, cols: number, rows: number): TerminalReplay;
   input(terminalId: string, data: string): void;
@@ -206,6 +208,27 @@ class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
         },
       ];
     });
+  }
+
+  hasActiveTerminalForWorkdir(workdir: string, sessionId?: string): boolean {
+    if (this.pendingSessionOpens.size > 0) {
+      return true;
+    }
+    const targetDir = canonicalPathOrResolve(workdir);
+    for (const record of this.records.values()) {
+      if (sessionId && record.sessionId === sessionId) {
+        return true;
+      }
+      const recordDir = canonicalPathOrResolve(record.cwd);
+      const rel = path.relative(targetDir, recordDir);
+      if (
+        rel === '' ||
+        (!path.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`))
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   async open(params: TerminalOpenParams): Promise<TerminalOpenResult> {
@@ -401,6 +424,15 @@ class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
     for (const handler of this.handlers) {
       handler(event);
     }
+  }
+}
+
+function canonicalPathOrResolve(targetPath: string): string {
+  const resolved = path.resolve(targetPath);
+  try {
+    return fs.realpathSync.native(resolved);
+  } catch {
+    return resolved;
   }
 }
 
