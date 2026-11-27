@@ -37,8 +37,11 @@ export async function acceptSessionUserTurn(
   creation?: SessionMeta,
   queue?: Record<string, unknown>,
   attachments?: SessionAttachmentDraft[],
-  onAccepted?: () => void
+  onAccepted?: () => void,
+  /** A composer edit replacing row `cid` instead of appending; requires `queue`. */
+  queueReplace?: { cid: string }
 ): Promise<'written' | 'pending'> {
+  if (queueReplace && !queue) throw new Error('A queue edit needs its queue row');
   // Do not consume a draft into a provisional plaintext namespace that may be
   // retired when the workspace is classified as encrypted.
   await runtime.waitForContentAdmission?.();
@@ -118,6 +121,7 @@ export async function acceptSessionUserTurn(
       delivery,
       creation,
       queue: prepared.queue,
+      ...(queueReplace ? { queueReplace } : {}),
       attachments: attachments ?? [],
       targetMachineId: targetMachineId as MachineId | undefined,
       historyBackend: meta?.historyBackend === 'roost' ? 'roost' : 'loro',
@@ -133,6 +137,7 @@ export async function acceptSessionUserTurn(
     delivery,
     creation,
     queue: prepared.queue,
+    ...(queueReplace ? { queueReplace } : {}),
   });
   onAccepted?.();
   return 'written';

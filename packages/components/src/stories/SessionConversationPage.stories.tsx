@@ -29,7 +29,17 @@ import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import type { ComponentProps, CSSProperties, ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { fn, userEvent, within } from 'storybook/test';
 import {
@@ -51,6 +61,7 @@ import {
   type MessageQueueItem,
   type SessionDoc,
   type SessionHistoryParsed,
+  type SessionHistory,
   type SessionId,
   type SessionMeta,
   type SessionPullRequestMeta,
@@ -71,6 +82,7 @@ import {
 } from '@/atoms/doc-meta';
 import { lodyPresenceStatesAtom } from '@/atoms/presence';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import type { PendingSessionSend } from '@/lib/session-pending-sends';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import {
   MessageSelectionContext,
@@ -90,7 +102,11 @@ import {
   SessionConversationPage,
   SessionConversationPageBody,
 } from '@/components/sessions/session-conversation-page';
-import { SessionChatInputArea } from '@/components/sessions/session-chat-input-area';
+import {
+  SessionChatInputArea,
+  type SessionChatInputAreaHandle,
+} from '@/components/sessions/session-chat-input-area';
+import { UserAvatar } from '@/components/user-avatar';
 import {
   Archive,
   Copy,
@@ -1620,12 +1636,61 @@ function createReadingRuntime(sessionId: SessionId): WorkspaceRuntime {
   } as unknown as WorkspaceRuntime;
 }
 
-function createStoryStore(session: SessionMeta, state: PageState) {
+/** A saved edit of the second queued row, still preparing its new image. */
+function storyHeldEdit(sessionId: SessionId, failed: boolean): PendingSessionSend {
+  const image = new Blob(
+    [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="100%" height="100%" fill="#cbd5e1"/></svg>',
+    ],
+    { type: 'image/svg+xml' }
+  );
+  return {
+    id: 'story-edit-turn-1',
+    sessionId,
+    workspaceId: STORY_WORKSPACE_ID,
+    sequence: 1,
+    entry: { id: 'story-edit-turn-1', role: 'user', items: [] } as unknown as SessionHistory,
+    delivery: { kind: 'queue' },
+    queue: { task: 'Refactor the message queue (with the new mock)' },
+    queueReplace: { cid: 'story-edit-queue-1' },
+    ...(failed ? { error: "The image couldn't be uploaded (network_error). Try again." } : {}),
+    attachments: [
+      {
+        id: 'mock',
+        kind: 'image',
+        source: image,
+        name: 'mock.svg',
+        mimeType: 'image/svg+xml',
+        lastModified: 0,
+        progress: failed ? 0 : 64,
+      },
+    ],
+  };
+}
+
+function createStoryStore(session: SessionMeta, state: PageState, heldEdit?: 'saving' | 'failed') {
   const store = createStore();
   store.set(currentWorkspaceIdAtom, STORY_WORKSPACE_ID);
   store.set(currentWorkspaceSlugAtom, STORY_WORKSPACE_SLUG);
   store.set(authTokenAtom, STORY_AUTH_TOKEN);
-  store.set(runtimeAtom, isReadingState(state) ? createReadingRuntime(session.id) : storyRuntime);
+  const held = heldEdit ? [storyHeldEdit(session.id, heldEdit === 'failed')] : [];
+  store.set(
+    runtimeAtom,
+    isReadingState(state)
+      ? createReadingRuntime(session.id)
+      : heldEdit
+        ? ({
+            ...storyRuntime,
+            pendingSends: {
+              subscribe: () => () => {},
+              getSnapshot: () => held,
+              hasSession: () => true,
+              retry: () => {},
+              cancel: async () => {},
+            },
+          } as unknown as WorkspaceRuntime)
+        : storyRuntime
+  );
   store.set(userAtom, {
     id: STORY_USER_ID,
     name: 'Zixuan',
@@ -1676,6 +1741,149 @@ const storyQueueItems = (): MessageQueueItem[] =>
     timestamp: new Date(getServerNow() - i * 1000).toISOString(),
     acpSessionConfig: { prompt: task, cliType: 'claude-code', agentType: 'claude-code' },
   })) as unknown as MessageQueueItem[];
+
+/* --- Queue editing on the real page -------------------------------------
+   The page's info-bar queue and its real composer share one state here, wired
+   the way `session-chat-interface.tsx` wires them: Edit begins a composer edit
+   through the composer handle, Save/Cancel end it, and the composer shows the
+   row's own run config while editing. */
+
+const STORY_TEAMMATE_ID = 'user-storybook-teammate';
+const storyTeam: Record<string, string> = {
+  [STORY_USER_ID]: 'Storybook user',
+  [STORY_TEAMMATE_ID]: 'Leo Park',
+};
+
+const storyEditQueueItems = (): MessageQueueItem[] => {
+  const altModel = selectorOptions.modelOptions[1]?.value ?? selectorOptions.modelOptions[0]?.value;
+  const rows = [
+    {
+      task: 'After the permission flow lands, tighten the mobile composer spacing.',
+      userId: STORY_USER_ID,
+    },
+    {
+      task: 'Refactor the message queue to support priority ordering and cancellation tokens.',
+      userId: STORY_TEAMMATE_ID,
+      modelId: altModel,
+    },
+    { task: 'Then run the Storybook render budgets again.', userId: STORY_USER_ID },
+  ];
+  return rows.map((row, i) => ({
+    $cid: `story-edit-queue-${i}`,
+    task: row.task,
+    userId: row.userId,
+    userName: storyTeam[row.userId],
+    userTurnId: `story-edit-turn-${i}`,
+    timestamp: new Date(getServerNow() - (3 - i) * 60_000).toISOString(),
+    acpSessionConfig: {
+      prompt: row.task,
+      cliType: 'builtin',
+      agentType: 'codex',
+      ...(row.modelId ? { modelId: row.modelId } : {}),
+    },
+  })) as unknown as MessageQueueItem[];
+};
+
+type StoryQueueEdit = {
+  items: MessageQueueItem[];
+  setItems: (update: (rows: MessageQueueItem[]) => MessageQueueItem[]) => void;
+  editingCid: string | null;
+  begin: (item: MessageQueueItem) => void;
+  end: () => void;
+  composerRef: RefObject<SessionChatInputAreaHandle | null>;
+  /** The edit's own model selection; the Session's returns when the edit ends. */
+  editModel: string | null;
+  setEditModel: (value: string) => void;
+};
+const StoryQueueEditContext = createContext<StoryQueueEdit | null>(null);
+
+function StoryQueueEditProvider({
+  autoEditIndex,
+  children,
+}: {
+  autoEditIndex?: number;
+  children: ReactNode;
+}) {
+  const [items, setItems] = useState(storyEditQueueItems);
+  const [editingCid, setEditingCid] = useState<string | null>(null);
+  const [editModel, setEditModel] = useState<string | null>(null);
+  const composerRef = useRef<SessionChatInputAreaHandle | null>(null);
+  const value = useMemo<StoryQueueEdit>(
+    () => ({
+      items,
+      setItems,
+      editingCid,
+      composerRef,
+      editModel,
+      setEditModel,
+      begin: (item) => {
+        setEditingCid(item.$cid);
+        setEditModel(
+          item.acpSessionConfig?.modelId ?? selectorOptions.modelOptions[0]?.value ?? null
+        );
+        composerRef.current?.beginQueueEdit(item.acpSessionConfig?.prompt ?? item.task);
+      },
+      end: () => setEditingCid(null),
+    }),
+    [editModel, editingCid, items]
+  );
+  const started = useRef(false);
+  useEffect(() => {
+    if (autoEditIndex === undefined || started.current || !composerRef.current) return;
+    started.current = true;
+    value.begin(items[autoEditIndex]!);
+  });
+  return <StoryQueueEditContext.Provider value={value}>{children}</StoryQueueEditContext.Provider>;
+}
+
+function StoryEditableQueue({ session, mobile }: { session: SessionMeta; mobile: boolean }) {
+  const edit = useContext(StoryQueueEditContext)!;
+  const firstModel = selectorOptions.modelOptions[0]?.value;
+  return (
+    <MessageQueueDisplay
+      sessionId={session.id}
+      items={edit.items}
+      editingCid={edit.editingCid}
+      onEditStart={edit.begin}
+      onFocusEdit={() => edit.composerRef.current?.focusInput()}
+      onRemove={(cid) => edit.setItems((rows) => rows.filter((row) => row.$cid !== cid))}
+      onReorder={fn()}
+      onSteer={fn()}
+      showSteerAction
+      roomy={mobile}
+      footerPosition={mobile ? 'inline' : 'below'}
+      renderSenderAvatar={(item) => (
+        <UserAvatar size="small" user={{ id: item.userId, name: item.userName ?? '' }} />
+      )}
+      describeRunConfig={(item) => {
+        const modelId = item.acpSessionConfig?.modelId ?? firstModel;
+        const modelLabel =
+          selectorOptions.modelOptions.find((option) => option.value === modelId)?.label ?? null;
+        return {
+          agentLabel: 'Codex',
+          modelLabel,
+          modeLabel: selectorOptions.modeOptions[0]?.label ?? null,
+          differenceTag: modelId !== firstModel ? modelLabel : null,
+        };
+      }}
+    />
+  );
+}
+
+function MaybeQueueEdit({
+  mode,
+  children,
+}: {
+  mode?: 'idle' | 'editing' | 'saving' | 'failed';
+  children: ReactNode;
+}) {
+  if (!mode) return <>{children}</>;
+  return (
+    <StoryQueueEditProvider autoEditIndex={mode === 'editing' ? 1 : undefined}>
+      {children}
+    </StoryQueueEditProvider>
+  );
+}
 
 function StoryInfoBar({
   session,
@@ -1728,15 +1936,16 @@ function StoryInfoBar({
     );
   }
   const withoutBar = queued === 'without-info-bar';
-  const queue = queued ? (
+  const queueEdit = useContext(StoryQueueEditContext);
+  const queue = queueEdit ? (
+    <StoryEditableQueue session={session} mobile={mobile} />
+  ) : queued ? (
     <MessageQueueDisplay
       sessionId={session.id}
       items={storyQueueItems()}
       onRemove={fn()}
       onReorder={fn()}
       onEditStart={fn()}
-      onEditCancel={fn()}
-      onEditSave={fn()}
       onSteer={fn()}
       showSteerAction
       roomy={mobile}
@@ -1813,9 +2022,24 @@ function StoryComposer({
       options.configOptionSelectors.map((selector) => [selector.configId, selector.currentValue])
     )
   );
+  const queueEdit = useContext(StoryQueueEditContext);
+  const editing = queueEdit?.editingCid
+    ? queueEdit.items.find((item) => item.$cid === queueEdit.editingCid)
+    : undefined;
 
   return (
     <SessionChatInputArea
+      ref={queueEdit?.composerRef}
+      queueEdit={
+        editing && queueEdit
+          ? {
+              position: queueEdit.items.indexOf(editing) + 1,
+              keptBlocks: [],
+              onRemoveKeptBlock: () => undefined,
+            }
+          : null
+      }
+      onQueueEditCancel={queueEdit?.end}
       claimNavigationFocus={claimNavigationFocus}
       // The info bar above owns this gap, as on the session page.
       hideTopSpacer
@@ -1826,7 +2050,7 @@ function StoryComposer({
       isDark
       isEmptyConversation={false}
       selectedModeId={mode}
-      selectedModelId={model}
+      selectedModelId={editing ? (queueEdit?.editModel ?? model) : model}
       modeOptions={options.modeOptions}
       modelOptions={options.modelOptions}
       configOptionSelectors={options.configOptionSelectors}
@@ -1834,11 +2058,38 @@ function StoryComposer({
       isRepoPublic
       availableCommands={[]}
       onModeChange={setMode}
-      onModelChange={setModel}
+      onModelChange={editing && queueEdit ? queueEdit.setEditModel : setModel}
       onConfigOptionChange={(configId, value) =>
         setConfigValues((prev) => ({ ...prev, [configId]: value }))
       }
-      onSendMessage={onSendMessage ?? (async () => true)}
+      onSendMessage={
+        editing && queueEdit
+          ? async (blocks) => {
+              const text = blocks
+                .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+                .join('\n');
+              queueEdit.setItems((rows) =>
+                rows.map((row) =>
+                  row.$cid === editing.$cid
+                    ? {
+                        ...row,
+                        task: text,
+                        userId: STORY_USER_ID,
+                        userName: storyTeam[STORY_USER_ID],
+                        acpSessionConfig: {
+                          ...row.acpSessionConfig!,
+                          prompt: text,
+                          modelId: queueEdit.editModel ?? undefined,
+                        },
+                      }
+                    : row
+                )
+              );
+              queueEdit.end();
+              return true;
+            }
+          : (onSendMessage ?? (async () => true))
+      }
       onStop={action}
       onRemoveQueueItem={async () => undefined}
       initialInputText={initialInputText}
@@ -2024,7 +2275,13 @@ export function SessionConversationStoryHarness({
   onPresented,
   composerModelLabel,
   claimNavigationFocus,
+  queueEdit,
 }: {
+  /**
+   * Interactive queue editing on this page; `editing` starts on the second row,
+   * `saving`/`failed` show that row's saved edit still preparing a new image.
+   */
+  queueEdit?: 'idle' | 'editing' | 'saving' | 'failed';
   state: PageState;
   frame: DeviceFrame;
   embedded?: boolean;
@@ -2084,7 +2341,15 @@ export function SessionConversationStoryHarness({
   const selection = useMessageSelection(session.id);
   const [preview, setPreview] = useState<ConversationMessage[] | null>(null);
   const [sentMessages, setSentMessages] = useState<SessionHistoryParsed[]>([]);
-  const store = useMemo(() => createStoryStore(session, state), [session, state]);
+  const store = useMemo(
+    () =>
+      createStoryStore(
+        session,
+        state,
+        queueEdit === 'saving' || queueEdit === 'failed' ? queueEdit : undefined
+      ),
+    [queueEdit, session, state]
+  );
   /* Wide mode is a persisted atom; seed it per story instead of leaking the
      previous story's localStorage pick into this one. */
   useEffect(() => {
@@ -2440,7 +2705,7 @@ export function SessionConversationStoryHarness({
                         }
                         composerSlot={
                           shouldShowPermissionSurface ? null : (
-                            <>
+                            <MaybeQueueEdit mode={queueEdit}>
                               <div hidden={selection.active}>
                                 {/* Mirrors the production info bar (cluster + stage)
                               glued above the composer — desktop AND mobile. */}
@@ -2497,7 +2762,7 @@ export function SessionConversationStoryHarness({
                                 />
                               </div>
                               <MessageSelectionToolbar selection={selection} />
-                            </>
+                            </MaybeQueueEdit>
                           )
                         }
                       />
@@ -2832,6 +3097,65 @@ export const DesktopQueuedMessages: Story = {
 
 export const MobileQueuedMessages: Story = {
   args: { frame: 'mobile', state: 'working', queued: 'with-info-bar' },
+  globals: { theme: 'light' },
+  decorators: [withMobileViewport],
+};
+
+/**
+ * Queue editing on the real page: several senders, a row that runs on another
+ * model (tagged), and Edit moving a row into the composer (try Esc / Cancel /
+ * Save). The `Editing` variants start with the second row in the composer.
+ */
+export const DesktopQueueEdit: Story = {
+  args: { state: 'working', queued: 'with-info-bar', queueEdit: 'idle' },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopQueueEditing: Story = {
+  args: { state: 'working', queued: 'with-info-bar', queueEdit: 'editing' },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopQueueEditingDark: Story = {
+  args: { state: 'working', queued: 'with-info-bar', queueEdit: 'editing' },
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopQueueEditSaving: Story = {
+  args: { state: 'working', queued: 'with-info-bar', queueEdit: 'saving' },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopQueueEditSaveFailed: Story = {
+  args: { state: 'working', queued: 'with-info-bar', queueEdit: 'failed' },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+export const MobileQueueEdit: Story = {
+  args: { frame: 'mobile', state: 'working', queued: 'with-info-bar', queueEdit: 'idle' },
+  globals: { theme: 'light' },
+  decorators: [withMobileViewport],
+};
+
+export const MobileQueueEditing: Story = {
+  args: { frame: 'mobile', state: 'working', queued: 'with-info-bar', queueEdit: 'editing' },
+  globals: { theme: 'light' },
+  decorators: [withMobileViewport],
+};
+
+export const MobileQueueEditSaving: Story = {
+  args: { frame: 'mobile', state: 'working', queued: 'with-info-bar', queueEdit: 'saving' },
+  globals: { theme: 'light' },
+  decorators: [withMobileViewport],
+};
+
+export const MobileQueueEditSaveFailed: Story = {
+  args: { frame: 'mobile', state: 'working', queued: 'with-info-bar', queueEdit: 'failed' },
   globals: { theme: 'light' },
   decorators: [withMobileViewport],
 };

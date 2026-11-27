@@ -91,6 +91,17 @@ export function selectPendingQueueSends(
   );
 }
 
+/** Held composer edits of existing rows in this conversation, by row `cid`. */
+export function selectPendingQueueEdits(
+  sends: readonly PendingSessionSend[],
+  sessionId: string
+): ReadonlyMap<string, PendingSessionSend> {
+  const edits = new Map<string, PendingSessionSend>();
+  for (const send of sends)
+    if (send.sessionId === sessionId && send.queueReplace) edits.set(send.queueReplace.cid, send);
+  return edits;
+}
+
 export function deriveSessionSendStatuses(
   sends: readonly PendingSessionSend[]
 ): Record<string, SessionSendStatus> {

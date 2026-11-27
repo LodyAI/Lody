@@ -425,3 +425,16 @@ export const clearSessionRunConfigDraftsAtom = atom(
     if (remaining.size !== leases.size) set(mountedLeasesAtom, remaining);
   }
 );
+
+/** Drop one scope's outstanding edits, e.g. a finished queued-message edit. */
+export const discardSessionRunConfigDraftAtom = atom(
+  null,
+  (get, set, scope: SessionRunConfigDraftScope) => {
+    const key = getSessionRunConfigDraftKey(scope);
+    const drafts = get(sessionRunConfigDraftsAtom);
+    if (!drafts.has(key)) return;
+    const next = new Map(drafts);
+    next.delete(key);
+    set(sessionRunConfigDraftsAtom, next);
+  }
+);
