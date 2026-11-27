@@ -4,7 +4,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 import { ChevronLeft, RefreshCw } from 'lucide-react';
-import { Children, isValidElement, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
@@ -69,8 +69,8 @@ export interface E2eeDeviceApprovalGuideProps {
   refreshing?: boolean;
   /** The way out when no other device can approve; replaces the re-invitation note. */
   lostAccess?: ReactNode;
-  /** The existing explicit pairing exchange, kept during the transition. */
-  children?: ReactNode;
+  /** This device's account pairing request, shown below the steps. */
+  pairing?: ReactNode;
 }
 
 /**
@@ -80,19 +80,6 @@ export interface E2eeDeviceApprovalGuideProps {
  */
 export function E2eeDeviceApprovalGuide(props: E2eeDeviceApprovalGuideProps) {
   const { t } = useTranslation();
-  const childList = Children.toArray(props.children);
-  const hasAccountPairing = childList.some((child) => {
-    if (!isValidElement<{ runtime?: Record<string, unknown> }>(child)) return false;
-    const runtime = child.props?.runtime;
-    return Boolean(runtime?.requestAccountPairing || runtime?.inspectAccountPairing);
-  });
-  const visibleChildren = hasAccountPairing
-    ? childList.filter((child) => {
-        if (!isValidElement<Record<string, unknown>>(child)) return true;
-        // Hide the legacy personal-pairing card when account pairing is supported.
-        return !('canApprove' in child.props && 'accountId' in child.props);
-      })
-    : childList;
   return (
     <main
       data-testid="e2ee-device-approval-guide"
@@ -144,7 +131,7 @@ export function E2eeDeviceApprovalGuide(props: E2eeDeviceApprovalGuideProps) {
             </Button>
           )}
         </div>
-        {visibleChildren}
+        {props.pairing}
       </div>
     </main>
   );

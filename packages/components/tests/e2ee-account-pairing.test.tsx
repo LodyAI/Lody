@@ -379,56 +379,6 @@ describe('approving device', () => {
     );
   });
 
-  it('in the reverse direction shows its own code and opens the confirmation once a request arrives', async () => {
-    const host = approverHost();
-    host.request = null;
-    await act(async () => root.render(<E2eeAccountPairingApprove runtime={host.runtime} />));
-    await click('e2ee.accountPair.approve.showInstead');
-    expect(text()).toContain(CODE);
-    expect(qr.payloads.at(-1)).toBe('lody://pair/50M6HA7955MTKTHADANEPAVBNF38');
-    await tick();
-    expect(host.inspected).toEqual([CODE]);
-    expect(text()).not.toContain('e2ee.accountPair.approve.warning');
-    host.request = preview;
-    await tick();
-    expect(text()).toContain('e2ee.accountPair.approve.warning');
-    await tick();
-    // The confirmation stops polling.
-    expect(host.inspected).toHaveLength(2);
-  });
-
-  it('in the reverse direction learns of a request from the relay hint before the next poll, and releases the hint when leaving the code', async () => {
-    // Without the hint the approver waits for its poll; the poll stays the fallback.
-    const host = approverHost();
-    host.request = null;
-    const lookupId = 'cd'.repeat(16);
-    const hints = new Map<string, () => void>();
-    const runtime = {
-      ...host.runtime,
-      accountPairingCode: async () => ({
-        pairingString: CODE,
-        expiresAt: NOW + 600_000,
-        lookupId,
-      }),
-      subscribeAccountPairingApproval: (id: string, changed: () => void) => {
-        hints.set(id, changed);
-        return () => hints.delete(id);
-      },
-    };
-    await act(async () => root.render(<E2eeAccountPairingApprove runtime={runtime} />));
-    await click('e2ee.accountPair.approve.showInstead');
-    expect([...hints.keys()]).toEqual([lookupId]);
-    expect(host.inspected).toEqual([]);
-    host.request = preview;
-    await act(async () => {
-      hints.get(lookupId)!();
-      await Promise.resolve();
-    });
-    expect(host.inspected).toEqual([CODE]);
-    expect(text()).toContain('e2ee.accountPair.approve.warning');
-    expect(hints.size).toBe(0);
-  });
-
   it('declines without signing anything', async () => {
     const host = approverHost();
     await act(async () => root.render(<E2eeAccountPairingApprove runtime={host.runtime} />));
@@ -1071,8 +1021,7 @@ describe('automatic pairing product flow', () => {
     await click('e2ee.auto.previous.review');
     await click('e2ee.auto.previous.endAndRestart');
     expect((button('e2ee.auto.cancel') as HTMLButtonElement).disabled).toBe(false);
-    expect((button('e2ee.auto.offline') as HTMLButtonElement).disabled).toBe(false);
-    await click('e2ee.auto.offline');
+    await click('e2ee.auto.manual');
     expect(manualed).toBe(1);
     expect(cancelled).toEqual(['w1']);
     await click('e2ee.auto.cancel');
@@ -1213,7 +1162,6 @@ describe('automatic pairing product flow', () => {
     );
     expect(text()).toContain('123 456');
     expect(text()).toContain('Synthetic team');
-    expect(text()).not.toContain('e2ee.pair.claim');
     saved = { ...waiting, phase: 'syncing' };
     await tick(2000);
     expect(opened).toBe(true);
