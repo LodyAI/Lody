@@ -1,22 +1,5 @@
 import { App } from '@capacitor/app';
-
-/** Longest accepted pairing link; anything longer is not a Lody pairing link. */
-const MAX_LENGTH = 512;
-
-/** The link itself when it is a `lody://auto-pair?…` approval link, otherwise `null`.
- * Join links (`lody://pair/…`), OAuth callbacks and other `lody://` links pass untouched. */
-function pairingLink(value: unknown): string | null {
-  if (typeof value !== 'string' || value.length > MAX_LENGTH) return null;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return null;
-  }
-  // The OS may hand over any letter case for the scheme and host.
-  if (url.protocol.toLowerCase() !== 'lody:') return null;
-  return url.hostname.toLowerCase() === 'auto-pair' && url.search.length > 1 ? value : null;
-}
+import { parseAutoPairLink } from '@lody/shared/e2ee-pair-link';
 
 type PairLinkWindow = typeof window & { __LODY_PENDING_E2EE_PAIR_URL__?: string };
 
@@ -31,7 +14,7 @@ export function initE2eePairLinks(): () => Promise<void> {
   const target = window as PairLinkWindow;
   let warm = false;
   const publish = (value: unknown) => {
-    const url = pairingLink(value);
+    const url = parseAutoPairLink(value);
     if (!url) return false;
     target.__LODY_PENDING_E2EE_PAIR_URL__ = url;
     target.dispatchEvent(new CustomEvent('lody:e2ee-pair-url', { detail: { url } }));

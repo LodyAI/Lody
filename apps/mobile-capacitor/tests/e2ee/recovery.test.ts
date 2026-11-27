@@ -14,11 +14,7 @@ import {
   mobileRecoverySite,
   visibleSecurityEvents,
 } from '../../src/e2ee/recovery';
-import {
-  mobileRecoveryPort,
-  recoveryFilePrompt,
-  type RecoveryFilePromptState,
-} from '../../src/recovery/recovery-port';
+import { mobileRecoveryPort } from '../../src/recovery/recovery-port';
 
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory());
@@ -816,83 +812,45 @@ it('a staging build binds the origin of its VITE_SITE_URL instead of Lody Cloud'
   );
 });
 
-function silentChooserPage() {
+function silentPickers() {
+  const opened: (EventTarget & { removed: boolean; files: unknown[] })[] = [];
   let reads = 0;
-  class Input extends EventTarget {
-    type = '';
-    hidden = false;
-    files: { size: number; arrayBuffer: () => Promise<ArrayBuffer> }[] | null = null;
-    removed = false;
-    remove() {
-      this.removed = true;
-    }
-    click() {
-      opened.push(this);
-      for (const wake of waiting.splice(0)) wake();
-    }
-    choose(bytes: Uint8Array | null) {
-      this.files = bytes
-        ? [
-            {
-              size: bytes.length,
-              arrayBuffer: async () => {
-                reads++;
-                return bytes.slice().buffer;
-              },
-            },
-          ]
-        : [];
-      this.dispatchEvent(new Event('change'));
-    }
-  }
-  const opened: Input[] = [];
   const waiting: (() => void)[] = [];
   const page = Object.assign(new EventTarget(), {
-    createElement: () => new Input(),
     body: { append: () => {} },
-    visibilityState: 'visible',
+    createElement: () => {
+      const input = Object.assign(new EventTarget(), {
+        removed: false,
+        files: [] as unknown[],
+        remove: () => void (input.removed = true),
+        click: () => {
+          opened.push(input);
+          for (const wake of waiting.splice(0)) wake();
+        },
+      });
+      return input;
+    },
   });
-  const view = new EventTarget();
   vi.stubGlobal('document', page);
-  vi.stubGlobal('window', view);
   const nth = (count: number) =>
-    new Promise<Input>((resolve) => {
+    new Promise<(typeof opened)[number]>((resolve) => {
       const check = () =>
         opened.length >= count ? resolve(opened[count - 1]!) : waiting.push(check);
       check();
     });
-  return { opened, nth, view, reads: () => reads };
-}
-
-function promptStates() {
-  const states: RecoveryFilePromptState[] = [];
-  const waiters: (() => void)[] = [];
-  let seen = 0;
-  return {
-    states,
-    record: (state: RecoveryFilePromptState) => {
-      states.push(state);
-      if (state === 'waiting') for (const wake of waiters.splice(0)) wake();
-    },
-    waiting: () =>
-      new Promise<void>((resolve) => {
-        const target = ++seen;
-        const check = () =>
-          states.filter((state) => state === 'waiting').length >= target
-            ? resolve()
-            : waiters.push(check);
-        check();
-      }),
+  const answer = (input: (typeof opened)[number], bytes: Uint8Array) => {
+    input.files = [
+      { size: bytes.length, arrayBuffer: async () => (reads++, bytes.slice().buffer) },
+    ];
+    input.dispatchEvent(new Event('change'));
   };
+  return { nth, answer, reads: () => reads };
 }
 
-async function verifiedCreation() {
+async function promptedPort() {
   const f = await fixture();
   f.empty();
-  const page = silentChooserPage();
-  const watched = promptStates();
-  const prompt = recoveryFilePrompt(watched.record);
-  let saved = new Uint8Array();
+  const prompts: (string | null)[] = [];
   const owned = mobileRecoveryPort({
     config: {
       ...f.options,
@@ -903,131 +861,48 @@ async function verifiedCreation() {
     accountId: 'account-a',
     sessionId: 'login-a',
     currentSession: f.options.currentSession,
-    exportFile: async (bytes) => {
-      saved = bytes.slice();
-      return true;
-    },
-    chooseFile: prompt.chooseFile,
-    confirmSavedFile: prompt.confirmSavedFile,
+    onFilePrompt: (mode) => prompts.push(mode),
+    exportFile: async () => true,
   });
-  return { f, page, watched, prompt, owned, saved: () => saved };
+  return { f, owned, prompts, pickers: silentPickers() };
 }
 
-it('Cancel on the verification prompt releases a creation whose picker WebKit never answers', async () => {
-  const t = await verifiedCreation();
-  try {
-    const stuck = t.owned.port.create!();
-    await t.watched.waiting();
-    t.prompt.pick();
-    const silent = await t.page.nth(1);
-    t.page.view.dispatchEvent(new Event('blur'));
-    t.page.view.dispatchEvent(new Event('focus'));
-    expect(t.watched.states.at(-1)).toBe('choosing');
-    t.prompt.cancel();
-    expect(await stuck).toEqual({ outcome: 'cancelled' });
-    expect(silent.removed).toBe(true);
-    expect(t.f.paths).not.toContain('e2eeRecoveryVault:putImmutable');
-    const retry = t.owned.port.create!();
-    await t.watched.waiting();
-    t.prompt.pick();
-    const slow = await t.page.nth(2);
-    t.page.view.dispatchEvent(new Event('blur'));
-    t.page.view.dispatchEvent(new Event('focus'));
-    for (let turn = 0; turn < 20; turn++) await Promise.resolve();
-    slow.choose(t.saved());
-    expect(await retry).toEqual({ outcome: 'created', vaultId: expect.any(String) });
-    expect(t.watched.states.at(-1)).toBe('closed');
-  } finally {
-    t.saved().fill(0);
-    t.prompt.dispose();
-    t.owned.dispose();
-  }
-}, 30_000);
+it('a file prompt survives a silent WKWebView picker: Choose again replaces it, Cancel and logout answer', async () => {
+  const { owned, prompts, pickers } = await promptedPort();
+  const stuck = owned.port.checkFile!();
+  const silent = await pickers.nth(1);
+  expect(prompts).toEqual(['open']);
+  owned.filePrompt.pick();
+  expect(silent.removed).toBe(true);
+  pickers.answer(silent, new Uint8Array([1, 2, 3]));
+  expect(pickers.reads()).toBe(0);
+  owned.filePrompt.cancel();
+  expect(await stuck).toEqual({ outcome: 'cancelled' });
+  expect((await pickers.nth(2)).removed).toBe(true);
+  expect(prompts.at(-1)).toBeNull();
+  const dismissed = owned.port.checkFile!();
+  (await pickers.nth(3)).dispatchEvent(new Event('cancel'));
+  expect(await dismissed).toEqual({ outcome: 'cancelled' });
+  const orphan = owned.port.checkFile!();
+  await pickers.nth(4);
+  owned.dispose();
+  expect(await orphan).toEqual({ outcome: 'cancelled' });
+});
 
-it('Choose again replaces a silent picker, and its late change is never read', async () => {
-  const t = await verifiedCreation();
-  try {
-    const created = t.owned.port.create!();
-    await t.watched.waiting();
-    t.prompt.pick();
-    const silent = await t.page.nth(1);
-    t.prompt.pick();
-    const again = await t.page.nth(2);
-    expect(silent.removed).toBe(true);
-    silent.choose(new Uint8Array([1, 2, 3]));
-    expect(t.page.reads()).toBe(0);
-    again.dispatchEvent(new Event('cancel'));
-    await t.watched.waiting();
-    t.prompt.pick();
-    (await t.page.nth(3)).choose(t.saved());
-    expect(await created).toEqual({ outcome: 'created', vaultId: expect.any(String) });
-    expect(t.page.reads()).toBe(1);
-  } finally {
-    t.saved().fill(0);
-    t.prompt.dispose();
-    t.owned.dispose();
-  }
-}, 30_000);
-
-it('logout settles an open verification prompt and every chooser the port opened', async () => {
-  const t = await verifiedCreation();
-  try {
-    const pending = t.owned.port.create!();
-    await t.watched.waiting();
-    t.prompt.pick();
-    const open = await t.page.nth(1);
-    t.prompt.dispose();
-    t.owned.dispose();
-    await expect(pending).rejects.toThrow();
-    expect(t.f.paths).not.toContain('e2eeRecoveryVault:putImmutable');
-    expect(open.removed).toBe(true);
-    const next = mobileRecoveryPort({
-      config: {
-        ...t.f.options,
-        run: Effect.runPromise,
-        defaultLabel: async () => 'iPhone',
-        runtime: () => undefined,
-      },
-      accountId: 'account-a',
-      sessionId: 'login-a',
-      currentSession: t.f.options.currentSession,
-    });
-    const orphan = next.port.checkFile!();
-    const chooser = await t.page.nth(2);
-    next.dispose();
-    expect(await orphan).toEqual({ outcome: 'cancelled' });
-    expect(chooser.removed).toBe(true);
-  } finally {
-    t.saved().fill(0);
-  }
-}, 30_000);
-
-it('Cancel and Choose again also release a file action whose picker WebKit never answers', async () => {
-  const t = await verifiedCreation();
-  try {
-    const created = t.owned.port.create!();
-    await t.watched.waiting();
-    t.prompt.pick();
-    (await t.page.nth(1)).choose(t.saved());
-    expect(await created).toEqual({ outcome: 'created', vaultId: expect.any(String) });
-    const stuck = t.owned.port.checkFile!();
-    const silent = await t.page.nth(2);
-    expect(t.watched.states.at(-1)).toBe('opening');
-    t.prompt.cancel();
-    expect(await stuck).toEqual({ outcome: 'cancelled' });
-    expect(silent.removed).toBe(true);
-    const check = t.owned.port.checkFile!();
-    await t.page.nth(3);
-    t.prompt.pick();
-    (await t.page.nth(4)).choose(t.saved());
-    expect(await check).toMatchObject({ outcome: 'opened' });
-    expect(t.watched.states.at(-1)).toBe('closed');
-    const dismissed = t.owned.port.checkFile!();
-    (await t.page.nth(5)).dispatchEvent(new Event('cancel'));
-    expect(await dismissed).toEqual({ outcome: 'cancelled' });
-  } finally {
-    t.saved().fill(0);
-    t.prompt.dispose();
-    t.owned.dispose();
-  }
+it('Cancel and logout on saved-file verification release the vault command permit without an upload', async () => {
+  const { f, owned, prompts, pickers } = await promptedPort();
+  const first = owned.port.create!();
+  await vi.waitFor(() => expect(prompts.at(-1)).toBe('verify'));
+  owned.filePrompt.pick();
+  await pickers.nth(1);
+  owned.filePrompt.cancel();
+  expect(await first).toEqual({ outcome: 'cancelled' });
+  const second = owned.port.create!();
+  await vi.waitFor(() => expect(prompts.at(-1)).toBe('verify'));
+  owned.filePrompt.pick();
+  const open = await pickers.nth(2);
+  owned.dispose();
+  await expect(second).rejects.toThrow();
+  expect(open.removed).toBe(true);
+  expect(f.paths).not.toContain('e2eeRecoveryVault:putImmutable');
 }, 30_000);

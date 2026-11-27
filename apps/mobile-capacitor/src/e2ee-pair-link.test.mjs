@@ -4,13 +4,17 @@ import test from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
 
-const source = ts.transpileModule(
-  readFileSync(new URL('./e2ee-pair-link.ts', import.meta.url), 'utf8'),
-  { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }
-).outputText;
+const transpile = (url) =>
+  ts.transpileModule(readFileSync(url, 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+  }).outputText;
+const source = transpile(new URL('./e2ee-pair-link.ts', import.meta.url));
+const parser = transpile(
+  new URL('../../../packages/shared/src/e2ee-pair-link.ts', import.meta.url)
+);
 
-const pairUrl = 'lody://auto-pair?id=automatic-0&code=secret-code-0';
-const autoPairUrl = 'lody://auto-pair?id=automatic-1&code=secret-code-1';
+const firstAutoPairUrl = 'lody://auto-pair?id=automatic-0&code=secret-code-0';
+const secondAutoPairUrl = 'lody://auto-pair?id=automatic-1&code=secret-code-1';
 
 /** A native shell whose launch URL and URL-open events the test controls. */
 async function boot({ launchUrl = null, launchFails = false } = {}) {
@@ -65,15 +69,17 @@ async function boot({ launchUrl = null, launchFails = false } = {}) {
     },
   };
   const entry = new vm.SourceTextModule(source, { context });
-  await entry.link(
-    (name) =>
-      new vm.SyntheticModule(
-        Object.keys(exports[name]),
-        function () {
-          for (const [key, value] of Object.entries(exports[name])) this.setExport(key, value);
-        },
-        { context }
-      )
+  const shared = new vm.SourceTextModule(parser, { context });
+  await entry.link((name) =>
+    name === '@lody/shared/e2ee-pair-link'
+      ? shared
+      : new vm.SyntheticModule(
+          Object.keys(exports[name]),
+          function () {
+            for (const [key, value] of Object.entries(exports[name])) this.setExport(key, value);
+          },
+          { context }
+        )
   );
   await entry.evaluate();
   const stop = entry.namespace.initE2eePairLinks();
@@ -89,29 +95,31 @@ async function boot({ launchUrl = null, launchFails = false } = {}) {
 }
 
 await test('a pairing link that cold-launches the app is handed to the pairing screen', async () => {
-  const t = await boot({ launchUrl: pairUrl });
+  const t = await boot({ launchUrl: firstAutoPairUrl });
   await t.settle();
-  assert.equal(t.window.__LODY_PENDING_E2EE_PAIR_URL__, pairUrl);
-  assert.deepEqual(t.events, [{ type: 'lody:e2ee-pair-url', url: pairUrl, pending: pairUrl }]);
+  assert.equal(t.window.__LODY_PENDING_E2EE_PAIR_URL__, firstAutoPairUrl);
+  assert.deepEqual(t.events, [
+    { type: 'lody:e2ee-pair-url', url: firstAutoPairUrl, pending: firstAutoPairUrl },
+  ]);
 });
 
 await test('a pairing link opened while the app runs is stored before the screen is told', async () => {
   const t = await boot();
   await t.settle();
-  t.open(autoPairUrl);
+  t.open(secondAutoPairUrl);
   assert.deepEqual(t.events, [
-    { type: 'lody:e2ee-pair-url', url: autoPairUrl, pending: autoPairUrl },
+    { type: 'lody:e2ee-pair-url', url: secondAutoPairUrl, pending: secondAutoPairUrl },
   ]);
 });
 
 await test('a later warm link is not replaced by the slower cold-launch answer', async () => {
-  const t = await boot({ launchUrl: pairUrl });
-  t.open(autoPairUrl);
+  const t = await boot({ launchUrl: firstAutoPairUrl });
+  t.open(secondAutoPairUrl);
   await t.settle();
-  assert.equal(t.window.__LODY_PENDING_E2EE_PAIR_URL__, autoPairUrl);
+  assert.equal(t.window.__LODY_PENDING_E2EE_PAIR_URL__, secondAutoPairUrl);
   assert.deepEqual(
     t.events.map((event) => event.url),
-    [autoPairUrl]
+    [secondAutoPairUrl]
   );
 });
 
@@ -152,9 +160,9 @@ await test('an oversized pairing link is ignored', async () => {
 });
 
 await test('pairing codes are never written to the console, even when the native lookup fails', async () => {
-  const failing = await boot({ launchUrl: pairUrl, launchFails: true });
+  const failing = await boot({ launchUrl: firstAutoPairUrl, launchFails: true });
   await failing.settle();
-  failing.open(autoPairUrl);
+  failing.open(secondAutoPairUrl);
   failing.open('lody://auth/callback?code=oauth-secret');
   failing.open(`lody://auto-pair?id=${'A'.repeat(600)}`);
   assert.deepEqual(failing.logged, []);
@@ -165,6 +173,6 @@ await test('stopping the bridge removes its URL listener', async () => {
   await t.settle();
   await t.stop();
   assert.equal(t.listeners.length, 0);
-  t.open(pairUrl);
+  t.open(firstAutoPairUrl);
   assert.deepEqual(t.events, []);
 });

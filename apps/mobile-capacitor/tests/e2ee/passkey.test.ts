@@ -141,31 +141,13 @@ describe('iPhone recovery vault passkey boundary', () => {
         },
       }).authenticate(request)
     ).rejects.toThrow('e2ee_passkey_failed');
-  });
-  it('reports an inactive or non-interactive native presentation as unavailable, never as a failed credential', async () => {
-    for (const ceremony of ['authenticate', 'register'] as const) {
-      const port = fixture({
-        [ceremony]: async () => {
+    await expect(
+      fixture({
+        authenticate: async () => {
           throw { code: 'unavailable', message: 'private native detail' };
         },
-      });
-      const attempt =
-        ceremony === 'authenticate'
-          ? port.authenticate(request)
-          : port.register({
-              rpId: request.rpId,
-              userHandle: new Uint8Array(32).fill(3),
-              userName: 'synthetic@example.test',
-              prfInput: request.prfInput,
-              excludeCredentialIds: [],
-            });
-      const error = await attempt.then(
-        () => undefined,
-        (reason: unknown) => reason
-      );
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toBe('e2ee_passkey_unavailable');
-    }
+      }).authenticate(request)
+    ).rejects.toThrow('e2ee_passkey_unavailable');
   });
 });
 

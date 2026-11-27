@@ -12,7 +12,11 @@ export async function exportMobileRecoveryFile(
   if (file.length < 1 || file.length > 4096) throw new Error('e2ee_recovery_invalid-input');
   const android = Capacitor.getPlatform() === 'android';
   const path = `lody-recovery-${crypto.randomUUID()}.lodyrecovery`;
-  let saved = false;
+  const failure = (error: unknown) =>
+    error instanceof Error && error.message === 'e2ee_recovery_cancelled'
+      ? error
+      : new Error('e2ee_recovery_storage');
+  let uri: string;
   try {
     if (android) {
       const previous = await Filesystem.readdir({ path: '', directory: Directory.Cache });
@@ -22,33 +26,36 @@ export async function exportMobileRecoveryFile(
       }
       check();
     }
-    const written = await Filesystem.writeFile({
-      path,
-      directory: Directory.Cache,
-      data: btoa(String.fromCharCode(...file)),
-    });
+    uri = (
+      await Filesystem.writeFile({
+        path,
+        directory: Directory.Cache,
+        data: btoa(String.fromCharCode(...file)),
+      })
+    ).uri;
+  } catch (error) {
+    throw failure(error);
+  }
+  let deleteFailed = false;
+  try {
     check();
     try {
-      await Share.share({ files: [written.uri] });
+      await Share.share({ files: [uri] });
     } catch (error) {
       if (error instanceof Error && error.message === 'Share canceled') return false;
       throw new Error('e2ee_recovery_storage');
     }
     check();
-    saved = true;
   } catch (error) {
-    if (error instanceof Error && error.message === 'e2ee_recovery_cancelled') throw error;
-    throw new Error('e2ee_recovery_storage');
+    throw failure(error);
   } finally {
     // Android's target can still be reading after the chooser settles; clean it on next export.
-    if (!android) {
-      const removed = await Filesystem.deleteFile({ path, directory: Directory.Cache }).then(
-        () => true,
-        () => false
+    if (!android)
+      deleteFailed = await Filesystem.deleteFile({ path, directory: Directory.Cache }).then(
+        () => false,
+        () => true
       );
-      if (!removed) saved = false;
-    }
   }
-  if (!saved) throw new Error('e2ee_recovery_storage');
+  if (deleteFailed) throw new Error('e2ee_recovery_storage');
   return true;
 }

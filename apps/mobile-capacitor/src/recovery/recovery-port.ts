@@ -3,9 +3,25 @@ import { chooseRecoveryFile, recoveryWorkspacesPort } from '@lody/client-e2ee/re
 import type { MobileRecoveryConfig } from './recovery-context';
 import type { MobileRecoveryWorkspaces } from '../e2ee/recovery';
 
+/** The prompt around a file action's chooser (`open`) or saved-file verification (`verify`). */
+export type FilePromptMode = 'open' | 'verify';
+type PromptState =
+  | { readonly tag: 'idle' }
+  | { readonly tag: 'disposed' }
+  | {
+      readonly tag: 'active';
+      readonly mode: FilePromptMode;
+      readonly picker: AbortController | null;
+      readonly resolve: (file: Uint8Array | null) => void;
+      readonly reject: (error: unknown) => void;
+    };
+
 /**
  * The console's recovery port for one login. The vault engine and its cryptography load
  * only on first use; commands borrow the application's existing encrypted runtime.
+ * Every system chooser runs under the host's file prompt: WKWebView may close its picker
+ * without any event, so the prompt stays open with Cancel and the reopening button while
+ * a chooser runs, and Cancel releases the command waiting on it.
  */
 export function mobileRecoveryPort(options: {
   readonly config: MobileRecoveryConfig;
@@ -14,16 +30,49 @@ export function mobileRecoveryPort(options: {
   readonly currentSession: () => { accountId: string; sessionId: string } | null;
   /** Owning tests inject a file source; the product opens the system chooser. */
   readonly chooseFile?: () => Promise<Uint8Array | null>;
-  /** The provider asks for a fresh tap before opening WebKit's verification picker. */
-  readonly confirmSavedFile?: () => Promise<Uint8Array | null>;
+  readonly onFilePrompt?: (mode: FilePromptMode | null) => void;
   readonly exportFile?: (file: Uint8Array, check: () => void) => Promise<boolean>;
 }) {
   const { config } = options;
   let loaded: MobileRecoveryWorkspaces | undefined;
   let engine: Promise<MobileRecoveryWorkspaces> | undefined;
   let disposed = false;
-  const choosers = new AbortController();
-  const choose = () => chooseRecoveryFile({ signal: choosers.signal });
+  let prompt: PromptState = { tag: 'idle' };
+  const publish = () => options.onFilePrompt?.(prompt.tag === 'active' ? prompt.mode : null);
+  const answer = (reply: (active: Extract<PromptState, { tag: 'active' }>) => void) => {
+    if (prompt.tag !== 'active') return;
+    const active = prompt;
+    active.picker?.abort();
+    prompt = { tag: 'idle' };
+    publish();
+    reply(active);
+  };
+  /** Opens (or reopens) the system chooser; call it synchronously from the tap. */
+  const pick = () => {
+    if (prompt.tag !== 'active') return;
+    prompt.picker?.abort();
+    const picker = new AbortController();
+    prompt = { ...prompt, picker };
+    chooseRecoveryFile({ signal: picker.signal }).then(
+      (file) => {
+        if (prompt.tag !== 'active' || prompt.picker !== picker) return void file?.fill(0);
+        if (file || prompt.mode === 'open') answer((active) => active.resolve(file));
+        else prompt = { ...prompt, picker: null };
+      },
+      (error: unknown) => {
+        if (prompt.tag === 'active' && prompt.picker === picker)
+          answer((active) => active.reject(error));
+      }
+    );
+  };
+  const ask = (mode: FilePromptMode) =>
+    new Promise<Uint8Array | null>((resolve, reject) => {
+      answer((active) => active.resolve(null));
+      if (prompt.tag === 'disposed') return resolve(null);
+      prompt = { tag: 'active', mode, picker: null, resolve, reject };
+      publish();
+      if (mode === 'open') pick();
+    });
   const check = () => {
     const current = options.currentSession();
     if (
@@ -61,7 +110,7 @@ export function mobileRecoveryPort(options: {
         return loaded;
       })),
     run: config.run,
-    chooseFile: options.chooseFile ?? choose,
+    chooseFile: options.chooseFile ?? (() => ask('open')),
     defaultLabel: config.defaultLabel,
     saveFile: async (file) => {
       check();
@@ -69,7 +118,7 @@ export function mobileRecoveryPort(options: {
         options.exportFile ?? (await import('./recovery-file')).exportMobileRecoveryFile;
       if (!(await exportFile(file, check))) return null;
       check();
-      const read = await (options.confirmSavedFile ?? options.chooseFile ?? choose)();
+      const read = await (options.chooseFile ?? (() => ask('verify')))();
       try {
         check();
         return read;
@@ -81,81 +130,12 @@ export function mobileRecoveryPort(options: {
   });
   return {
     port,
+    filePrompt: { pick, cancel: () => answer((active) => active.resolve(null)) },
     dispose: () => {
       disposed = true;
-      choosers.abort();
+      answer((active) => active.resolve(null));
+      prompt = { tag: 'disposed' };
       loaded?.dispose();
-    },
-  };
-}
-
-export type RecoveryFilePromptState = 'closed' | 'waiting' | 'choosing' | 'opening';
-
-/**
- * The host's prompt around every recovery file chooser. WKWebView may close the picker
- * without any event, so the prompt stays open while a chooser runs: Cancel answers its
- * caller (releasing a command that waits on it) and Choose again replaces the chooser.
- * After a dismissed verification chooser the prompt waits for another try; a dismissed
- * file-action chooser answers null.
- */
-export function recoveryFilePrompt(
-  onState: (state: RecoveryFilePromptState) => void,
-  choose: typeof chooseRecoveryFile = chooseRecoveryFile
-) {
-  let answer:
-    | {
-        resolve: (file: Uint8Array | null) => void;
-        reject: (error: unknown) => void;
-        direct: boolean;
-      }
-    | undefined;
-  let picking: AbortController | undefined;
-  let disposed = false;
-  const settle = (reply: (to: NonNullable<typeof answer>) => void) => {
-    const to = answer;
-    answer = undefined;
-    picking?.abort();
-    picking = undefined;
-    onState('closed');
-    if (to) reply(to);
-  };
-  const ask = (direct: boolean) =>
-    new Promise<Uint8Array | null>((resolve, reject) => {
-      settle((to) => to.resolve(null));
-      if (disposed) return resolve(null);
-      answer = { resolve, reject, direct };
-      if (direct) pick();
-      else onState('waiting');
-    });
-  const pick = () => {
-    if (!answer) return;
-    picking?.abort();
-    const controller = new AbortController();
-    picking = controller;
-    onState(answer.direct ? 'opening' : 'choosing');
-    choose({ signal: controller.signal }).then(
-      (file) => {
-        if (picking !== controller) return file?.fill(0);
-        picking = undefined;
-        if (file || answer?.direct) settle((to) => to.resolve(file));
-        else onState('waiting');
-      },
-      (error: unknown) => {
-        if (picking !== controller) return;
-        picking = undefined;
-        settle((to) => to.reject(error));
-      }
-    );
-  };
-  return {
-    /** A file action's chooser; it opens synchronously, inside the tap. */
-    chooseFile: () => ask(true),
-    confirmSavedFile: () => ask(false),
-    pick,
-    cancel: () => settle((to) => to.resolve(null)),
-    dispose: () => {
-      disposed = true;
-      settle((to) => to.resolve(null));
     },
   };
 }

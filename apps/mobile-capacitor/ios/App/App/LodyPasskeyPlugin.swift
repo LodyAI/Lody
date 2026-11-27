@@ -10,6 +10,7 @@ public final class LodyPasskeyPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise)
     }
     @MainActor private var ceremony: AnyObject?
+    private static let activationWait: TimeInterval = 1
 
     private var enabled: Bool { Bundle.main.object(forInfoDictionaryKey: "LodyPasskeyEnabled") as? String == "YES" }
 
@@ -21,9 +22,13 @@ public final class LodyPasskeyPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc public func register(_ call: CAPPluginCall) { perform(call, registration: true) }
     @objc public func authenticate(_ call: CAPPluginCall) { perform(call, registration: false) }
 
+    private func reject(_ call: CAPPluginCall, _ error: LodyPasskeyError) {
+        call.reject(error.rawValue, error.rawValue)
+    }
+
     private func perform(_ call: CAPPluginCall, registration: Bool) {
-        guard enabled else { call.reject("unavailable", "unavailable"); return }
-        guard #available(iOS 18.4, *) else { call.reject("unavailable", "unavailable"); return }
+        guard enabled else { reject(call, .unavailable); return }
+        guard #available(iOS 18.4, *) else { reject(call, .unavailable); return }
         do {
             guard call.getString("rpId") == LodyPasskeyCodec.relyingParty,
                   let encodedInput = call.getString("prfInput"),
@@ -35,89 +40,53 @@ public final class LodyPasskeyPlugin: CAPPlugin, CAPBridgedPlugin {
             // Snapshot inputs before queueing; no credential/state is persisted or logged.
             Task { @MainActor in
                 LodyPasskeyCallQueue.shared.enqueue { [self] in
-                    self.whenActive { window in
-                        guard let window else {
-                            call.reject("unavailable", "unavailable")
-                            LodyPasskeyCallQueue.shared.finished()
-                            return
-                        }
-                        self.start(call, window: window, registration: registration, allowed: allowed, input: input, handle: handle, userName: userName)
+                    Task { @MainActor in
+                        defer { LodyPasskeyCallQueue.shared.finished() }
+                        await self.run(call, registration: registration, allowed: allowed, input: input, handle: handle, userName: userName)
                     }
                 }
             }
         } catch {
-            let failure = error as? LodyPasskeyError ?? .invalidRequest
-            call.reject(failure.rawValue, failure.rawValue)
+            reject(call, error as? LodyPasskeyError ?? .invalidRequest)
         }
     }
 
-    /// A tap that opens the ceremony can arrive while the scene is still
-    /// `.foregroundInactive` (a dismissing sheet or Control Center). Wait briefly for
-    /// activation; a scene that stays inactive is unavailable, never a credential failure.
-    @MainActor private func whenActive(_ ready: @escaping @MainActor (UIWindow?) -> Void) {
-        guard let window = bridge?.viewController?.viewIfLoaded?.window,
-              let scene = window.windowScene else { ready(nil); return }
-        switch scene.activationState {
-        case .foregroundActive: ready(window); return
-        case .foregroundInactive: break
-        default: ready(nil); return
-        }
-        let wait = LodyPasskeyActivationWait(scene: scene) { active in
-            ready(active && scene.activationState == .foregroundActive ? window : nil)
-        }
-        wait.begin(timeout: Self.activationWait)
-    }
-
-    private static let activationWait: TimeInterval = 1
-
+    /// Owns one queued call until the system ceremony actually settles.
     @available(iOS 18.4, *)
-    @MainActor private func start(_ call: CAPPluginCall, window: UIWindow, registration: Bool, allowed: [Data], input: Data, handle: Data?, userName: String?) {
-        let native = LodyPasskeyCeremony(window: window, registration: registration, allowed: allowed) { [self] result in
-            self.ceremony = nil
-            switch result {
-            case .success(let value): call.resolve(value)
-            case .failure(let error): call.reject(error.rawValue, error.rawValue)
+    @MainActor private func run(_ call: CAPPluginCall, registration: Bool, allowed: [Data], input: Data, handle: Data?, userName: String?) async {
+        guard let window = await waitForActiveWindow() else { reject(call, .unavailable); return }
+        let result = await withCheckedContinuation { (settled: CheckedContinuation<Result<[String: Any], LodyPasskeyError>, Never>) in
+            let native = LodyPasskeyCeremony(window: window, registration: registration, allowed: allowed) { settled.resume(returning: $0) }
+            ceremony = native
+            do { try native.start(prfInput: input, userHandle: handle, userName: userName) }
+            catch { settled.resume(returning: .failure(error as? LodyPasskeyError ?? .failed)) }
+        }
+        ceremony = nil
+        switch result {
+        case .success(let value): call.resolve(value)
+        case .failure(let error): reject(call, error)
+        }
+    }
+
+    /// A tap can open the ceremony while the scene is still `.foregroundInactive` (a closing
+    /// sheet or Control Center). Wait briefly for activation; a scene that stays inactive or
+    /// leaves the foreground is unavailable, never a credential failure.
+    @MainActor private func waitForActiveWindow() async -> UIWindow? {
+        guard let scene = bridge?.viewController?.viewIfLoaded?.window?.windowScene else { return nil }
+        if scene.activationState == .foregroundInactive {
+            await withTaskGroup(of: Void.self) { group in
+                for name in [UIScene.didActivateNotification, UIScene.didEnterBackgroundNotification] {
+                    group.addTask { @MainActor in
+                        for await _ in NotificationCenter.default.notifications(named: name, object: scene) { return }
+                    }
+                }
+                group.addTask { try? await Task.sleep(for: .seconds(Self.activationWait)) }
+                await group.next()
+                group.cancelAll()
             }
-            LodyPasskeyCallQueue.shared.finished()
         }
-        ceremony = native
-        do { try native.start(prfInput: input, userHandle: handle, userName: userName) }
-        catch {
-            ceremony = nil
-            let failure = error as? LodyPasskeyError ?? .failed
-            call.reject(failure.rawValue, failure.rawValue)
-            LodyPasskeyCallQueue.shared.finished()
-        }
-    }
-}
-
-/// One bounded wait for a scene's activation; it answers exactly once.
-@MainActor
-private final class LodyPasskeyActivationWait {
-    private let scene: UIScene
-    private let ready: @MainActor (Bool) -> Void
-    private var observer: NSObjectProtocol?
-    private var answered = false
-
-    init(scene: UIScene, ready: @escaping @MainActor (Bool) -> Void) {
-        self.scene = scene
-        self.ready = ready
-    }
-
-    func begin(timeout: TimeInterval) {
-        observer = NotificationCenter.default.addObserver(forName: UIScene.didActivateNotification, object: scene, queue: .main) { [self] _ in
-            Task { @MainActor in self.answer(true) }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [self] in
-            Task { @MainActor in self.answer(false) }
-        }
-    }
-
-    private func answer(_ active: Bool) {
-        guard !answered else { return }
-        answered = true
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-        observer = nil
-        ready(active)
+        // Re-read after the wait: an activation before the observers subscribed is still seen here.
+        guard scene.activationState == .foregroundActive else { return nil }
+        return bridge?.viewController?.viewIfLoaded?.window
     }
 }

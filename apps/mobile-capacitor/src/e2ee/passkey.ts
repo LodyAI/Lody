@@ -28,6 +28,19 @@ export interface MobilePasskeyBridge {
   }>;
 }
 
+/** The Swift plugin's `LodyPasskeyError` raw values; anything else is a plain failure. */
+type NativePasskeyErrorCode = 'invalid_request' | 'unavailable' | 'cancelled' | 'failed';
+const nativeCodes: readonly NativePasskeyErrorCode[] = [
+  'invalid_request',
+  'unavailable',
+  'cancelled',
+  'failed',
+];
+function nativeErrorCode(error: unknown): NativePasskeyErrorCode | undefined {
+  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : null;
+  return nativeCodes.find((known) => known === code);
+}
+
 const rpId = E2EE_PASSKEY_RP_ID;
 const fail = () => new Error('e2ee_passkey_invalid_result');
 function encode(bytes: Uint8Array): string {
@@ -85,12 +98,20 @@ export function makeMobilePasskeyPort(input: {
     try {
       return await work();
     } catch (error) {
-      const code =
-        typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
-      if (code === 'cancelled')
-        throw input.cancelled?.() ?? new E2eePasskeyCancelled('e2ee_passkey_cancelled');
-      if (code === 'unavailable') throw new Error('e2ee_passkey_unavailable');
-      throw new Error('e2ee_passkey_failed');
+      const code = nativeErrorCode(error);
+      switch (code) {
+        case 'cancelled':
+          throw input.cancelled?.() ?? new E2eePasskeyCancelled('e2ee_passkey_cancelled');
+        case 'unavailable':
+          throw new Error('e2ee_passkey_unavailable');
+        case 'invalid_request':
+          throw new Error('e2ee_passkey_invalid_request');
+        case 'failed':
+        case undefined:
+          throw new Error('e2ee_passkey_failed');
+        default:
+          return code satisfies never;
+      }
     }
   }
   return {

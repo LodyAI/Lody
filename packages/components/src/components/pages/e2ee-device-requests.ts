@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import { parseAutoPairLink } from '@lody/shared/e2ee-pair-link';
 
 /** The account's waiting device requests, as the application-level inbox sees them. */
 export type E2eeDeviceRequestsUi = {
@@ -27,7 +28,7 @@ let pending: { url: string; at: number } | null = null;
 let listening = false;
 type PairLinkWindow = Window & { __LODY_PENDING_E2EE_PAIR_URL__?: string };
 
-export const isPairLink = (url: string) => /^lody:\/\/auto-pair\?/i.test(url.trim());
+export const isPairLink = (url: string) => parseAutoPairLink(url) !== null;
 
 function takeParked() {
   if (typeof window === 'undefined') return;

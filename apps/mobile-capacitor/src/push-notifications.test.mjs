@@ -17,21 +17,15 @@ function deferred() {
   });
   return { promise, resolve };
 }
-async function setup(platform, { channel, configure, autoToken = true, storage = {} } = {}) {
+async function setup(platform, { channel, configure, autoToken = true } = {}) {
   const events = [];
   const visited = [];
   let signedIn = null;
   const sessionListeners = new Set();
-  const session = {
-    get: () => ({ data: signedIn ? { user: { id: signedIn } } : null }),
-    listen: (fn) => {
-      sessionListeners.add(fn);
-      return () => sessionListeners.delete(fn);
-    },
-  };
+  const storage = new Map([['lody:push-installation', 'installation']]);
   const signIn = (id) => {
     signedIn = id;
-    for (const fn of sessionListeners) fn(session.get());
+    for (const fn of sessionListeners) fn(id);
   };
   const window = {
     location: { origin: 'https://localhost', pathname: '/', search: '', hash: '' },
@@ -54,10 +48,20 @@ async function setup(platform, { channel, configure, autoToken = true, storage =
         this.type = type;
       }
     },
-    localStorage: { getItem: (key) => storage[key] ?? 'installation' },
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: (key) => storage.delete(key),
+    },
   });
   const exports = {
-    './auth': { authClient: { $store: { atoms: { session } } } },
+    './auth': {
+      getAuthUserId: () => signedIn,
+      subscribeAuthUserId: (fn) => {
+        sessionListeners.add(fn);
+        return () => sessionListeners.delete(fn);
+      },
+    },
     '@capacitor/app': { App: { getInfo: async () => ({ id: 'app.test' }) } },
     '@capacitor/core': {
       Capacitor: { getPlatform: () => platform },
@@ -96,7 +100,20 @@ async function setup(platform, { channel, configure, autoToken = true, storage =
   );
   await entry.evaluate();
   entry.namespace.initPushBridge();
-  return { bridge: context.window.__LODY_PUSH__, events, listeners, timers, visited, signIn };
+  const tap = (route, recipientUserId) =>
+    listeners.get('pushNotificationActionPerformed')({
+      notification: { data: { route, recipientUserId } },
+    });
+  return {
+    bridge: context.window.__LODY_PUSH__,
+    events,
+    listeners,
+    timers,
+    visited,
+    signIn,
+    storage,
+    tap,
+  };
 }
 await test('logout while Android channel creation is pending cannot register afterward', async () => {
   const entered = deferred();
@@ -233,53 +250,32 @@ await test('encrypted Live Activity keeps session navigation while removing HTTP
 });
 await test('a cold-start tap opens once its recipient is signed in, even if push never registers', async () => {
   const t = await setup('ios');
-  const tap = (route, recipientUserId = 'alice') =>
-    t.listeners.get('pushNotificationActionPerformed')({
-      notification: { data: { route, recipientUserId } },
-    });
   await Promise.resolve();
-  tap('//evil.test/path');
-  tap('/workspace/w1/session/s1');
+  t.tap('/workspace/w1/session/s1', 'alice');
+  t.tap('//evil.test/path', 'alice');
+  t.tap('/workspace/w1/session/s0', '');
   assert.deepEqual(t.visited, []);
-  // The startup workspace is blocked, so `register()` is never called.
   t.signIn('alice');
-  assert.deepEqual(t.visited, ['/workspace/w1/session/s1']);
-  assert.equal(t.events.filter((event) => event === 'popstate').length, 1);
-  tap('/workspace/w1/session/s2', 'bob');
-  tap('/workspace/w1/session/s3');
+  t.tap('/workspace/w1/session/s2', 'bob');
+  t.tap('/workspace/w1/session/s3', 'alice');
   assert.deepEqual(t.visited, ['/workspace/w1/session/s1', '/workspace/w1/session/s3']);
+  assert.equal(t.events.filter((event) => event === 'popstate').length, 2);
 });
-await test('logout drops a parked notification tap, and another account never opens it', async () => {
+await test("logout fences the leaving account, keeps the next account's tap, and opt-out fences nothing", async () => {
   const t = await setup('ios');
   await Promise.resolve();
-  const tap = (route) =>
-    t.listeners.get('pushNotificationActionPerformed')({
-      notification: { data: { route, recipientUserId: 'alice' } },
-    });
-  tap('/workspace/w1');
-  await t.bridge.unregister();
+  t.storage.set('lody:push-user', 'alice');
   t.signIn('alice');
-  assert.deepEqual(t.visited, []);
+  await t.bridge.unregister();
+  t.tap('/workspace/opted-out', 'alice');
+  assert.deepEqual(t.visited, ['/workspace/opted-out']);
+  t.storage.delete('lody:push-user');
+  await t.bridge.unregister();
+  t.tap('/workspace/leaving', 'alice');
+  t.tap('/workspace/next', 'bob');
+  t.signIn('alice');
+  assert.deepEqual(t.visited, ['/workspace/opted-out']);
   t.signIn(null);
-  tap('/workspace/w2');
   t.signIn('bob');
-  t.signIn('alice');
-  assert.deepEqual(t.visited, []);
-});
-await test('a tap after unregister() never opens for the account still finishing logout', async () => {
-  const t = await setup('ios');
-  await Promise.resolve();
-  const tap = (route, recipientUserId = 'alice') =>
-    t.listeners.get('pushNotificationActionPerformed')({
-      notification: { data: { route, recipientUserId } },
-    });
-  t.signIn('alice');
-  await t.bridge.unregister();
-  tap('/workspace/w1');
-  t.signIn('alice');
-  assert.deepEqual(t.visited, []);
-  t.signIn(null);
-  t.signIn('alice');
-  tap('/workspace/w2');
-  assert.deepEqual(t.visited, ['/workspace/w2']);
+  assert.deepEqual(t.visited, ['/workspace/opted-out', '/workspace/next']);
 });
