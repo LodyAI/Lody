@@ -225,11 +225,11 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: colors.onAccent,
   },
   checkBoxDone: {
-    backgroundColor: colors.accent,
-    borderColor: { default: colors.accent, ':hover': colors.accent },
+    backgroundColor: colors.selectedFill,
+    borderColor: { default: colors.separator, ':hover': colors.tertiaryLabel },
+    color: colors.secondaryLabel,
   },
   textDone: { color: colors.secondaryLabel, textDecorationLine: 'line-through' },
   text: {
