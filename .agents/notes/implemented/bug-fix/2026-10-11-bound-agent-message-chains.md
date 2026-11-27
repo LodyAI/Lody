@@ -29,6 +29,29 @@ At the limit, agents must report remaining work to the user instead of retrying 
 creating another session to evade the guard. Prompt guidance is not enforcement of
 message semantics; the existing runtime guard enforces only chain depth.
 
+## Visible limit and soft-limit budget (2026-11-26)
+
+Reaching the cap used to be silent. A rejected command returned only a terse error,
+and an automatic continuation whose batch depth reached 16 was marked `depth_limited`
+without any history row, so the human saw an idle Session holding delivered results.
+That guard also stopped continuations one hop earlier than targets: a depth-15 Turn
+could delegate, but the target's result could never come back automatically.
+
+- Continuations now run at depth 16 and only a deeper batch is held. It still
+  terminates, because a depth-16 Turn cannot delegate. Held results stay queued for
+  the next human input, and the Coordinator upserts one `agent_warning` notice per
+  held intent.
+- A cap rejection names the hop and the maximum, and upserts one notice per capped
+  Turn in the calling Session.
+- From `LODY_CHAIN_DEPTH_SOFT_LIMIT` (8), operation snapshots carry `chainBudget`, so
+  every dispatch reply tells the Agent how many hops remain. The product owner
+  requested this warning on 2026-11-26. It states only depth facts and gives no
+  instruction, per the agent-text rule.
+- Alternatives not taken: relaxing only the error text, which would leave held results
+  invisible; deriving continuation depth only from members, which would contradict the
+  Spec's current/member rule; and a new notice type, which older clients could not parse.
+  Reusing `agent_warning` with a `source` renders everywhere.
+
 ## Verification and limits
 
 The existing model boundary test now accepts depth 15 and rejects depths 16, 17 and

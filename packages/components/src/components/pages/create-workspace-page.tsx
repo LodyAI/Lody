@@ -9,7 +9,7 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 import { pageSurface as surface } from './surface';
-import type { ReferralPolicy } from '@lody/cloud-api';
+import type { PromoCheckoutOffer, ReferralPolicy } from '@lody/cloud-api';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
@@ -24,7 +24,7 @@ import { Field as UiField } from '@lody/ui/field';
 import { PricingPageLink } from '../shared/pricing-page-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { formatUsd } from '../settings/billing-setting-pure';
-import { ReferralOfferNotice } from '../settings/referral-settings-pure';
+import { PromoOfferNotice, ReferralOfferNotice } from '../settings/referral-settings-pure';
 
 const layoutStyles = stylex.create({
   page: {
@@ -50,6 +50,7 @@ export interface CreateWorkspacePricing {
   monthlyAmountCents: number;
   yearlyAmountCents: number;
   yearlyOfferKey?: string | null;
+  promo?: PromoCheckoutOffer | null;
 }
 
 export interface CreateWorkspacePageProps {
@@ -57,6 +58,7 @@ export interface CreateWorkspacePageProps {
   workspaceSlug: string;
   error?: string | null;
   creating?: boolean;
+  creatingLabel?: string;
   submitDisabled?: boolean;
   creationOptions?: ReactNode;
   slugChecking?: boolean;
@@ -83,6 +85,7 @@ export function CreateWorkspacePage({
   workspaceSlug,
   error = null,
   creating = false,
+  creatingLabel,
   submitDisabled = false,
   creationOptions,
   slugChecking = false,
@@ -228,57 +231,116 @@ export function CreateWorkspacePage({
                     {t('organization.plusBillingInterval', 'Billing interval')}
                   </div>
                   <div {...stylex.props(styles.intervals)}>
-                    {(['year', 'month'] as const).map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => onBillingIntervalChange?.(value)}
-                        disabled={creating}
-                        {...stylex.props(
-                          styles.interval,
-                          billingInterval === value
-                            ? styles.intervalSelected
-                            : styles.intervalUnselected
-                        )}
-                      >
-                        {value === 'year'
-                          ? t('billing.yearly', 'Yearly')
-                          : t('billing.monthly', 'Monthly')}
-                        {pricing ? (
-                          <span {...stylex.props(styles.intervalPrice)}>
-                            {t('organization.plusPricePerSeatMonth', {
-                              price: formatUsd(
-                                value === 'year'
-                                  ? Math.round(pricing.yearlyAmountCents / 12)
-                                  : pricing.monthlyAmountCents
-                              ),
-                            })}
-                            {value === 'year' ? (
-                              <>
-                                {' · '}
-                                {t('organization.plusPriceBilledYearly')}
-                              </>
-                            ) : null}
-                          </span>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                  {referralOffer &&
-                  pricing &&
-                  !(billingInterval === 'year' && pricing.yearlyOfferKey) ? (
-                    <ReferralOfferNotice
-                      interval={billingInterval}
-                      regularCents={
-                        billingInterval === 'year'
-                          ? pricing.yearlyAmountCents
+                    {(['year', 'month'] as const).map((value) => {
+                      const regularOptionMonthCents = pricing
+                        ? value === 'year'
+                          ? Math.round(pricing.yearlyAmountCents / 12)
                           : pricing.monthlyAmountCents
-                      }
-                      disabled={creating}
-                      onRemove={referralOffer.onRemove}
-                      policy={referralOffer.policy}
-                    />
-                  ) : null}
+                        : 0;
+                      const optionPromoPercent =
+                        pricing && !(value === 'year' && pricing.yearlyOfferKey)
+                          ? value === 'year'
+                            ? (pricing.promo?.yearlyDiscountPercent ?? 0)
+                            : (pricing.promo?.monthlyDiscountPercent ?? 0)
+                          : 0;
+                      const optionReferralPercent =
+                        referralOffer && !(value === 'year' && pricing?.yearlyOfferKey)
+                          ? (referralOffer.policy?.discountPercent ?? 10)
+                          : 0;
+                      const optionDiscountPercent = Math.max(
+                        optionPromoPercent,
+                        optionReferralPercent
+                      );
+                      const discountedOptionMonthCents =
+                        pricing && optionDiscountPercent > 0
+                          ? value === 'year'
+                            ? Math.round(
+                                Math.round(
+                                  (pricing.yearlyAmountCents * (100 - optionDiscountPercent)) / 100
+                                ) / 12
+                              )
+                            : Math.round(
+                                (pricing.monthlyAmountCents * (100 - optionDiscountPercent)) / 100
+                              )
+                          : null;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => onBillingIntervalChange?.(value)}
+                          disabled={creating}
+                          {...stylex.props(
+                            styles.interval,
+                            billingInterval === value
+                              ? styles.intervalSelected
+                              : styles.intervalUnselected
+                          )}
+                        >
+                          {value === 'year'
+                            ? `${t('billing.yearly', 'Yearly')} (${t('billing.yearlySaveBadge', 'Save 20%')})`
+                            : t('billing.monthly', 'Monthly')}
+                          {pricing ? (
+                            <span {...stylex.props(styles.intervalPrice)}>
+                              {discountedOptionMonthCents !== null ? (
+                                <>
+                                  <s>{formatUsd(regularOptionMonthCents)}</s>{' '}
+                                </>
+                              ) : null}
+                              {t('organization.plusPricePerSeatMonth', {
+                                price: formatUsd(
+                                  discountedOptionMonthCents ?? regularOptionMonthCents
+                                ),
+                              })}
+                              {value === 'year' ? (
+                                <>
+                                  {' · '}
+                                  {t('organization.plusPriceBilledYearly')}
+                                </>
+                              ) : null}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(() => {
+                    if (!pricing || (billingInterval === 'year' && pricing.yearlyOfferKey)) {
+                      return null;
+                    }
+                    const regularCents =
+                      billingInterval === 'year'
+                        ? pricing.yearlyAmountCents
+                        : pricing.monthlyAmountCents;
+                    const promoPercent =
+                      billingInterval === 'year'
+                        ? (pricing.promo?.yearlyDiscountPercent ?? 0)
+                        : (pricing.promo?.monthlyDiscountPercent ?? 0);
+                    const referralPercent = referralOffer
+                      ? (referralOffer.policy?.discountPercent ?? 10)
+                      : 0;
+                    if (promoPercent > 0 && (!referralOffer || promoPercent > referralPercent)) {
+                      return (
+                        <PromoOfferNotice
+                          interval={billingInterval}
+                          regularCents={regularCents}
+                          discountPercent={promoPercent}
+                          policy={pricing.promo?.policy}
+                        />
+                      );
+                    }
+                    if (referralOffer) {
+                      return (
+                        <ReferralOfferNotice
+                          interval={billingInterval}
+                          regularCents={regularCents}
+                          disabled={creating}
+                          onRemove={referralOffer.onRemove}
+                          policy={referralOffer.policy}
+                        />
+                      );
+                    }
+                    return null;
+                  })()}
                   <p {...stylex.props(surface.hint)}>
                     {t(
                       'organization.plusBillingHelp',
@@ -308,9 +370,10 @@ export function CreateWorkspacePage({
                       diameter="calc(var(--spacing) * 4)"
                       className={stylex.props(surface.spinnerMargin).className}
                     />
-                    {paidRequired
-                      ? t('billing.startingCheckout', 'Starting checkout...')
-                      : t('common.creating')}
+                    {creatingLabel ??
+                      (paidRequired
+                        ? t('billing.startingCheckout', 'Starting checkout...')
+                        : t('common.creating'))}
                   </span>
                 ) : (
                   <span {...stylex.props(surface.row)}>

@@ -62,7 +62,9 @@
   earliest durable deadline, capped at 15 seconds for staged-outcome reconciliation
   and auto delivery — no polling probe and no work-remaining rescan. A durable
   denial — revoked grant or authorization, superseded or deleted work — cancels the
-  queued input end to end; only transient denials re-verify. Guard predicates share
+  queued input end to end; only transient denials re-verify. An input already promoted
+  to history is cancelled there by the Session execution owner while no runtime has
+  started it; a running Turn follows Stop. Guard predicates share
   one `guard:` reason namespace at engine check and resource admission, so the same
   durable classifier converges both; cancellation preserves that reason. Capacity
   wake scans resolve candidates by the observed binding/model through normalized

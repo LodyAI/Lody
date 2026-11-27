@@ -7,12 +7,65 @@ import {
   RecoveryVaultError,
   type LedgerView,
   type RecoveryEntryReference,
+  type RecoveryPrivatePackage,
   type RecoveryVault,
   type WorkspaceRecoveryInput,
   type WorkspaceRestorePlan,
 } from '@lody/e2ee-core';
 import { verifyLedger, wipeRecoveryPackage } from '@lody/e2ee-core/protocol';
 import { fromHex } from './bytes';
+
+const copyRecoveryPackage = (value: RecoveryPrivatePackage): RecoveryPrivatePackage => ({
+  ...value,
+  signingPublic: new Uint8Array(value.signingPublic),
+  encryptionPublic: new Uint8Array(value.encryptionPublic),
+  signingPrivate: new Uint8Array(value.signingPrivate),
+  encryptionPrivate: new Uint8Array(value.encryptionPrivate),
+  trust: { ...value.trust, genesisRecord: new Uint8Array(value.trust.genesisRecord) },
+});
+
+/**
+ * Scope-bound wrapper around `vault` that reads and decrypts `reference` at most once
+ * within a single restore attempt, returning owned copies to each caller and wiping the
+ * retained copy when the enclosing Scope closes.
+ */
+export const scopedRecoveryVault = (
+  vault: RecoveryVault,
+  reference: RecoveryEntryReference,
+  initialIndex?: Effect.Success<ReturnType<RecoveryVault['readIndex']>>
+): Effect.Effect<RecoveryVault, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    let held: RecoveryPrivatePackage | undefined;
+    let cachedIndex = initialIndex;
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        if (held) {
+          wipeRecoveryPackage(held);
+          held = undefined;
+        }
+      })
+    );
+    return {
+      ...vault,
+      readIndex: () =>
+        cachedIndex
+          ? Effect.succeed(cachedIndex)
+          : Effect.tap(vault.readIndex(), (index) =>
+              Effect.sync(() => {
+                cachedIndex = index;
+              })
+            ),
+      readEntry: (ref) =>
+        ref.entryId === reference.entryId && ref.digest === reference.digest
+          ? held
+            ? Effect.sync(() => copyRecoveryPackage(held!))
+            : Effect.map(vault.readEntry(ref), (bundle) => {
+                held = bundle;
+                return copyRecoveryPackage(bundle);
+              })
+          : vault.readEntry(ref),
+    };
+  });
 
 /** Workspaces this vault can restore: the live entries of its authenticated index. */
 export const listVaultWorkspaces = (
@@ -396,6 +449,8 @@ export type PersonalRecoverySetupInput = Pick<
   WorkspaceRecoveryInput,
   'vault' | 'local' | 'fetchCurrentEnvelope'
 > & {
+  /** Skip the redundant leading control.refresh() when the caller just opened the session. */
+  readonly skipInitialRefresh?: boolean;
   readonly submitOriginal: (
     ...args: Parameters<WorkspaceRecoveryInput['submitOriginal']>
   ) => Effect.Effect<

@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getAgentConfigRoomId,
   getSessionRoomId,
+  LODY_MAX_CHAIN_DEPTH,
   machineFlockKeys,
   type AgentConfigMeta,
   type MachineId,
@@ -699,6 +700,54 @@ describe('LodyOperationCoordinator', () => {
       expect(acpSessionConfig).not.toHaveProperty('_lodyAutomation');
       expect(acpSessionConfig).toMatchObject({ cliType: 'builtin', agentType: 'codex' });
       expect(queuedResults(store, harness.coordinatorOptions.workspaceId)).toEqual([]);
+    } finally {
+      store.close();
+      await harness.coordinator.stop();
+    }
+  });
+
+  it('tells the requester once when the chain cap holds results back from the agent', async () => {
+    const harness = await makeHarness({
+      continuationInputConfig: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        chainDepth: LODY_MAX_CHAIN_DEPTH,
+      },
+    });
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    const notices = () =>
+      (harness.histories.get(harness.requesterSessionId) ?? []).filter((entry) =>
+        entry.items?.some((item) => item.type === 'system_notice' && item.name === 'agent_warning')
+      );
+    try {
+      store.finish(harness.requesterSessionId, 'review-round-1', {
+        type: 'result',
+        value: { items: [] },
+      });
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      harness.triggerOperationStoreWake();
+      await harness.coordinator.idle();
+      harness.triggerOperationStoreWake();
+      await harness.coordinator.idle();
+
+      expect(harness.continueSession).not.toHaveBeenCalled();
+      const [notice] = notices();
+      expect(notices()).toHaveLength(1);
+      expect(notice).toMatchObject({
+        role: 'system',
+        items: [
+          {
+            type: 'system_notice',
+            name: 'agent_warning',
+            meta: { source: 'delegationChainResultsHeld' },
+          },
+        ],
+      });
+      const message = (notice?.items?.[0] as { meta?: { message?: string } }).meta?.message;
+      expect(message).toContain(`${LODY_MAX_CHAIN_DEPTH} hops`);
+      expect(message).toContain('1 delegated result');
+      expect(queuedResults(store, harness.coordinatorOptions.workspaceId)).toHaveLength(1);
     } finally {
       store.close();
       await harness.coordinator.stop();

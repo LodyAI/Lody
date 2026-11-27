@@ -14,6 +14,7 @@ import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-creation-option';
 import {
   createPreparedE2eeWorkspace,
+  e2eeCreateRefusalReasonKey,
   e2eeCreationErrorCode,
   isE2eeCreationNotEnabled,
   reconcilePendingE2eeWorkspaces,
@@ -25,6 +26,7 @@ import {
   type PendingE2eeWorkspace,
 } from '@/lib/e2ee-workspace-storage';
 import { isE2eeActionTimeoutError } from '../../providers/cloud-e2ee-workspaces';
+import { isLocalStorageFailure, localStorageFailureKey } from '../../lib/e2ee-actionable-failure';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { useTranslation } from 'react-i18next';
@@ -133,7 +135,7 @@ function CreateWorkspaceAuthed({
   redirect?: string;
   allowExisting?: boolean;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
   const platform = usePlatform();
   const platformSession = usePlatformSession();
@@ -180,7 +182,11 @@ function CreateWorkspaceAuthed({
   const creationAvailability = useCloudQuery(
     cloudOperations.billing.getWorkspaceCreationAvailability
   );
-  const newWorkspacePricing = useCloudQuery(cloudOperations.billing.getMyNewWorkspacePricing, {});
+  const [promoRefreshKey, refreshPromoPolicy] = useState(0);
+  const newWorkspacePricing = useCloudQuery(
+    cloudOperations.billing.getMyNewWorkspacePricing,
+    promoRefreshKey > 0 ? { policyRefreshKey: promoRefreshKey } : {}
+  );
   const [referralCode, setReferralCode] = useState(() => readReferral());
   const createPaidWorkspaceCheckout = useCloudAction(
     cloudOperations.billing.createPaidWorkspaceCheckout
@@ -234,6 +240,13 @@ function CreateWorkspaceAuthed({
     paidRequired ? { policyRefreshKey, ...(referralCode ? { code: referralCode } : {}) } : 'skip'
   );
   useReferralPolicyRefresh(referralOffer?.policy?.nextChangeAt, refreshPolicy);
+  useReferralPolicyRefresh(
+    Math.min(
+      newWorkspacePricing?.promo?.nextChangeAt ?? Infinity,
+      newWorkspacePricing?.promo?.policy?.nextChangeAt ?? Infinity
+    ),
+    refreshPromoPolicy
+  );
   // Mirrors the early-return below: the form is only really shown when creating
   // is allowed for an existing-workspace user, or the user has none.
   const willRenderCreateForm = allowExisting === true || !hasExistingWorkspaces;
@@ -523,10 +536,8 @@ function CreateWorkspaceAuthed({
         err instanceof ConvexError && err.data && typeof err.data === 'object'
           ? (err.data as { code?: unknown }).code
           : undefined;
-      const refusalCode = e2eeCreationErrorCode(err);
-      const refusalReason = refusalCode
-        ? t(`e2ee.create.reason.${refusalCode}`, { defaultValue: refusalCode })
-        : undefined;
+      const refusalReasonKey = e2eeCreateRefusalReasonKey(e2eeCreationErrorCode(err), i18n);
+      const refusalReason = refusalReasonKey ? t(refusalReasonKey) : undefined;
       setError(
         !useEncryption
           ? typeof code === 'string' && code in REFERRAL_ERROR_KEYS
@@ -536,9 +547,11 @@ function CreateWorkspaceAuthed({
             ? t('e2ee.create.notEnabled')
             : isE2eeActionTimeoutError(err)
               ? t('e2ee.create.timeout')
-              : refusalReason
-                ? t('e2ee.create.requestRemoved', { code: refusalReason })
-                : t('e2ee.create.failed')
+              : isLocalStorageFailure(err)
+                ? t(localStorageFailureKey('create'))
+                : refusalReason
+                  ? t('e2ee.create.requestRemoved', { code: refusalReason })
+                  : t('e2ee.create.failed')
       );
       captureCreateFailed('create_rejected', startMs);
     } finally {
@@ -563,6 +576,7 @@ function CreateWorkspaceAuthed({
       workspaceSlug={workspaceSlug}
       error={error}
       creating={creating}
+      creatingLabel={useEncryption ? t('e2ee.create.creating') : undefined}
       submitDisabled={
         !accountId || (useEncryption && (!platform.e2eeWorkspaces?.prepareCreation || paidRequired))
       }

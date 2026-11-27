@@ -259,6 +259,7 @@ jobs:
       LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
       LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL }}
       SITE_URL: ${{ vars.SITE_URL }}
+      LODY_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
@@ -379,6 +380,7 @@ jobs:
           'next'
         }}
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      LODY_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       NODE_OPTIONS: --max-old-space-size=6144
       npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
       LODY_PLATFORM: cloud
@@ -894,7 +896,7 @@ jobs:
           ((github.event_name == 'push' || inputs.component == 'android') &&
         needs.release.outputs.publish_requested == 'true' &&
         contains(fromJSON(needs.release.outputs.paths_released), 'apps/mobile-capacitor')) }}
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
     env:
       LODY_ENV: ${{ needs.release.outputs.target_environment == 'production' && 'production' || 'staging' }}
@@ -931,6 +933,7 @@ jobs:
           vars.MOBILE_ANDROID_DOWNLOAD_BASE_URL_STAGING
         }}
       MOBILE_VERSION_CODE: ${{ needs.release.outputs.build_number }}
+      VITE_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
@@ -1170,6 +1173,7 @@ jobs:
       VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
       VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
       VITE_VIBELOFT_WEB_AUTH_KEY: ${{ vars.VITE_VIBELOFT_WEB_AUTH_KEY }}
+      VITE_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
       IOS_BUNDLE_ID: ai.lody.mobile
       LODY_PLATFORM: cloud

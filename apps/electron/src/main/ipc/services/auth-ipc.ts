@@ -174,7 +174,12 @@ export class AuthIpc extends ProductWindowIpcService {
     let accepted = false
     try {
       const result = await getIpcServiceDeps().authService.getActiveOrganization(payload, query)
-      accepted = Boolean(result.data && !result.error)
+      accepted =
+        typeof result === 'object' &&
+        result !== null &&
+        'data' in result &&
+        Boolean(result.data) &&
+        !('error' in result && result.error != null)
       return result
     } finally {
       if (!accepted && workspaceSelections.get(sender) === query) {

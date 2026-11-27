@@ -129,6 +129,33 @@ export function buildElectronRedirectToken(authorizationCode: string, state: str
   );
 }
 
+function isEncodedElectronRedirectToken(value: string, expectedState: string): boolean {
+  try {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const parsed = JSON.parse(atob(padded)) as { identifier?: unknown; state?: unknown } | null;
+    return (
+      Boolean(parsed) &&
+      typeof parsed?.identifier === 'string' &&
+      parsed.identifier.length > 0 &&
+      parsed.state === expectedState
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function buildElectronRedirectUrlFromCookie(
+  cookieValue: string,
+  state: string,
+  channel?: 'stable' | 'nightly'
+): string {
+  if (isEncodedElectronRedirectToken(cookieValue, state)) {
+    return buildElectronAuthorizationCallbackUrl(cookieValue, channel);
+  }
+  return buildElectronRedirectUrl(cookieValue, state, channel);
+}
+
 export function buildElectronRedirectUrl(
   authorizationCode: string,
   state: string,

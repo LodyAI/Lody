@@ -3,9 +3,10 @@ import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
-import { ChevronLeft, MonitorSmartphone, RefreshCw } from 'lucide-react';
+import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { Children, isValidElement, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
 const styles = stylex.create({
   page: {
@@ -34,7 +35,6 @@ const styles = stylex.create({
   },
   back: { marginInlineStart: `calc(-1 * ${space[2]})`, alignSelf: 'flex-start' },
   hero: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[3] },
-  icon: { color: colors.secondaryLabel },
   title: { fontSize: type.titleSize, lineHeight: type.titleLeading, fontWeight: 600, margin: 0 },
   lead: { margin: 0, color: colors.secondaryLabel },
   steps: {
@@ -105,7 +105,7 @@ export function E2eeDeviceApprovalGuide(props: E2eeDeviceApprovalGuideProps) {
           {t('e2ee.control.back')}
         </Button>
         <header {...stylex.props(styles.hero)}>
-          <MonitorSmartphone size={28} aria-hidden="true" {...stylex.props(styles.icon)} />
+          <E2eeDevicePairArt width={140} />
           <h1 {...stylex.props(styles.title)}>{t('e2ee.approvalGuide.title')}</h1>
           <p {...stylex.props(styles.lead)}>
             {t(

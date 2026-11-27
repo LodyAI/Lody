@@ -34,8 +34,8 @@ const directoryEntrySchema = z.object({
 });
 export type ShortcutDirectoryEntry = z.infer<typeof directoryEntrySchema>;
 const discoverySchema = z.object({
-  directory: z.array(directoryEntrySchema),
-  entries: z.array(PromptShortcutIndexSchema),
+  directory: z.array(directoryEntrySchema).optional(),
+  entries: z.array(PromptShortcutIndexSchema).optional(),
   workspaceEntries: z.array(PromptShortcutIndexSchema).optional(),
   workspaceDeletedIds: z.array(z.string()).optional(),
 });
@@ -111,25 +111,16 @@ export class LocalShortcutStore {
   discovery(): ShortcutDiscoverySnapshot {
     return discoverySchema.parse(
       this.ledger.flock.get(['discovery']) ?? {
-        directory: [],
-        entries: [],
         workspaceEntries: [],
         workspaceDeletedIds: [],
       }
     );
   }
 
-  applyRemoteDeletions(
-    rows: readonly ShortcutDirectoryEntry[],
-    workspaceDeletedIds: ReadonlySet<string> = new Set()
-  ): Promise<void> {
+  applyRemoteDeletions(workspaceDeletedIds: ReadonlySet<string>): Promise<void> {
     return this.serialized(async () => {
       await this.recover();
-      const deletedIds = new Set<string>(workspaceDeletedIds);
-      for (const row of rows) {
-        if (row.deleted && row.ownerUserId === this.userId) deletedIds.add(row.shortcutId);
-      }
-      for (const shortcutId of deletedIds) {
+      for (const shortcutId of workspaceDeletedIds) {
         const current = this.get(shortcutId);
         // Never erase offline edits because a different device deleted the source.
         if (!current || current.operation || current.deleted) continue;
@@ -141,10 +132,7 @@ export class LocalShortcutStore {
   cacheDiscovery(discovery: ShortcutDiscoverySnapshot): Promise<void> {
     return this.serialized(async () => {
       const value = discoverySchema.parse(discovery);
-      if (
-        value.entries.some((entry) => entry.workspaceId !== this.workspaceId) ||
-        (value.workspaceEntries ?? []).some((entry) => entry.workspaceId !== this.workspaceId)
-      )
+      if ((value.workspaceEntries ?? []).some((entry) => entry.workspaceId !== this.workspaceId))
         throw new PromptShortcutError('forbidden', 'Wrong workspace');
       this.ledger.flock.set(['discovery'], JSON.parse(JSON.stringify(value)));
       this.ledger.flock.commit();
@@ -306,7 +294,6 @@ export class LocalShortcutStore {
     const candidates = [
       ...(entry.ownerUserId === this.userId ? [getLocalShortcutWorkingDocId(entry.id)] : []),
       getWorkspaceShortcutBodyStreamId(this.workspaceId, entry.bodyDocId),
-      getShortcutBodyStreamId(entry.bodyDocId),
     ];
     let sawRevisionMismatch = false;
     for (const docId of candidates) {

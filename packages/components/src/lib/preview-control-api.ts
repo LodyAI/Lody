@@ -27,6 +27,8 @@ export async function getRoostCloudHistoryReadGrant(
     signal.throwIfAborted();
     throw new RoostCloudHistoryTransportError({ cause });
   });
+  // A backend without this route keeps the owner read path; access decisions use 401/403.
+  if (response.status === 404) return { state: 'owner-required' as const };
   if (!response.ok) throw new RoostCloudHistoryRequestError(response.status);
   return roostCloudHistoryReadResultSchema.parse(await response.json());
 }

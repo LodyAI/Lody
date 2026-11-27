@@ -422,6 +422,18 @@ void test('bundled entry imports application after ownership and replays the ear
   )
 })
 
+void test('bundled entry normalizes an uppercase callback scheme while preserving token case', async (t) => {
+  const run = launch(t, {
+    initialUrl: 'AI.LODY.NIGHTLY://auth/callback#token=AbC123'
+  })
+  await run.done
+  assert.ok(!run.events.some(([name]) => name === 'fatal'), JSON.stringify(run.events))
+  assert.deepEqual(
+    run.events.filter(([name]) => name === 'application' || name === 'launch'),
+    [['application'], ['launch', { url: 'ai.lody.nightly://auth/callback#token=AbC123' }]]
+  )
+})
+
 void test('same-app secondary exits without starting a second application', async (t) => {
   const run = launch(t, { sameAppPrimary: false })
   await run.done

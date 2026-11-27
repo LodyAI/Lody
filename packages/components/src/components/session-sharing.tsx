@@ -540,6 +540,15 @@ function SessionAccessMembers({
             {available.map((member) => (
               <Menu.Item
                 key={member.userId}
+                label={member.name}
+                icon={
+                  <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
+                    <UserAvatar
+                      user={{ id: member.userId, name: member.name, image: member.image }}
+                      size="mini"
+                    />
+                  </span>
+                }
                 onClick={() => {
                   void change(member.userId, true);
                 }}

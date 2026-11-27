@@ -421,6 +421,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   task: schema.String(),
   project: schema.Any({ required: false }),
   userId: schema.String(),
+  /** The sender's own display name, copied to the promoted turn's author. Display only. */
+  userName: schema.String({ required: false }),
   userTurnId: schema.String({ required: false }),
   /** Stable queue promotion identity; legacy rows derive it from userTurnId/$cid. */
   operationId: schema.String({ required: false }),

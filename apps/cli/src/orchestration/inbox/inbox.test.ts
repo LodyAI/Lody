@@ -1,4 +1,10 @@
-import type { LodyOperationItemResult, MachineId, SessionId, WorkspaceId } from '@lody/shared';
+import {
+  LODY_MAX_CHAIN_DEPTH,
+  type LodyOperationItemResult,
+  type MachineId,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
 import Database from 'better-sqlite3';
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Scheduler } from 'effect';
 import { TestClock } from 'effect/testing';
@@ -344,6 +350,39 @@ describe('durable Operation inbox', () => {
     expect(b.config.prompt).toBe('current human request');
     expect(f.sql.members(b)[0].chainDepth).toBe(15);
     expect(batchDepth({ ...f.input, kind: 'automatic' }, [15])).toBe(16);
+  });
+  it('delivers results from the last permitted hop to an automatic continuation at the cap', () => {
+    const f = fixture();
+    f.add('final-hop', LODY_MAX_CHAIN_DEPTH - 1);
+    const [intent] = f.sql.pending('workspace');
+    const batch = f.sql.prepare(intent.input, 'owner', intent.intentId)!;
+    expect(batch.chainDepth).toBe(LODY_MAX_CHAIN_DEPTH);
+    expect(f.sql.members(batch).map((m) => m.operationId)).toEqual(['final-hop']);
+    expect(f.sql.depthLimitedIntents('workspace')).toEqual([]);
+  });
+  it('keeps results past the cap for the next human input and reports them once', () => {
+    const f = fixture();
+    const capped = { ...f.input, config: { prompt: 'last hop', chainDepth: LODY_MAX_CHAIN_DEPTH } };
+    expect(f.sql.accept(capped)).toBe(true);
+    expect(f.sql.begin(capped, 'execution-1')).toBe(true);
+    f.add('late', LODY_MAX_CHAIN_DEPTH - 1);
+    f.add('later', LODY_MAX_CHAIN_DEPTH - 1);
+    f.sql.release({ ...capped, executionId: 'execution-1', outcome: 'normal' });
+    const [intent] = f.sql.pending('workspace');
+    expect(f.sql.prepare(intent.input, 'owner', intent.intentId)).toBeUndefined();
+    expect(f.sql.pending('workspace')).toEqual([]);
+    const [limited] = f.sql.depthLimitedIntents('workspace');
+    expect(limited).toEqual({
+      intentId: intent.intentId,
+      sessionId: 'A',
+      pendingResults: 2,
+    });
+    f.sql.acknowledgeDepthLimited(limited.intentId);
+    expect(f.sql.depthLimitedIntents('workspace')).toEqual([]);
+    const human = { ...f.input, inputId: 'user-2' };
+    expect(f.sql.accept(human)).toBe(true);
+    const delivered = f.sql.prepare(human, 'owner')!;
+    expect(f.sql.members(delivered).map((m) => m.operationId)).toEqual(['late', 'later']);
   });
   it('a newer human acceptance invalidates automatic preparation before submission', () => {
     const f = fixture();

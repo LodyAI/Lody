@@ -37,6 +37,7 @@ export {
 export {
   makePersonalWorkspaceRuntime,
   personalRuntimeAccountRequester,
+  personalRuntimeReceiveKeys,
   personalRuntimeRecovery,
   type PersonalRuntimeRecovery,
   type PersonalRuntimeOptions,

@@ -270,7 +270,7 @@ export function recoveryWorkspacesPort(host: RecoveryWorkspacesPortHost) {
         };
         try {
           const rows = ids.length
-            ? await batch((progress) => engine.restore(unlock, ids, progress), observe)
+            ? await batch((progress) => engine.restore(unlock, ids, progress, plan), observe)
             : [];
           return {
             outcome: 'restored' as const,

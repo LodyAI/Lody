@@ -1,6 +1,14 @@
 import { electronProxyClient } from '@better-auth/electron/proxy'
 import {
+  decodeBetterAuthActiveOrganization,
+  decodeBetterAuthOrganizations,
+  decodeBetterAuthSession,
+  formatBoundaryDecodeDiagnostic,
+  type BoundaryDecodeDiagnostic
+} from '@lody/shared/boundary-decode'
+import {
   ElectronDevEmailPasswordSignInInputSchema,
+  ElectronLoginStateSchema,
   isDevEmailPasswordLoginEnabled,
   type ElectronLoginState
 } from '@lody/shared/electron-ipc'
@@ -10,6 +18,7 @@ import {
   type LodyAuthClient
 } from '@lody/components/lib/auth'
 import type { AuthSessionAtom, AuthSessionSnapshot } from '@lody/components/lib/auth-session-store'
+import { recordClientLog } from '@lody/components/lib/client-log'
 import { jotaiStore } from '@lody/components/lib'
 import {
   electronDeepLinkSignInInProgressAtom,
@@ -120,6 +129,18 @@ function withStoredSessionAuthorization(input?: unknown): unknown {
   }
 }
 
+function reportAuthBoundaryDiagnostic(diagnostic: BoundaryDecodeDiagnostic): void {
+  const summary = formatBoundaryDecodeDiagnostic(diagnostic)
+  console.warn(`[Auth] ${summary}`)
+  recordClientLog('warn', 'boundary.decode', summary, {
+    boundary: diagnostic.boundary,
+    kind: diagnostic.kind,
+    droppedCount: diagnostic.droppedCount,
+    totalCount: diagnostic.totalCount,
+    issueCount: diagnostic.issueCount
+  })
+}
+
 const sessionStore = createAuthQueryStore<
   NonNullable<AuthSessionSnapshot['data']>,
   NonNullable<AuthSessionSnapshot['error']>
@@ -128,16 +149,42 @@ const sessionStore = createAuthQueryStore<
   async () => {
     return await getAuthApi().getSession(withStoredSessionAuthorization())
   },
-  { onCommit: persistAuthSessionResult }
+  {
+    onCommit: persistAuthSessionResult,
+    decode: (raw) =>
+      decodeBetterAuthSession('electron.renderer.getSession', raw, {
+        onDiagnostic: reportAuthBoundaryDiagnostic
+      }) as
+        | { ok: true; data: NonNullable<AuthSessionSnapshot['data']> | null }
+        | { ok: false; error: NonNullable<AuthSessionSnapshot['error']> }
+  }
 )
 
-const organizationsStore = createAuthQueryStore('listOrganizations', async () => {
-  return await getAuthApi().listOrganizations(withStoredSessionAuthorization())
-})
+const organizationsStore = createAuthQueryStore(
+  'listOrganizations',
+  async () => {
+    return await getAuthApi().listOrganizations(withStoredSessionAuthorization())
+  },
+  {
+    decode: (raw) =>
+      decodeBetterAuthOrganizations('electron.renderer.listOrganizations', raw, {
+        onDiagnostic: reportAuthBoundaryDiagnostic
+      })
+  }
+)
 
-const activeOrganizationStore = createAuthQueryStore('getActiveOrganization', async () => {
-  return await getAuthApi().getActiveOrganization(withStoredSessionAuthorization())
-})
+const activeOrganizationStore = createAuthQueryStore(
+  'getActiveOrganization',
+  async () => {
+    return await getAuthApi().getActiveOrganization(withStoredSessionAuthorization())
+  },
+  {
+    decode: (raw) =>
+      decodeBetterAuthActiveOrganization('electron.renderer.getActiveOrganization', raw, {
+        onDiagnostic: reportAuthBoundaryDiagnostic
+      })
+  }
+)
 
 const refetchSessionState = async () => {
   await sessionStore.refetch()
@@ -156,7 +203,23 @@ const refetchAllAuthState = async () => {
 let loginRevision = -1
 let loginPhase: ElectronLoginState['phase'] = 'idle'
 
-function applyLoginState(state: ElectronLoginState): void {
+function applyLoginState(rawState: unknown): void {
+  const parsed = ElectronLoginStateSchema.safeParse(rawState, { jitless: true })
+  if (!parsed.success) {
+    console.warn('[Auth] Dropped malformed electron login state from IPC')
+    recordClientLog(
+      'warn',
+      'boundary.decode',
+      'boundary=electron.ipc.loginState kind=invalid_payload',
+      {
+        boundary: 'electron.ipc.loginState',
+        kind: 'invalid_payload',
+        issueCount: parsed.error.issues.length
+      }
+    )
+    return
+  }
+  const state = parsed.data
   if (state.revision <= loginRevision) return
   loginRevision = state.revision
   loginPhase = state.phase

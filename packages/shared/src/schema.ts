@@ -974,10 +974,11 @@ export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'p
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project' | 'acpSessionConfig' | 'paused'
+  'project' | 'acpSessionConfig' | 'paused' | 'userName'
 > & {
   project: ProjectRef | undefined;
   paused?: boolean;
+  userName?: string;
   acpSessionConfig?: import('./ai').ACPSessionConfig &
     Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
 };

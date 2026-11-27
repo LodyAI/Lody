@@ -286,21 +286,22 @@ it('keeps selected stream bodies rendered after the reading window moves, then r
       </>
     );
   }
+  async function flushStreamFrame() {
+    await act(async () => {
+      await flushReaderChanges();
+      vi.advanceTimersToNextFrame();
+    });
+  }
+
   await act(async () => root.render(<StreamProbe />));
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushStreamFrame();
   await act(async () => stream.onVisibleTurnRangeChange({ from: 20, to: 28 }));
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushStreamFrame();
   await act(async () => select(21));
   const before = viewport.querySelector('[data-conversation-row-key="a-10"] span')!.firstChild;
   expect(document.getSelection()!.toString()).toBe('body:a-10');
   await act(async () => stream.onVisibleTurnRangeChange({ from: 100, to: 108 }));
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushStreamFrame();
   expect(document.getSelection()!.toString()).toBe('body:a-10');
   expect(viewport.querySelector('[data-conversation-row-key="a-10"] span')!.firstChild).toBe(
     before
@@ -309,9 +310,7 @@ it('keeps selected stream bodies rendered after the reading window moves, then r
     document.getSelection()!.removeAllRanges();
     document.dispatchEvent(new Event('selectionchange'));
   });
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushStreamFrame();
   expect(viewport.querySelector('[data-conversation-row-key="a-10"]')!.textContent).toBe(
     'placeholder'
   );

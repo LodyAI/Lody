@@ -8,6 +8,7 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { settingsSurface } from './surface';
+import { discountBadgeValues, resolvePromoCampaignName } from './discount-badge-values';
 
 export type IntervalPreview = FunctionReturnType<
   CloudApi['billing']['previewSubscriptionIntervalChange']
@@ -88,8 +89,25 @@ export function BillingIntervalDialog({
       }),
       preview.subtotalAmount,
     ]);
-    if (preview.promoDiscountAmount)
-      rows.push([t('billing.upcomingDiscount'), preview.promoDiscountAmount]);
+    if (preview.promoDiscountAmount) {
+      const customPromoName =
+        preview.promoKind === 'campaign_once'
+          ? resolvePromoCampaignName(preview.promoName, i18n.language)
+          : null;
+      const promoLabel =
+        preview.promoKind === 'campaign_once' && preview.promoDiscountPercent
+          ? customPromoName
+            ? `${customPromoName} (${t(
+                'billing.promoYearlyOfferBadge',
+                discountBadgeValues(preview.promoDiscountPercent)
+              )})`
+            : t(
+                'billing.switchPromoDiscountWithPercent',
+                discountBadgeValues(preview.promoDiscountPercent)
+              )
+          : t('billing.upcomingDiscount');
+      rows.push([promoLabel, preview.promoDiscountAmount]);
+    }
     if (preview.accruedSeatAmount)
       rows.push([t('billing.switchAccruedSeats'), preview.accruedSeatAmount]);
     if (preview.creditAmount) rows.push([t('billing.switchLineCredit'), preview.creditAmount]);
@@ -220,7 +238,12 @@ export function BillingIntervalDialog({
                   ))}
                   {preview.nextRenewalAt && (
                     <p {...stylex.props(styles.note)}>
-                      {t('billing.switchRenewalDate', { date: date(preview.nextRenewalAt) })}
+                      {preview.promoKind === 'campaign_once' && interval === 'year'
+                        ? t('billing.switchRenewalDateStandardYearly', {
+                            date: date(preview.nextRenewalAt),
+                            amount: money(preview.subtotalAmount),
+                          })
+                        : t('billing.switchRenewalDate', { date: date(preview.nextRenewalAt) })}
                     </p>
                   )}
                   {preview.remainingCredit > 0 && (

@@ -19,7 +19,6 @@ import { useTranslation } from 'react-i18next';
 import { Camera, ChevronDown, ChevronLeft, CircleCheck, QrCode, Smartphone } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
-import { Spinner } from '@lody/ui/spinner';
 import { Tabs } from '@lody/ui/tabs';
 import { accountPairingErrorCode } from '@lody/platform';
 import type {
@@ -51,6 +50,7 @@ import {
 } from './e2ee-device-requests';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
+import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
 /** Seconds left until `expiresAt`, ticking once a second; null without a deadline. */
 function useSecondsLeft(expiresAt: number | undefined) {
@@ -68,6 +68,10 @@ const clock = (seconds: number) =>
 const POLL_MS = 2000;
 /** The new device's poll for its QR join; the approving device signs within a second. */
 const QR_JOIN_POLL_MS = 800;
+/** Slower fallback for QR join when live claim subscription is active (covers mailbox delivery). */
+const QR_JOIN_FALLBACK_POLL_MS = 4_000;
+/** After 5s of syncing, guide the person to keep Lody open on the approving device. */
+const SYNC_SLOW_HINT_MS = 5_000;
 /** After 15s of syncing without key failure, surface explicit retry and cancel exits. */
 const SYNC_TIMEOUT_MS = 15_000;
 /** A scanned join that verified approvals settled without this workspace: it was left
@@ -230,16 +234,23 @@ export function E2eeAutomaticPairingPage({
   const lost = state?.phase === 'revoked' || state?.phase === 'removed';
   const receiving =
     !lost && (state?.phase === 'syncing' || state?.phase === 'joined' || qr === 'joined');
+  const [syncSlowHint, setSyncSlowHint] = useState(false);
   const [syncTimedOut, setSyncTimedOut] = useState(false);
   const [syncAttempt, setSyncAttempt] = useState(0);
   useEffect(() => {
     if (!receiving || keyFailure) {
+      setSyncSlowHint(false);
       setSyncTimedOut(false);
       return undefined;
     }
+    setSyncSlowHint(false);
     setSyncTimedOut(false);
+    const slowTimer = setTimeout(() => setSyncSlowHint(true), SYNC_SLOW_HINT_MS);
     const timer = setTimeout(() => setSyncTimedOut(true), SYNC_TIMEOUT_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(slowTimer);
+      clearTimeout(timer);
+    };
   }, [receiving, keyFailure, syncAttempt]);
   const linkGuardRef = useRef({ busy, canStart, lostAllOpen, receiving });
   linkGuardRef.current = { busy, canStart, lostAllOpen, receiving };
@@ -363,10 +374,13 @@ export function E2eeAutomaticPairingPage({
     }
     void tick();
     const timer = setInterval(() => void tick(), POLL_MS);
+    const onOnline = () => void tick();
+    window.addEventListener('online', onOnline);
     return () => {
       alive = false;
       unsubscribe?.();
       clearInterval(timer);
+      window.removeEventListener('online', onOnline);
     };
   }, [runtime, workspaceId, generation, canStart]);
   const ownerRef = useRef({ runtime, workspaceId });
@@ -510,11 +524,14 @@ export function E2eeAutomaticPairingPage({
         /* Live subscription is optional; interval polling verifies the same request. */
       }
     }
-    const timer = setInterval(poll, QR_JOIN_POLL_MS);
+    poll();
+    const timer = setInterval(poll, unsubscribe ? QR_JOIN_FALLBACK_POLL_MS : QR_JOIN_POLL_MS);
+    window.addEventListener('online', poll);
     return () => {
       alive = false;
       unsubscribe?.();
       clearInterval(timer);
+      window.removeEventListener('online', poll);
     };
     // The join belongs to this page's runtime and workspace; callbacks read refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -626,7 +643,15 @@ export function E2eeAutomaticPairingPage({
               {...lostAccess}
               workspaceId={workspaceId}
               workspaceName={lostAccess.workspaceName ?? state?.workspaceName}
-              {...(recovery ? { recovery: { ...recovery, onRecovered: recovered } } : {})}
+              {...(runtime.openBrowserRecovery
+                ? {
+                    recovery: undefined,
+                    entryVariant: 'link' as const,
+                    entryLabel: t('e2ee.lostAccess.entrySecondary'),
+                  }
+                : recovery
+                  ? { recovery: { ...recovery, onRecovered: recovered } }
+                  : {})}
               disabled={busy}
               onOpenChange={setLostAllOpen}
             />
@@ -671,7 +696,12 @@ export function E2eeAutomaticPairingPage({
         <ChevronLeft size={16} />
         {t('e2ee.control.back')}
       </Button>
-      <section {...stylex.props(themeStyles.column)}>
+      <section {...stylex.props(themeStyles.column, receiving && themeStyles.receivingColumn)}>
+        {receiving && (
+          <div {...stylex.props(themeStyles.receivingArt)}>
+            <E2eeDevicePairArt width={196} transferring={!keyFailure} />
+          </div>
+        )}
         <h1 {...stylex.props(themeStyles.copy)}>
           {t(
             terminal
@@ -698,9 +728,12 @@ export function E2eeAutomaticPairingPage({
           </>
         ) : receiving ? (
           <>
-            <p {...stylex.props(themeStyles.hint4, themeStyles.syncRow)}>
-              {!keyFailure && <Spinner size="small" />}
-              <span>{t('e2ee.auto.syncing.help')}</span>
+            <p role="status" {...stylex.props(themeStyles.hint3)}>
+              {t(
+                syncSlowHint && !syncTimedOut
+                  ? 'e2ee.auto.syncing.keepOpen'
+                  : 'e2ee.auto.syncing.help'
+              )}
             </p>
             {!keyFailure && syncTimedOut && (
               <div {...stylex.props(themeStyles.spaced2)} data-testid="e2ee-sync-timeout">
@@ -783,9 +816,13 @@ export function E2eeAutomaticPairingPage({
             ) : qr === 'scanning' ? (
               <div {...stylex.props(themeStyles.layout3)} data-testid="e2ee-qr-viewfinder">
                 <video ref={qrVideo} muted playsInline {...stylex.props(themeStyles.panel)} />
-                {cameraState === 'unavailable' && (
+                {(cameraState === 'denied' || cameraState === 'unavailable') && (
                   <p role="alert" {...stylex.props(themeStyles.hint7)}>
-                    {t('e2ee.verify.cameraUnavailable')}
+                    {t(
+                      cameraState === 'denied'
+                        ? 'e2ee.verify.cameraDenied'
+                        : 'e2ee.verify.cameraUnavailable'
+                    )}
                   </p>
                 )}
                 <Button xstyle={themeStyles.spaced3} variant="ghost" onClick={() => setQr('idle')}>
@@ -819,6 +856,9 @@ export function E2eeAutomaticPairingPage({
               </>
             ) : (
               <div data-testid="e2ee-awaiting-device" {...stylex.props(themeStyles.hint10)}>
+                <div {...stylex.props(themeStyles.cardArt)}>
+                  <E2eeDevicePairArt width={152} />
+                </div>
                 <p role="status" {...stylex.props(themeStyles.copy2)}>
                   {t('e2ee.auto.awaiting.title')}
                 </p>
@@ -1123,8 +1163,7 @@ export function E2eeAutomaticPairingInbox({
       /* Live discovery is optional; scoped polling still verifies the same originals. */
     }
     void tick();
-    // A hidden window does not poll; the subscription and the system notification
-    // still run, and showing the window again checks at once.
+    // Visible windows still poll: a post-reveal `e2eeAccountPairing` submission is not pushed.
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void tick();
     }, POLL_MS);
@@ -1133,11 +1172,13 @@ export function E2eeAutomaticPairingInbox({
       if (document.visibilityState === 'visible') void tick();
     };
     document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
     return () => {
       alive = false;
       unsubscribe?.();
       clearInterval(timer);
       document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('online', wake);
     };
   }, [runtime]);
   const current = requests.find((row) => row.id === selected);
@@ -1496,9 +1537,13 @@ export function E2eeAutomaticPairingInbox({
                         playsInline
                         {...stylex.props(themeStyles.panel6)}
                       />
-                      {scanState === 'unavailable' && (
+                      {(scanState === 'denied' || scanState === 'unavailable') && (
                         <p role="alert" {...stylex.props(themeStyles.hint14)}>
-                          {t('e2ee.verify.cameraUnavailable')}
+                          {t(
+                            scanState === 'denied'
+                              ? 'e2ee.verify.cameraDenied'
+                              : 'e2ee.verify.cameraUnavailable'
+                          )}
                         </p>
                       )}
                       <Button
@@ -1749,12 +1794,15 @@ const themeStyles = stylex.create({
     lineHeight: uiText.footnoteLeading,
     textAlign: 'start',
   },
-  syncRow: {
-    display: 'inline-flex',
-    alignItems: 'center',
+  /** Receiving keys is a wait with nothing to do: the column centres on the transfer. */
+  receivingColumn: {
     justifyContent: 'center',
-    gap: appSpace[2],
+    alignItems: 'center',
+    paddingTop: 0,
+    paddingBottom: appSpace[10],
   },
+  receivingArt: { display: 'flex', justifyContent: 'center', marginBottom: appSpace[8] },
+  cardArt: { display: 'flex', justifyContent: 'center', marginBottom: appSpace[4] },
   dialogBody: {
     flex: '1 1 auto',
     minHeight: 0,

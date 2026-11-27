@@ -61,6 +61,51 @@ export const chatScopeAtom = atomWithStorage<SidebarChatScope>(
   createRendererIsolatedJSONStorage<SidebarChatScope>()
 );
 
+/**
+ * People chosen under All Tasks, per workspace (`{ [workspaceId]: userId[] }`).
+ * Only meaningful while `chatScopeAtom` is `team`; empty means every owner.
+ */
+const chatScopeMemberIdsByWorkspaceAtom = atomWithStorage<Record<string, string[]>>(
+  'lody-sidebar-chat-scope-members-by-workspace',
+  {},
+  createRendererIsolatedJSONStorage<Record<string, string[]>>()
+);
+
+const EMPTY_MEMBER_IDS: readonly string[] = Object.freeze([]);
+
+/**
+ * The sidebar task filter for the current workspace: the shared My/All scope
+ * plus the people chosen in this workspace. Writing outside a workspace only
+ * updates the scope.
+ */
+export const taskOwnerSelectionAtom = atom<
+  { scope: SidebarChatScope; memberIds: readonly string[] },
+  [{ scope: SidebarChatScope; memberIds: readonly string[] }],
+  void
+>(
+  (get) => {
+    const scope = get(chatScopeAtom);
+    const workspaceId = get(currentWorkspaceIdAtom);
+    const memberIds =
+      scope === 'team' && workspaceId
+        ? (get(chatScopeMemberIdsByWorkspaceAtom)[workspaceId] ?? EMPTY_MEMBER_IDS)
+        : EMPTY_MEMBER_IDS;
+    return { scope, memberIds };
+  },
+  (get, set, next) => {
+    set(chatScopeAtom, next.scope);
+    const workspaceId = get(currentWorkspaceIdAtom);
+    if (!workspaceId) return;
+    const { [workspaceId]: _previous, ...rest } = get(chatScopeMemberIdsByWorkspaceAtom);
+    set(
+      chatScopeMemberIdsByWorkspaceAtom,
+      next.scope === 'team' && next.memberIds.length > 0
+        ? { ...rest, [workspaceId]: [...next.memberIds] }
+        : rest
+    );
+  }
+);
+
 export type RepoCollapseState = Record<string, boolean>;
 
 /**

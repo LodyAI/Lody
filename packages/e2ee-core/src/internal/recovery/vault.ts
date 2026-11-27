@@ -15,7 +15,7 @@ import {
   vaultError,
   encryptVault,
   decryptVault,
-  encryptPasswordWrap,
+  encryptPasswordWrapAndVerify,
   decryptPasswordWrap,
   normalizeRecoveryPassword,
   ownCiphertext,
@@ -322,8 +322,6 @@ const makeSession = Effect.fnUntraced(function* (input: {
   ) {
     if ((yield* local.compareAndSwap(key, expected, next)) !== 'Committed')
       return yield* vaultError('conflict');
-    const read = yield* local.read(key);
-    if (!read || !bytesEqual(next, read)) return yield* vaultError('storage');
     return yield* Effect.void;
   });
   const index = Effect.fnUntraced(function* () {
@@ -749,23 +747,17 @@ const makeSession = Effect.fnUntraced(function* (input: {
                 }
                 if (generation < 0) return yield* vaultError('conflict');
                 const id = yield* attempt(() => passwordWrapEntryId(vaultId, generation));
-                const entry = yield* encryptPasswordWrap(
+                yield* encryptPasswordWrapAndVerify(
                   pw,
                   vaultId,
                   id,
                   master,
-                  request.kdf ?? DEFAULT_PASSWORD_KDF
-                );
-                yield* store.putImmutable(vaultId, entry);
-                const stored = yield* store.readEntry(vaultId, id);
-                if (!stored || !sameCiphertext(entry, stored)) return yield* vaultError('storage');
-                yield* Effect.acquireUseRelease(
-                  decryptPasswordWrap(pw, vaultId, stored),
-                  (opened) =>
-                    bytesEqual(opened, master)
-                      ? Effect.void
-                      : Effect.fail(vaultError('authentication')),
-                  (opened) => Effect.sync(() => opened.fill(0))
+                  request.kdf ?? DEFAULT_PASSWORD_KDF,
+                  (entry) =>
+                    Effect.gen(function* () {
+                      yield* store.putImmutable(vaultId, entry);
+                      return yield* store.readEntry(vaultId, id);
+                    })
                 );
                 const previous = before.value.password;
                 if (previous) {
@@ -1378,7 +1370,37 @@ export const openRecoveryVaultWithPassword = Effect.fnUntraced(function* (input:
             store: input.store,
             local: input.local,
           });
-          yield* session.readIndex();
+          if (!pin || pin.revision !== indexHeader.revision) {
+            if (
+              (yield* input.local.compareAndSwap(
+                pinKey,
+                pinRaw,
+                canonical({ revision: indexHeader.revision, digest: indexHash })
+              )) !== 'Committed'
+            )
+              return yield* vaultError('conflict');
+          }
+          const intents = yield* input.local.list(`vault-v1/${input.vaultId}/index-intent/`);
+          for (const row of intents) {
+            const parsedIntent = yield* attempt(() => parseCanonical(row.value));
+            const pending = Schema.decodeUnknownResult(PendingIndexIntent)(parsedIntent);
+            if (
+              Result.isSuccess(pending) &&
+              indexHeader.revision > (pending.success.expected?.revision ?? -1)
+            ) {
+              if (
+                (yield* input.local.compareAndSwap(
+                  row.key,
+                  row.value,
+                  canonical({
+                    completed: true,
+                    entryId: row.key.slice(row.key.lastIndexOf('/') + 1),
+                  })
+                )) !== 'Committed'
+              )
+                return yield* vaultError('conflict');
+            }
+          }
           return session;
         }
         return yield* vaultError('authentication');

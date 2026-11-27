@@ -22,7 +22,7 @@ Allow: /
 User-agent: Perplexity-User
 Allow: /
 
-User-agent: Google-Other
+User-agent: GoogleOther
 Allow: /
 
 # Training crawlers are blocked while search and user retrieval remain available.

@@ -1,5 +1,6 @@
 import { getDroppedFileLocalPath } from './dropped-local-path';
 import {
+  buildHumanMessageAuthor,
   buildPendingUserHistoryEntry,
   inputBlocksToHistoryItems,
   normalizeSessionInputBlocks,
@@ -47,6 +48,17 @@ function source(file: File, id: string) {
   };
 }
 
+/**
+ * The signed-in user's display name for an input they author. Another member's
+ * input (a promoted queue row they wrote) never takes this user's name.
+ */
+export function ownDisplayName(
+  currentUser: { id: string; name: string } | null | undefined,
+  userId: string | null | undefined
+): string | undefined {
+  return currentUser && userId && currentUser.id === userId.trim() ? currentUser.name : undefined;
+}
+
 /** An attachment-only draft has no wire items until preparation succeeds. */
 export function buildDraftUserHistoryEntry(
   args: Parameters<typeof buildPendingUserHistoryEntry>[0],
@@ -58,6 +70,7 @@ export function buildDraftUserHistoryEntry(
   return {
     userId: args.userId.trim(),
     role: 'user' as const,
+    author: buildHumanMessageAuthor(args.userId.trim(), args.userName),
     items: inputBlocksToHistoryItems([]),
     timestamp: args.timestamp,
     status: args.status ?? ('pending' as const),

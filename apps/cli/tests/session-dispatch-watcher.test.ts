@@ -2815,6 +2815,7 @@ describe('SessionDispatchWatcher', () => {
         $cid: 'mq-1',
         task: 'queued hello',
         userId: 'user-1',
+        userName: 'Alice Chen',
         timestamp: new Date().toISOString(),
         project: undefined,
         acpSessionConfig: {
@@ -2919,6 +2920,7 @@ describe('SessionDispatchWatcher', () => {
         role: 'user',
         status: 'pending',
         userId: 'user-1',
+        author: { v: 1, kind: 'human', userId: 'user-1', name: 'Alice Chen' },
         inputConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,

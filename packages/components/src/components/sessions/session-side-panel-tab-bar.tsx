@@ -80,6 +80,7 @@ export const parseSideSessionPanelTabId = (tabId: string): string | null =>
 export const isViewerTabId = (tabId: string): boolean =>
   tabId.startsWith('file:') ||
   tabId.startsWith('diff:') ||
+  tabId.startsWith('attachment:') ||
   tabId.startsWith('pr:') ||
   tabId.startsWith('url:');
 

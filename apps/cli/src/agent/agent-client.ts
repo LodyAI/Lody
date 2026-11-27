@@ -88,7 +88,7 @@ import {
   parseSteerAppliedParams,
   type AcknowledgedSteerCapability,
 } from './acknowledged-steer';
-import type { SessionMcpCatalogSelector } from './session-mcp-resolver';
+import type { SessionMcpCatalogSelector, SessionMcpMount } from './session-mcp-resolver';
 import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
 import {
   getBuiltinToolPermissionOutcome,
@@ -598,6 +598,8 @@ export interface AgentClientOptions {
    * selector is applied once the agent has advertised its MCP capabilities.
    */
   loadExternalMcpServers?(): Promise<SessionMcpCatalogSelector>;
+  /** The workspace MCP mount of the ACP session now active, once it is started or adopted. */
+  onExternalMcpServersMounted?(mount: SessionMcpMount): void;
   onImageGenerationBegin?(event: ImageGenerationBeginEvent): void;
   onImageGenerationEnd?(event: ImageGenerationEndEvent): void;
   onWriteTextFile?(event: AcpWriteTextFileEvidence): void | Promise<void>;
@@ -635,6 +637,8 @@ export class AgentClient implements acp.Client {
   /** Latest Core activity level, kept with the ACP session it describes. */
   private nativeActivity: LodySessionActivityUpdate | null = null;
   private readonly devinSubagentTaskIds = new Set<string>();
+  /** Edit-and-resend candidates' MCP mounts, applied only when one is adopted. */
+  private readonly preparedMcpMounts = new WeakMap<acp.NewSessionResponse, SessionMcpMount>();
   private worktreeProject?: LodyWorktreeProject;
   private additionalDirectories: string[] = [];
   private authMethods: acp.AuthMethod[] = [];
@@ -766,10 +770,10 @@ export class AgentClient implements acp.Client {
   private async buildMcpServers(
     workdir: string,
     externalLoad: Promise<SessionMcpCatalogSelector> | undefined
-  ): Promise<acp.McpServer[]> {
+  ): Promise<{ servers: acp.McpServer[]; mount?: SessionMcpMount }> {
     const builtin = this.buildBuiltinMcpServers(workdir);
     if (!externalLoad) {
-      return builtin;
+      return { servers: builtin };
     }
 
     try {
@@ -793,7 +797,10 @@ export class AgentClient implements acp.Client {
           source: 'configWarning',
         });
       }
-      return [...builtin, ...(external.servers as acp.McpServer[])];
+      return {
+        servers: [...builtin, ...(external.servers as acp.McpServer[])],
+        ...(external.mount ? { mount: external.mount } : {}),
+      };
     } catch (error) {
       // A second cold result must leave initialization retryable, before any
       // provider session or Prompt can be created with a false empty selection.
@@ -803,7 +810,7 @@ export class AgentClient implements acp.Client {
       )}). The agent started with only the built-in Lody server.`;
       this.logger.debug(`[${this.options.sessionId}] ${message}`);
       this.options.onAgentWarning?.({ message, source: 'configWarning' });
-      return builtin;
+      return { servers: builtin, mount: { fingerprint: undefined, authRevisions: {} } };
     }
   }
 
@@ -2063,7 +2070,11 @@ export class AgentClient implements acp.Client {
     const newSessionStart = performance.now();
     this.options.onStartupStage?.({ type: 'new_session_start' });
     let sessionResponse: acp.NewSessionResponse;
-    const mcpServers = await this.buildMcpServers(workdir, externalMcpLoad);
+    const { servers: mcpServers, mount: mcpMount } = await this.buildMcpServers(
+      workdir,
+      externalMcpLoad
+    );
+    if (mcpMount) this.options.onExternalMcpServersMounted?.(mcpMount);
 
     const canLoadSession = this.supportsLoadSession && hasLoadSessionMethod;
     const canResumeSession = this.supportsResume && hasResumeMethod;
@@ -2404,15 +2415,28 @@ export class AgentClient implements acp.Client {
     }
 
     const acpSessionCwd = this.antigravitySessionCwd ?? workdir;
-    const mcpServers = await this.buildMcpServers(workdir, this.options.loadExternalMcpServers?.());
+    const { servers: mcpServers, mount } = await this.buildMcpServers(
+      workdir,
+      this.options.loadExternalMcpServers?.()
+    );
+    const prepared = (response: acp.NewSessionResponse) => {
+      if (mount) this.preparedMcpMounts.set(response, mount);
+      return response;
+    };
     if (!forkSessionTurnId) {
       try {
-        return await withTimeout(
-          connection.newSession({ cwd: acpSessionCwd, mcpServers, ...this.getSessionStartMeta() }),
-          this.logger,
-          'connection.newSession.editAndResend',
-          this.options.sessionId,
-          timeoutMs
+        return prepared(
+          await withTimeout(
+            connection.newSession({
+              cwd: acpSessionCwd,
+              mcpServers,
+              ...this.getSessionStartMeta(),
+            }),
+            this.logger,
+            'connection.newSession.editAndResend',
+            this.options.sessionId,
+            timeoutMs
+          )
         );
       } catch (error) {
         throw new Error(`[ACP_SESSION_PREPARE_FAILED] ${formatErrorMessage(error)}`, {
@@ -2430,17 +2454,19 @@ export class AgentClient implements acp.Client {
     }
 
     try {
-      return await withTimeout(
-        connection.unstable_forkSession({
-          sessionId: sourceSessionId as unknown as acp.SessionId,
-          cwd: acpSessionCwd,
-          mcpServers,
-          ...this.getSessionStartMeta(forkSessionTurnId),
-        }),
-        this.logger,
-        'connection.unstable_forkSession.editAndResend',
-        this.options.sessionId,
-        timeoutMs
+      return prepared(
+        await withTimeout(
+          connection.unstable_forkSession({
+            sessionId: sourceSessionId as unknown as acp.SessionId,
+            cwd: acpSessionCwd,
+            mcpServers,
+            ...this.getSessionStartMeta(forkSessionTurnId),
+          }),
+          this.logger,
+          'connection.unstable_forkSession.editAndResend',
+          this.options.sessionId,
+          timeoutMs
+        )
       );
     } catch (error) {
       throw new Error(`[ACP_FORK_FAILED] ${formatErrorMessage(error)}`, { cause: error });
@@ -2452,6 +2478,8 @@ export class AgentClient implements acp.Client {
     this.availableCommands = undefined;
     this.applySessionResponseState(sessionResponse);
     this.acpSessionId = sessionResponse.sessionId;
+    const mount = this.preparedMcpMounts.get(sessionResponse);
+    if (mount) this.options.onExternalMcpServersMounted?.(mount);
     const currentWork = this.getNativeWork();
     if (previousWork !== currentWork) this.options.onNativeWorkChanged?.(currentWork);
     this.devinSubagentTaskIds.clear();

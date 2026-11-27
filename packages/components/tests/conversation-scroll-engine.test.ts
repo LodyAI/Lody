@@ -357,6 +357,43 @@ describe('manual disclosures', () => {
       expectHealthy(sim);
     }
   );
+
+  it.each([0, 36])(
+    'anchors an unmounted scrolled-past sticky header at targetScreenY=%s on collapse',
+    (targetScreenY) => {
+      const detailRows = Array.from({ length: 40 }, (_, i) => ({
+        key: `detail-${i}`,
+        turnId: 't-disclose',
+        turnIndex: 20,
+        itemIndex: i + 1,
+        itemIdentity: `detail:${i}`,
+        firstItemIndex: null,
+        placeholder: false,
+        fixed: null,
+        height: 80,
+      }));
+      const expandedRows = [...prefix, header, ...detailRows, ...tail];
+      const collapsedRows = [...prefix, header, ...tail];
+      const sim = new ScrollSim(expandedRows, V);
+      sim.render();
+      sim.settle();
+      // Scroll deep into the expanded body so the header row is far past overscan and unmounted.
+      sim.controller.onReaderInput(true);
+      sim.nativeScroll(sim.contentTop + 2000 + 2200);
+      sim.settle();
+      expect(sim.controller.plan().keys).not.toContain(header.key);
+      expect(screenY(sim)).toBeLessThan(-1000);
+
+      sim.task(() => sim.controller.preserveDisclosure(header.key, 0, undefined, targetScreenY));
+      sim.render(collapsedRows);
+      sim.settle();
+
+      expect(sim.controller.mode).toBe('read');
+      expect(sim.controller.plan().keys).toContain(header.key);
+      expect(screenY(sim)).toBe(targetScreenY);
+      expectHealthy(sim);
+    }
+  );
 });
 
 describe('reading', () => {

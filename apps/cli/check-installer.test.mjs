@@ -99,3 +99,31 @@ test('checks the independent Next and Nightly installation channels', async () =
       })
     );
 });
+
+test('retries transient 5xx responses when checking newly published daemon installer metadata', async () => {
+  await fixture(async (options) => {
+    const original = options.fetchImpl;
+    let darwinAttempts = 0;
+    const delays = [];
+    options.fetchImpl = async (input) => {
+      if (new URL(input).pathname === '/api/install/daemon/nightly/darwin-arm64') {
+        darwinAttempts++;
+        if (darwinAttempts < 3) return new Response(null, { status: 500 });
+      }
+      return original(input);
+    };
+    assert.deepEqual(
+      await checkSourceDaemonInstaller({
+        ...options,
+        channel: 'nightly',
+        retryDelayMs: 100,
+        sleepImpl: async (ms) => {
+          delays.push(ms);
+        },
+      }),
+      { status: 'ready', channel: 'nightly' }
+    );
+    assert.equal(darwinAttempts, 3);
+    assert.deepEqual(delays, [100, 200]);
+  });
+});

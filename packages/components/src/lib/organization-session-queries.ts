@@ -1,6 +1,26 @@
 import { useSyncExternalStore } from 'react';
 import type { AuthQueryAtom } from 'better-auth/client';
+import {
+  decodeBetterAuthActiveOrganization,
+  decodeBetterAuthOrganizations,
+  formatBoundaryDecodeDiagnostic,
+  type BoundaryDecodeDiagnostic,
+  type BoundaryDecodeResult,
+} from '@lody/shared/boundary-decode';
+import { recordClientLog } from './client-log';
 import type { LodyAuthClient } from './auth';
+
+function reportOrganizationBoundaryDiagnostic(diagnostic: BoundaryDecodeDiagnostic): void {
+  const summary = formatBoundaryDecodeDiagnostic(diagnostic);
+  console.warn(`[OrganizationQuery] ${summary}`);
+  recordClientLog('warn', 'boundary.decode', summary, {
+    boundary: diagnostic.boundary,
+    kind: diagnostic.kind,
+    droppedCount: diagnostic.droppedCount,
+    totalCount: diagnostic.totalCount,
+    issueCount: diagnostic.issueCount,
+  });
+}
 
 type OrganizationQuery<Data> = {
   data: Data | null;
@@ -54,8 +74,9 @@ export function withSessionGatedOrganizationQueries(
   let signOutPending = 0;
 
   function createQuery<Data>(
-    fetcher: () => Promise<{ data: Data | null; error: unknown }>,
-    signal: '$listOrg' | '$activeOrgSignal'
+    fetcher: () => Promise<{ data: unknown; error: unknown }>,
+    signal: '$listOrg' | '$activeOrgSignal',
+    decode: (raw: unknown) => BoundaryDecodeResult<Data | null>
   ) {
     let owner: string | null = null;
     let admitted = false;
@@ -137,13 +158,32 @@ export function withSessionGatedOrganizationQueries(
             response.error !== null &&
             'status' in response.error &&
             response.error.status === 401;
-          snapshot = {
-            ...snapshot,
-            data: unauthorized ? null : response.error !== null ? snapshot.data : response.data,
-            error: response.error,
-            isPending: false,
-            isRefetching: false,
-          };
+          if (response.error !== null) {
+            snapshot = {
+              ...snapshot,
+              data: unauthorized ? null : snapshot.data,
+              error: response.error,
+              isPending: false,
+              isRefetching: false,
+            };
+          } else {
+            const decoded = decode(response.data);
+            snapshot = decoded.ok
+              ? {
+                  ...snapshot,
+                  data: decoded.data,
+                  error: null,
+                  isPending: false,
+                  isRefetching: false,
+                }
+              : {
+                  ...snapshot,
+                  data: null,
+                  error: decoded.error,
+                  isPending: false,
+                  isRefetching: false,
+                };
+          }
         } catch (error) {
           synchronize();
           if (requestRevision !== revision) return;
@@ -211,11 +251,19 @@ export function withSessionGatedOrganizationQueries(
 
   const list = createQuery(
     () => client.organization.list({ fetchOptions: { disableSignal: true } }),
-    '$listOrg'
+    '$listOrg',
+    (raw) =>
+      decodeBetterAuthOrganizations('betterAuth.organization.list', raw, {
+        onDiagnostic: reportOrganizationBoundaryDiagnostic,
+      })
   );
   const active = createQuery(
     () => client.organization.getFullOrganization({ fetchOptions: { disableSignal: true } }),
-    '$activeOrgSignal'
+    '$activeOrgSignal',
+    (raw) =>
+      decodeBetterAuthActiveOrganization('betterAuth.organization.getFullOrganization', raw, {
+        onDiagnostic: reportOrganizationBoundaryDiagnostic,
+      })
   );
   function retire() {
     logoutRevision++;

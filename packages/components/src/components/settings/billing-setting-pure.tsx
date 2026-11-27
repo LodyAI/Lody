@@ -1,4 +1,4 @@
-import type { ReferralCheckoutOffer, ReferralPolicy } from '@lody/cloud-api';
+import type { PromoCheckoutOffer, ReferralCheckoutOffer, ReferralPolicy } from '@lody/cloud-api';
 import { control, text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -19,7 +19,12 @@ import { PricingPageLink } from '../shared/pricing-page-link';
 import { FounderCallLink } from '../shared/founder-call-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { CompactLinkRow, CompactRow, CompactSection } from './compact-layout';
-import { ReferralCreditNotice, ReferralOfferNotice } from './referral-settings-pure';
+import { discountBadgeValues, resolvePromoCampaignName } from './discount-badge-values';
+import {
+  PromoOfferNotice,
+  ReferralCreditNotice,
+  ReferralOfferNotice,
+} from './referral-settings-pure';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
 import { settingsType as type } from './type.stylex';
@@ -138,6 +143,16 @@ const styles = stylex.create({
     letterSpacing: '-0.02em',
     color: colors.label,
     fontVariantNumeric: 'tabular-nums',
+  },
+  priceStrike: {
+    fontSize: '1.125em',
+    color: colors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  tabSaveTag: {
+    marginLeft: space[1.5],
+    fontSize: '11px',
+    color: colors.accent,
   },
   priceUnit: { fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   action: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[2] },
@@ -291,6 +306,7 @@ export interface BillingOverviewData {
     yearlyAmountCents: number;
     monthlyOfferKey: string | null;
     yearlyOfferKey: string | null;
+    promo?: PromoCheckoutOffer | null;
   };
 }
 
@@ -556,7 +572,7 @@ export function BillingSettingsView({
   referral = null,
   referralCreditCents = 0,
 }: BillingSettingsViewProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [code, setCode] = useState('');
 
   if (overview === null) {
@@ -622,10 +638,46 @@ export function BillingSettingsView({
   const yearlyPerMonthPrice = formatUsd(Math.round(overview.pricing.yearlyAmountCents / 12));
   const selectedOfferLabel =
     interval === 'month' && overview.pricing.monthlyOfferKey ? t('billing.founderPrice') : null;
-  // The newcomer discount never stacks with a locked offer price.
   const selectedOfferKey =
     interval === 'year' ? overview.pricing.yearlyOfferKey : overview.pricing.monthlyOfferKey;
-  const showReferralOffer = !selectedOfferKey && !canScheduleAfterGift;
+  const promoOffer = overview.pricing.promo ?? null;
+  const promoPercent = !selectedOfferKey
+    ? interval === 'year'
+      ? (promoOffer?.yearlyDiscountPercent ?? 0)
+      : (promoOffer?.monthlyDiscountPercent ?? 0)
+    : 0;
+  const retainedPromoPercent =
+    !selectedOfferKey && promoOffer?.retained?.interval === interval
+      ? promoOffer.retained.discountPercent
+      : 0;
+  const effectivePromoPercent = promoPercent > 0 ? promoPercent : retainedPromoPercent;
+  const referralPercent =
+    referralOffer && !canScheduleAfterGift ? (referralOffer.policy?.discountPercent ?? 10) : 0;
+  const showPromoOffer =
+    effectivePromoPercent > 0 &&
+    (canScheduleAfterGift || !referralOffer || effectivePromoPercent > referralPercent);
+  const showReferralOffer =
+    Boolean(referralOffer) && !selectedOfferKey && !canScheduleAfterGift && !showPromoOffer;
+  const activeFirstDiscountPercent = showPromoOffer
+    ? effectivePromoPercent
+    : showReferralOffer
+      ? (referralOffer?.policy?.discountPercent ?? 10)
+      : 0;
+  const regularPerSeatMonthPrice = interval === 'year' ? yearlyPerMonthPrice : monthlyPrice;
+  const discountedPerSeatMonthPrice =
+    activeFirstDiscountPercent > 0
+      ? formatUsd(
+          interval === 'year'
+            ? Math.round(
+                Math.round(
+                  (overview.pricing.yearlyAmountCents * (100 - activeFirstDiscountPercent)) / 100
+                ) / 12
+              )
+            : Math.round(
+                (overview.pricing.monthlyAmountCents * (100 - activeFirstDiscountPercent)) / 100
+              )
+        )
+      : null;
   // Checkout takes one discount: credit pays toward a first payment with no other offer.
   // An open Checkout already holds its credit, so the notice is only for a new one.
   const firstPaymentCents =
@@ -635,7 +687,8 @@ export function BillingSettingsView({
   const creditCents = Math.min(referralCreditCents, firstPaymentCents);
   const showReferralCredit =
     creditCents > 0 &&
-    !referralOffer &&
+    !showPromoOffer &&
+    !showReferralOffer &&
     !selectedOfferKey &&
     !canScheduleAfterGift &&
     !checkoutInProgress;
@@ -851,6 +904,25 @@ export function BillingSettingsView({
                         : t('billing.switchToMonthly')}
                     </button>
                   ) : null}
+                  {showIntervalSwitch &&
+                  overview.billingInterval === 'month' &&
+                  (promoOffer?.upgradeToYearlyDiscountPercent ?? 0) > 0 ? (
+                    <Badge tone="success">
+                      {(() => {
+                        const customUpgradeName = resolvePromoCampaignName(
+                          promoOffer?.policy?.name,
+                          i18n.language
+                        );
+                        const offerText = t(
+                          'billing.promoYearlyOfferBadge',
+                          discountBadgeValues(promoOffer!.upgradeToYearlyDiscountPercent!)
+                        );
+                        return customUpgradeName
+                          ? `${customUpgradeName} · ${offerText}`
+                          : offerText;
+                      })()}
+                    </Badge>
+                  ) : null}
                 </span>
               ) : null}
               {planIntervalLabel && planFocusAt === null && planStatusDetail ? (
@@ -992,7 +1064,12 @@ export function BillingSettingsView({
               ) : (
                 <div {...stylex.props(styles.strip)}>
                   <Tabs.List>
-                    <Tabs.Tab value="year">{t('billing.yearly')}</Tabs.Tab>
+                    <Tabs.Tab value="year">
+                      {t('billing.yearly')}
+                      <span {...stylex.props(styles.tabSaveTag)}>
+                        {t('billing.yearlySaveBadge')}
+                      </span>
+                    </Tabs.Tab>
                     <Tabs.Tab value="month">{t('billing.monthly')}</Tabs.Tab>
                   </Tabs.List>
                 </div>
@@ -1000,8 +1077,11 @@ export function BillingSettingsView({
               <Tabs.Panel value={interval} className={stylex.props(styles.pricePanel).className}>
                 <div {...stylex.props(styles.price)}>
                   <span {...stylex.props(styles.priceValue)}>
-                    {interval === 'year' ? yearlyPerMonthPrice : monthlyPrice}
+                    {discountedPerSeatMonthPrice ?? regularPerSeatMonthPrice}
                   </span>
+                  {discountedPerSeatMonthPrice ? (
+                    <s {...stylex.props(styles.priceStrike)}>{regularPerSeatMonthPrice}</s>
+                  ) : null}
                   <span {...stylex.props(styles.priceUnit)}>{t('billing.perSeatMonth')}</span>
                   {selectedOfferLabel ? <Badge>{selectedOfferLabel}</Badge> : null}
                 </div>
@@ -1010,6 +1090,20 @@ export function BillingSettingsView({
                 </p>
               </Tabs.Panel>
             </Tabs.Root>
+
+            {showPromoOffer ? (
+              <PromoOfferNotice
+                interval={interval}
+                regularCents={
+                  interval === 'year'
+                    ? overview.pricing.yearlyAmountCents
+                    : overview.pricing.monthlyAmountCents
+                }
+                discountPercent={promoPercent}
+                policy={promoOffer?.policy}
+                retained={promoOffer?.retained}
+              />
+            ) : null}
 
             {referralOffer && showReferralOffer ? (
               <ReferralOfferNotice

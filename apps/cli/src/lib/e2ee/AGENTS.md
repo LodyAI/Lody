@@ -32,6 +32,10 @@
   Members share 20 durable reservations across restart/reset; Owners remain unbounded
   ([derivation](../../../../../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md)).
   Origins bind signatures to content ([intent](../../../../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
+  An Inbox result continuation has no signed row: `claimContinuation` authorizes every
+  distinct Operation `sourceTurnId` through its human root under these rules, keeps refused
+  results queued and waits on pending evidence
+  ([continuations](../../../../../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md#inbox-result-continuations)).
 - Retain originals before feed/pin. Pin before compaction, attempted every
   64 records; its failures only warn. Retired cache cleanup must fail closed.
 - Iroh and Streams receivers share journal claims and live write completions, registered before

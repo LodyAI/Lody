@@ -187,16 +187,12 @@ export function useSessionDoc(
 
     if (!enabled) {
       setLoadedStore(null);
-      return () => {
-        // no-op
-      };
+      return () => {};
     }
 
     if (!runtime) {
       setLoadedStore(null);
-      return () => {
-        // no-op
-      };
+      return () => {};
     }
 
     void (async () => {
@@ -378,6 +374,7 @@ export function useSessionDoc(
       const pendingTurn = buildDraftUserHistoryEntry(
         {
           userId: entry.userId,
+          userName: entry.userName,
           inputBlocks: normalizeSessionInputBlocks(
             inputConfig?.inputBlocks,
             entry.acpSessionConfig?.prompt ?? (attachments?.length ? '' : entry.task)
@@ -523,9 +520,7 @@ export function useSessionDocSyncState(
     setHasLocalHistory(false);
 
     if (!enabled || !runtime) {
-      return () => {
-        // no-op
-      };
+      return () => {};
     }
 
     void (async () => {

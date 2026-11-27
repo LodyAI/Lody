@@ -228,6 +228,24 @@ describe('CloudPlatformProvider', () => {
     expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBeUndefined();
   });
 
+  it('tolerates a session payload whose user is null during sign-in without throwing', async () => {
+    fixture.session = {
+      data: { user: null as unknown as { id: string; email: string; name: string; image: null } },
+      isPending: false,
+      isRetrying: false,
+      isOptimistic: false,
+    };
+    await render();
+    expect(seen.at(-1)!.identity.session.get()).toEqual({ status: 'unauthenticated' });
+
+    refetch('A');
+    await render();
+    expect(seen.at(-1)!.identity.session.get()).toMatchObject({
+      status: 'authenticated',
+      user: { id: 'user-a' },
+    });
+  });
+
   it('accepts deletion only after the dedicated action confirms the requested workspace', async () => {
     refetch('A');
     await render();

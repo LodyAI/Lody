@@ -18,6 +18,17 @@ an ordinary human turn starts at zero. The limit remains fixed in the shared
 protocol contract; changing it requires updating every producer, recovery path,
 executable model, and this Spec.
 
+The limit is visible before and when it is reached. From depth 8 (the soft limit),
+every accepted create or chat reply carries `chainBudget`: the hop the delegated Turn
+runs at, the maximum, and the hops that remain, stated as facts so the dispatching
+Agent can plan. A rejected command also leaves one notice in the calling Session so the
+human sees that delegation stopped and that a new message starts a fresh chain.
+
+An Operation continuation may run at depth 16: it can read its results and report,
+but cannot delegate further. A continuation that would exceed 16, such as results
+arriving after a Turn already at the cap, is not submitted. Its results stay queued
+for the next human input, and the Session shows one notice saying how many wait.
+
 The experimental Review agent automation is retired. It no longer runs outside
 this delegation chain; see [Review agent retirement](review-agent-retirement.md).
 

@@ -92,6 +92,15 @@ export function createCloudE2eeWorkspaces(input: {
   >;
   prepareCreation?: PlatformE2eeWorkspaces['prepareCreation'];
   runtime?: PlatformE2eeWorkspaces['runtime'];
+  onWorkspaceCreated?: (workspace: {
+    id: string;
+    name: string;
+    slug: string;
+    contentMode: 'e2ee';
+    contentModeVersion: number;
+    cryptoOrgId: string;
+    genesisHash: string;
+  }) => void;
   refreshWorkspaces: () => Promise<void>;
   actionTimeoutMs?: number;
 }): PlatformE2eeWorkspaces {
@@ -236,13 +245,23 @@ export function createCloudE2eeWorkspaces(input: {
         });
         assertAccount(owner);
       }
-      // Listing is a projection: its failure must not turn a committed, validated
-      // creation into an error. The next listing refresh shows the workspace.
-      try {
-        await input.refreshWorkspaces();
-      } catch {
-        console.warn('Encrypted workspace list refresh pending', { code: 'e2ee_listing_pending' });
-      }
+      // Listing is a projection: show the validated workspace now, refresh in the background.
+      input.onWorkspaceCreated?.({
+        id: result.workspaceId,
+        name: result.name,
+        slug: result.slug,
+        contentMode: result.contentMode,
+        contentModeVersion: result.contentModeVersion,
+        cryptoOrgId: result.cryptoOrgId,
+        genesisHash: result.genesisHash,
+      });
+      void Promise.resolve()
+        .then(() => input.refreshWorkspaces())
+        .catch(() => {
+          console.warn('Encrypted workspace list refresh pending', {
+            code: 'e2ee_listing_pending',
+          });
+        });
       assertAccount(owner);
       return result;
     },

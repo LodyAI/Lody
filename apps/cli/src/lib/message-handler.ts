@@ -88,7 +88,8 @@ import {
   handleMemoryProviderRequest,
   handleRelayedMemoryProviderRequest,
 } from './memory-providers';
-import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
+import { formatAgentSenderHeader, formatHumanSenderHeader, readMessageAuthor } from '@lody/shared';
+import { HumanSpeakerTracker } from '@/session/human-speaker-tracker';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
 import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
@@ -986,6 +987,7 @@ export class MessageHandler {
   private androidEmulatorService: AndroidEmulatorService;
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
+  private readonly humanSpeakers = new HumanSpeakerTracker();
   private sessionForkService: SessionForkService;
   private sessionEditAndResendService: SessionEditAndResendService;
   private operationCoordinator: LodyOperationCoordinator;
@@ -2764,10 +2766,13 @@ export class MessageHandler {
   }
 
   /**
-   * Provenance header for an agent-authored input. Best effort: any read failure
-   * omits the header and the turn proceeds with its unchanged text.
+   * Sender header for an input. An agent-authored input always names its source
+   * Session. A human input is labelled only when its sender differs from the
+   * previous human sender in this Session, so a single-user Session stays
+   * unchanged. Best effort: any read failure omits the header and the turn
+   * proceeds with its unchanged text.
    */
-  private async readAgentSenderHeader(
+  private async readSenderHeader(
     sessionId: SessionId,
     userTurnId: string | undefined
   ): Promise<string | undefined> {
@@ -2778,12 +2783,19 @@ export class MessageHandler {
       const input = await backend.history.readTurn(userTurnId);
       if (input.state !== 'ready' || input.turn.role !== 'user') return undefined;
       const author = readMessageAuthor(input.turn.author);
-      if (author?.kind !== 'agent') return undefined;
-      const source = await this.workspaceDocument.repo
-        .getDocMeta(getSessionRoomId(author.sessionId as SessionId))
-        .catch(() => undefined);
-      const title = (source?.meta as SessionMeta | undefined)?.title;
-      return formatAgentSenderHeader(author, title);
+      if (author?.kind === 'agent') {
+        const source = await this.workspaceDocument.repo
+          .getDocMeta(getSessionRoomId(author.sessionId as SessionId))
+          .catch(() => undefined);
+        const title = (source?.meta as SessionMeta | undefined)?.title;
+        return formatAgentSenderHeader(author, title);
+      }
+      if (author?.kind === 'system') return undefined;
+      const speakerId = (author?.userId ?? input.turn.userId)?.trim();
+      if (!speakerId) return undefined;
+      return this.humanSpeakers.changed(sessionId, userTurnId, speakerId, this.userId)
+        ? formatHumanSenderHeader(author?.name)
+        : undefined;
     } catch (error) {
       this.logger.warn(
         `[${sessionId}] Omitting sender provenance for ${userTurnId}: ${formatErrorMessage(error)}`
@@ -3044,7 +3056,7 @@ export class MessageHandler {
 
     // Build the full text prompt: comment references first, then user text
     const [senderHeader, replyContextHeader, projectFactsDeltaHeader] = await Promise.all([
-      this.readAgentSenderHeader(args.sessionId, args.userTurnId),
+      this.readSenderHeader(args.sessionId, args.userTurnId),
       this.readReplyContextHeader(args.workspaceId, args.sessionId, args.userTurnId),
       this.readProjectFactsDeltaHeader(args.workspaceId, args.sessionId, args.userTurnId),
     ]);

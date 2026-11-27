@@ -80,7 +80,7 @@ Al abrir un proyecto que ya está abierto en el editor, se enfoca la ventana exi
 
 Pasa el cursor sobre una sesión en la lista (o tócala en dispositivos móviles) para mostrar el botón de archivar en la esquina inferior derecha. Haz clic en él para archivar la sesión.
 
-Las sesiones archivadas pasan a la lista de archivo y conservan su historial de conversación. La máquina propietaria puede recuperar un directorio de worktree gestionado por Lody antes de su eliminación permanente, conservando la rama local y confirmando primero los cambios pendientes no ignorados. Los archivos ignorados pueden descartarse y un script de limpieza puede modificar archivos antes de la copia de seguridad. Guarda los archivos necesarios fuera del worktree antes de archivar. Consulta [Retención y recuperación de worktrees](/es/docs/worktrees#automatic-cleanup) para conocer los plazos, los requisitos de recuperación y los límites de protección. Las sesiones que se ejecutan directamente en un directorio de proyecto local no ven eliminado ese directorio por la limpieza de worktrees gestionados.
+Las sesiones archivadas pasan a la lista de archivo y conservan su historial de conversación. La máquina propietaria puede recuperar un directorio de worktree gestionado por Lody antes de su eliminación permanente, conservando la rama local y confirmando primero los cambios pendientes no ignorados. Los archivos ignorados pueden descartarse y un script de limpieza puede modificar archivos antes de la copia de seguridad. Guarda los archivos necesarios fuera del worktree antes de archivar. Consulta [Retención y recuperación de worktrees](/es/docs/worktrees#limpieza-automática) para conocer los plazos, los requisitos de recuperación y los límites de protección. Las sesiones que se ejecutan directamente en un directorio de proyecto local no ven eliminado ese directorio por la limpieza de worktrees gestionados.
 
 ## Desarchivar sesiones
 
@@ -90,7 +90,7 @@ En la esquina inferior derecha de la barra lateral izquierda, haz clic en el bot
 
 ## Eliminar sesiones
 
-En la esquina inferior derecha de la barra lateral izquierda, haz clic en el botón de la lista de archivo para abrir las sesiones archivadas. Haz clic en el botón de eliminar junto a una sesión para borrarla de forma permanente junto con su historial de conversación. Esta acción no se puede deshacer. Cualquier worktree gestionado restante sigue siendo elegible para limpieza según la [misma regla de respaldo](/es/docs/worktrees#automatic-cleanup); la rama Git local y los commits se conservan.
+En la esquina inferior derecha de la barra lateral izquierda, haz clic en el botón de la lista de archivo para abrir las sesiones archivadas. Haz clic en el botón de eliminar junto a una sesión para borrarla de forma permanente junto con su historial de conversación. Esta acción no se puede deshacer. Cualquier worktree gestionado restante sigue siendo elegible para limpieza según la [misma regla de respaldo](/es/docs/worktrees#limpieza-automática); la rama Git local y los commits se conservan.
 
 En el caso de sesiones sin ningún proyecto seleccionado, la eliminación también borra el directorio de trabajo de chat gestionado por Lody y todos los archivos que contiene, sin copia de seguridad ni recuperación; el archivado solo recupera directorios vacíos.
 

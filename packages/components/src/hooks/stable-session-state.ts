@@ -1,3 +1,5 @@
+import { BetterAuthUserSchema } from '@lody/shared/boundary-decode';
+
 export const DEFAULT_AUTHENTICATED_SESSION_GRACE_MS = 2_000;
 export const DEFAULT_SESSION_RESUME_REFETCH_THROTTLE_MS = 30_000;
 export const DEFAULT_SESSION_KEEPALIVE_REFETCH_INTERVAL_MS = 5 * 60_000;
@@ -75,7 +77,7 @@ type MissingAuthenticatedSessionRetryOptions = {
 };
 
 export function hasAuthenticatedUser(data: AuthSessionLike): boolean {
-  return Boolean(data?.user);
+  return BetterAuthUserSchema.safeParse(data?.user, { jitless: true }).success;
 }
 
 export function hasUsableSessionUser(options: UsableSessionUserOptions): boolean {

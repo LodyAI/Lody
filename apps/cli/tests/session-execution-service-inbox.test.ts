@@ -15,8 +15,16 @@ import { TurnPostProcessingService } from '../src/session/turn-post-processing-s
 import { CodeCollabV2DiffStore } from '../src/lib/code-collab/code-collab-v2-diff-store';
 import { CodeCollabV2Service } from '../src/lib/code-collab/code-collab-v2-service';
 import Database from 'better-sqlite3';
+import { Effect } from 'effect';
+import {
+  lazyExecutionJournal,
+  makeEncryptedAgentExecution,
+  type ExecutionAuthorization,
+  type VerifiedExecutionOriginal,
+} from '../src/lib/e2ee/agent-execution';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { InboxExecutionRejected } from '../src/orchestration/inbox/admission-failure';
@@ -2080,5 +2088,151 @@ describe('session start retry pacing', () => {
     expect(jitterSessionStartRetryDelay(1_000, 0)).toBe(500);
     expect(jitterSessionStartRetryDelay(1_000, 0.999)).toBe(1_000);
     expect(jitterSessionStartRetryDelay(3_000, 0.5)).toBe(2_250);
+  });
+});
+
+describe('encrypted Inbox result continuations', () => {
+  type Original =
+    | VerifiedExecutionOriginal
+    | { state: 'refused'; reason: 'e2ee_signature_invalid' };
+  const encryptedInbox = () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-encrypted-inbox-'));
+    const rows = new Map<string, Original>([
+      ['owner-turn', { requesterDevice: 'aa'.repeat(32), requesterCryptoUserId: 'owner-crypto' }],
+      ['tampered-turn', { state: 'refused', reason: 'e2ee_signature_invalid' }],
+    ]);
+    const grant: { value: ExecutionAuthorization } = {
+      value: { _tag: 'Authorized', principal: 'owner' },
+    };
+    const gate = makeEncryptedAgentExecution({
+      machineUserId: 'user-1',
+      genesis: '11'.repeat(32),
+      workspaceId: 'workspace-1',
+      targetMachineId: 'machine-1',
+      journal: lazyExecutionJournal(path.join(directory, 'execution.sqlite'), () => 0),
+      selfDevice: 'cc'.repeat(32),
+      resolveVerifiedOriginal: (intent) => Effect.sync(() => rows.get(intent.userTurnId)),
+      authorizeExecution: () => Effect.sync(() => grant.value),
+    });
+    const prompts: string[] = [];
+    const waiters: Array<() => void> = [];
+    let launches = 0;
+    const f = inboxExecutionFixture(
+      async (blocks) => {
+        prompts.push(
+          blocks
+            .filter((block) => block.type === 'text')
+            .map((block) => block.text)
+            .join('\n')
+        );
+        return { stopReason: 'end_turn' };
+      },
+      undefined,
+      () => {
+        launches++;
+        for (const resolve of waiters.splice(0)) resolve();
+      },
+      'encrypted-inbox-session' as SessionId,
+      gate
+    );
+    return {
+      f,
+      grant,
+      prompts,
+      launched: (count: number) =>
+        new Promise<void>((resolve) => {
+          const check = () => (launches >= count ? resolve() : waiters.push(check));
+          check();
+        }),
+      failures: async () =>
+        (await (await createSessionBackend(f.doc)).readHistory())
+          .flatMap((entry) => entry.items ?? [])
+          .flatMap((item) =>
+            item.type === 'system_notice' && item.name === 'chat_failed'
+              ? [String((item.meta as { message?: unknown } | undefined)?.message)]
+              : []
+          ),
+      results: () => {
+        const db = new Database(f.storePath, { readonly: true });
+        try {
+          return db
+            .prepare('SELECT operation_id,consumed,claim FROM inbox_results ORDER BY sequence')
+            .all();
+        } finally {
+          db.close();
+        }
+      },
+      close: async () => {
+        await f.close();
+        fs.rmSync(directory, { recursive: true, force: true });
+      },
+    };
+  };
+
+  it('runs the continuation with the authority of the owner Turn that delegated it', async () => {
+    const h = encryptedInbox();
+    try {
+      h.f.add('op-owner', 0, [], true, 'user-1', 'owner-turn');
+      await h.f.wake();
+      await h.launched(1);
+      expect(h.prompts).toHaveLength(1);
+      expect(h.prompts[0]).toContain('op-owner');
+      expect(await h.failures()).toEqual([]);
+      expect(h.results()).toEqual([
+        { operation_id: 'op-owner', consumed: 1, claim: expect.any(String) },
+      ]);
+      expect(h.f.store.inbox.pending('workspace-1')).toEqual([]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('runs the authorized part of a mixed batch and keeps refused results queued', async () => {
+    const h = encryptedInbox();
+    try {
+      h.f.add('op-owner', 0, [], true, 'user-1', 'owner-turn');
+      h.f.add('op-tampered', 0, [], true, 'user-1', 'tampered-turn');
+      await h.f.wake();
+      await h.launched(1);
+      expect(h.prompts).toHaveLength(1);
+      expect(h.prompts[0]).toContain('op-owner');
+      expect(h.prompts[0]).not.toContain('op-tampered');
+      await h.f.wake();
+      await h.launched(2);
+      expect(h.prompts).toHaveLength(1);
+      expect(await h.failures()).toEqual([expect.stringContaining('e2ee_signature_invalid')]);
+      expect(h.results()).toEqual([
+        { operation_id: 'op-owner', consumed: 1, claim: expect.any(String) },
+        { operation_id: 'op-tampered', consumed: 0, claim: null },
+      ]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('keeps the batch pending, not failed, until authority evidence is available', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = encryptedInbox();
+    try {
+      h.grant.value = { _tag: 'Denied', reason: 'unavailable' };
+      h.f.add('op-waiting', 0, [], true, 'user-1', 'owner-turn');
+      await h.f.wake();
+      await h.launched(1);
+      expect(h.prompts).toEqual([]);
+      expect(await h.failures()).toEqual([]);
+      expect(h.f.store.inbox.pending('workspace-1')).toHaveLength(1);
+      expect(h.f.service.getExecutionSnapshot(h.f.message.sessionId).hasActiveTurn).toBe(false);
+
+      h.grant.value = { _tag: 'Authorized', principal: 'owner' };
+      await vi.advanceTimersByTimeAsync(1_000);
+      await h.launched(2);
+      expect(h.prompts).toHaveLength(1);
+      expect(h.prompts[0]).toContain('op-waiting');
+      expect(await h.failures()).toEqual([]);
+      expect(h.f.store.inbox.pending('workspace-1')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      await h.close();
+    }
   });
 });

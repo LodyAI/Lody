@@ -849,6 +849,132 @@
   background: hsl(214 55% 7% / 0.92);
 }
 
+/* Narrow promotional strip pinned directly below the 64px fixed SiteNav. */
+.landing-promo-banner {
+  position: fixed;
+  inset: 64px 0 auto;
+  z-index: 42;
+  border-top: 1px solid hsl(var(--landing-border) / 0.16);
+  border-bottom: 1px solid hsl(var(--landing-border) / 0.18);
+  background: hsl(var(--landing-surface-1) / 0.78);
+  color: hsl(var(--landing-ink));
+  -webkit-backdrop-filter: saturate(1.3) blur(14px);
+  backdrop-filter: saturate(1.3) blur(14px);
+  animation: landing-promo-banner-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes landing-promo-banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.landing-promo-banner__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: var(--site-content-width);
+  min-height: 34px;
+  padding: 0.25rem 0;
+  margin: 0 auto;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.landing-promo-banner__content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.landing-promo-banner__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--ocean-aqua) / 0.36);
+  background: hsl(var(--ocean-aqua) / 0.14);
+  color: hsl(var(--ocean-aqua));
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.landing-promo-banner__text {
+  color: hsl(var(--landing-ink) / 0.92);
+  font-weight: 500;
+}
+
+.landing-promo-banner__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: hsl(var(--ocean-aqua));
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: opacity 150ms ease;
+}
+
+.landing-promo-banner__cta:hover {
+  opacity: 0.82;
+}
+
+.landing-promo-banner__arrow {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex-shrink: 0;
+}
+
+.landing-promo-banner__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: hsl(var(--landing-ink-muted));
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+.landing-promo-banner__close:hover {
+  color: hsl(var(--landing-ink));
+  background: hsl(var(--landing-ink) / 0.08);
+}
+
+.landing-promo-banner__close svg {
+  width: 0.88rem;
+  height: 0.88rem;
+}
+
+@media (max-height: 860px) {
+  .underwater-landing:has(.landing-promo-banner) .underwater-hero {
+    padding-top: 6.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-promo-banner {
+    animation: none;
+  }
+}
+
 /* ---- Tuning panel (only mounted with ?tune in the URL) -------------------- */
 
 .uw-tuner {

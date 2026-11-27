@@ -36,7 +36,10 @@ export function PrivatePairingSurface({ children }: { children: ReactNode }) {
 
 export type InstantQrRuntime = Pick<
   E2eeWorkspaceRuntime,
-  'accountPairingCode' | 'inspectAccountPairing' | 'approveAccountPairing'
+  | 'accountPairingCode'
+  | 'inspectAccountPairing'
+  | 'approveAccountPairing'
+  | 'subscribeAccountPairingApproval'
 >;
 export const supportsInstantQr = (runtime: InstantQrRuntime | undefined) =>
   Boolean(
@@ -58,6 +61,8 @@ export type InstantQrPhase =
   | { kind: 'failed'; error: string };
 
 const INSTANT_QR_POLL_MS = 900;
+/** Slow fallback interval when live approval subscription is active. */
+const INSTANT_QR_FALLBACK_POLL_MS = 8_000;
 const formatCountdown = (seconds: number) =>
   `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
@@ -101,10 +106,16 @@ export function useInstantQrOffer(
       unavailable: string[];
     } | null = null;
     let timer: ReturnType<typeof setInterval> | undefined;
+    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribe: (() => void) | undefined;
     const finish = (next: InstantQrPhase) => {
       settled = true;
       if (timer !== undefined) clearInterval(timer);
+      if (expiryTimer !== undefined) clearTimeout(expiryTimer);
       timer = undefined;
+      expiryTimer = undefined;
+      unsubscribe?.();
+      unsubscribe = undefined;
       setPhase(next);
     };
     const poll = async () => {
@@ -177,6 +188,7 @@ export function useInstantQrOffer(
     };
     const wake = () => void poll();
     document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
     setPhase({ kind: 'loading' });
     void (async () => {
       try {
@@ -184,17 +196,31 @@ export function useInstantQrOffer(
         if (!alive) return;
         offer = next;
         setPhase({ kind: 'showing', ...next });
-        timer = setInterval(() => void poll(), pollMs);
+        let subscribed = false;
+        if (next.lookupId && runtime.subscribeAccountPairingApproval) {
+          try {
+            unsubscribe = runtime.subscribeAccountPairingApproval(next.lookupId, wake);
+            subscribed = true;
+          } catch {}
+        }
+        const effectivePollMs =
+          options.pollMs ?? (subscribed ? INSTANT_QR_FALLBACK_POLL_MS : pollMs);
+        timer = setInterval(() => void poll(), effectivePollMs);
+        const msUntilExpiry = Math.max(0, next.expiresAt - Date.now());
+        expiryTimer = setTimeout(() => void poll(), msUntilExpiry);
       } catch (failure) {
         if (alive) finish({ kind: 'failed', error: failureKey(failure) });
       }
     })();
     return () => {
       alive = false;
+      unsubscribe?.();
       if (timer !== undefined) clearInterval(timer);
+      if (expiryTimer !== undefined) clearTimeout(expiryTimer);
       document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('online', wake);
     };
-  }, [runtime, enabled, generation, pollMs]);
+  }, [runtime, enabled, generation, pollMs, options.pollMs]);
   return { phase, refresh: () => setGeneration((value) => value + 1) };
 }
 

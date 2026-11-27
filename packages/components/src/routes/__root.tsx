@@ -58,7 +58,7 @@ import { usePlatformWorkspaces } from '@lody/platform/react';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { onIpcEvent, getIpcServices } from '@/lib/electron-ipc-client';
 import { useStableSession } from '@/hooks/useStableSession';
-import { normalizeCurrentUserFromSessionUser } from '@/lib/current-user';
+import { safeNormalizeCurrentUserFromSessionUser } from '@/lib/current-user';
 import { writeAuthBootstrapSnapshot } from '@/lib/auth-bootstrap';
 import { toast } from '@/lib/toast';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
@@ -192,7 +192,7 @@ function RootApp() {
     if (!session?.user) {
       return null;
     }
-    return normalizeCurrentUserFromSessionUser(session.user);
+    return safeNormalizeCurrentUserFromSessionUser(session.user);
   }, [session?.user]);
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
   useDesktopWorkspaceMembershipSync(multiWorkspaceAvailable ? (currentUser?.id ?? null) : null);

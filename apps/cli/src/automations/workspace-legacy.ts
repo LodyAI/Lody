@@ -397,6 +397,7 @@ export async function createAutomationWorkspaceLegacy(options: {
               { state: 'cancelling', reason: verdict.reason, retryAt: now },
               now
             );
+            await authority.cancelInput(sessionId, turnId).catch(() => false);
           }
           return false;
         }),

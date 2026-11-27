@@ -59,6 +59,8 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - Receipts coalesce into one intent when idle, unpaused and released; busy Sessions wait
   for normal release. Claim requires a wakeable result and freezes all available members.
   Later arrivals wait; pause, empty queues and duplicates cannot wake.
+- Automatic batches deeper than `LODY_MAX_CHAIN_DEPTH` keep their results queued and
+  are reported to the human once ([chain cap](README.md#chain-depth-cap)).
 - The Inbox continuation prompt and `batchPreview` header only describe the delegated
   results: what they are, that they are reference data, and where omitted ones are read.
   They must not tell the agent to review, verify or re-dispatch them, nor to skip doing
@@ -84,7 +86,8 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   report it and attempt bounded background cleanup using only the old handles.
   Startup retires interrupted input as unknown without replay and clears legacy blocks.
   Coordinator recovery calls `recoverClose`, not cached failed `close`. Release finishes
-  input; a still-pending turn `withdraw`s before submit/acquisition.
+  input; a still-pending turn `withdraw`s before submit/acquisition. An encrypted continuation
+  may `narrow` its own prepared, unfenced batch; removed results return to the queue unconsumed.
 - Inbox v2 removes Delivery APIs/data, not Operations/retired IDs. Preserve queued
   input/results, pause, unknown evidence and monotonic sequences. Host v3
   rejects old workers before storage; end prior Workers before handoff. Passive

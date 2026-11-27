@@ -168,6 +168,23 @@ later load after its baseline uses ordinary reads without the cold warning. Exis
 startup owners retain process and relay cleanup. Other configuration diagnostics
 remain best effort. Empty selections skip the catalog entirely.
 
+Each load also returns an in-memory mount record. Its SHA-256 fingerprint covers, per
+selected ID, the catalog row's name, transport and connection, and the connection after
+`${VAR}` and passthrough resolution under the owner-only environment rule. Beside it, the
+record keeps each server's local credential revision, which `McpAuthenticationLegacy`
+advances on user-initiated configure, completed sign-in, sign-out, and whenever those
+close one of the CLI account's live relays even if the vault write then fails (never on
+token refresh). Only the CLI account's own turns observe revisions, because only they
+mount local credentials.
+`AgentClient` reports the record when a provider session starts, and for edit-and-resend
+only when the prepared candidate is adopted. Before the next prompt or steer, and again
+after a starting session becomes ready, session execution compares revisions first, then
+the fingerprint recomputed from the local catalog replica; a difference retires the ACP
+even when the selected IDs are unchanged. A changed revision retires it even when the
+catalog is unreadable; otherwise an unreadable catalog keeps the mounted servers, and a
+start that read no catalog records an unknown fingerprint, so the next readable catalog
+replaces it. The record hashes resolved secrets and is never persisted, synced or logged.
+
 ### Steer delivery classification
 
 AgentClient converts adapter evidence into `applied`, `not-applied`, or `unknown`. The

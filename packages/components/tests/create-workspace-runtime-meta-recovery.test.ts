@@ -600,6 +600,34 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('keeps the active workspace Repo on window when a superseded startup is aborted', async () => {
+    const { LoroRepo: MockedRepo } = await import('loro-repo');
+    const create = vi.mocked(MockedRepo.create);
+    const createRepo = create.getMockImplementation()!;
+    const controller = new AbortController();
+    create.mockImplementationOnce(async (...args) => {
+      const repo = await createRepo(...args);
+      controller.abort();
+      return repo;
+    });
+    const active = {} as LoroRepo;
+    window.repo = active;
+    try {
+      await expect(
+        createWorkspaceRuntime({
+          content: { mode: 'plaintext' },
+          workspaceSlug: 'previous',
+          workspaceId: 'workspace-previous' as WorkspaceId,
+          apiBaseUrl: 'https://api.example.test',
+          signal: controller.signal,
+        })
+      ).rejects.toThrow();
+      expect(window.repo).toBe(active);
+    } finally {
+      delete window.repo;
+    }
+  });
+
   it('retries a failed transport close without releasing the Repo or reviving its runtime', async () => {
     const failure = new Error('temporary transport close failure');
     const entered = Promise.withResolvers<void>();

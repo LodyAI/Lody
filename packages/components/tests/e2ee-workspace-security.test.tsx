@@ -132,7 +132,9 @@ describe('recovery vault settings', () => {
         );
       });
       for (let tick = 0; tick < 10; tick++) await act(async () => {});
-      expect(container.textContent).toContain('e2ee.recovery.createWithPassword');
+      expect(
+        container.querySelector('button[aria-label="e2ee.recovery.createWithPassword"]')
+      ).not.toBeNull();
     } finally {
       act(() => root.unmount());
       container.remove();
@@ -179,6 +181,7 @@ describe('desktop account recovery page', () => {
     return {
       calls,
       text: container.textContent ?? '',
+      hasButton: (name: string) => container.querySelector(`button[aria-label="${name}"]`) !== null,
       dispose: () => {
         act(() => root.unmount());
         container.remove();
@@ -190,7 +193,7 @@ describe('desktop account recovery page', () => {
   it('manages recovery from Settings > Account without opening an encrypted workspace', async () => {
     const page = await renderPage(TEST_CLOUD_PLATFORM, true);
     try {
-      expect(page.text).toContain('e2ee.recovery.createWithPassword');
+      expect(page.hasButton('e2ee.recovery.createWithPassword')).toBe(true);
       expect(page.calls).toContain('e2ee.recoveryReplacementPlan');
     } finally {
       page.dispose();
@@ -281,8 +284,13 @@ describe('recovery vault settings actions', () => {
     };
     await settle();
     const buttons = () => [...container.querySelectorAll('button')];
+    const name = (button: HTMLButtonElement) =>
+      button.textContent ? (button.getAttribute('aria-label') ?? button.textContent) : '';
     return {
       get labels() {
+        return buttons().map(name).filter(Boolean);
+      },
+      get visibleLabels() {
         return buttons()
           .map((button) => button.textContent)
           .filter(Boolean);
@@ -290,13 +298,13 @@ describe('recovery vault settings actions', () => {
       get primary() {
         return buttons()
           .filter((button) => button.dataset.variant === 'primary')
-          .map((b) => b.textContent);
+          .map(name);
       },
       get text() {
         return container.textContent ?? '';
       },
       click: async (label: string) => {
-        const button = buttons().find((b) => b.textContent === label);
+        const button = buttons().find((b) => name(b) === label);
         if (!button) throw new Error(`no ${label} button`);
         await act(async () => button.click());
         await settle();
@@ -348,6 +356,10 @@ describe('recovery vault settings actions', () => {
         'e2ee.recovery.create',
       ]);
       expect(withPasskey.primary).toEqual(['e2ee.recovery.createWithPasskey']);
+      expect(withPasskey.visibleLabels).toEqual(
+        expect.arrayContaining(['e2ee.recovery.setUpShort', 'e2ee.recovery.createShort'])
+      );
+      expect(withPasskey.visibleLabels).not.toContain('e2ee.recovery.createWithPasskey');
     } finally {
       withPasskey.done();
     }
@@ -823,10 +835,12 @@ describe('recovery vault settings actions', () => {
       expect(view.primary).toEqual(['e2ee.recovery.restore']);
       await view.click('e2ee.recovery.restore');
       // A wait that timed out is still waiting, and an uncovered workspace is not a failure.
-      expect(view.text).toContain('e2ee.recovery.restoreWaiting');
-      expect(view.text).toContain('e2ee.recovery.restorePartial');
-      expect(view.text).toContain('e2ee.recovery.restoreNotBackedUp');
-      expect(view.text).not.toContain('e2ee.recovery.restoreFailed');
+      expect(view.text).toContain('e2ee.recovery.restoreProgressTitle');
+      expect(view.text).toContain('e2ee.recovery.restoreStatus.waiting');
+      expect(view.text).toContain('e2ee.recovery.restoreStatus.partial');
+      expect(view.text).toContain('e2ee.recovery.restoreStatus.partialHelp');
+      expect(view.text).toContain('e2ee.recovery.restoreStatus.notBackedUp');
+      expect(view.text).not.toContain('e2ee.recovery.restoreStatus.failed');
     } finally {
       view.done();
     }

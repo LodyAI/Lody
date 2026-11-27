@@ -36,15 +36,15 @@ lody agent-config update --help
 
 | 명령어 그룹                           | 용도                                                              | 도움말 명령어              | 문서                                            |
 | ------------------------------------- | ----------------------------------------------------------------- | -------------------------- | ----------------------------------------------- |
-| `lody` / `login` / `logout` / `start` | 로그인, CLI 정보 확인, 포그라운드에서 로컬 런타임 실행            | `lody --help`              | [핵심 명령어](#core-commands)                   |
-| `daemon`                              | 백그라운드 데몬 시작, 중지, 상태 확인 및 로그 읽기                | `lody daemon --help`       | [데몬 모드](#daemon-mode)                       |
-| `workspace`                           | 접근 가능한 워크스페이스 ID 및 슬러그(slug) 조회                  | `lody workspace --help`    | [워크스페이스 명령어](#workspace-commands)      |
-| `github`                              | 워크스페이스에 이미 연결된 GitHub 저장소 목록 조회                | `lody github --help`       | [GitHub 명령어](#github-commands)               |
-| `project`                             | 로컬 프로젝트 등록 관리                                           | `lody project --help`      | [프로젝트 명령어](#project-commands)            |
-| `app`                                 | 데스크톱 앱 열기 또는 앱이 멈췄을 때 로컬 캐시 초기화             | `lody app --help`          | [데스크톱 앱 명령어](#desktop-app-commands)     |
-| `session`                             | 세션 생성, 대화, 조회, 보관, 복원 및 삭제                       | `lody session --help`      | [세션 명령어](#session-commands)                |
-| `machine`                             | 워크스페이스에 등록된 머신 조회                                   | `lody machine --help`      | [머신 명령어](#machine-commands)                |
-| `agent-config`                        | 에이전트 설정 관리 및 런타임 기능 새로고침                        | `lody agent-config --help` | [에이전트 설정 명령어](#agent-config-commands)  |
+| `lody` / `login` / `logout` / `start` | 로그인, CLI 정보 확인, 포그라운드에서 로컬 런타임 실행            | `lody --help`              | [핵심 명령어](#핵심-명령어)                   |
+| `daemon`                              | 백그라운드 데몬 시작, 중지, 상태 확인 및 로그 읽기                | `lody daemon --help`       | [데몬 모드](#데몬-모드)                       |
+| `workspace`                           | 접근 가능한 워크스페이스 ID 및 슬러그(slug) 조회                  | `lody workspace --help`    | [워크스페이스 명령어](#워크스페이스-명령어)      |
+| `github`                              | 워크스페이스에 이미 연결된 GitHub 저장소 목록 조회                | `lody github --help`       | [GitHub 명령어](#github-명령어)               |
+| `project`                             | 로컬 프로젝트 등록 관리                                           | `lody project --help`      | [프로젝트 명령어](#프로젝트-명령어)            |
+| `app`                                 | 데스크톱 앱 열기 또는 앱이 멈췄을 때 로컬 캐시 초기화             | `lody app --help`          | [데스크톱 앱 명령어](#데스크톱-앱-명령어)     |
+| `session`                             | 세션 생성, 대화, 조회, 보관, 복원 및 삭제                       | `lody session --help`      | [세션 명령어](#세션-명령어)                |
+| `machine`                             | 워크스페이스에 등록된 머신 조회                                   | `lody machine --help`      | [머신 명령어](#머신-명령어)                |
+| `agent-config`                        | 에이전트 설정 관리 및 런타임 기능 새로고침                        | `lody agent-config --help` | [에이전트 설정 명령어](#에이전트-설정-명령어)  |
 
 ## 핵심 명령어
 
@@ -356,7 +356,7 @@ lody app reset-cache --cancel # 위의 두 요청 중 하나 취소
 
 - `session create`, `session chat`, `session cancel`은 현재 머신에서 `lody start` 또는 `lody daemon start`가 실행 중이어야 합니다
 - `session list`, `history`, `observe`, `show`, `rename`, `archive`, `restore`, `delete`는 로그인과 워크스페이스 접근 권한만 있으면 됩니다
-- 워크스페이스 ID 또는 슬러그가 필요하면 [`lody workspace list`](#workspace-commands)를 사용하세요
+- 워크스페이스 ID 또는 슬러그가 필요하면 [`lody workspace list`](#워크스페이스-명령어)를 사용하세요
 - `sessionId`는 위치 인수로 전달하거나 `LODY_SESSION_ID`를 통해 전달할 수 있습니다
 
 | 하위 명령어            | 기능                                       | 로컬 런타임 필요 여부 | 도움말 명령어                 |

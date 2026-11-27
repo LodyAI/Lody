@@ -403,10 +403,14 @@ function RemovalConfirm({
 export function E2eeLostAccessEntry({
   disabled,
   onOpenChange,
+  entryLabel,
+  entryVariant = 'secondary',
   ...props
 }: Omit<E2eeLostAccessProps, 'onBusyChange'> & {
   disabled?: boolean;
   onOpenChange?: (open: boolean) => void;
+  entryLabel?: string;
+  entryVariant?: 'secondary' | 'link' | 'ghost';
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -417,15 +421,17 @@ export function E2eeLostAccessEntry({
     setOpen(next);
     onOpenChange?.(next);
   };
+  const label =
+    entryLabel ?? t(props.recovery ? 'e2ee.lostAccess.entryWithRecovery' : 'e2ee.lostAccess.entry');
   return (
     <>
       <Button
-        variant="secondary"
+        variant={entryVariant}
         data-testid="e2ee-lost-access-entry"
         disabled={disabled}
         onClick={() => change(true)}
       >
-        {t('e2ee.lostAccess.entry')}
+        {label}
       </Button>
       <Dialog.Root open={open} onOpenChange={change}>
         <Dialog.Content width={520} xstyle={themeStyles.glyph} data-e2ee-pairing-surface="">

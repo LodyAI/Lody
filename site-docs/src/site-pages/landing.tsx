@@ -7,14 +7,16 @@ import { buildLocaleAlternates, localeCode, localizeSitePath, type SiteLocale } 
 const landingAlternates = buildLocaleAlternates('/');
 
 export function landingHead(locale: SiteLocale, options?: { noindex?: boolean }): SiteHead {
+  const noindex = options?.noindex === true;
   return pageHead({
     title: landingPageTitle(locale),
     description: landingMetaDescription(locale),
-    path: localizeSitePath('/', locale),
+    path: localizeSitePath(noindex ? '/home' : '/', locale),
     locale: localeCode(locale),
-    alternates: landingAlternates,
-    robots: options?.noindex ? { index: false, follow: true } : undefined,
-    jsonLd: landingJsonLd(locale),
+    alternates: noindex ? undefined : landingAlternates,
+    canonical: !noindex,
+    robots: noindex ? { index: false, follow: true } : undefined,
+    jsonLd: noindex ? undefined : landingJsonLd(locale),
   });
 }
 
