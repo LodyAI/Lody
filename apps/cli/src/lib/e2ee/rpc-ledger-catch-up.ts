@@ -10,6 +10,7 @@ import {
 
 const CATCH_UP_TIMEOUT_MS = 30_000;
 const CATCH_UP_COOLDOWN_MS = 60_000;
+const MISSING_KEY_COOLDOWN_MS = 4_000;
 
 /** Non-secret diagnosis of a request rejected by the core epoch guard. */
 export type LedgerCatchUpEvent = {
@@ -30,6 +31,7 @@ export type LedgerCatchUpOptions = {
   readonly now?: () => number;
   readonly timeoutMs?: number;
   readonly cooldownMs?: number;
+  readonly missingKeyCooldownMs?: number;
   readonly observe?: (event: LedgerCatchUpEvent) => void;
 };
 
@@ -47,7 +49,7 @@ const ledgerState = (view: LedgerView) => `${view.inspectState().epoch.number}:$
  */
 export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
   const now = options.now ?? Date.now;
-  let flight: { state: string; done: Promise<void> } | undefined;
+  let flight: { state: string; cooldownMs: number; done: Promise<void> } | undefined;
   let exhausted: { state: string; until: number } | undefined;
   const observe = (event: LedgerCatchUpEvent) => {
     try {
@@ -89,9 +91,17 @@ export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
     );
   };
   // One wait per verified ledger state, shared by concurrent frames.
-  const join = (state: string) => {
-    if (flight?.state === state) return flight.done;
-    const done = (async () => {
+  const join = (state: string, cooldownMs: number) => {
+    if (flight?.state === state) {
+      flight.cooldownMs = Math.min(flight.cooldownMs, cooldownMs);
+      return flight.done;
+    }
+    const current = {
+      state,
+      cooldownMs,
+      done: undefined as unknown as Promise<void>,
+    };
+    current.done = (async () => {
       await Effect.runPromise(
         Effect.exit(
           Effect.promise(() => options.catchUp()).pipe(
@@ -101,11 +111,11 @@ export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
       );
       const after = await Effect.runPromise(Effect.result(options.ledger()));
       if (Result.isFailure(after) || ledgerState(after.success) === state)
-        exhausted = { state, until: now() + (options.cooldownMs ?? CATCH_UP_COOLDOWN_MS) };
-      if (flight?.state === state) flight = undefined;
+        exhausted = { state, until: now() + current.cooldownMs };
+      if (flight === current) flight = undefined;
     })();
-    flight = { state, done };
-    return done;
+    flight = current;
+    return current.done;
   };
 
   return <A, E>(open: (machineId: string, frameHex: string) => Effect.Effect<A, E>) =>
@@ -143,7 +153,11 @@ export function makeLedgerCatchUp(options: LedgerCatchUpOptions) {
               report('cooldown');
               return yield* Effect.fail(error);
             }
-            yield* Effect.promise(() => join(state));
+            const cooldownMs =
+              frameEpoch === localEpoch && missingKey
+                ? (options.missingKeyCooldownMs ?? MISSING_KEY_COOLDOWN_MS)
+                : (options.cooldownMs ?? CATCH_UP_COOLDOWN_MS);
+            yield* Effect.promise(() => join(state, cooldownMs));
             return yield* open(machineId, frameHex).pipe(
               Effect.tap(() =>
                 Effect.sync(() => {

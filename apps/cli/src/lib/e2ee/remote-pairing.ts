@@ -21,6 +21,38 @@ const KEY_RETRY_MAX_MS = 15_000;
 // Admission precedes key delivery: the approving desktop's refresh sends the current
 // key afterwards and resumes it on its next refresh. Bound this wait for the terminal user.
 const KEY_WAIT_MS = 10 * 60_000;
+const CLAIM_RETRY_BASE_MS = 1500;
+const CLAIM_RETRY_MAX_MS = 15_000;
+const CLAIM_RETRY_BUDGET_MS = 60_000;
+const CLAIM_RETRY_MAX_ATTEMPTS = 8;
+
+const TRANSIENT_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+function isTransientClaimError(error: unknown, signal: AbortSignal): boolean {
+  if (signal.aborted) return false;
+  if (typeof error === 'object' && error !== null && 'status' in error) {
+    const status = (error as { status?: unknown }).status;
+    if (typeof status === 'number') return status >= 500 || status === 429;
+  }
+  if (!(error instanceof Error)) return false;
+  if (error.message === 'e2ee_pairing_unavailable_retry_same_command') return true;
+  if (error instanceof TypeError) return true;
+  if (error.name === 'TimeoutError' || error.name === 'AbortError') return true;
+  const code = (error as NodeJS.ErrnoException).code;
+  if (typeof code === 'string' && TRANSIENT_NETWORK_CODES.has(code)) return true;
+  return /(?:^|\b)(?:50[0-9]|429|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|fetch failed|network)/i.test(
+    error.message
+  );
+}
 /** Verify the executable command before any custody access or network operation. */
 export function decodeRemoteMachineOffer(encoded: string) {
   if (encoded.length > 32768 || !/^[A-Za-z0-9_-]+$/.test(encoded))
@@ -61,6 +93,9 @@ export async function pairRemoteMachineLegacy(options: {
   const now = options.now ?? Date.now;
   let keyWaitStartedAt: number | undefined;
   let keyRetryMs = POLL_MS;
+  let claimRetryStartedAt: number | undefined;
+  let claimRetryAttempts = 0;
+  let claimRetryMs = CLAIM_RETRY_BASE_MS;
   const offer = decodeRemoteMachineOffer(options.encodedOffer);
   const prepared = await prepareCliE2eeMachineLegacy({
     ...offer,
@@ -85,7 +120,26 @@ export async function pairRemoteMachineLegacy(options: {
   });
   for (;;) {
     options.signal.throwIfAborted();
-    const status = RemoteMachineStatusSchema.parse(await options.claim(body, options.signal));
+    let rawStatus: unknown;
+    try {
+      rawStatus = await options.claim(body, options.signal);
+    } catch (error) {
+      if (!isTransientClaimError(error, options.signal)) throw error;
+      claimRetryStartedAt ??= now();
+      claimRetryAttempts += 1;
+      if (
+        claimRetryAttempts >= CLAIM_RETRY_MAX_ATTEMPTS ||
+        now() - claimRetryStartedAt >= CLAIM_RETRY_BUDGET_MS
+      )
+        throw error;
+      await wait(options.signal, claimRetryMs);
+      claimRetryMs = Math.min(claimRetryMs * 2, CLAIM_RETRY_MAX_MS);
+      continue;
+    }
+    claimRetryStartedAt = undefined;
+    claimRetryAttempts = 0;
+    claimRetryMs = CLAIM_RETRY_BASE_MS;
+    const status = RemoteMachineStatusSchema.parse(rawStatus);
     if (status.pairingSessionId !== offer.pairingSessionId)
       throw new Error('e2ee_pairing_conflict');
     // Another machine's claim on the same command, before or after ours; never admit it.
@@ -103,31 +157,34 @@ export async function pairRemoteMachineLegacy(options: {
     if (['cancelled', 'expired', 'conflict'].includes(status.status))
       throw new Error(`e2ee_pairing_${status.status}_create_new_command`);
     if (status.status === 'admitted' || status.status === 'ready') {
-      try {
-        await activateCliE2eeWorkspaceLegacy({
-          accountId: offer.accountId,
-          workspaceId: offer.workspaceId,
-          genesisHash: offer.genesisHash,
-          pairingSessionId: offer.pairingSessionId,
-          frontendSigningPublicKey: offer.frontendSigningPublicKey,
-          expectedSigningPublicKey: material.signingPublicKey,
-          cloud: options.cloud,
-          onUnavailable: () => undefined,
-          keyring: options.keyring,
-        });
-      } catch (error) {
-        if (!(error instanceof Error && error.message === 'e2ee_waiting_for_key')) throw error;
-        keyWaitStartedAt ??= now();
-        if (now() - keyWaitStartedAt >= KEY_WAIT_MS) throw error;
-        options.show({
-          summary,
-          protection: material.protection,
-          location: status.location,
-          status: 'waiting-for-key',
-        });
-        await wait(options.signal, keyRetryMs);
-        keyRetryMs = Math.min(keyRetryMs * 2, KEY_RETRY_MAX_MS);
-        continue;
+      for (;;) {
+        options.signal.throwIfAborted();
+        try {
+          await activateCliE2eeWorkspaceLegacy({
+            accountId: offer.accountId,
+            workspaceId: offer.workspaceId,
+            genesisHash: offer.genesisHash,
+            pairingSessionId: offer.pairingSessionId,
+            frontendSigningPublicKey: offer.frontendSigningPublicKey,
+            expectedSigningPublicKey: material.signingPublicKey,
+            cloud: options.cloud,
+            onUnavailable: () => undefined,
+            keyring: options.keyring,
+          });
+          break;
+        } catch (error) {
+          if (!(error instanceof Error && error.message === 'e2ee_waiting_for_key')) throw error;
+          keyWaitStartedAt ??= now();
+          if (now() - keyWaitStartedAt >= KEY_WAIT_MS) throw error;
+          options.show({
+            summary,
+            protection: material.protection,
+            location: status.location,
+            status: 'waiting-for-key',
+          });
+          await wait(options.signal, keyRetryMs);
+          keyRetryMs = Math.min(keyRetryMs * 2, KEY_RETRY_MAX_MS);
+        }
       }
       await retainCliE2eeMachineBootstrapLegacy(
         {

@@ -66,6 +66,7 @@ import { randomBytes } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import { link, lstat, mkdir, open, readFile, rename, unlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { Effect, Exit, Scope, Result, Fiber, Schedule } from 'effect';
 import { z } from 'zod';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
@@ -120,6 +121,55 @@ const Removed = z
     membershipId: z.string().regex(/^[0-9a-f]{32}$/),
   })
   .strict();
+function readMembershipIdFromPairingJournal(
+  directory: string,
+  genesisHash: string,
+  signingPublicKey: string
+): string | null {
+  const dbPath = join(directory, 'pairings.sqlite');
+  if (!existsSync(dbPath)) return null;
+  try {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const extract = (row: { context?: unknown; material?: unknown } | undefined) => {
+        if (!row || typeof row.context !== 'string' || typeof row.material !== 'string')
+          return null;
+        const ctx = JSON.parse(row.context) as {
+          genesisHash?: unknown;
+          membershipId?: unknown;
+        };
+        const mat = JSON.parse(row.material) as { signingPublicKey?: unknown };
+        if (
+          ctx.genesisHash === genesisHash &&
+          mat.signingPublicKey === signingPublicKey &&
+          typeof ctx.membershipId === 'string' &&
+          /^[0-9a-f]{32}$/.test(ctx.membershipId)
+        )
+          return ctx.membershipId;
+        return null;
+      };
+      const current = db
+        .prepare(
+          'SELECT p.context, p.material FROM current_identity c JOIN pairings p ON p.session = c.session WHERE c.singleton = 1'
+        )
+        .get() as { context?: unknown; material?: unknown } | undefined;
+      const fromCurrent = extract(current);
+      if (fromCurrent) return fromCurrent;
+      const rows = db
+        .prepare('SELECT context, material FROM pairings WHERE material IS NOT NULL')
+        .all() as Array<{ context?: unknown; material?: unknown }>;
+      for (const row of rows) {
+        const match = extract(row);
+        if (match) return match;
+      }
+      return null;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  }
+}
 async function readRemoval(directory: string) {
   try {
     return Removed.parse(JSON.parse(await readFile(join(directory, 'removed.json'), 'utf8')));
@@ -975,6 +1025,7 @@ async function openWorkspaceOwned(
     throw error;
   });
   const initialStatus = await run(opened.runtime.status());
+  let lastKnownMembershipId: string | null = initialStatus.membershipId;
   const tokensInUse = new Set<
     Awaited<Effect.Success<ReturnType<NonNullable<CloudE2eePort['createContentTokenProvider']>>>>
   >();
@@ -1389,11 +1440,20 @@ async function openWorkspaceOwned(
               return false;
             // A revoked device keeps membership: its receipt only retires this identity
             // so the next pairing creates a new one; it never erases the workspace.
+            const membershipId = removedStatus
+              ? (removedStatus.membershipId ??
+                lastKnownMembershipId ??
+                readMembershipIdFromPairingJournal(
+                  directory,
+                  options.genesisHash,
+                  opened.signingPublicKey
+                ))
+              : undefined;
             const receipt = removedStatus
               ? Removed.parse({
                   genesisHash: options.genesisHash,
                   signingPublicKey: opened.signingPublicKey,
-                  membershipId: removedStatus.membershipId,
+                  membershipId,
                 })
               : RevokedDevice.parse({
                   genesisHash: options.genesisHash,
@@ -1494,6 +1554,7 @@ async function openWorkspaceOwned(
         )
       );
       if (closed) return false;
+      if (status.membershipId) lastKnownMembershipId = status.membershipId;
       epochTransition.observe(status);
       await confirmPairing(intent);
       return true;
@@ -1524,6 +1585,7 @@ async function openWorkspaceOwned(
           const startedAt = authorityStamp();
           const confirmRead = opened.executionAuthorization.beginLatestRead();
           let status = await run(opened.runtime.status());
+          if (status.membershipId) lastKnownMembershipId = status.membershipId;
           const trusted = status;
           let checkpoint: Parameters<CloudE2eePort['getHistory']>[0]['checkpoint'];
           do {
@@ -1571,6 +1633,7 @@ async function openWorkspaceOwned(
             });
             ledgerBlocked = false;
             ledgerRetryAttempts = 0;
+            if (status.membershipId) lastKnownMembershipId = status.membershipId;
             epochTransition.observe(status);
             cursor = page.nextCursor ?? undefined;
           } while (cursor && !isClosed());
@@ -1582,13 +1645,14 @@ async function openWorkspaceOwned(
             hooks.onAuthorityConfirmed?.(startedAt);
           }
         }
+        let waitingForKey = false;
         if (!closed) {
           if (pairing) {
             if (!local) await confirmPairing(pairing);
             pairingConfirmed = true;
           }
           if (epochTransition.needsUpdate()) {
-            await epochTransition.transition({
+            const transitioned = await epochTransition.transition({
               install: async () => {
                 // The refresh above verified the ledger. If the key for its epoch is
                 // already installed, a slow earlier install finished: select it without
@@ -1604,12 +1668,17 @@ async function openWorkspaceOwned(
                 return installed;
               },
             });
+            if (!transitioned && !closed) waitingForKey = true;
           } else if (requireActivation || pairing) {
             await run(opened.runtime.receiveKeys());
           }
         }
-        refreshRetryAttempts = 0;
-        clearRefreshRetry();
+        if (waitingForKey) {
+          scheduleRefreshRetry();
+        } else {
+          refreshRetryAttempts = 0;
+          clearRefreshRetry();
+        }
         // A confirmed read, and any key it installed, may admit a waiting turn.
         if (!cursor && !movedBack) notifyExecutionEvidence();
       }
@@ -2056,7 +2125,13 @@ async function openWorkspaceOwned(
                 });
                 return yield* Effect.never;
               })
-            ).pipe(Effect.retry(Schedule.spaced('1 second'))),
+            ).pipe(
+              Effect.retry(
+                Schedule.jittered(
+                  Schedule.min([Schedule.exponential('1 second'), Schedule.spaced('30 seconds')])
+                )
+              )
+            ),
             scope
           );
           // Iroh is independent of the Streams listener above: either may fail or

@@ -13,7 +13,14 @@ afterEach(() => {
 });
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 
-function machine(options: { error?: ContentError | InstalledKeyError } = {}) {
+function machine(
+  options: {
+    error?: ContentError | InstalledKeyError;
+    now?: () => number;
+    cooldownMs?: number;
+    missingKeyCooldownMs?: number;
+  } = {}
+) {
   const f = encryptedRpcFixture();
   fixtures.push(f);
   let catchUps = 0;
@@ -22,6 +29,9 @@ function machine(options: { error?: ContentError | InstalledKeyError } = {}) {
     genesis: hex(f.ledger.context.genesis.toBytes()),
     resource: e2eeRpcResource,
     ledger: f.ledger.ledger,
+    now: options.now,
+    cooldownMs: options.cooldownMs,
+    missingKeyCooldownMs: options.missingKeyCooldownMs,
     catchUp: async () => {
       catchUps++;
     },
@@ -90,5 +100,45 @@ describe('dispatch open after an epoch rotation', () => {
     }
     expect(m.catchUps()).toBe(0);
     expect(new Set(m.events.map((event) => event.outcome))).toEqual(new Set(['unauthenticated']));
+  });
+
+  it('uses a short 4s cooldown for same-epoch missing-key requests instead of the 60s epoch cooldown', async () => {
+    let clock = 10_000;
+    const missingKeyMachine = machine({
+      error: new InstalledKeyError({ reason: 'missing-key' }),
+      now: () => clock,
+    });
+    const currentEpochFrame = await missingKeyMachine.seal(0);
+
+    expect(Exit.isFailure(await missingKeyMachine.open(currentEpochFrame))).toBe(true);
+    expect(missingKeyMachine.catchUps()).toBe(1);
+
+    clock += 3_999;
+    expect(Exit.isFailure(await missingKeyMachine.open(currentEpochFrame))).toBe(true);
+    expect(missingKeyMachine.catchUps()).toBe(1);
+    expect(missingKeyMachine.events.at(-1)?.outcome).toBe('cooldown');
+
+    clock += 1;
+    expect(Exit.isFailure(await missingKeyMachine.open(currentEpochFrame))).toBe(true);
+    expect(missingKeyMachine.catchUps()).toBe(2);
+
+    let futureClock = 10_000;
+    const newerEpochMachine = machine({
+      error: new ContentError({ code: 'unauthorized' }),
+      now: () => futureClock,
+    });
+    const newerEpochFrame = await newerEpochMachine.seal(1);
+
+    expect(Exit.isFailure(await newerEpochMachine.open(newerEpochFrame))).toBe(true);
+    expect(newerEpochMachine.catchUps()).toBe(1);
+
+    futureClock += 59_999;
+    expect(Exit.isFailure(await newerEpochMachine.open(newerEpochFrame))).toBe(true);
+    expect(newerEpochMachine.catchUps()).toBe(1);
+    expect(newerEpochMachine.events.at(-1)?.outcome).toBe('cooldown');
+
+    futureClock += 1;
+    expect(Exit.isFailure(await newerEpochMachine.open(newerEpochFrame))).toBe(true);
+    expect(newerEpochMachine.catchUps()).toBe(2);
   });
 });

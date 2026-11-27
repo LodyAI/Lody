@@ -1517,7 +1517,7 @@ export class LodyFleet {
         if (
           workspace.contentMode === 'e2ee' &&
           error instanceof Error &&
-          error.message === 'e2ee_pairing_required'
+          (error.message === 'e2ee_pairing_required' || error.message === 'e2ee_device_revoked')
         ) {
           this.waitingForPairing.add(workspace.id);
           this.runtimeStateReporter.clearIssue(`workspace_start_failed:${workspace.id}`);

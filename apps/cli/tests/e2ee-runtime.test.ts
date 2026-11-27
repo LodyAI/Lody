@@ -526,6 +526,191 @@ describe('machine E2EE local runtime', () => {
     }
   }, 60_000);
 
+  it('schedules a refresh retry instead of waiting 5 minutes when epoch transition enters waiting-key', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-waiting-key-retry-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+    try {
+      const accountId = 'synthetic-waiting-key-account';
+      const root = join(
+        getLodyDataDir(),
+        'e2ee',
+        createHash('sha256').update(accountId).digest('hex'),
+        'workspace'
+      );
+      const fixture = await execute(setup(directory, 2, join(root, 'custody'), true, true));
+      await retainCliE2eeWorkspaceBinding(accountId, {
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        genesisRecordHex: hex(fixture.genesisRecord),
+      });
+      const machineKey = await execute(
+        Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(root, 'custody'),
+            keyring: noKeyring,
+          });
+          return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+        })
+      );
+      await fs.writeFile(
+        join(root, 'activation.json'),
+        JSON.stringify({
+          genesisHash: hex(fixture.genesis.toBytes()),
+          signingPublicKey: machineKey,
+        })
+      );
+      let history = page(fixture.records);
+      let keyDelivered = false;
+      const encodedGroup = encodeEpochStagedGroup(fixture.stagedGroup!);
+      const cloud = {
+        getHistory: async () => history,
+        getContentToken: async () => ({
+          token: 'synthetic-token',
+          expiresIn: 900,
+          expiresAt: Date.now() + 900_000,
+          gatewayBaseUrl: 'https://synthetic.invalid',
+          bucketId: 'synthetic-bucket',
+        }),
+        readEpochGroup: async () => (keyDelivered ? encodedGroup : null),
+        mailboxCall: async (
+          method: keyof E2eeMailboxRequests,
+          input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
+        ) => {
+          if (method === 'fetch') {
+            return {
+              items:
+                (input as E2eeMailboxRequests['fetch']).epoch === 0
+                  ? [{ sender: fixture.sender, frameHex: hex(fixture.frame) }]
+                  : [],
+              next: null,
+            };
+          }
+          if (method === 'status')
+            return {
+              ...(input as E2eeMailboxRequests['status']).slot,
+              revision: 0,
+              status: 'EnvelopeStored',
+            };
+          if (method === 'report') return null;
+          throw new Error('unexpected mailbox operation');
+        },
+      } as CloudE2eePort;
+      host = await openCliE2eeWorkspaceLegacy({
+        accountId,
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        cloud,
+        keyring: noKeyring,
+        onUnavailable: () => {},
+      });
+      await host.refresh();
+      expect(await host.status()).toMatchObject({ epoch: 0, epochPhase: 'ready' });
+
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      history = page([...fixture.records, ...fixture.rotationSuffix]);
+      await host.refresh();
+      expect(await host.status()).toMatchObject({
+        epoch: 1,
+        hasCurrentKey: false,
+        epochPhase: 'waiting-key',
+      });
+
+      keyDelivered = true;
+      await vi.advanceTimersByTimeAsync(1_000);
+      for (let turn = 0; turn < 200; turn++) {
+        if ((await host.status()).epochPhase === 'ready') break;
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      expect(await host.status()).toMatchObject({
+        epoch: 1,
+        hasCurrentKey: true,
+        epochPhase: 'ready',
+      });
+    } finally {
+      vi.useRealTimers();
+      await host?.close();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('backs off RPC streams reconnection exponentially instead of hammering every 1s while offline', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-rpc-backoff-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+    try {
+      const accountId = 'synthetic-rpc-backoff-account';
+      const root = join(
+        getLodyDataDir(),
+        'e2ee',
+        createHash('sha256').update(accountId).digest('hex'),
+        'workspace'
+      );
+      const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+      await retainCliE2eeWorkspaceBinding(accountId, {
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        genesisRecordHex: hex(fixture.genesisRecord),
+      });
+      const machineKey = await execute(
+        Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(root, 'custody'),
+            keyring: noKeyring,
+          });
+          return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+        })
+      );
+      await fs.writeFile(
+        join(root, 'activation.json'),
+        JSON.stringify({
+          genesisHash: hex(fixture.genesis.toBytes()),
+          signingPublicKey: machineKey,
+        })
+      );
+      let tokenAttempts = 0;
+      const cloud = {
+        getHistory: async () => page(fixture.records),
+        getContentToken: async () => {
+          throw new Error('offline');
+        },
+        createContentTokenProvider: () =>
+          Effect.suspend(() => {
+            tokenAttempts += 1;
+            return Effect.fail(new Error('offline'));
+          }),
+        mailboxCall: async (method: keyof E2eeMailboxRequests) => {
+          if (method === 'fetch') {
+            return {
+              items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
+              next: null,
+            };
+          }
+          return null;
+        },
+      } as unknown as CloudE2eePort;
+      host = await openCliE2eeWorkspaceLegacy({
+        accountId,
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        cloud,
+        keyring: noKeyring,
+        onUnavailable: () => {},
+      });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      await host.startRpc('machine-1', async () => {});
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(tokenAttempts).toBeGreaterThanOrEqual(2);
+      expect(tokenAttempts).toBeLessThanOrEqual(7);
+    } finally {
+      vi.useRealTimers();
+      await host?.close();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it.each(['cold-ledger', 'fresh-ledger', 'joined-refresh'] as const)(
     'verifies a signed input across an epoch rotation with %s, without its new key',
     async (mode) => {

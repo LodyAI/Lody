@@ -716,6 +716,49 @@ it('waits silently for pairing when an activated machine has lost its custody', 
   }
 });
 
+it('parks a revoked encrypted workspace in waitingForPairing without a 10s retry loop', async () => {
+  const workspace = {
+    id: 'revoked-on-restart',
+    name: 'Revoked on restart',
+    slug: null,
+    role: 'owner',
+    contentMode: 'e2ee',
+    genesisHash: 'cd'.repeat(32),
+  };
+  const create = vi.spyOn(Lody, 'create').mockRejectedValue(new Error('e2ee_device_revoked'));
+  const harness = createFleetHarness(createCatalogStub(() => Effect.succeed(catalogSnapshot({}))));
+  const issues = new Set<string>([`workspace_start_failed:${workspace.id}`]);
+  harness.runtimeStateReporter.upsertIssue.mockImplementation((issue) => {
+    issues.add(issue.code);
+  });
+  harness.runtimeStateReporter.clearIssue.mockImplementation((code) => {
+    issues.delete(code);
+  });
+  const fleet = harness.fleet as unknown as {
+    desiredWorkspaces: Map<string, unknown>;
+    retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+    waitingForPairing: Set<string>;
+    startWorkspace(workspace: never): Promise<void>;
+    stopped: boolean;
+  };
+  delete (fleet as unknown as { startWorkspace?: unknown }).startWorkspace;
+  fleet.desiredWorkspaces.set(workspace.id, workspace);
+  vi.useFakeTimers();
+  try {
+    await fleet.startWorkspace(workspace as never);
+    expect(fleet.waitingForPairing.has(workspace.id)).toBe(true);
+    expect(fleet.retryTimers.size).toBe(0);
+    expect(issues.has(`workspace_start_failed:${workspace.id}`)).toBe(false);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fleet.retryTimers.size).toBe(0);
+    expect(create).toHaveBeenCalledTimes(1);
+  } finally {
+    fleet.stopped = true;
+    create.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
 it.each(['EMFILE', 'EACCES'])(
   'retries an encrypted workspace after %s clears without requiring activation',
   async (code) => {
