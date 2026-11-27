@@ -627,7 +627,9 @@
   "referral.older": "Старее",
   "referral.offerTitle": "Реферальная скидка",
   "referral.offerBadge": "Скидка {{discount}}%",
-  "referral.offerYearly": "Первый год — {{first}} за место, затем {{regular}}/год.",
+  "referral.offerYearlyBadge": "Ещё −{{discount}}% на год",
+  "referral.offerYearly": "Ещё −{{discount}}% к годовому тарифу (−{{combinedDiscount}}% к помесячному): первый год — {{first}} за место, затем {{regular}}/год.",
+  "referral.retainedCheckoutYearly": "Незавершённая оплата сохраняет ещё −{{discount}}% на год ({{first}} за первый год за место).",
   "referral.offerMonthly": "Первый месяц — {{first}} за место, затем {{regular}}/мес.",
   "referral.remove": "Не использовать",
   "referral.invalid": "Эта реферальная ссылка больше не работает. Удалите её, чтобы продолжить.",
@@ -7406,8 +7408,15 @@
   "settings.agent.dialog.defaultPermissionLastUsed": "Последнее выбранное",
   "e2ee.access.waitingKey.checkFailed": "Не удалось проверить ключи сейчас. Проверьте подключение и повторите попытку.",
   "e2ee.instantQr.retrying": "Соединение прервано. Повторная попытка…",
+  "billing.yearlySaveBadge": "−20%",
   "billing.promoOfferTitle": "Акционная скидка",
-  "billing.switchPromoDiscountWithPercent": "Акционная скидка (−{{discount}}%)",
+  "billing.promoYearlyOfferBadge": "Ещё −{{discount}}% на год",
+  "billing.promoYearlyExtraBadge": "Ещё −{{discount}}%",
+  "billing.promoMonthlyOfferBadge": "Скидка {{discount}}%",
+  "billing.promoOfferYearly": "Ещё −{{discount}}% к годовому тарифу (−{{combinedDiscount}}% к помесячному): первый год — {{first}} за место, затем {{regular}}/год.",
+  "billing.promoRetainedYearly": "Незавершённая оплата сохраняет ещё −{{discount}}% на год ({{first}} за первый год за место).",
+  "billing.switchPromoDiscountWithPercent": "Акционная скидка (ещё −{{discount}}% на год)",
   "billing.switchRenewalDateStandardYearly": "Следующее продление: {{date}} по стандартному тарифу ({{amount}}/год).",
-  "workspace.invite.seat.promoNoteUntil": "Скидка {{discount}}% при принятии приглашения до {{date}}. Продление по стандартному тарифу."
+  "workspace.invite.seat.promoNoteUntil": "Скидка {{discount}}% при принятии приглашения до {{date}}. Продление по стандартному тарифу.",
+  "workspace.invite.seat.promoNoteYearlyUntil": "Ещё −{{discount}}% к годовому тарифу при принятии приглашения до {{date}}. Продление по стандартному тарифу."
 }

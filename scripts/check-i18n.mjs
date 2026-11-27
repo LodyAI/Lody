@@ -122,13 +122,22 @@ function getTranslationValue(obj, keyPath) {
 // and `{{rate}}` (e.g. "8 折" in Chinese), so either token satisfies parity.
 const DISCOUNT_OR_RATE_KEYS = new Set([
   'referral.retainedCheckout',
+  'referral.retainedCheckoutYearly',
   'referral.description',
   'referral.discount',
   'referral.shareTitle',
   'referral.perkDiscount',
   'referral.offerBadge',
+  'referral.offerYearlyBadge',
+  'referral.offerYearly',
+  'billing.promoYearlyOfferBadge',
+  'billing.promoYearlyExtraBadge',
+  'billing.promoMonthlyOfferBadge',
+  'billing.promoOfferYearly',
+  'billing.promoRetainedYearly',
   'billing.switchPromoDiscountWithPercent',
   'workspace.invite.seat.promoNoteUntil',
+  'workspace.invite.seat.promoNoteYearlyUntil',
 ]);
 
 /**
@@ -139,7 +148,11 @@ function extractPlaceholders(value, key) {
   const matches = value.match(/\{\{[^}]+\}\}/g);
   if (!matches) return [];
   const normalized = DISCOUNT_OR_RATE_KEYS.has(key)
-    ? matches.map((token) => (token === '{{rate}}' ? '{{discount}}' : token))
+    ? matches.map((token) => {
+        if (token === '{{rate}}') return '{{discount}}';
+        if (token === '{{combinedRate}}') return '{{combinedDiscount}}';
+        return token;
+      })
     : matches;
   return [...new Set(normalized)].sort();
 }

@@ -34,9 +34,14 @@ function normalizePromoLocaleKey(raw: string | undefined): string {
 }
 
 export function discountBadgeValues(discountPercent: number) {
+  const rate = Number(((100 - discountPercent) / 10).toFixed(2));
+  const combinedDiscount = Number((100 - (80 * (100 - discountPercent)) / 100).toFixed(1));
+  const combinedRate = Number(((80 * (100 - discountPercent)) / 1000).toFixed(2));
   return {
     discount: discountPercent,
-    rate: (100 - discountPercent) / 10,
+    rate,
+    combinedDiscount,
+    combinedRate,
   };
 }
 

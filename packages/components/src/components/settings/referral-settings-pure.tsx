@@ -502,8 +502,11 @@ export function ReferralOfferNotice({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
+  const discountPercent = policy?.discountPercent ?? 10;
+  const badgeValues = policyValues(policy);
   const values = {
-    first: formatUsd(Math.round((regularCents * (100 - (policy?.discountPercent ?? 10))) / 100)),
+    ...badgeValues,
+    first: formatUsd(Math.round((regularCents * (100 - discountPercent)) / 100)),
     regular: formatUsd(regularCents),
   };
   return (
@@ -511,16 +514,26 @@ export function ReferralOfferNotice({
       <div {...stylex.props(styles.text)}>
         <p {...stylex.props(surface.rowLabel)}>
           {t('referral.offerTitle')}{' '}
-          <Badge tone="success">{t('referral.offerBadge', policyValues(policy))}</Badge>
+          <Badge tone="success">
+            {t(
+              interval === 'year' ? 'referral.offerYearlyBadge' : 'referral.offerBadge',
+              badgeValues
+            )}
+          </Badge>
         </p>
         {retained && retained.policy.discountPercent !== (policy?.discountPercent ?? 10) ? (
           <p {...stylex.props(surface.rowHelper)}>
-            {t('referral.retainedCheckout', {
-              ...policyValues(retained.policy),
-              first: formatUsd(
-                Math.round((regularCents * (100 - retained.policy.discountPercent)) / 100)
-              ),
-            })}
+            {t(
+              interval === 'year'
+                ? 'referral.retainedCheckoutYearly'
+                : 'referral.retainedCheckout',
+              {
+                ...policyValues(retained.policy),
+                first: formatUsd(
+                  Math.round((regularCents * (100 - retained.policy.discountPercent)) / 100)
+                ),
+              }
+            )}
           </p>
         ) : null}
         <ReferralCampaignDates policy={policy} />
@@ -586,9 +599,8 @@ function ReferralComparedValue({
 
 function policyValues(policy?: ReferralPolicy) {
   return {
-    discount: policy?.discountPercent ?? 10,
+    ...discountBadgeValues(policy?.discountPercent ?? 10),
     reward: policy?.rewardPercent ?? 20,
-    rate: (100 - (policy?.discountPercent ?? 10)) / 10,
   };
 }
 
@@ -616,7 +628,9 @@ export function PromoOfferNotice({
   const effectivePercent =
     discountPercent > 0 ? discountPercent : (activeRetained?.discountPercent ?? 0);
   if (effectivePercent <= 0) return null;
+  const badgeValues = discountBadgeValues(effectivePercent);
   const values = {
+    ...badgeValues,
     first: formatUsd(Math.round((regularCents * (100 - effectivePercent)) / 100)),
     regular: formatUsd(regularCents),
   };
@@ -637,25 +651,33 @@ export function PromoOfferNotice({
         <p {...stylex.props(surface.rowLabel)}>
           {customTitle ?? t('billing.promoOfferTitle')}{' '}
           <Badge tone="success">
-            {t('referral.offerBadge', discountBadgeValues(effectivePercent))}
+            {t(
+              interval === 'year'
+                ? 'billing.promoYearlyOfferBadge'
+                : 'billing.promoMonthlyOfferBadge',
+              badgeValues
+            )}
           </Badge>
         </p>
         {activeRetained &&
         discountPercent > 0 &&
         activeRetained.discountPercent !== discountPercent ? (
           <p {...stylex.props(surface.rowHelper)}>
-            {t('referral.retainedCheckout', {
-              ...discountBadgeValues(activeRetained.discountPercent),
-              first: formatUsd(
-                Math.round((regularCents * (100 - activeRetained.discountPercent)) / 100)
-              ),
-            })}
+            {t(
+              interval === 'year' ? 'billing.promoRetainedYearly' : 'referral.retainedCheckout',
+              {
+                ...discountBadgeValues(activeRetained.discountPercent),
+                first: formatUsd(
+                  Math.round((regularCents * (100 - activeRetained.discountPercent)) / 100)
+                ),
+              }
+            )}
           </p>
         ) : null}
         <ReferralCampaignDates policy={dateRange} />
         <p {...stylex.props(surface.rowHelper)}>
           {interval === 'year'
-            ? t('referral.offerYearly', values)
+            ? t('billing.promoOfferYearly', values)
             : t('referral.offerMonthly', values)}
         </p>
       </div>
