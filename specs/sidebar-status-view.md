@@ -106,9 +106,10 @@ All three ship this; the design, its limits and what was verified are in the
   into a drag: reorder Focus, or drop a Later or Settled row into Focus. Every drag
   outcome is also a menu item and an accessibility action.
 - A trailing swipe offers Settle and Later on Focus and Later rows and Archive on
-  Settled rows. Later opens a bottom sheet with the presets and a custom date and
-  time. Settle and Later confirm with an Undo notice. The conversation page's "…"
-  sheet carries the same status actions.
+  Settled rows. On iOS and Android, Settled rows also offer Move to Focus.
+  Later opens a bottom sheet with the presets and a custom date and time.
+  Settle and Later confirm with an Undo notice. The conversation page's "…" sheet
+  carries the same status actions.
 - The native clients' previous status grouping (Needs you, Running, Finished, Pull
   requests, Idle) is replaced by these tiers.
 - Native clients have no live session presence. They treat a conversation as
