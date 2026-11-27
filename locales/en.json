@@ -7286,6 +7286,5 @@
   "sessions.messageQueue.details.mode": "Mode",
   "sessions.messageQueue.details.plan": "Plan",
   "sessions.messageQueue.details.fast": "Fast",
-  "sessions.messageQueue.details.on": "On",
-  "sessions.messageQueue.details.edit": "Edit in composer"
+  "sessions.messageQueue.details.on": "On"
 }

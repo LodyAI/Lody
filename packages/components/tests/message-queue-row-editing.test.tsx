@@ -312,7 +312,7 @@ describe('queued message editing commits', () => {
       expect(details!.textContent).toContain(text);
     await act(async () => {
       [...details!.querySelectorAll('button')]
-        .find((button) => button.textContent?.includes('Edit in composer'))!
+        .find((button) => button.textContent?.trim() === 'Edit')!
         .click();
     });
     expect(started).toEqual(['cid-0']);

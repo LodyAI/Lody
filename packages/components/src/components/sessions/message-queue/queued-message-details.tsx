@@ -247,7 +247,7 @@ export function QueuedMessageDetails({
         <div {...stylex.props(styles.footer)}>
           <Button variant="secondary" size="small" disabled={editDisabled} onClick={onEdit}>
             <Pencil size={13} strokeWidth={1.75} aria-hidden="true" />
-            {t('sessions.messageQueue.details.edit', 'Edit in composer')}
+            {t('common.edit', 'Edit')}
           </Button>
         </div>
       ) : null}

@@ -7286,6 +7286,5 @@
   "sessions.messageQueue.details.mode": "模式",
   "sessions.messageQueue.details.plan": "Plan",
   "sessions.messageQueue.details.fast": "Fast",
-  "sessions.messageQueue.details.on": "开启",
-  "sessions.messageQueue.details.edit": "在输入框中编辑"
+  "sessions.messageQueue.details.on": "开启"
 }

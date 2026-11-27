@@ -7426,6 +7426,5 @@
   "sessions.messageQueue.details.mode": "Режим",
   "sessions.messageQueue.details.plan": "Plan",
   "sessions.messageQueue.details.fast": "Fast",
-  "sessions.messageQueue.details.on": "Вкл.",
-  "sessions.messageQueue.details.edit": "Изменить в поле ввода"
+  "sessions.messageQueue.details.on": "Вкл."
 }
