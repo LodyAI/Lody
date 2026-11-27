@@ -71,6 +71,7 @@ export const INDEX_SCALAR_KEYS = [
   'acpTurnId',
   'startedAt',
   'permissionWaitMs',
+  'threadRoots',
 ] as const;
 
 export type IndexScalarKey = (typeof INDEX_SCALAR_KEYS)[number];

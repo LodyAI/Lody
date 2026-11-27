@@ -285,6 +285,7 @@ describe('MessageHandler machine registration', () => {
         sessionDirectoryListing: 1,
         bugReportClientLog: 1,
         sessionLiveActivity: 1,
+        coordinatorSessions: 3,
         localProjectFileSearch: 1,
         localProjectSkillsFingerprint: 1,
       });

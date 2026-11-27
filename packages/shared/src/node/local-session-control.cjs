@@ -527,6 +527,24 @@ function isLocalSessionControlRequest(value) {
     );
   }
 
+  if (value.type === 'session/coordinator-diagnostics') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string'
+    );
+  }
+
+  if (value.type === 'session/coordinator-triggers') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string' &&
+      isObjectRecord(value.action) &&
+      typeof value.action.kind === 'string'
+    );
+  }
+
   if (value.type === 'machine/dsh-providers') {
     return (
       typeof value.machineId === 'string' &&
@@ -880,6 +898,25 @@ function isLocalSessionControlResponse(value) {
       typeof value.sessionId === 'string' &&
       typeof value.success === 'boolean' &&
       isOptionalString(value.error)
+    );
+  }
+
+  if (value.type === 'session/coordinator-diagnostics_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.observedAt === 'number' &&
+      Array.isArray(value.cursors) &&
+      Array.isArray(value.operations) &&
+      Array.isArray(value.waits)
+    );
+  }
+
+  if (value.type === 'session/coordinator-triggers_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.ok === 'boolean' &&
+      isOptionalString(value.error) &&
+      isOptionalString(value.triggerId)
     );
   }
 

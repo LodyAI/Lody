@@ -1,5 +1,11 @@
 import { Clock, Effect, Layer, ManagedRuntime, Queue } from 'effect';
 import { ChildProcessSpawner } from 'effect/process';
+import {
+  COORDINATOR_WAKE_DEBOUNCE_MS,
+  COORDINATOR_WORK_ITEMS_RESOURCE,
+  evaluateCoordinatorWakeGate,
+  type ObservedCoordinatorWorkItem,
+} from './context/coordinator-watch-gate';
 import path from 'node:path';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
@@ -9,7 +15,7 @@ import {
   type AutomationOrigin,
   type AutomationWait,
 } from '@lody/shared/automations';
-import type { SessionId } from '@lody/shared';
+import { getSessionRoomId, type SessionId, type SessionMeta } from '@lody/shared';
 import { platformLayer } from '@/platform/process-options';
 import type { Lody } from '@/lib/lody';
 import type { AuthContext } from '@/lib/command-runtime';
@@ -131,7 +137,6 @@ export async function createAutomationWorkspaceLegacy(options: {
     'runs',
     automationIdentity(auth.machineId, workspace.id)
   );
-
   const reportRun = (cause: unknown) =>
     Effect.sync(() => logger.warn('Managed automation run did not settle', cause));
 
@@ -168,8 +173,9 @@ export async function createAutomationWorkspaceLegacy(options: {
               Effect.uninterruptible,
               Effect.flatMap(({ context }) =>
                 Clock.currentTimeMillis.pipe(
-                  Effect.flatMap((now) =>
-                    evaluateAutomationProgram(
+                  Effect.flatMap((now) => {
+                    const observedSnapshots: ObservedCoordinatorWorkItem[] = [];
+                    return evaluateAutomationProgram(
                       wait.program ?? '',
                       { ...context, now },
                       (input) =>
@@ -183,6 +189,9 @@ export async function createAutomationWorkspaceLegacy(options: {
                                 wait,
                                 input,
                                 now: readNow,
+                                onCoordinatorWorkItemsObserved: (items) => {
+                                  observedSnapshots.push(...items);
+                                },
                               })
                             ).pipe(Effect.uninterruptible)
                           )
@@ -208,8 +217,18 @@ export async function createAutomationWorkspaceLegacy(options: {
                               : Effect.fail(new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE'))
                           )
                         )
-                    )
-                  )
+                    ).pipe(
+                      Effect.map((result) => {
+                        const verdict = evaluateCoordinatorWakeGate({
+                          result,
+                          observedSnapshots,
+                        });
+                        return verdict.kind === 'suppress'
+                          ? { suppressed: true as const, retryDelayMs: verdict.retryDelayMs }
+                          : verdict.result;
+                      })
+                    );
+                  })
                 )
               )
             );
@@ -300,6 +319,39 @@ export async function createAutomationWorkspaceLegacy(options: {
     authority.setPendingWork(
       (sessionId, excludingId) => !closing && ledger.hasSessionWork(sessionId, excludingId)
     );
+    const invalidateCoordinatorWorkItemWatches = async (
+      childSessionId: SessionId,
+      knownMeta?: SessionMeta,
+      observedAt = Date.now()
+    ) => {
+      const watchers = ledger.wantsReadSessions(COORDINATOR_WORK_ITEMS_RESOURCE);
+      if (watchers.size === 0) return;
+      const record = knownMeta
+        ? undefined
+        : await lody.documentManager.repo
+            .getDocMeta(getSessionRoomId(childSessionId))
+            .catch(() => undefined);
+      const meta = knownMeta ?? (record?.meta as SessionMeta | undefined);
+      if (!meta) return;
+      const wakeAt = observedAt + COORDINATOR_WAKE_DEBOUNCE_MS;
+      if (meta.openedBySessionId && watchers.has(meta.openedBySessionId)) {
+        ledger.invalidateReads(COORDINATOR_WORK_ITEMS_RESOURCE, meta.openedBySessionId, wakeAt);
+      }
+      const explicitWid = meta.workItemId?.trim();
+      if (explicitWid) {
+        for (const coordinatorId of watchers) {
+          if (coordinatorId === meta.openedBySessionId) continue;
+          const doc = await lody.documentManager
+            .getOrCreateSessionDoc(coordinatorId as SessionId)
+            .catch(() => undefined);
+          const state = await doc?.getDocState().catch(() => undefined);
+          if (state?.workItems && explicitWid in state.workItems) {
+            ledger.invalidateReads(COORDINATOR_WORK_ITEMS_RESOURCE, coordinatorId, wakeAt);
+          }
+        }
+      }
+    };
+
     authority.setObservations({
       stage: (fact) => {
         if (!closing) ledger.stageTurn(fact);
@@ -307,6 +359,7 @@ export async function createAutomationWorkspaceLegacy(options: {
       turn: (fact) =>
         guardedCall(undefined, async () => {
           ledger.stageTurn(fact);
+          await invalidateCoordinatorWorkItemWatches(fact.sessionId, undefined, fact.observedAt);
           await runtime.runPromise(service.wake);
         }),
       capacity: (binding, snapshot, source) =>
@@ -394,11 +447,13 @@ export async function createAutomationWorkspaceLegacy(options: {
       recordWorkflowObservations: ((meta, repository, headSha, runs, gap, observedAt) =>
         guardedCall(undefined, async () => {
           observeWorkflows(ledger, meta, repository, headSha, runs, gap, observedAt);
+          await invalidateCoordinatorWorkItemWatches(meta.id, meta, observedAt);
           await runtime.runPromise(service.wake);
         })) satisfies NonNullable<PrPollerWorkspaceHandle['recordWorkflowObservations']>,
       recordObservations: ((meta, repoFullName, observations, observedAt) =>
         guardedCall(undefined, async () => {
           observePullRequests(ledger, meta, repoFullName, observations, observedAt);
+          await invalidateCoordinatorWorkItemWatches(meta.id, meta, observedAt);
           await runtime.runPromise(service.wake);
         })) satisfies NonNullable<PrPollerWorkspaceHandle['recordObservations']>,
       publish: (event: AutomationEvent) =>

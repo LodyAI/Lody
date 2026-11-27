@@ -84,6 +84,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   machineDiskStatus: 'machineDiskStatus',
   managedDaemonUpdates: 'managedDaemonUpdates',
   sessionInputWithdraw: 'sessionInputWithdraw',
+  coordinatorSessions: 'coordinatorSessions',
   localProjectFileSearch: 'localProjectFileSearch',
   localProjectSkillsFingerprint: 'localProjectSkillsFingerprint',
 } as const;
@@ -164,6 +165,12 @@ export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
 /** `machine/bug-report` accepts an optional `clientLog` and merges it into the upload. */
 export const BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION = 1;
+/**
+ * Coordinator session protocol: v1 delivers the coordinator system prompt, v2 adds
+ * coordinator message/status MCP tools, and v3 adds structured bubble replies and thread roots.
+ */
+export const COORDINATOR_SESSIONS_MIN_PROTOCOL_VERSION = 2;
+export const COORDINATOR_SESSIONS_PROTOCOL_VERSION = 3;
 /**
  * `local-project/search-files` exists. An older daemon's strict request schema
  * drops the unknown type without replying, so a caller must check before sending.
@@ -326,11 +333,37 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog]: BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.coordinatorSessions]: COORDINATOR_SESSIONS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectFileSearch]:
     LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectSkillsFingerprint]:
     LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION,
 };
+
+/**
+ * Whether the target daemon honors `SessionMeta.coordinator`. An older daemon
+ * ignores the marker and would run the conversation without its system prompt,
+ * so creators must not write it there.
+ */
+export function machineSupportsCoordinatorSessions(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.coordinatorSessions,
+    COORDINATOR_SESSIONS_MIN_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsCoordinatorThreads(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.coordinatorSessions,
+    COORDINATOR_SESSIONS_PROTOCOL_VERSION
+  );
+}
 
 /**
  * Fits a local-project control request to what the target daemon understands:

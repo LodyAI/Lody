@@ -1,4 +1,5 @@
 import { encryptedGithubTokenPort } from './e2ee/runtime-cloud-port';
+import { CoordinatorTriggerService } from '@/automations/connectors/service';
 import path from 'node:path';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { LodyPresenceStateMap, ManagedDaemonUpgradeOptions } from '@lody/shared';
@@ -166,6 +167,7 @@ type WorkspaceRuntimeState = {
   prPollerWorkspace: PrPollerWorkspaceHandle | null;
   schedules: ScheduleWorkspaceHandle;
   automations?: AutomationWorkspaceHandle;
+  coordinatorTriggers?: CoordinatorTriggerService;
   automationsStart?: Promise<AutomationWorkspaceHandle>;
   automationsRetryAt?: number;
   localProjectReconciliation?: { stop: AbortController; done: Promise<void> };
@@ -1202,6 +1204,7 @@ export class LodyFleet {
       let accessLost = false;
       let stopSchedules: (() => Promise<void>) | undefined;
       let stopAutomations: (() => Promise<void>) | undefined;
+      let stopCoordinatorTriggers: (() => void) | undefined;
       let partialPoller: PrPollerWorkspaceHandle | undefined;
       const workspaceStartAt = Date.now();
       try {
@@ -1433,12 +1436,35 @@ export class LodyFleet {
               return undefined;
             });
         stopAutomations = automations?.dispose;
+        let coordinatorTriggers: CoordinatorTriggerService | undefined;
+        try {
+          coordinatorTriggers = new CoordinatorTriggerService({
+            workspaceId: workspace.id as WorkspaceId,
+            machineId: this.machineId,
+            userId: this.userId,
+            manager: startedLody.documentManager,
+            logger: workspaceLogger,
+            resolveGitHubCredential: async (repoFullName) =>
+              (await prPollerWorkspace?.resolveCredential(repoFullName)) ?? null,
+            invalidateGitHubCredential: (repoFullName, credential) => {
+              prPollerWorkspace?.invalidateCredential(repoFullName, credential);
+            },
+          });
+          startedLody.setCoordinatorTriggers(coordinatorTriggers);
+          coordinatorTriggers.start();
+          stopCoordinatorTriggers = () => coordinatorTriggers?.dispose();
+        } catch (triggerInitErr) {
+          workspaceLogger.warn(
+            `Coordinator triggers failed to initialize: ${formatErrorMessage(triggerInitErr)}`
+          );
+        }
         const runtime: WorkspaceRuntimeState = {
           workspace,
           lody: startedLody,
           prPollerWorkspace,
           schedules,
           automations,
+          coordinatorTriggers,
           automationsRetryAt:
             !automationsSupported || automations ? undefined : Date.now() + 60_000,
         };
@@ -1472,6 +1498,7 @@ export class LodyFleet {
           const retained = lody;
           const owner = workspaceCleanupOwnerLegacy([
             async () => {
+              stopCoordinatorTriggers?.();
               await stopAutomations?.();
             },
             async () => {
@@ -1636,6 +1663,8 @@ export class LodyFleet {
     this.cleanupOwners.set(state.workspace.id, state);
     state.cleanupOwner ??= workspaceCleanupOwnerLegacy([
       async () => {
+        state.lody.setCoordinatorTriggers(undefined);
+        state.coordinatorTriggers?.dispose();
         await state.automationsStart?.catch(() => undefined);
         await state.automations?.dispose();
       },
@@ -2036,6 +2065,59 @@ export class LodyFleet {
     const runtime = this.runtimes.get(workspaceId);
     if (!runtime) {
       throw new Error(`workspace_runtime_unavailable:${workspaceId}`);
+    }
+
+    if (message.type === 'session/coordinator-diagnostics') {
+      const storeDiag = runtime.lody.readCoordinatorStoreDiagnostics(message.sessionId);
+      const ledger = runtime.automations?.ledger;
+      const rawWaits = ledger ? ledger.waits(undefined, message.sessionId, 24) : [];
+      const waits = rawWaits.map((wait) => {
+        const receipt = wait.invocationId && ledger ? ledger.receipt(wait.invocationId) : undefined;
+        return {
+          id: wait.id,
+          ...(wait.reason ? { reason: wait.reason } : {}),
+          ...(wait.program ? { program: wait.program.slice(0, 4096) } : {}),
+          state: wait.state,
+          checks: wait.checks,
+          consecutiveErrors: wait.consecutiveErrors,
+          ...(wait.lastError ? { lastError: wait.lastError } : {}),
+          nextCheckAt: wait.nextCheckAt,
+          ...(wait.expiresAt !== undefined ? { expiresAt: wait.expiresAt } : {}),
+          ...(wait.reads ? { reads: wait.reads } : {}),
+          ...(receipt
+            ? {
+                continuation: {
+                  state: receipt.state,
+                  ...(receipt.reason ? { reason: receipt.reason } : {}),
+                },
+              }
+            : {}),
+        };
+      });
+      const response: LocalSessionControlResponse = {
+        type: 'session/coordinator-diagnostics_response',
+        sessionId: message.sessionId,
+        observedAt: Date.now(),
+        cursors: storeDiag.cursors,
+        ...(storeDiag.lastTurnDelta ? { lastTurnDelta: storeDiag.lastTurnDelta } : {}),
+        operations: storeDiag.operations,
+        waits,
+      };
+      options.onResponse?.(response);
+      return [response];
+    }
+
+    if (message.type === 'session/coordinator-triggers') {
+      const response: LocalSessionControlResponse = runtime.coordinatorTriggers
+        ? await runtime.coordinatorTriggers.handleAction(message.sessionId, message.action)
+        : {
+            type: 'session/coordinator-triggers_response',
+            sessionId: message.sessionId,
+            ok: false,
+            error: 'Coordinator trigger service unavailable',
+          };
+      options.onResponse?.(response);
+      return [response];
     }
 
     return await runtime.lody.dispatchLocalControl(message, options);

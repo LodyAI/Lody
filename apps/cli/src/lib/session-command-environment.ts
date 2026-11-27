@@ -28,6 +28,9 @@ export interface SessionCommandHost {
   }): Promise<SessionWithdrawInputResponse>;
   /** The running turn an Agent chat may steer; undefined unless it runs on this daemon. */
   readActiveTurnId(sessionId: SessionId): string | undefined;
+  /** The open assistant history entry owned by this daemon's active turn, if any. */
+  readActiveAssistantTurnId?(sessionId: SessionId): string | undefined;
+  coordinatorTriggers?: import('@/automations/connectors/service').CoordinatorTriggerService;
   steerSession(input: {
     sessionId: SessionId;
     expectedTurnId: string;
@@ -99,6 +102,8 @@ export interface DaemonWorkspace {
   machineId: MachineId;
   manager: LoroDocumentManager;
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
+  readActiveAssistantTurnId?(sessionId: SessionId): string | undefined;
+  coordinatorTriggers?: import('@/automations/connectors/service').CoordinatorTriggerService;
   readAccess?(): DaemonWorkspaceAccess;
   host?: DaemonLocalSessionHost;
   wakeOperations?(): void;
@@ -281,6 +286,15 @@ export const getDaemonWorkspace = (): DaemonWorkspace | undefined => {
     manager: environment.manager,
     readInvocation: (sessionId) => environment.host.readInvocation(sessionId),
     host: environment.host,
+    ...(environment.host.readActiveAssistantTurnId
+      ? {
+          readActiveAssistantTurnId: (sessionId: SessionId) =>
+            environment.host.readActiveAssistantTurnId?.(sessionId),
+        }
+      : {}),
+    ...(environment.host.coordinatorTriggers
+      ? { coordinatorTriggers: environment.host.coordinatorTriggers }
+      : {}),
   };
 };
 

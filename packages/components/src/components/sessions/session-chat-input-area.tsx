@@ -102,6 +102,7 @@ import type {
   AgentRole,
   AgentRoleId,
   CommentReferencePayload,
+  CoordinatorReplyRef,
   SessionMeta,
   SessionId,
   SessionInputBlock,
@@ -121,6 +122,7 @@ import {
 } from '@/components/chat/visual-annotation-reference-state';
 import { SESSION_IMAGE_MAX_COUNT } from '@lody/shared';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import { CoordinatorComposerReplyBanner } from '@/components/project-mode/coordinator-reply-ui';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type {
   AcpConfigOptionSelector,
@@ -356,12 +358,8 @@ const getSessionPastedTextDrafts = (sessionId: SessionId): PastedTextDraft[] => 
 ];
 
 /**
- * Mention ranges for the session's draft, kept beside its text.
- *
- * Same lifetime as the other draft caches — in memory, so it covers leaving the
- * session and coming back, which is where the ranges were being lost. It does
- * not survive a restart, but neither does the draft text here, so there is
- * nothing to restore them onto.
+ * Mention ranges for the session's draft, kept beside its text in memory and
+ * hydrated alongside the persisted `localStorage` conversation draft.
  */
 const sessionMentionRangesCache = new Map<SessionId, PersistedMentionRange[]>();
 
@@ -413,6 +411,14 @@ const revokeImagePreviewUrls = (
     image.abort?.abort();
     URL.revokeObjectURL(image.previewUrl);
   }
+};
+
+/** Evict only in-memory composer draft caches in tests to simulate a cold reload. */
+export const evictSessionChatInputMemoryDraftsForTest = (sessionId: SessionId): void => {
+  sessionQuoteDraftKeys.delete(sessionId);
+  sessionDraftsCache.delete(sessionId);
+  sessionPastedTextDraftsCache.delete(sessionId);
+  sessionMentionRangesCache.delete(sessionId);
 };
 
 export const clearSessionChatInputDrafts = (sessionId: SessionId): void => {
@@ -571,6 +577,9 @@ export interface SessionChatInputAreaProps {
   onVisualAnnotationReferencesSubmitted?: (
     references: VisualAnnotationReferencePayload[]
   ) => void | Promise<void>;
+  coordinatorReplyDraft?: CoordinatorReplyRef | null;
+  onClearCoordinatorReplyDraft?: () => void;
+  onOpenCoordinatorReplyThread?: (threadRootId: string, previewHint?: string) => void;
 }
 
 export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
@@ -586,6 +595,7 @@ export type SessionSendMessageOptions = {
   mcpServerIds?: readonly McpServerId[];
   /** Local UI intent; never part of the durable input config. */
   skipMcpOnce?: boolean;
+  replyTo?: CoordinatorReplyRef;
 };
 
 export type SessionChatInputAreaHandle = {
@@ -673,12 +683,17 @@ export const SessionChatInputArea = memo(
       onCommentReferencesChange,
       onVisualAnnotationReferencesChange,
       onVisualAnnotationReferencesSubmitted,
+      coordinatorReplyDraft = null,
+      onClearCoordinatorReplyDraft,
+      onOpenCoordinatorReplyThread,
     }: SessionChatInputAreaProps,
     ref: React.ForwardedRef<SessionChatInputAreaHandle>
   ) {
     const { t, i18n } = useTranslation();
     const [restoring, setRestoring] = useState(false);
     const restoringRef = useRef(false);
+    const coordinatorReplyDraftRef = useRef(coordinatorReplyDraft);
+    coordinatorReplyDraftRef.current = coordinatorReplyDraft;
     const handleRestore = useCallback(async () => {
       if (!onRestoreSession || restoringRef.current) return;
       restoringRef.current = true;
@@ -706,22 +721,22 @@ export const SessionChatInputArea = memo(
     );
     const numberFormatter = useMemo(() => new Intl.NumberFormat(intlLocale), [intlLocale]);
     const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
+    const storageDraftKey = workspaceId ? conversationQuoteDraftKey(workspaceId, session.id) : null;
     useMemo(() => {
-      if (!workspaceId) return;
-      const key = conversationQuoteDraftKey(workspaceId, session.id);
-      sessionQuoteDraftKeys.set(session.id, key);
+      if (!storageDraftKey) return;
+      sessionQuoteDraftKeys.set(session.id, storageDraftKey);
       if (sessionDraftsCache.has(session.id)) return;
       try {
-        const saved = loadConversationQuoteDraft(localStorage, key);
+        const saved = loadConversationQuoteDraft(localStorage, storageDraftKey);
         if (saved) {
           sessionDraftsCache.set(session.id, saved.text);
           sessionPastedTextDraftsCache.set(session.id, saved.drafts);
           setSessionMentionRanges(session.id, saved.mentions ?? []);
         }
       } catch {
-        /* Storage can be unavailable; writing below surfaces a warning. */
+        /** Storage can be unavailable; writing below surfaces a warning. */
       }
-    }, [session.id, workspaceId]);
+    }, [session.id, storageDraftKey]);
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
     // Scoped by this composer's session id; the hook resolves its machine and
@@ -1029,10 +1044,11 @@ export const SessionChatInputArea = memo(
         });
     }, [session.id, submissionPending]);
 
-    // Load new session's draft when session changes (during-render state adjustment)
     const [prevSessionId, setPrevSessionId] = useState(session.id);
+    const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(storageDraftKey);
     if (prevSessionId !== session.id) {
       setPrevSessionId(session.id);
+      setHydratedDraftKey(storageDraftKey);
       const cached = sessionDraftsCache.get(session.id) ?? initialInputText ?? '';
       setUserInputState(cached);
       setPendingImages(getSessionImageDrafts(session.id));
@@ -1040,13 +1056,23 @@ export const SessionChatInputArea = memo(
       setPastedTextDrafts(getSessionPastedTextDrafts(session.id));
       setPersistedMentionRanges(getSessionMentionRanges(session.id));
       setDraftMentionRevision(0);
-      // Cleared with the rest of the draft: the incoming session's own ranges
-      // arrive from its hydrators, and until they do there must be none.
       mentionRangesRef.current = [];
       commentReferencesRef.current = [];
       setCommentReferences([]);
       visualAnnotationReferencesRef.current = [];
       setVisualAnnotationReferences([]);
+    } else if (storageDraftKey && hydratedDraftKey !== storageDraftKey) {
+      setHydratedDraftKey(storageDraftKey);
+      if (
+        (userInput === '' || userInput === (initialInputText ?? '')) &&
+        pastedTextDrafts.length === 0 &&
+        sessionDraftsCache.has(session.id)
+      ) {
+        setUserInputState(sessionDraftsCache.get(session.id) ?? '');
+        setPastedTextDrafts(getSessionPastedTextDrafts(session.id));
+        setPersistedMentionRanges(getSessionMentionRanges(session.id));
+        setDraftMentionRevision((revision) => revision + 1);
+      }
     }
 
     useEffect(() => {
@@ -2072,6 +2098,7 @@ export const SessionChatInputArea = memo(
           // Use the committed callback and Role after waiting: routing and run
           // config must come from the same current composer state.
           const role = agentRoleTurnSelectionRef.current;
+          const submittedReplyTo = coordinatorReplyDraftRef.current ?? undefined;
           accepted = scheduled.at
             ? await scheduledSaveRef.current({
                 inputBlocks,
@@ -2099,8 +2126,16 @@ export const SessionChatInputArea = memo(
                 ...options,
                 attachments,
                 ...(mcpServerIds ? { mcpServerIds } : {}),
+                ...(submittedReplyTo ? { replyTo: submittedReplyTo } : {}),
               });
           if (accepted) {
+            if (
+              !scheduled.at &&
+              submittedReplyTo &&
+              coordinatorReplyDraftRef.current === submittedReplyTo
+            ) {
+              onClearCoordinatorReplyDraft?.();
+            }
             // A sent message answers the prediction shown before it; the next turn
             // publishes its own suggestion.
             if (!scheduled.at)
@@ -2196,6 +2231,7 @@ export const SessionChatInputArea = memo(
         isExternalHistoryRefreshing,
         isMachineRemoved,
         isVisible,
+        onClearCoordinatorReplyDraft,
         onVisualAnnotationReferencesSubmitted,
         pendingFiles,
         pendingImages,
@@ -2710,6 +2746,15 @@ export const SessionChatInputArea = memo(
         preservePromptFocus={usesMobileKeyboardAction && submissionPending && !isArchived}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}
+        replyBanner={
+          !submissionPending && coordinatorReplyDraft ? (
+            <CoordinatorComposerReplyBanner
+              reply={coordinatorReplyDraft}
+              onClear={isArchived ? undefined : onClearCoordinatorReplyDraft}
+              onOpenThread={onOpenCoordinatorReplyThread}
+            />
+          ) : null
+        }
         commentReferenceItems={submissionPending ? [] : commentReferences}
         onCommentReferenceRemove={
           submissionPending || isArchived ? undefined : removeCommentReference

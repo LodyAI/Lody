@@ -1,6 +1,6 @@
 import { readSessionHistoryMetadata } from '@lody/shared/session-data';
 import { toShared } from '@/platform/process-options';
-import { resolveSessionConversationConfig } from '@lody/shared';
+import { readSessionCoordinatorKind, resolveSessionConversationConfig } from '@lody/shared';
 import {
   getServerNow,
   resolveSessionAcpTargetId,
@@ -755,6 +755,7 @@ export class SessionForkService {
         repoFullName: targetRepoFullName,
         baseBranch: source.branchName ?? source.baseBranch,
         isWorktree: true,
+        ...(source.coordinator ? { coordinator: source.coordinator } : {}),
       };
       const branch = source.branchName ?? source.baseBranch;
       const marker: SessionForkOperationMarker = {
@@ -872,6 +873,7 @@ export class SessionForkService {
       isWorktree: source.isWorktree,
       parentSessionId,
       ...(spec.targetPlacement ? { childSessionPlacement: spec.targetPlacement } : {}),
+      ...(source.coordinator ? { coordinator: source.coordinator } : {}),
     };
 
     let targetPrepared = false;
@@ -892,6 +894,7 @@ export class SessionForkService {
             agentConfigId: source.agentConfigId,
             agentCliType: source.cliType,
             agentType: source.agentType,
+            coordinator: readSessionCoordinatorKind(source),
             memory: resolveSessionConversationConfig(historyResult.history).memory,
             mcpServerIds: resolveSessionMcpSelection(historyResult.history),
             customAcp: agentConfig.customAcp,
@@ -1034,6 +1037,7 @@ export class SessionForkService {
       agentConfigId: source.agentConfigId,
       agentCliType: source.cliType,
       agentType: source.agentType,
+      coordinator: readSessionCoordinatorKind(source),
       memory: resolveSessionConversationConfig(historyResult.history).memory,
       mcpServerIds: resolveSessionMcpSelection(historyResult.history),
       customAcp: agentConfig.customAcp,

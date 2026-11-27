@@ -866,7 +866,7 @@ export function buildGroups(
   chatsLabel: string = 'Chats',
   projectGroups: readonly SessionListProjectGroupState[] = []
 ): SessionRowGroup[] {
-  const sessionsByRepo = new Map<string, SessionListRow[]>();
+  const sessionsByRepoLower = new Map<string, SessionListRow[]>();
   const onlyChats: SessionListRow[] = [];
   const sessionsByProjectGroup = new Map<string, SessionListRow[]>();
   const removedProjectGroupNames = new Map<string, string>();
@@ -885,16 +885,14 @@ export function buildGroups(
       onlyChats.push(session);
       continue;
     }
-    const list = sessionsByRepo.get(repoFullName);
+    const lower = repoFullName.toLowerCase();
+    const list = sessionsByRepoLower.get(lower);
     if (list) list.push(session);
-    else sessionsByRepo.set(repoFullName, [session]);
+    else sessionsByRepoLower.set(lower, [session]);
   }
 
   const ordered: SessionRowGroup[] = [];
 
-  // Defined groups come first and stay listed while empty: the header is where
-  // a conversation in the group starts. A deleted group keeps its
-  // conversations under the name their snapshot recorded.
   for (const group of projectGroups) {
     removedProjectGroupNames.delete(group.projectId);
     ordered.push({
@@ -935,36 +933,45 @@ export function buildGroups(
     });
   }
 
-  const seen = new Set<string>();
+  const seenLower = new Set<string>();
   for (const repo of repos) {
     const repoName = repo.repoFullName.trim();
     if (!repoName) continue;
-    seen.add(repoName);
-    const repoSessions = sessionsByRepo.get(repoName);
+    const lower = repoName.toLowerCase();
+    if (seenLower.has(lower)) continue;
+    seenLower.add(lower);
+    const repoSessions = sessionsByRepoLower.get(lower);
     if (!repoSessions || repoSessions.length === 0) continue;
+    const sortedSessions = sortSessionRowsByLatestMessage(repoSessions);
+    const displayRepoName =
+      normalizeRepoFullName(sortedSessions[0]?.repoFullName) || repoName;
     ordered.push({
-      key: repoName,
-      label: repoName,
+      key: displayRepoName,
+      label: displayRepoName,
       kind: 'repo',
-      repoFullName: repoName,
+      repoFullName: displayRepoName,
       collapsed: repo.collapsed,
-      sessions: sortSessionRowsByLatestMessage(repoSessions),
+      sessions: sortedSessions,
     });
   }
 
-  const remainingRepos = [...sessionsByRepo.keys()]
-    .filter((repoFullName) => !seen.has(repoFullName))
-    .sort((a, b) => a.localeCompare(b));
-  for (const repoFullName of remainingRepos) {
-    const repoSessions = sessionsByRepo.get(repoFullName);
-    if (!repoSessions || repoSessions.length === 0) continue;
+  const remainingEntries = [...sessionsByRepoLower.entries()]
+    .filter(([lower]) => !seenLower.has(lower))
+    .map(([, repoSessions]) => {
+      const sortedSessions = sortSessionRowsByLatestMessage(repoSessions);
+      const displayRepoName = normalizeRepoFullName(sortedSessions[0]?.repoFullName) ?? '';
+      return { displayRepoName, sortedSessions };
+    })
+    .filter((entry) => entry.displayRepoName.length > 0)
+    .sort((a, b) => a.displayRepoName.localeCompare(b.displayRepoName));
+  for (const { displayRepoName, sortedSessions } of remainingEntries) {
     ordered.push({
-      key: repoFullName,
-      label: repoFullName,
+      key: displayRepoName,
+      label: displayRepoName,
       kind: 'repo',
-      repoFullName,
+      repoFullName: displayRepoName,
       collapsed: false,
-      sessions: sortSessionRowsByLatestMessage(repoSessions),
+      sessions: sortedSessions,
     });
   }
 
@@ -2779,7 +2786,7 @@ export const SessionList = memo(function SessionList({
     for (const repo of repos) {
       const repoFullName = repo.repoFullName.trim();
       if (!repoFullName) continue;
-      map.set(repoFullName, { repoFullName, collapsed: repo.collapsed });
+      map.set(repoFullName.toLowerCase(), { repoFullName, collapsed: repo.collapsed });
     }
     return map;
   }, [repos]);
@@ -2855,8 +2862,8 @@ export const SessionList = memo(function SessionList({
 
     const nextRepoFullNames = arrayMove(repoIds, fromIndex, toIndex);
     const nextRepos: SessionListRepoState[] = nextRepoFullNames.map((repoFullName) => {
-      const existing = repoStateByFullName.get(repoFullName);
-      return existing ?? { repoFullName, collapsed: false };
+      const existing = repoStateByFullName.get(repoFullName.toLowerCase());
+      return existing ? { repoFullName, collapsed: existing.collapsed } : { repoFullName, collapsed: false };
     });
 
     onMoveRepo?.({ activeRepoFullName, overRepoFullName, fromIndex, toIndex, nextRepos });

@@ -664,6 +664,16 @@ export class Lody {
     return responses as LocalSessionControlResponse[];
   }
 
+  setCoordinatorTriggers(
+    service: import('@/automations/connectors/service').CoordinatorTriggerService | undefined
+  ): void {
+    this.runtime.setCoordinatorTriggers(service);
+  }
+
+  readCoordinatorStoreDiagnostics(sessionId: SessionId) {
+    return this.runtime.readCoordinatorStoreDiagnostics(sessionId);
+  }
+
   async dispatchLocalMachineRpc(
     message: LocalMachineRpcRequestValidated,
     signal?: AbortSignal

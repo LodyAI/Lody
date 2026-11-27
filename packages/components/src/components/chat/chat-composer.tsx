@@ -771,6 +771,8 @@ export interface ChatComposerProps {
   visualAnnotationReferenceItems?: VisualAnnotationReferenceChipItem[];
   /** Remove a visual annotation reference by localId */
   onVisualAnnotationReferenceRemove?: (localId: string) => void;
+  /** Optional reply banner rendered at the top inside the composer container. */
+  replyBanner?: ReactNode;
   /** Selector node displayed above the textarea (e.g., repo, agent) */
   topSelector?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
@@ -879,6 +881,7 @@ export function ChatComposer({
   revealCommentReferenceRemoveOnClick = false,
   visualAnnotationReferenceItems = [],
   onVisualAnnotationReferenceRemove,
+  replyBanner,
   topSelector,
   footerSelector,
   bottomBar,
@@ -1449,6 +1452,7 @@ export function ChatComposer({
     .join(' ');
 
   const composerHasAttachments =
+    Boolean(replyBanner) ||
     imageItems.length > 0 ||
     fileItems.length > 0 ||
     commentReferenceItems.length > 0 ||
@@ -1552,6 +1556,9 @@ export function ChatComposer({
                   : undefined
               }
             >
+              {replyBanner ? (
+                <div {...stylex.props(isSheet && styles.sheetStripInset)}>{replyBanner}</div>
+              ) : null}
               {commentReferenceItems.length > 0 ? (
                 <div {...stylex.props(styles.referenceStrip, isSheet && styles.sheetStripInset)}>
                   {commentReferenceItems.map((item) => (

@@ -13,6 +13,7 @@ import { LoroRepo } from 'loro-repo';
 import { makePromiseRepoNetwork } from '@/lib/loro/promise-repo-network.test-support';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  COORDINATOR_CARD_DISMISSED_ACTION_ID,
   getSessionRoomId,
   getMachineFlockDocId,
   getMachineRoomId,
@@ -47,6 +48,7 @@ import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
 import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
 import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
 import { LodyOperationStore, getLodyOperationStorePath } from '@/orchestration/operation-store';
+import { resolveCoordinatorPromptReplyHeader } from '@/lib/coordinator-reply-context';
 import { createSessionBackend } from '@/session/session-backend';
 import { LocalControlHandler } from '@/lib/local-control-handler';
 import { LoroDocumentManager, SessionDocument, TRANSIENT_DOC_ROOM_RETAIN_MS } from '@/lib/loro/doc';
@@ -2660,5 +2662,738 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         () => executeDaemonSessionTool(context(), 'lody_operation', { action: 'list' })
       )
     ).rejects.toThrow('Session tool requires an active Turn');
+  });
+
+  it('publishes coordinator message bubbles and live status only inside an active coordinator turn', async () => {
+    const ordinaryServer = buildLodyMcpServer();
+    const coordinatorServer = buildLodyMcpServer({ coordinator: true });
+    const ordinaryClient = new Client({ name: 'ordinary-mcp-test', version: '1' });
+    const coordinatorClient = new Client({ name: 'coordinator-mcp-test', version: '1' });
+    const [ordinaryClientTransport, ordinaryServerTransport] = InMemoryTransport.createLinkedPair();
+    const [coordClientTransport, coordServerTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await ordinaryServer.connect(ordinaryServerTransport);
+      await ordinaryClient.connect(ordinaryClientTransport);
+      await coordinatorServer.connect(coordServerTransport);
+      await coordinatorClient.connect(coordClientTransport);
+
+      const ordinaryTools = (await ordinaryClient.listTools()).tools.map((tool) => tool.name);
+      expect(ordinaryTools).not.toContain('lody_coordinator_send_message');
+      expect(ordinaryTools).not.toContain('lody_coordinator_set_status');
+      expect(ordinaryTools).not.toContain('lody_coordinator_work_item');
+
+      const coordinatorTools = (await coordinatorClient.listTools()).tools;
+      const sendTool = coordinatorTools.find(
+        (tool) => tool.name === 'lody_coordinator_send_message'
+      );
+      const statusTool = coordinatorTools.find(
+        (tool) => tool.name === 'lody_coordinator_set_status'
+      );
+      const workItemTool = coordinatorTools.find(
+        (tool) => tool.name === 'lody_coordinator_work_item'
+      );
+      expect(sendTool?.description).not.toContain('Before execution, read lody_help');
+      expect(statusTool?.description).not.toContain('Before execution, read lody_help');
+      expect(workItemTool?.description).not.toContain('Before execution, read lody_help');
+    } finally {
+      await ordinaryClient.close();
+      await coordinatorClient.close();
+      await ordinaryServer.close();
+      await coordinatorServer.close();
+    }
+
+    const nonCoordinatorCall = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: 'Should not publish',
+      })
+    );
+    expect(nonCoordinatorCall.isError).toBe(true);
+    expect(JSON.stringify(nonCoordinatorCall.content)).toContain(
+      'available only inside a coordinator conversation'
+    );
+
+    await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+      coordinator: { version: 1 },
+    });
+    const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(sessionDoc);
+
+    const withoutTurn = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: 'Before assistant opens',
+      })
+    );
+    expect(withoutTurn.isError).toBe(true);
+    expect(JSON.stringify(withoutTurn.content)).toContain('No open assistant turn');
+
+    await backend.openAssistantTurn({
+      turnId: 'coord-turn-1',
+      userTurnId: 'synthetic-turn',
+      timestamp: new Date(1_700_000_000_000).toISOString(),
+    });
+
+    const coordinatorDaemon: DaemonWorkspace = {
+      ...daemon,
+      readActiveAssistantTurnId: () => 'coord-turn-1',
+    };
+
+    const status1 = await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_set_status', {
+        status: '正在查找合适的 Role…',
+      })
+    );
+    expect(status1.isError).not.toBe(true);
+
+    const bubble1 = await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: '我先查看一下可用的 Role，马上把任务派出去。',
+      })
+    );
+    expect(bubble1.isError).not.toBe(true);
+
+    const status2 = await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_set_status', {
+        status: '正在创建子会话…',
+      })
+    );
+    expect(status2.isError).not.toBe(true);
+
+    const bubble2 = await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: '已交给 **天才程序员** 处理。',
+      })
+    );
+    expect(bubble2.isError).not.toBe(true);
+
+    const storedTurn = await backend.readTurn('coord-turn-1');
+    expect(storedTurn.state).toBe('ready');
+    if (storedTurn.state !== 'ready') throw new Error('Expected ready turn');
+    expect(storedTurn.turn.items).toEqual([
+      {
+        type: 'coordinator_message',
+        id: expect.any(String),
+        body: '我先查看一下可用的 Role，马上把任务派出去。',
+        createdAt: expect.any(Number),
+      },
+      {
+        type: 'coordinator_status',
+        status: '正在创建子会话…',
+        updatedAt: expect.any(Number),
+      },
+      {
+        type: 'coordinator_message',
+        id: expect.any(String),
+        body: '已交给 **天才程序员** 处理。',
+        createdAt: expect.any(Number),
+      },
+    ]);
+
+    await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_set_status', { status: '' })
+    );
+    const afterClear = await backend.readTurn('coord-turn-1');
+    expect(afterClear.state === 'ready' ? afterClear.turn.items : []).toHaveLength(2);
+
+    const childSessionId = 'child-media-session' as SessionId;
+    const childDoc = await manager.getOrCreateSessionDoc(childSessionId);
+    const childBackend = await createSessionBackend(childDoc);
+    const childImage = {
+      imageId: 'img-child-9',
+      mimeType: 'image/png',
+      fileName: 'ui.png',
+      sizeBytes: 4096,
+      width: 640,
+      height: 480,
+      transport: 'r2' as const,
+    };
+    const childFile = {
+      type: 'file' as const,
+      fileId: 'file-child-9',
+      fileName: 'walkthrough.mp4',
+      mimeType: 'video/mp4',
+      sizeBytes: 8192,
+      sha256: 'b'.repeat(64),
+      textPreview: false,
+      transport: 'r2' as const,
+      uploadedAt: 1001,
+    };
+    await childBackend.appendHistoryTurn({
+      id: 'child-assistant-9',
+      role: 'assistant',
+      timestamp: '2026-11-20T00:00:00.000Z',
+      items: [{ type: 'image_group', images: [childImage] }, childFile],
+      finished: true,
+    });
+    await backend.appendHistoryTurn({
+      id: 'coord-completion-9',
+      role: 'system',
+      timestamp: '2026-11-20T00:00:05.000Z',
+      items: [
+        {
+          type: 'operation_completion',
+          deliveryId: 'delivery-media-9',
+          operationId: 'op-media-9',
+          operationKind: 'session_create',
+          completion: {
+            type: 'result',
+            value: {
+              items: [
+                {
+                  status: 'succeeded',
+                  target: { sessionId: childSessionId, userTurnId: 'child-user-9' },
+                  assistantTurnId: 'child-assistant-9',
+                  output: {
+                    text: 'Done',
+                    attachments: [
+                      {
+                        kind: 'image',
+                        ref: 'image:img-child-9',
+                        fileName: 'ui.png',
+                        mimeType: 'image/png',
+                        sizeBytes: 4096,
+                        width: 640,
+                        height: 480,
+                      },
+                      {
+                        kind: 'file',
+                        ref: 'file:file-child-9',
+                        fileName: 'walkthrough.mp4',
+                        mimeType: 'video/mp4',
+                        sizeBytes: 8192,
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+
+    const bubbleWithAttachments = await runWithDaemonWorkspace(coordinatorDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: '子任务已完成，附上截图和录屏：',
+        attachments: ['image:img-child-9', 'file:file-child-9'],
+      })
+    );
+    expect(bubbleWithAttachments.isError, JSON.stringify(bubbleWithAttachments.content)).not.toBe(
+      true
+    );
+    const afterAttachments = await backend.readTurn('coord-turn-1');
+    expect(afterAttachments.state).toBe('ready');
+    if (afterAttachments.state !== 'ready') throw new Error('Expected ready turn');
+    expect(afterAttachments.turn.items?.at(-1)).toEqual({
+      type: 'coordinator_message',
+      id: expect.any(String),
+      body: '子任务已完成，附上截图和录屏：',
+      images: [{ ...childImage, storageSessionId: childSessionId }],
+      files: [{ ...childFile, storageSessionId: childSessionId }],
+      createdAt: expect.any(Number),
+    });
+
+    await backend.appendHistoryTurn({
+      id: 'assistant:user-open-turn',
+      userTurnId: 'user-open-turn',
+      role: 'assistant',
+      timestamp: '2026-11-20T00:01:00.000Z',
+      finished: true,
+      items: [
+        {
+          type: 'coordinator_message',
+          id: 'bubble-ask',
+          body: '需要你决定：[迁移任务](lody://session/child-e2ee-share) 的旧链接保留多久？',
+          linkedSessionIds: ['child-e2ee-share' as SessionId],
+        },
+        {
+          type: 'coordinator_message',
+          id: 'bubble-other',
+          body: '另一项[分页测试](lody://session/child-pagination)也在跑。',
+        },
+      ],
+    });
+
+    await backend.appendHistoryTurn({
+      id: 'user-reply-turn',
+      role: 'user',
+      timestamp: '2026-11-20T00:02:00.000Z',
+      threadRoots: 'bubble:assistant:user-open-turn:bubble-ask',
+      inputConfig: {
+        prompt: '保留 7 天即可',
+        inputBlocks: [{ type: 'text', text: '保留 7 天即可' }],
+        cliType: 'builtin',
+        agentType: 'claude',
+        replyTo: {
+          target: {
+            kind: 'coordinator_bubble',
+            turnId: 'assistant:user-open-turn',
+            bubbleId: 'bubble-ask',
+          },
+          threadRootId: 'bubble:assistant:user-open-turn:bubble-ask',
+          author: 'coordinator',
+          previewText: '需要你决定：迁移任务 的旧链接保留多久？',
+        },
+      },
+      items: [{ type: 'text', text: '保留 7 天即可' }],
+    });
+
+    const replyHeader = await resolveCoordinatorPromptReplyHeader({
+      history: backend.history,
+      workspaceId,
+      userTurnId: 'user-reply-turn',
+    });
+    expect(replyHeader).toContain(
+      '<reply_context thread_id="bubble:assistant:user-open-turn:bubble-ask"'
+    );
+    expect(replyHeader).toContain('replied_author="coordinator"');
+    expect(replyHeader).toContain('related_sessions="lody://session/child-e2ee-share?workspace=');
+    expect(replyHeader).toContain('旧链接保留多久？');
+
+    await backend.openAssistantTurn({
+      turnId: 'assistant:user-reply-turn',
+      userTurnId: 'user-reply-turn',
+      timestamp: '2026-11-20T00:02:01.000Z',
+    });
+
+    const replyDaemon: DaemonWorkspace = {
+      ...daemon,
+      readActiveAssistantTurnId: () => 'assistant:user-reply-turn',
+    };
+
+    const inheritedBubble = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: '好，这就转告 [迁移任务](lody://session/child-e2ee-share) 按 7 天实现。',
+      })
+    );
+    expect(inheritedBubble.isError).not.toBe(true);
+
+    const explicitOtherThreadBubble = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        markdown: '顺便汇报：分页测试已经全绿了。',
+        threadId: 'bubble:assistant:user-open-turn:bubble-other',
+        actions: [
+          {
+            label: '让分页会话直接提 PR',
+            tone: 'primary',
+            intent: {
+              kind: 'session_dispatch',
+              sessionId: 'lody://session/child-pagination?workspace=ws',
+              prompt: '请提交分支并创建 PR',
+              mode: 'send',
+            },
+          },
+          {
+            id: 'custom-followup',
+            label: '再补一组压测',
+            intent: {
+              kind: 'coordinator_prompt',
+              prompt: '顺便派一个压测 Role 验证分页性能',
+              mode: 'send',
+            },
+          },
+        ],
+      })
+    );
+    expect(explicitOtherThreadBubble.isError).not.toBe(true);
+
+    const storedReplyTurn = await backend.readTurn('assistant:user-reply-turn');
+    expect(storedReplyTurn.state).toBe('ready');
+    if (storedReplyTurn.state !== 'ready') throw new Error('Expected ready reply turn');
+    expect(storedReplyTurn.turn.threadRoots).toBe(
+      'bubble:assistant:user-open-turn:bubble-ask\nbubble:assistant:user-open-turn:bubble-other'
+    );
+    expect(storedReplyTurn.turn.items).toEqual([
+      {
+        type: 'coordinator_message',
+        id: expect.any(String),
+        body: '好，这就转告 [迁移任务](lody://session/child-e2ee-share) 按 7 天实现。',
+        replyTo: {
+          target: { kind: 'user_turn', turnId: 'user-reply-turn' },
+          threadRootId: 'bubble:assistant:user-open-turn:bubble-ask',
+          author: 'user',
+          previewText: '保留 7 天即可',
+        },
+        linkedSessionIds: ['child-e2ee-share'],
+        createdAt: expect.any(Number),
+      },
+      {
+        type: 'coordinator_message',
+        id: expect.any(String),
+        body: '顺便汇报：分页测试已经全绿了。',
+        replyTo: {
+          target: {
+            kind: 'coordinator_bubble',
+            turnId: 'assistant:user-open-turn',
+            bubbleId: 'bubble-other',
+          },
+          threadRootId: 'bubble:assistant:user-open-turn:bubble-other',
+          author: 'coordinator',
+          previewText: '另一项分页测试也在跑。',
+        },
+        linkedSessionIds: ['child-pagination'],
+        actions: [
+          {
+            id: 'act-1',
+            label: '让分页会话直接提 PR',
+            tone: 'primary',
+            source: 'agent',
+            intent: {
+              kind: 'session_dispatch',
+              sessionId: 'child-pagination',
+              prompt: '请提交分支并创建 PR',
+              mode: 'send',
+            },
+          },
+          {
+            id: 'custom-followup',
+            label: '再补一组压测',
+            source: 'agent',
+            intent: {
+              kind: 'coordinator_prompt',
+              prompt: '顺便派一个压测 Role 验证分页性能',
+              mode: 'send',
+            },
+          },
+        ],
+        createdAt: expect.any(Number),
+      },
+    ]);
+    const standaloneCardResult = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        card: {
+          kind: 'next_step',
+          title: '排查已完成，下一步如何推进？',
+          summary: '根因已由 [审核员](lody://session/child-audit?workspace=ws) 独立复现确认。',
+          actions: [
+            {
+              label: '让天才程序员修复并创建 PR',
+              description: '继续复用排查会话完成修复、回归测试与 PR 创建。',
+              tone: 'primary',
+              intent: {
+                kind: 'session_dispatch',
+                sessionId: 'lody://session/child-ios-fix?workspace=ws',
+                prompt: '请修复该配置同步缺陷并创建 PR',
+                mode: 'send',
+              },
+            },
+          ],
+        },
+      })
+    );
+    expect(standaloneCardResult.isError).not.toBe(true);
+    const firstBlock = standaloneCardResult.content[0] as { type: string; text: string };
+    expect(JSON.parse(firstBlock.text)).toMatchObject({
+      ok: true,
+      hasCard: true,
+      actionCount: 1,
+    });
+
+    const storedAfterCard = await backend.readTurn('assistant:user-reply-turn');
+    expect(storedAfterCard.state).toBe('ready');
+    if (storedAfterCard.state !== 'ready') throw new Error('Expected ready reply turn');
+    expect(storedAfterCard.turn.items[2]).toEqual({
+      type: 'coordinator_message',
+      id: expect.any(String),
+      body: '',
+      replyTo: {
+        target: { kind: 'user_turn', turnId: 'user-reply-turn' },
+        threadRootId: 'bubble:assistant:user-open-turn:bubble-ask',
+        author: 'user',
+        previewText: '保留 7 天即可',
+      },
+      linkedSessionIds: ['child-audit', 'child-ios-fix'],
+      card: {
+        kind: 'next_step',
+        title: '排查已完成，下一步如何推进？',
+        summary: '根因已由 [审核员](lody://session/child-audit?workspace=ws) 独立复现确认。',
+        actions: [
+          {
+            id: 'card-act-1',
+            label: '让天才程序员修复并创建 PR',
+            description: '继续复用排查会话完成修复、回归测试与 PR 创建。',
+            tone: 'primary',
+            source: 'agent',
+            intent: {
+              kind: 'session_dispatch',
+              sessionId: 'child-ios-fix',
+              prompt: '请修复该配置同步缺陷并创建 PR',
+              mode: 'send',
+            },
+          },
+        ],
+      },
+      createdAt: expect.any(Number),
+    });
+
+    await backend.appendHistoryTurn({
+      id: 'user-plain-followup',
+      role: 'user',
+      timestamp: new Date(1_700_000_006_000).toISOString(),
+      inputConfig: {
+        prompt: '排查结果我看过了，先别急着提 PR，让它补一个真机模拟器验证再说',
+        inputBlocks: [
+          { type: 'text', text: '排查结果我看过了，先别急着提 PR，让它补一个真机模拟器验证再说' },
+        ],
+        cliType: 'builtin',
+        agentType: 'claude',
+      },
+      items: [
+        { type: 'text', text: '排查结果我看过了，先别急着提 PR，让它补一个真机模拟器验证再说' },
+      ],
+    });
+
+    const implicitCardHeader = await resolveCoordinatorPromptReplyHeader({
+      history: backend.history,
+      workspaceId,
+      userTurnId: 'user-plain-followup',
+      isCoordinator: true,
+    });
+    expect(implicitCardHeader).toContain('<related_card_context');
+    expect(implicitCardHeader).toContain('排查已完成，下一步如何推进？');
+    expect(implicitCardHeader).toContain('child-ios-fix');
+
+    const cardItem = storedAfterCard.turn.items[2] as { id: string };
+    const dismissRes = await backend.applyHistoryAction({
+      kind: 'coordinator-action-resolved',
+      turnId: 'assistant:user-reply-turn',
+      bubbleId: cardItem.id,
+      actionId: COORDINATOR_CARD_DISMISSED_ACTION_ID,
+      resolution: {
+        status: 'dismissed',
+        resolvedAt: 1_700_000_007_000,
+      },
+    });
+    expect(dismissRes.matched).toBe(true);
+
+    await backend.appendHistoryTurn({
+      id: 'user-after-card-dismiss',
+      role: 'user',
+      timestamp: new Date(1_700_000_008_000).toISOString(),
+      inputConfig: {
+        prompt: '另外帮忙开一个新任务整理发布说明',
+        inputBlocks: [{ type: 'text', text: '另外帮忙开一个新任务整理发布说明' }],
+        cliType: 'builtin',
+        agentType: 'claude',
+      },
+      items: [{ type: 'text', text: '另外帮忙开一个新任务整理发布说明' }],
+    });
+
+    const headerAfterDismiss = await resolveCoordinatorPromptReplyHeader({
+      history: backend.history,
+      workspaceId,
+      userTurnId: 'user-after-card-dismiss',
+      isCoordinator: true,
+    });
+    expect(headerAfterDismiss).toBeUndefined();
+
+    const implSessionId = 'child-impl-group' as SessionId;
+    const reviewSessionId = 'child-review-group' as SessionId;
+    const foreignSessionId = 'child-foreign-group' as SessionId;
+    await manager.repo.upsertDocMeta(getSessionRoomId(implSessionId), {
+      id: implSessionId,
+      userId: ownerUserId,
+      machineId,
+      openedBySessionId: sessionId,
+      createdAt: '2026-11-20T00:05:00.000Z',
+      cliType: 'builtin',
+      agentType: 'claude',
+      latestUserMsgId: 'u-impl-init',
+    });
+    await manager.repo.upsertDocMeta(getSessionRoomId(reviewSessionId), {
+      id: reviewSessionId,
+      userId: ownerUserId,
+      machineId,
+      openedBySessionId: sessionId,
+      createdAt: '2026-11-20T00:05:10.000Z',
+      cliType: 'builtin',
+      agentType: 'claude',
+      latestUserMsgId: 'u-review-init',
+    });
+    await manager.repo.upsertDocMeta(getSessionRoomId(foreignSessionId), {
+      id: foreignSessionId,
+      userId: 'other-user' as UserId,
+      machineId,
+      createdAt: '2026-11-20T00:05:20.000Z',
+      cliType: 'builtin',
+      agentType: 'claude',
+    });
+
+    const rejectedForeign = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_work_item', {
+        workItemId: implSessionId,
+        members: [{ sessionId: foreignSessionId, role: 'review' }],
+      })
+    );
+    expect(rejectedForeign.isError).toBe(true);
+    expect(JSON.stringify(rejectedForeign.content)).toContain(
+      'Cannot group a conversation owned by another user: child-foreign-group'
+    );
+
+    const groupResult = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_work_item', {
+        workItemId: `lody://session/${implSessionId}?workspace=${workspaceId}`,
+        title: 'ACP submodule token refresh',
+        mode: 'direct',
+        members: [
+          {
+            sessionId: `lody://session/${implSessionId}?workspace=${workspaceId}`,
+            role: 'implement',
+          },
+          { sessionId: reviewSessionId, role: 'review' },
+        ],
+        externalRefs: [
+          {
+            kind: 'linear_issue',
+            label: 'ENG-204',
+            uri: 'https://linear.app/lody/issue/ENG-204',
+          },
+        ],
+      })
+    );
+    expect(groupResult.isError, JSON.stringify(groupResult.content)).not.toBe(true);
+
+    const docStateAfterGroup = await sessionDoc.getDocState();
+    expect(docStateAfterGroup.workItems?.[implSessionId]).toMatchObject({
+      id: implSessionId,
+      title: 'ACP submodule token refresh',
+      mode: 'direct',
+      externalRefs: [
+        {
+          kind: 'linear_issue',
+          label: 'ENG-204',
+          uri: 'https://linear.app/lody/issue/ENG-204',
+        },
+      ],
+    });
+
+    const proposedCardRes = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_work_item', {
+        workItemId: 'wi-proposed-card',
+        title: 'Confirm cache migration plan',
+        stage: 'proposed',
+        summary: 'Migrate local cache index before enabling multi-window sync.',
+        pendingAction: 'Confirm whether to run automatic migration on startup.',
+      })
+    );
+    expect(proposedCardRes.isError, JSON.stringify(proposedCardRes.content)).not.toBe(true);
+    const stateAfterProposed = await sessionDoc.getDocState();
+    expect(stateAfterProposed.workItems?.['wi-proposed-card']).toMatchObject({
+      id: 'wi-proposed-card',
+      title: 'Confirm cache migration plan',
+      stage: 'proposed',
+      summary: 'Migrate local cache index before enabling multi-window sync.',
+      pendingAction: 'Confirm whether to run automatic migration on startup.',
+    });
+
+    const startedCardRes = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_work_item', {
+        workItemId: 'wi-proposed-card',
+        stage: 'working',
+        progressNote: 'Dispatched implementation worker for cache index migration.',
+      })
+    );
+    expect(startedCardRes.isError, JSON.stringify(startedCardRes.content)).not.toBe(true);
+    const stateAfterStarted = await sessionDoc.getDocState();
+    expect(stateAfterStarted.workItems?.['wi-proposed-card']).toMatchObject({
+      id: 'wi-proposed-card',
+      stage: 'working',
+      progressNote: 'Dispatched implementation worker for cache index migration.',
+    });
+    expect(stateAfterStarted.workItems?.['wi-proposed-card']?.pendingAction).toBeUndefined();
+    expect((await manager.repo.getDocMeta(getSessionRoomId(implSessionId)))?.meta).toMatchObject({
+      workItemId: implSessionId,
+      workItemRole: 'implement',
+    });
+    expect((await manager.repo.getDocMeta(getSessionRoomId(reviewSessionId)))?.meta).toMatchObject({
+      workItemId: implSessionId,
+      workItemRole: 'review',
+    });
+
+    await backend.openAssistantTurn({
+      turnId: 'assistant:user-after-card-dismiss',
+      userTurnId: 'user-after-card-dismiss',
+      timestamp: new Date(1_700_000_009_000).toISOString(),
+    });
+    const groupedDaemon: DaemonWorkspace = {
+      ...daemon,
+      readActiveAssistantTurnId: () => 'assistant:user-after-card-dismiss',
+    };
+
+    const groupedCardResult = await runWithDaemonWorkspace(groupedDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        card: {
+          kind: 'next_step',
+          title: '实现与独立审查均已完成',
+          workItemId: implSessionId,
+          actions: [
+            {
+              label: '让实现会话提交跨仓 PR',
+              tone: 'primary',
+              intent: {
+                kind: 'session_dispatch',
+                sessionId: implSessionId,
+                prompt: '请提交 PR',
+                mode: 'send',
+              },
+            },
+          ],
+        },
+      })
+    );
+    expect(groupedCardResult.isError, JSON.stringify(groupedCardResult.content)).not.toBe(true);
+
+    const turnWithGroupedCard = await backend.readTurn('assistant:user-after-card-dismiss');
+    expect(turnWithGroupedCard.state).toBe('ready');
+    if (turnWithGroupedCard.state !== 'ready') throw new Error('Expected ready reply turn');
+    expect(turnWithGroupedCard.turn.items.at(-1)).toMatchObject({
+      type: 'coordinator_message',
+      card: {
+        title: '实现与独立审查均已完成',
+        workItemId: implSessionId,
+        snapshotTurnBySession: {
+          [implSessionId]: 'u-impl-init',
+          [reviewSessionId]: 'u-review-init',
+        },
+      },
+    });
+
+    await backend.appendHistoryTurn({
+      id: 'user-followup-grouped-fresh',
+      role: 'user',
+      timestamp: new Date(1_700_000_010_000).toISOString(),
+      inputConfig: {
+        prompt: '先跑一遍兼容性检查再提 PR',
+        inputBlocks: [{ type: 'text', text: '先跑一遍兼容性检查再提 PR' }],
+        cliType: 'builtin',
+        agentType: 'claude',
+      },
+      items: [{ type: 'text', text: '先跑一遍兼容性检查再提 PR' }],
+    });
+
+    const readLatestUserMsgId = async (sid: SessionId) =>
+      ((await manager.repo.getDocMeta(getSessionRoomId(sid)))?.meta as SessionMeta | undefined)
+        ?.latestUserMsgId;
+
+    const freshSnapshotHeader = await resolveCoordinatorPromptReplyHeader({
+      history: backend.history,
+      workspaceId,
+      userTurnId: 'user-followup-grouped-fresh',
+      isCoordinator: true,
+      readSessionLatestUserMsgId: readLatestUserMsgId,
+    });
+    expect(freshSnapshotHeader).toContain('实现与独立审查均已完成');
+
+    await manager.repo.upsertDocMeta(getSessionRoomId(reviewSessionId), {
+      latestUserMsgId: 'u-review-direct-2',
+    });
+
+    const staleSnapshotHeader = await resolveCoordinatorPromptReplyHeader({
+      history: backend.history,
+      workspaceId,
+      userTurnId: 'user-followup-grouped-fresh',
+      isCoordinator: true,
+      readSessionLatestUserMsgId: readLatestUserMsgId,
+    });
+    expect(staleSnapshotHeader).toBeUndefined();
   });
 });

@@ -46,6 +46,7 @@ const MemberRow = z.object({
     'session_chat_many',
   ]),
   source_turn_id: z.string().nullable(),
+  frozen_config_json: z.string().nullable().optional(),
   created_at: z.string().nullable(),
   completed_at: z.string().nullable(),
   chain_depth: z.number(),
@@ -902,16 +903,33 @@ export class InboxSqlite {
         .get(s.workspaceId, s.sessionId, s.userId) as { value: number }
     ).value;
   }
+  private hasOperationsTable(): boolean {
+    return Boolean(
+      this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operations'").get()
+    );
+  }
   private available(s: InboxScope, watermark: number, automatic: boolean): InboxMember[] {
+    const joinOps = this.hasOperationsTable();
     return this.db
       .prepare(
-        `SELECT sequence,operation_id,operation_kind,source_turn_id,created_at,completed_at,chain_depth,completion_json FROM inbox_results WHERE workspace_id=? AND session_id=? AND user_id=? AND sequence<=? AND consumed=0 AND claim IS NULL ${automatic ? 'AND automatic_eligible=1' : ''} ORDER BY sequence`
+        joinOps
+          ? `SELECT r.sequence,r.operation_id,r.operation_kind,r.source_turn_id,o.frozen_config_json,r.created_at,r.completed_at,r.chain_depth,r.completion_json FROM inbox_results r LEFT JOIN operations o ON o.requester_session_id=r.session_id AND o.operation_id=r.operation_id WHERE r.workspace_id=? AND r.session_id=? AND r.user_id=? AND r.sequence<=? AND r.consumed=0 AND r.claim IS NULL ${automatic ? 'AND r.automatic_eligible=1' : ''} ORDER BY r.sequence`
+          : `SELECT sequence,operation_id,operation_kind,source_turn_id,created_at,completed_at,chain_depth,completion_json FROM inbox_results WHERE workspace_id=? AND session_id=? AND user_id=? AND sequence<=? AND consumed=0 AND claim IS NULL ${automatic ? 'AND automatic_eligible=1' : ''} ORDER BY sequence`
       )
       .all(s.workspaceId, s.sessionId, s.userId, watermark)
       .map((row) => this.decodeMember(row));
   }
   private decodeMember(row: unknown): InboxMember {
     const r = MemberRow.parse(row);
+    let originThreadId: string | undefined;
+    if (r.frozen_config_json) {
+      try {
+        const parsed = JSON.parse(r.frozen_config_json) as { originThreadId?: unknown };
+        if (typeof parsed.originThreadId === 'string' && parsed.originThreadId.trim().length > 0) {
+          originThreadId = parsed.originThreadId.trim();
+        }
+      } catch {}
+    }
     return {
       sequence: r.sequence,
       operationId: r.operation_id,
@@ -919,6 +937,7 @@ export class InboxSqlite {
       ...(r.created_at ? { createdAt: r.created_at } : {}),
       ...(r.completed_at ? { completedAt: r.completed_at } : {}),
       ...(r.source_turn_id ? { sourceTurnId: r.source_turn_id } : {}),
+      ...(originThreadId ? { originThreadId } : {}),
       chainDepth: r.chain_depth,
       completion: JSON.parse(r.completion_json),
     };
@@ -1119,9 +1138,12 @@ export class InboxSqlite {
       .map((row) => this.decodeBatch(row));
   }
   members(batch: InboxBatch, after = 0, limit = 50): InboxMember[] {
+    const joinOps = this.hasOperationsTable();
     return this.db
       .prepare(
-        'SELECT r.sequence,r.operation_id,r.operation_kind,r.source_turn_id,r.created_at,r.completed_at,r.chain_depth,r.completion_json FROM inbox_results r JOIN inbox_members m USING(sequence) WHERE m.batch_id=? AND r.sequence>? ORDER BY r.sequence LIMIT ?'
+        joinOps
+          ? 'SELECT r.sequence,r.operation_id,r.operation_kind,r.source_turn_id,o.frozen_config_json,r.created_at,r.completed_at,r.chain_depth,r.completion_json FROM inbox_results r JOIN inbox_members m USING(sequence) LEFT JOIN operations o ON o.requester_session_id=r.session_id AND o.operation_id=r.operation_id WHERE m.batch_id=? AND r.sequence>? ORDER BY r.sequence LIMIT ?'
+          : 'SELECT r.sequence,r.operation_id,r.operation_kind,r.source_turn_id,r.created_at,r.completed_at,r.chain_depth,r.completion_json FROM inbox_results r JOIN inbox_members m USING(sequence) WHERE m.batch_id=? AND r.sequence>? ORDER BY r.sequence LIMIT ?'
       )
       .all(batch.batchId, after, limit)
       .map((row) => this.decodeMember(row));

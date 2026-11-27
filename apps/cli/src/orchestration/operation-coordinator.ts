@@ -17,6 +17,7 @@ import {
   getServerNow,
   getSessionRoomId,
   isLoroRepoDocDeleted,
+  LODY_PRESENCE_TTL_MS,
   type LodyOperationItemResult,
   type MachineId,
   type SessionId,
@@ -24,6 +25,7 @@ import {
   type StoredLodyOperation,
   type WorkspaceId,
 } from '@lody/shared';
+import { COORDINATOR_WAKE_DEBOUNCE_MS } from '@/automations/context/coordinator-watch-gate';
 
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { SessionDispatchWatcher } from '@/session/session-dispatch-watcher';
@@ -33,6 +35,7 @@ import type { Logger } from '@/utils/logger';
 import { TURN_BUDGETS } from '@/session/turn-budgets';
 
 import {
+  type CoordinatorCursorStorePort,
   getLodyOperationStorePath,
   LodyOperationStore,
   LodyOperationStoreError,
@@ -104,6 +107,7 @@ export class LodyOperationCoordinator {
   private readonly inboxExecutions = new Set<Promise<void>>();
   private readonly materializationClaimToken = randomUUID();
   private readonly workerBootId: string;
+  private focusGateRecheckTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly options: LodyOperationCoordinatorOptions) {
     const storePath = options.storePath ?? getLodyOperationStorePath(options.machineId);
@@ -173,9 +177,14 @@ export class LodyOperationCoordinator {
         // successful recovery wakes the Inbox, which runs this check again.
         if (execution.releaseBlocked)
           void this.options.executionService.requestReleaseRecovery?.(sessionId);
-        return (
-          !execution.hasActiveTurn && !this.options.dispatchWatcher.hasPendingDispatch(sessionId)
-        );
+        if (execution.hasActiveTurn || this.options.dispatchWatcher.hasPendingDispatch(sessionId)) {
+          return false;
+        }
+        if (batch.kind === 'automatic' && this.isUserViewingAutomaticBatchTarget(batch)) {
+          this.scheduleFocusGateRecheck();
+          return false;
+        }
+        return true;
       },
       admit: (batch) =>
         this.started &&
@@ -339,7 +348,50 @@ export class LodyOperationCoordinator {
     return this.store?.hasTurnWorkForRequester(this.options.workspaceId, sessionId) ?? true;
   }
 
+  private isUserViewingAutomaticBatchTarget(batch: InboxBatch): boolean {
+    const presenceStates = this.options.workspaceDocument.getPresenceStates?.();
+    if (!presenceStates || !this.store) return false;
+    const now = this.now();
+    const viewedChildIds = new Set<string>();
+    for (const entry of Object.values(presenceStates)) {
+      if (
+        entry.kind === 'session-viewing' &&
+        entry.userId === batch.userId &&
+        entry.sessionId !== batch.sessionId &&
+        now - entry.updatedAt <= LODY_PRESENCE_TTL_MS
+      ) {
+        viewedChildIds.add(entry.sessionId);
+      }
+    }
+    if (viewedChildIds.size === 0) return false;
+    const members = this.store.inbox.members(batch);
+    for (const member of members) {
+      const completion = member.completion as
+        | { type?: string; value?: { items?: Array<{ target?: { sessionId?: string } }> } }
+        | undefined;
+      if (completion?.type !== 'result' || !Array.isArray(completion.value?.items)) continue;
+      for (const item of completion.value.items) {
+        const targetId = item.target?.sessionId;
+        if (targetId && viewedChildIds.has(targetId)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private scheduleFocusGateRecheck(): void {
+    if (this.focusGateRecheckTimer || !this.started) return;
+    this.focusGateRecheckTimer = setTimeout(() => {
+      this.focusGateRecheckTimer = undefined;
+      if (!this.started) return;
+      void this.inbox?.wake().catch(() => undefined);
+    }, COORDINATOR_WAKE_DEBOUNCE_MS);
+  }
+
   stop(): Promise<void> {
+    if (this.focusGateRecheckTimer) clearTimeout(this.focusGateRecheckTimer);
+    this.focusGateRecheckTimer = undefined;
     if (this.startupRetry) clearTimeout(this.startupRetry);
     this.startupRetry = undefined;
     this.startupRetryDelay = 30_000;
@@ -430,6 +482,17 @@ export class LodyOperationCoordinator {
       })
       .catch(() => undefined);
     return recovery;
+  }
+
+  getCoordinatorCursorStore(): CoordinatorCursorStorePort | undefined {
+    return this.started && this.store ? this.store : undefined;
+  }
+
+  readCoordinatorStoreDiagnostics(coordinatorSessionId: SessionId) {
+    if (!this.started || !this.store) {
+      return { cursors: [], operations: [] };
+    }
+    return this.store.readCoordinatorStoreDiagnostics(coordinatorSessionId);
   }
 
   wake(reason: string): Promise<void> {

@@ -20,11 +20,22 @@ import {
   LODY_CHAIN_DEPTH_SOFT_LIMIT,
   LODY_MAX_CHAIN_DEPTH,
   LODY_OPERATION_COMPLETION_MAX_BYTES,
+  LocalSessionControlResponseSchema,
   type AcpCapabilityCacheEntry,
   type MachineId,
   type SessionId,
+  type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import {
+  isLocalSessionControlRequest,
+  isLocalSessionControlResponse,
+} from '@lody/shared/node/local-session-control';
+import type { SessionHistoryReader, SessionTurn } from '@lody/shared/session-data';
+import {
+  extractChildDirectTailSummary,
+  resolveCoordinatorProjectFactsDelta,
+} from '@/lib/coordinator-project-delta';
 
 import {
   canonicalizeLodyCommand,
@@ -1528,5 +1539,416 @@ describe('runWithOperationStoreBusyRetry', () => {
     expect(isOperationStoreBusyError(busyError('SQLITE_CONSTRAINT'))).toBe(false);
     expect(isOperationStoreBusyError(new Error('database is locked'))).toBe(false);
     expect(isOperationStoreBusyError('database is locked')).toBe(false);
+  });
+});
+
+describe('coordinator read cursors and <project_facts_delta>', () => {
+  function createInMemoryHistoryReader(turns: readonly SessionTurn[]): SessionHistoryReader {
+    return {
+      count: async () => turns.length,
+      readDirectory: async (start, count) =>
+        turns.slice(start, start + count).map((turn, idx) => ({
+          index: start + idx,
+          turnId: turn.id,
+          scalars: { id: turn.id, role: turn.role, timestamp: turn.timestamp },
+        })) as never,
+      readTurn: async (turnId) => {
+        const found = turns.find((turn) => turn.id === turnId);
+        return found ? { state: 'ready', turn: found } : ({ state: 'missing' } as never);
+      },
+      readWindow: async (start, count) => turns.slice(start, start + count),
+    } as SessionHistoryReader;
+  }
+
+  it('ignores coordinator-authored child turns, emits bounded <project_facts_delta> on direct co-work and PR updates, caches per userTurnId across reopen, and cleans up on delete', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'lody-coord-delta-'));
+    try {
+      const dbPath = path.join(dir, 'operations.sqlite3');
+      const workspaceId = 'ws-coord' as WorkspaceId;
+      const coordinatorId = 'coord-main' as SessionId;
+      const delegatedChildId = 'child-delegated' as SessionId;
+      const directChildId = 'child-direct-ui' as SessionId;
+      const foreignChildId = 'child-foreign' as SessionId;
+      const machineId = 'machine-1' as MachineId;
+
+      const delegatedTurns: SessionTurn[] = [
+        {
+          id: 'u-coord-dispatch-1',
+          role: 'user',
+          timestamp: '2026-11-24T01:00:00.000Z',
+          author: buildAgentMessageAuthor({ sessionId: coordinatorId, turnId: 'coord-t1' }),
+          items: [{ type: 'text', text: 'Run test suite and report back' }],
+        } as SessionTurn,
+        {
+          id: 'a-coord-dispatch-1',
+          role: 'assistant',
+          timestamp: '2026-11-24T01:00:05.000Z',
+          items: [{ type: 'text', text: 'All 42 unit tests passed.' }],
+        } as SessionTurn,
+      ];
+
+      const directTurns: SessionTurn[] = [
+        {
+          id: 'u-seed-1',
+          role: 'user',
+          timestamp: '2026-11-24T01:01:00.000Z',
+          author: buildAgentMessageAuthor({ sessionId: coordinatorId, turnId: 'coord-t1' }),
+          items: [{ type: 'text', text: 'Seed onboarding layout prototype' }],
+        } as SessionTurn,
+        {
+          id: 'a-seed-1',
+          role: 'assistant',
+          timestamp: '2026-11-24T01:01:10.000Z',
+          items: [{ type: 'text', text: 'Initial layout ready.' }],
+        } as SessionTurn,
+      ];
+
+      const baseMetas = (): SessionMeta[] => [
+        {
+          id: delegatedChildId,
+          userId: 'user-owner',
+          machineId,
+          openedBySessionId: coordinatorId,
+          createdAt: '2026-11-24T01:00:00.000Z',
+          lastMessageAt: 1_000,
+          latestUserMsgId: 'u-coord-dispatch-1',
+          title: 'Run backend tests',
+          cliType: 'builtin',
+          agentType: 'claude',
+        } as SessionMeta,
+        {
+          id: directChildId,
+          userId: 'user-owner',
+          machineId,
+          openedBySessionId: coordinatorId,
+          createdAt: '2026-11-24T01:01:00.000Z',
+          lastMessageAt: 2_000,
+          latestUserMsgId: 'u-seed-1',
+          title: 'Interactive UI co-design',
+          workItemId: directChildId,
+          workItemRole: 'design',
+          cliType: 'builtin',
+          agentType: 'claude',
+        } as SessionMeta,
+        {
+          id: foreignChildId,
+          userId: 'other-user',
+          machineId,
+          openedBySessionId: coordinatorId,
+          createdAt: '2026-11-24T01:02:00.000Z',
+          lastMessageAt: 3_000,
+          latestUserMsgId: 'u-foreign-1',
+          title: 'Foreign secret session',
+          cliType: 'builtin',
+          agentType: 'claude',
+        } as SessionMeta,
+      ];
+
+      const store1 = new LodyOperationStore(dbPath, () => 10_000);
+      const readTail = async (sid: SessionId, prevMsgId: string | undefined) => {
+        const list =
+          sid === delegatedChildId
+            ? delegatedTurns
+            : sid === directChildId
+              ? directTurns
+              : [
+                  {
+                    id: 'u-foreign-1',
+                    role: 'user',
+                    timestamp: '2026-11-24T01:02:00.000Z',
+                    items: [{ type: 'text', text: 'Should never be read' }],
+                  } as SessionTurn,
+                ];
+        return extractChildDirectTailSummary({
+          history: createInMemoryHistoryReader(list),
+          coordinatorSessionId: coordinatorId,
+          previousLatestUserMsgId: prevMsgId,
+        });
+      };
+
+      const initialDelta = await resolveCoordinatorProjectFactsDelta({
+        workspaceId,
+        coordinatorSessionId: coordinatorId,
+        coordinatorUserId: 'user-owner',
+        userTurnId: 'coord-user-turn-1',
+        allSessionMetas: baseMetas(),
+        rawWorkItems: {},
+        cursorStore: store1,
+        readChildTail: readTail,
+      });
+      expect(initialDelta).toBeUndefined();
+      expect(store1.readCoordinatorCursors(coordinatorId).size).toBe(2);
+      store1.close();
+
+      directTurns.push(
+        {
+          id: 'u-human-direct-2',
+          role: 'user',
+          timestamp: '2026-11-24T01:05:00.000Z',
+          items: [{ type: 'text', text: '改成左右分栏并保留底部固定操作条' }],
+        } as SessionTurn,
+        {
+          id: 'a-human-direct-2',
+          role: 'assistant',
+          timestamp: '2026-11-24T01:05:20.000Z',
+          items: [{ type: 'text', text: '已完成左右分栏改造并提交 PR #88。' }],
+        } as SessionTurn
+      );
+
+      const updatedMetas = baseMetas().map((meta) =>
+        meta.id === directChildId
+          ? ({
+              ...meta,
+              lastMessageAt: 5_000,
+              latestUserMsgId: 'u-human-direct-2',
+              pullRequests: [{ url: 'https://github.com/LodyAI/lody/pull/88', status: 'open' }],
+              pullRequestState: {
+                'https://github.com/LodyAI/lody/pull/88': { s: 's', m: 'c', t: 5_000 },
+              },
+            } as SessionMeta)
+          : meta
+      );
+      const workItems = {
+        [directChildId]: {
+          id: directChildId,
+          title: 'Onboarding split-pane co-design',
+          mode: 'direct',
+          createdAt: 2_000,
+          updatedAt: 5_000,
+        },
+      };
+
+      const store2 = new LodyOperationStore(dbPath, () => 20_000);
+      const deltaTurn2 = await resolveCoordinatorProjectFactsDelta({
+        workspaceId,
+        coordinatorSessionId: coordinatorId,
+        coordinatorUserId: 'user-owner',
+        userTurnId: 'coord-user-turn-2',
+        allSessionMetas: updatedMetas,
+        rawWorkItems: workItems,
+        cursorStore: store2,
+        readChildTail: readTail,
+      });
+      expect(deltaTurn2).toContain('<project_facts_delta>');
+      expect(deltaTurn2).toContain('task="T2"');
+      expect(deltaTurn2).toContain('mode="direct"');
+      expect(deltaTurn2).toContain('role="design"');
+      expect(deltaTurn2).toContain('LodyAI/lody#88 (open, ci:pass, ready-to-merge)');
+      expect(deltaTurn2).toContain('direct_user: 改成左右分栏并保留底部固定操作条');
+      expect(deltaTurn2).toContain('child_reply: 已完成左右分栏改造并提交 PR #88。');
+      expect(deltaTurn2).not.toContain('Foreign secret session');
+      expect(deltaTurn2).not.toContain('Run backend tests');
+
+      const retrySameTurn = await resolveCoordinatorProjectFactsDelta({
+        workspaceId,
+        coordinatorSessionId: coordinatorId,
+        coordinatorUserId: 'user-owner',
+        userTurnId: 'coord-user-turn-2',
+        allSessionMetas: updatedMetas,
+        rawWorkItems: workItems,
+        cursorStore: store2,
+      });
+      expect(retrySameTurn).toBe(deltaTurn2);
+
+      const storeDiagOnTurn2 = store2.readCoordinatorStoreDiagnostics(coordinatorId);
+      expect(storeDiagOnTurn2.lastTurnDelta).toMatchObject({
+        userTurnId: 'coord-user-turn-2',
+        deltaText: deltaTurn2,
+      });
+
+      const quietTurn3 = await resolveCoordinatorProjectFactsDelta({
+        workspaceId,
+        coordinatorSessionId: coordinatorId,
+        coordinatorUserId: 'user-owner',
+        userTurnId: 'coord-user-turn-3',
+        allSessionMetas: updatedMetas,
+        rawWorkItems: workItems,
+        cursorStore: store2,
+        readChildTail: readTail,
+      });
+      expect(quietTurn3).toBeUndefined();
+
+      store2.accept({
+        ...baseInput(),
+        operationId: 'diag-op-1',
+        workspaceId,
+        requesterSessionId: coordinatorId,
+        requesterUserId: 'user-owner',
+        items: [
+          {
+            status: 'active',
+            target: { sessionId: directChildId, userTurnId: 'child-turn-op' },
+            inputDurable: true,
+          },
+        ],
+      });
+
+      const storeDiag = store2.readCoordinatorStoreDiagnostics(coordinatorId);
+      expect(storeDiag.cursors.map((c) => c.targetSessionId).sort()).toEqual(
+        [delegatedChildId, directChildId].sort()
+      );
+      expect(storeDiag.lastTurnDelta).toMatchObject({
+        userTurnId: 'coord-user-turn-3',
+        deltaText: '',
+      });
+      expect(storeDiag.operations).toMatchObject([
+        {
+          operationId: 'diag-op-1',
+          kind: 'session_chat',
+          state: 'active',
+          targets: [{ sessionId: directChildId, status: 'active' }],
+        },
+      ]);
+
+      const parsedResponse = LocalSessionControlResponseSchema.safeParse({
+        type: 'session/coordinator-diagnostics_response',
+        sessionId: coordinatorId,
+        observedAt: 20_000,
+        cursors: storeDiag.cursors,
+        lastTurnDelta: storeDiag.lastTurnDelta,
+        operations: storeDiag.operations,
+        waits: [
+          {
+            id: 'wait-1',
+            state: 'waiting',
+            checks: 2,
+            consecutiveErrors: 0,
+            nextCheckAt: 24_000,
+            reason: 'Await T2 PR CI',
+            program: 'return await coordinator.workItems();',
+            continuation: { state: 'pending' },
+          },
+        ],
+      });
+      expect(parsedResponse.success).toBe(true);
+      expect(
+        isLocalSessionControlRequest({
+          type: 'session/coordinator-diagnostics',
+          machineId: 'machine-1',
+          workspaceId,
+          sessionId: coordinatorId,
+        })
+      ).toBe(true);
+      expect(
+        isLocalSessionControlResponse({
+          type: 'session/coordinator-diagnostics_response',
+          sessionId: coordinatorId,
+          observedAt: 20_000,
+          cursors: storeDiag.cursors,
+          lastTurnDelta: storeDiag.lastTurnDelta,
+          operations: storeDiag.operations,
+          waits: [],
+        })
+      ).toBe(true);
+
+      store2.deleteRequesterSession(coordinatorId);
+      expect(store2.readCoordinatorCursors(coordinatorId).size).toBe(0);
+      expect(store2.readCoordinatorTurnDelta(coordinatorId, 'coord-user-turn-3')).toBeUndefined();
+      store2.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads long [from, to) child histories, aligns T<n> with standalone proposals, and only advances cursors for delivered updates', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'lody-coord-delta-budget-'));
+    const dbPath = path.join(dir, 'operations.sqlite3');
+    const workspaceId = 'ws-budget' as WorkspaceId;
+    const coordinatorId = 'coord-budget' as SessionId;
+    try {
+      const longTurns: SessionTurn[] = Array.from({ length: 20 }, (_, i) => ({
+        id: `turn-${i}`,
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        timestamp: new Date(1_000 + i * 100).toISOString(),
+        items: [{ type: 'text', text: i === 18 ? 'Latest direct tweak on turn 18' : `msg-${i}` }],
+        author:
+          i % 2 === 0
+            ? i === 18
+              ? { kind: 'human', userId: 'user-owner' }
+              : { kind: 'agent', sessionId: coordinatorId }
+            : undefined,
+      })) as unknown as SessionTurn[];
+      const longReader = {
+        count: () => longTurns.length,
+        readDirectory: (from: number, to: number) =>
+          longTurns.slice(from, to).map((t) => ({ turnId: t.id, scalars: { id: t.id } })),
+        readTurn: (turnId: string) => {
+          const turn = longTurns.find((t) => t.id === turnId);
+          return turn ? { state: 'ready' as const, turn } : { state: 'missing' as const };
+        },
+      } as unknown as SessionHistoryReader;
+
+      const tail = await extractChildDirectTailSummary({
+        history: longReader,
+        coordinatorSessionId: coordinatorId,
+        previousLatestUserMsgId: 'turn-16',
+      });
+      expect(tail.hasNonCoordinatorUserTurn).toBe(true);
+      expect(tail.directExchanges[0]?.userText).toContain('Latest direct tweak on turn 18');
+
+      const childMetas: SessionMeta[] = Array.from({ length: 7 }, (_, i) => ({
+        id: `child-b-${i + 1}` as SessionId,
+        machineId: 'machine-1' as MachineId,
+        userId: 'user-owner',
+        openedBySessionId: coordinatorId,
+        title: `Child ${i + 1}`,
+        createdAt: new Date(5_000 + i * 1_000).toISOString(),
+        cliType: 'builtin',
+        agentType: 'claude',
+        lastMessageAt: 20_000 + i * 100,
+        latestUserMsgId: `child-turn-${i + 1}`,
+      }));
+
+      const workItems = {
+        'wi-proposal-first': {
+          id: 'wi-proposal-first',
+          title: 'Earlier standalone proposal',
+          stage: 'proposed' as const,
+          createdAt: 1_000,
+          updatedAt: 1_000,
+        },
+      };
+
+      const store = new LodyOperationStore(dbPath, () => 30_000);
+      const readTail = async (sid: SessionId) => ({
+        hasNonCoordinatorUserTurn: true,
+        directExchanges: [{ userText: `Direct edit in ${sid}`, assistantText: `Done ${sid}` }],
+      });
+
+      const turn1 = await resolveCoordinatorProjectFactsDelta({
+        workspaceId,
+        coordinatorSessionId: coordinatorId,
+        coordinatorUserId: 'user-owner',
+        userTurnId: 'budget-turn-1',
+        allSessionMetas: childMetas,
+        rawWorkItems: workItems,
+        cursorStore: store,
+        readChildTail: readTail,
+      });
+      expect(turn1).toContain('task="T8"');
+      expect(turn1).toContain('task="T3"');
+      expect(turn1).not.toContain('task="T1"');
+      expect(turn1).not.toContain('task="T2"');
+      expect(turn1).toContain('child-b-7');
+      expect(turn1).not.toContain('child-b-1');
+      expect(store.readCoordinatorCursors(coordinatorId).has('child-b-1')).toBe(false);
+
+      const turn2 = await resolveCoordinatorProjectFactsDelta({
+        workspaceId,
+        coordinatorSessionId: coordinatorId,
+        coordinatorUserId: 'user-owner',
+        userTurnId: 'budget-turn-2',
+        allSessionMetas: childMetas,
+        rawWorkItems: workItems,
+        cursorStore: store,
+        readChildTail: readTail,
+      });
+      expect(turn2).toContain('child-b-1');
+      expect(turn2).toContain('task="T2"');
+      expect(store.readCoordinatorCursors(coordinatorId).has('child-b-1')).toBe(true);
+      store.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

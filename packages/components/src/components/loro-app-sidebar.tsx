@@ -5,6 +5,7 @@ import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { E2eeMachineWindowPill, E2eeOfflineSummary } from '@/components/e2ee-offline-window';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import {
+  isSessionInMyScope,
   isSessionInTaskOwnerFilter,
   resolveTaskOwnerFilter,
   toggleTaskOwnerSelection,
@@ -44,6 +45,7 @@ import { useOpenToday } from '@/components/today/use-open-today';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import {
   findFreshSessionPresenceState,
+  isCoordinatorSession,
   machineSupportsLocalProjectRemovalProtocol,
   resolveProjectGitHubRepo,
   resolveSessionHistoryBackendKind,
@@ -392,6 +394,7 @@ import {
   setMobileDrawerOpenAtom,
   userAtom,
   WORKSPACE_FOCUS_SCOPES,
+  developerModeEnabledAtom,
 } from '@/atoms';
 import {
   activeWorkspaceRuntimeAtom,
@@ -403,6 +406,17 @@ import {
   setWorkspaceContextAtom,
 } from '@/atoms';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
+import {
+  coordinatorProjectKeyId,
+  findProjectCoordinatorSession,
+  getSessionCoordinatorProjectKey,
+  type CoordinatorProjectKey,
+} from '@/components/project-mode/project-board-model';
+import {
+  SidebarProjectList,
+  SidebarProjectViewSwitch,
+  type SidebarProjectListItem,
+} from '@/components/project-mode/sidebar-project-list';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
@@ -437,6 +451,7 @@ import {
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
   sidebarOrganizeModeAtom,
+  sidebarProjectViewAtom,
   sidebarHideEmptyProjectsAtom,
   sidebarShowBranchNamesAtom,
   sidebarUpdatedShowProjectNamesAtom,
@@ -525,6 +540,7 @@ import {
   FolderOpen,
   GripVertical,
   MoreHorizontal,
+  Network,
   Settings2,
   Folders,
   Pencil,
@@ -648,14 +664,15 @@ function getDocsLinkOrigin(): string {
 }
 
 function getStableRepoFullNames(tasks: { repoFullName?: string | null }[]): string[] {
-  const seen = new Set<string>();
+  const seenLower = new Set<string>();
   const ordered: string[] = [];
 
   for (const task of tasks) {
     const repoFullName = typeof task.repoFullName === 'string' ? task.repoFullName.trim() : '';
     if (!repoFullName) continue;
-    if (seen.has(repoFullName)) continue;
-    seen.add(repoFullName);
+    const lower = repoFullName.toLowerCase();
+    if (seenLower.has(lower)) continue;
+    seenLower.add(lower);
     ordered.push(repoFullName);
   }
 
@@ -1217,6 +1234,8 @@ export type LocalProjectItemProps = {
   toggleLabel: string;
   onNavigateProject: (machineId: MachineId, localProjectId: string) => void;
   onNewChatInProject?: (machineId: MachineId, localProjectId: string) => void;
+  /** Developer mode only: opens the new-chat page in coordinator mode for this project. */
+  onStartCoordinatorInProject?: (machineId: MachineId, localProjectId: string) => void;
   onOpenProjectSettings?: (machineId: MachineId, localProjectId: string) => void;
   /** Opens the project editor seeded with this folder, to add more repositories. */
   onEditProject?: (machineId: MachineId, localProjectId: string, name: string) => void;
@@ -1328,6 +1347,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   toggleLabel,
   onNavigateProject,
   onNewChatInProject,
+  onStartCoordinatorInProject,
   onOpenProjectSettings,
   onEditProject,
   onRevealProject,
@@ -1453,9 +1473,14 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   );
   const revealPath = onRevealProject && formattedPath ? formattedPath : null;
   const editProjectLabel = t('sidebar.localProjects.editProject', 'Edit project…');
+  const startCoordinatorLabel = t(
+    'sidebar.localProjects.startCoordinator',
+    'Start coordinator conversation'
+  );
   const showProjectMenu =
     !isMobile &&
     (canRemoveProject ||
+      Boolean(onStartCoordinatorInProject) ||
       Boolean(onOpenProjectSettings) ||
       Boolean(onEditProject) ||
       Boolean(revealPath) ||
@@ -1662,6 +1687,16 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           </Tooltip.Root>
           {showProjectMenu ? (
             <ContextMenu.Content minWidth={180}>
+              {onStartCoordinatorInProject && projectCanNavigate ? (
+                <ContextMenu.Item
+                  icon={Network}
+                  onClick={() => {
+                    onStartCoordinatorInProject(machineId, project.id);
+                  }}
+                >
+                  {startCoordinatorLabel}
+                </ContextMenu.Item>
+              ) : null}
               {onEditProject && projectCanNavigate ? (
                 <ContextMenu.Item
                   icon={Folders}
@@ -2603,6 +2638,25 @@ export function LoroAppSidebar({
         to: '/$workspaceName/chat',
         params: { workspaceName: workspaceSlug },
         search: { context: 'local' as const, machine: machineId, project: localProjectId },
+      });
+    },
+    [closeMobileDrawer, router, workspaceSlug]
+  );
+
+  const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
+  const handleStartCoordinatorInProject = useCallback(
+    (machineId: MachineId, localProjectId: string) => {
+      if (!workspaceSlug) return;
+      closeMobileDrawer();
+      void router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: workspaceSlug },
+        search: {
+          context: 'local' as const,
+          machine: machineId,
+          project: localProjectId,
+          coordinator: true,
+        },
       });
     },
     [closeMobileDrawer, router, workspaceSlug]
@@ -3752,6 +3806,156 @@ export function LoroAppSidebar({
       }),
     [catalogLocalProjectSections, projectGroupSessions, projectGroupStates, workspaceProjects]
   );
+  const [sidebarProjectView, setSidebarProjectView] = useAtom(sidebarProjectViewAtom);
+  const showProjectList = developerModeEnabled && sidebarProjectView === 'projects';
+  const projectModeProjects = useMemo(() => {
+    if (!showProjectList) return [];
+    const projects = new Map<
+      string,
+      { key: CoordinatorProjectKey; item: SidebarProjectListItem }
+    >();
+    for (const section of catalogLocalProjectSections) {
+      if (!section.machineId) continue;
+      for (const project of section.projects) {
+        const key: CoordinatorProjectKey = {
+          kind: 'local',
+          machineId: section.machineId,
+          localProjectId: project.id,
+        };
+        projects.set(coordinatorProjectKeyId(key), {
+          key,
+          item: {
+            id: coordinatorProjectKeyId(key),
+            kind: 'local',
+            name: project.name,
+            detail: section.machineDisplayName,
+            activity: null,
+          },
+        });
+      }
+    }
+    const sessionsByProject = new Map<string, SessionMeta[]>();
+    const githubDisplayRankById = new Map<string, number>();
+    for (const session of sessions) {
+      if (session.parentSessionId) continue;
+      if (!isSessionInMyScope(session, myAccountId)) continue;
+      const key = getSessionCoordinatorProjectKey(session);
+      if (!key) continue;
+      const id = coordinatorProjectKeyId(key);
+      if (key.kind === 'github') {
+        const rank = Math.max(
+          Date.parse(session.createdAt) || 0,
+          typeof session.lastMessageAt === 'number'
+            ? session.lastMessageAt
+            : Date.parse(String(session.lastMessageAt ?? '')) || 0
+        );
+        const existing = projects.get(id);
+        const prevRank = githubDisplayRankById.get(id) ?? -1;
+        if (!existing) {
+          githubDisplayRankById.set(id, rank);
+          projects.set(id, {
+            key,
+            item: { id, kind: 'github', name: key.repoFullName, detail: null, activity: null },
+          });
+        } else if (existing.key.kind === 'github' && rank > prevRank) {
+          githubDisplayRankById.set(id, rank);
+          projects.set(id, {
+            key,
+            item: { ...existing.item, name: key.repoFullName },
+          });
+        }
+      }
+      const list = sessionsByProject.get(id);
+      if (list) list.push(session);
+      else sessionsByProject.set(id, [session]);
+    }
+    return Array.from(projects.values()).map(({ key, item }) => {
+      const projectSessions = sessionsByProject.get(item.id) ?? [];
+      return {
+        key,
+        item: {
+          ...item,
+          activity: summarizeLocalSessionsActivity(
+            projectSessions,
+            childSessionsByParent,
+            liveSessionStatuses,
+            sendStates
+          ),
+        },
+      };
+    });
+  }, [
+    catalogLocalProjectSections,
+    childSessionsByParent,
+    liveSessionStatuses,
+    myAccountId,
+    sendStates,
+    sessions,
+    showProjectList,
+  ]);
+  const projectModeItems = useMemo(
+    () => projectModeProjects.map((project) => project.item),
+    [projectModeProjects]
+  );
+  const selectedProjectModeId = useMemo(() => {
+    if (!showProjectList) return null;
+    const selected = selectedSessionId
+      ? allActiveSessions.find((session) => session.id === selectedSessionId)
+      : undefined;
+    if (selected && isCoordinatorSession(selected)) {
+      const key = getSessionCoordinatorProjectKey(selected);
+      return key ? coordinatorProjectKeyId(key) : null;
+    }
+    const search = location.search as Record<string, unknown>;
+    if (search.coordinator === true || search.coordinator === 'true') {
+      if (search.context === 'local' && typeof search.machine === 'string') {
+        return coordinatorProjectKeyId({
+          kind: 'local',
+          machineId: search.machine as MachineId,
+          localProjectId: String(search.project),
+        });
+      }
+      if (search.context === 'github' && typeof search.repo === 'string') {
+        return coordinatorProjectKeyId({ kind: 'github', repoFullName: search.repo });
+      }
+    }
+    return null;
+  }, [allActiveSessions, location.search, selectedSessionId, showProjectList]);
+  const handleSelectProjectModeProject = useCallback(
+    (id: string) => {
+      if (!workspaceSlug) return;
+      const project = projectModeProjects.find((entry) => entry.item.id === id);
+      if (!project) return;
+      closeMobileDrawer();
+      const coordinator = findProjectCoordinatorSession(
+        allActiveSessions,
+        project.key,
+        myAccountId
+      );
+      if (coordinator) {
+        void router.navigate({
+          to: '/$workspaceName/sessions/$sessionId',
+          params: { workspaceName: workspaceSlug, sessionId: coordinator.id },
+        });
+        return;
+      }
+      void router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: workspaceSlug },
+        search:
+          project.key.kind === 'local'
+            ? {
+                context: 'local' as const,
+                machine: project.key.machineId,
+                project: project.key.localProjectId,
+                coordinator: true,
+              }
+            : { context: 'github' as const, repo: project.key.repoFullName, coordinator: true },
+      });
+    },
+    [allActiveSessions, closeMobileDrawer, myAccountId, projectModeProjects, router, workspaceSlug]
+  );
+
   // Filter after pinned trees and opened-by placement have assigned each row
   // its final group. Keep the catalog above for Updated/Pinned and saved order.
   // With "Hide Empty Projects" off, every catalog project stays listed.
@@ -4050,6 +4254,9 @@ export function LoroAppSidebar({
                               // New Chat selects a target; it must not fork or clear
                               // the workspace-owned Chat Landing draft.
                               onNewChatInProject={handleNavigateToProject}
+                              onStartCoordinatorInProject={
+                                developerModeEnabled ? handleStartCoordinatorInProject : undefined
+                              }
                               onOpenProjectSettings={handleOpenProjectSettings}
                               onEditProject={handleEditLocalProject}
                               onRevealProject={
@@ -4095,30 +4302,43 @@ export function LoroAppSidebar({
       </div>
     );
 
-  // Compute repos array from persisted state
   const repos = useMemo<SessionListRepoState[]>(() => {
-    const repoSet = new Set(repoFullNames);
+    const canonicalByLower = new Map<string, string>();
+    for (const repoFullName of repoFullNames) {
+      canonicalByLower.set(repoFullName.toLowerCase(), repoFullName);
+    }
+    const collapsedByLower = new Map<string, boolean>();
+    for (const [key, collapsed] of Object.entries(repoCollapseState)) {
+      if (collapsed) {
+        collapsedByLower.set(key.toLowerCase(), true);
+      }
+    }
     const result: SessionListRepoState[] = [];
-    const seen = new Set<string>();
+    const seenLower = new Set<string>();
 
-    // First, add repos in persisted order (if they still exist)
-    for (const repoFullName of repoOrder) {
-      if (repoSet.has(repoFullName) && !seen.has(repoFullName)) {
-        seen.add(repoFullName);
+    for (const orderedName of repoOrder) {
+      const lower = orderedName.trim().toLowerCase();
+      const canonical = canonicalByLower.get(lower);
+      if (canonical && !seenLower.has(lower)) {
+        seenLower.add(lower);
         result.push({
-          repoFullName,
-          collapsed: repoCollapseState[repoFullName] ?? false,
+          repoFullName: canonical,
+          collapsed:
+            repoCollapseState[canonical] ??
+            repoCollapseState[orderedName] ??
+            collapsedByLower.get(lower) ??
+            false,
         });
       }
     }
 
-    // Then, add any new repos not in the persisted order
     for (const repoFullName of repoFullNames) {
-      if (!seen.has(repoFullName)) {
-        seen.add(repoFullName);
+      const lower = repoFullName.toLowerCase();
+      if (!seenLower.has(lower)) {
+        seenLower.add(lower);
         result.push({
           repoFullName,
-          collapsed: repoCollapseState[repoFullName] ?? false,
+          collapsed: repoCollapseState[repoFullName] ?? collapsedByLower.get(lower) ?? false,
         });
       }
     }
@@ -4126,21 +4346,18 @@ export function LoroAppSidebar({
     return result;
   }, [repoFullNames, repoOrder, repoCollapseState]);
 
-  // Append-only sync: register newly discovered repos into `repoOrder`, but
-  // never remove. Removing on transient disappearance (scope/visibility/sync
-  // races) would corrupt persisted positions and could ping-pong adjacent
-  // repos every time they flicker in and out.
   const repoOrderRef = useRef(repoOrder);
   repoOrderRef.current = repoOrder;
   useEffect(() => {
     if (sessionsListLoading) return;
     if (repoFullNames.length === 0) return;
     const prevOrder = repoOrderRef.current;
-    const known = new Set(prevOrder);
+    const knownLower = new Set(prevOrder.map((entry) => entry.trim().toLowerCase()));
     const newRepos: string[] = [];
     for (const repoFullName of repoFullNames) {
-      if (!known.has(repoFullName)) {
-        known.add(repoFullName);
+      const lower = repoFullName.toLowerCase();
+      if (!knownLower.has(lower)) {
+        knownLower.add(lower);
         newRepos.push(repoFullName);
       }
     }
@@ -4827,6 +5044,20 @@ export function LoroAppSidebar({
         // header inset so the sidebar's first row aligns with the top bar.
         isElectronMacOS={isElectronMacOS && !isElectronFullscreen}
         activeNav={activeNav}
+        navAccessory={
+          developerModeEnabled ? (
+            <SidebarProjectViewSwitch value={sidebarProjectView} onChange={setSidebarProjectView} />
+          ) : undefined
+        }
+        listOverride={
+          showProjectList ? (
+            <SidebarProjectList
+              items={projectModeItems}
+              selectedId={selectedProjectModeId}
+              onSelect={handleSelectProjectModeProject}
+            />
+          ) : undefined
+        }
         topContent={
           <>
             <E2eeDeviceRequestsButton {...stylex.props(themeStyles.glyph)} />

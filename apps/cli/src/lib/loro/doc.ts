@@ -3433,7 +3433,48 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
       acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
+      workItems: state.workItems as SessionDocMeta['workItems'],
+      triggers: state.triggers as SessionDocMeta['triggers'],
     };
+  }
+
+  upsertCoordinatorWorkItem(
+    workItemId: string,
+    updater: (
+      existing: import('@lody/shared').CoordinatorWorkItemDoc | undefined
+    ) => import('@lody/shared').CoordinatorWorkItemDoc
+  ): import('@lody/shared').CoordinatorWorkItemDoc {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    const existing = this.mirror.getState().workItems?.[workItemId] as
+      | import('@lody/shared').CoordinatorWorkItemDoc
+      | undefined;
+    const next = updater(existing);
+    this.mirror.setState((draft) => {
+      draft.workItems ??= {};
+      draft.workItems[workItemId] = next;
+    });
+    return next;
+  }
+
+  upsertCoordinatorTrigger(
+    triggerId: string,
+    doc: import('@lody/shared').CoordinatorTriggerDoc
+  ): void {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    this.mirror.setState((draft) => {
+      draft.triggers ??= {};
+      draft.triggers[triggerId] = doc;
+    });
+  }
+
+  deleteCoordinatorTrigger(triggerId: string): void {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    if (!this.mirror.getState().triggers?.[triggerId]) return;
+    this.mirror.setState((draft) => {
+      if (draft.triggers) {
+        delete draft.triggers[triggerId];
+      }
+    });
   }
 
   /** Trusted human send only; generic history writes/imports never author this outbox. */
@@ -4425,6 +4466,8 @@ type MachineMetaPatch = Partial<MachineMeta> & Pick<MachineMeta, 'id'>;
 export type AcpCapabilityWriteOptions = {
   signal?: AbortSignal;
   sessionTitle?: boolean;
+  /** Runtime advertised standard ACP `sessionCapabilities.systemPrompt`. */
+  systemPrompt?: boolean;
   rateLimits?: LodyRateLimitsCapability;
   /**
    * Every model's controls from the adapter's `_meta.lody.modelCapabilities`,
@@ -4463,6 +4506,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     acknowledgedSteer: entry.acknowledgedSteer,
     goalActions: entry.goalActions,
     sessionTitle: entry.sessionTitle,
+    systemPrompt: entry.systemPrompt,
     rateLimits: entry.rateLimits,
     sessionForkWorktree: entry.sessionForkWorktree,
   });
@@ -4594,6 +4638,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       acknowledgedSteer,
       goalActions: goalActions?.length ? goalActions : undefined,
       sessionTitle: options.sessionTitle,
+      systemPrompt: options.systemPrompt,
       rateLimits: options.rateLimits,
       sessionForkWorktree: sessionFork,
       modelReasoningEfforts:

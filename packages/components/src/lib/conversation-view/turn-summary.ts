@@ -53,6 +53,7 @@ const textLength = (value: unknown): number => {
  * text — only the first prose item's head is sliced.
  */
 export function summarizeTurnShallow(turnMap: LoroMap): TurnSummary {
+  let coordinatorHeadText = '';
   let headText = '';
   let textChars = 0;
   let toolCalls = 0;
@@ -81,6 +82,13 @@ export function summarizeTurnShallow(turnMap: LoroMap): TurnSummary {
                 : '';
           if (head.trim()) headText = head;
         }
+      } else if (type === 'coordinator_message') {
+        const body = map.get('body');
+        textChars += textLength(body);
+        if (!coordinatorHeadText && typeof body === 'string') {
+          const head = body.slice(0, TURN_SUMMARY_HEAD_CHARS);
+          if (head.trim()) coordinatorHeadText = head;
+        }
       } else if (type === 'thought') {
         thoughts += 1;
         textChars += textLength(map.get('text'));
@@ -91,5 +99,5 @@ export function summarizeTurnShallow(turnMap: LoroMap): TurnSummary {
       }
     }
   }
-  return { headText, textChars, toolCalls, thoughts };
+  return { headText: coordinatorHeadText || headText, textChars, toolCalls, thoughts };
 }

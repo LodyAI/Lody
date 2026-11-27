@@ -559,6 +559,9 @@ export type PendingScheduledTask = {
 
 export type SessionHistoryBackendKind = 'loro' | 'roost';
 
+/** Versioned so a later coordinator contract can be told apart from this one. */
+export type SessionCoordinatorMarker = { version: 1 };
+
 /** Missing discriminator means a legacy session and must remain pinned to Loro. */
 export const LEGACY_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
 
@@ -722,6 +725,29 @@ export type SessionMeta = SessionPullRequestRecordFields & {
   openedByRootSessionId?: SessionId;
   /** Project binding for this session (GitHub repo or local project). */
   project?: ProjectRef;
+  /**
+   * Coordinator conversation marker, written once at creation. The owning daemon
+   * delivers the coordinator system prompt over ACP on every session establishment;
+   * creators require `coordinatorSessions` on the machine and an agent config whose
+   * capability advertises `systemPrompt` (`session-coordinator.ts`).
+   */
+  coordinator?: SessionCoordinatorMarker;
+  /**
+   * Project mode: when the owner accepted this conversation's result as a
+   * coordinator task. Activity after this time sends the task back to review.
+   */
+  coordinatorTaskAcceptedAt?: number;
+  /**
+   * Project mode: optional task-group (`WorkItem`) identifier joining one or more
+   * collaborating child conversations under a single `T<n>` work item. When absent,
+   * the conversation forms an implicit solo work item keyed by its own `id`.
+   */
+  workItemId?: string;
+  /**
+   * Project mode: optional short role label of this conversation inside its
+   * multi-session `WorkItem` (for example `implement`, `review`, `submodule:pi`).
+   */
+  workItemRole?: string;
   projectRun?: SessionProjectRun;
   repoFullName?: string;
   /** Base branch selected when the session starts (starting point). */

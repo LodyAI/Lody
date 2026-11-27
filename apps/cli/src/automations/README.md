@@ -80,14 +80,15 @@ Session ownership and active registration for every call. CodeMode combines thes
 observations into predicates using its supported JavaScript subset. Resources describe available data, not a
 catalog of business conditions.
 
-| Resource              | Observation                                                                         |
-| --------------------- | ----------------------------------------------------------------------------------- |
-| `session`             | Bound Session's input identifiers and stopped/archived flags                        |
-| `session.group`       | Authoritative group settlement (`yes`, `no` or `unknown`), excluding this wait      |
-| `github.pullRequests` | Associated PR lifecycle and timestamped poll observations                           |
-| `github.workflowRuns` | Current PR HEAD's trusted Run/Attempt observations, or `status: "unknown"`          |
-| `provider.capacity`   | Current binding's sanitized quota windows and eligibility; no active provider query |
-| `events`              | Bound Session's persisted facts; optional `since` timestamp and `limit` (1–100)     |
+| Resource                | Observation                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| `session`               | Bound Session's input identifiers and stopped/archived flags                        |
+| `session.group`         | Authoritative group settlement (`yes`, `no` or `unknown`), excluding this wait      |
+| `coordinator.workItems` | Coordinator Session's managed `WorkItem`s, member `SessionMeta`, PRs and view focus |
+| `github.pullRequests`   | Associated PR lifecycle and timestamped poll observations                           |
+| `github.workflowRuns`   | Current PR HEAD's trusted Run/Attempt observations, or `status: "unknown"`          |
+| `provider.capacity`     | Current binding's sanitized quota windows and eligibility; no active provider query |
+| `events`                | Bound Session's persisted facts; optional `since` timestamp and `limit` (1–100)     |
 
 All other resources/parameters are rejected. A new resource adapter belongs beside
 its existing owner and must define its scope, freshness and admission evidence.

@@ -1,6 +1,7 @@
 import { Immer, enablePatches, type Patch } from 'immer';
 import type { AgentHistoryMutationPath } from '../acp/history-apply';
 import { markAssistantTurnFinished } from './assistant-finalize';
+import { mergeThreadRootsScalar } from '../coordinator-threads';
 import { planOperationProgress, planOperationCompletion } from './operation-progress';
 import type { StoredLodyOperation } from '../session-orchestration';
 import type { OperationProgressStatus } from '../session-orchestration';
@@ -85,6 +86,31 @@ export type HistoryAction =
       fileId: string;
       relayFileId: string;
       encryption?: import('../encrypted-attachment').EncryptedAttachment;
+    }
+  | {
+      kind: 'coordinator-output';
+      turnId?: string;
+      output:
+        | {
+            kind: 'message';
+            id: string;
+            body: string;
+            images?: import('../ai').SessionImagePayload[];
+            files?: import('../ai').SessionFilePayload[];
+            replyTo?: import('../coordinator-threads').CoordinatorReplyRef;
+            linkedSessionIds?: import('../ids').SessionId[];
+            card?: import('../coordinator-actions').CoordinatorProactiveCardSpec;
+            actions?: import('../coordinator-actions').CoordinatorActionSpec[];
+            createdAt: number;
+          }
+        | { kind: 'status'; status: string; updatedAt: number };
+    }
+  | {
+      kind: 'coordinator-action-resolved';
+      turnId: string;
+      bubbleId: string;
+      actionId: string;
+      resolution: import('../coordinator-actions').CoordinatorActionResolution;
     };
 
 /** Which actions can be committed by reading exactly one body. */
@@ -94,7 +120,9 @@ export function historyActionTarget(action: HistoryAction): string | undefined {
     action.kind === 'user-status' ||
     action.kind === 'finish-assistant' ||
     action.kind === 'assistant-file-diff' ||
-    action.kind === 'assistant-token-usage'
+    action.kind === 'assistant-token-usage' ||
+    action.kind === 'coordinator-output' ||
+    action.kind === 'coordinator-action-resolved'
     ? action.turnId
     : undefined;
 }
@@ -363,6 +391,87 @@ export function applyHistoryAction(
             matched = true;
           }
         }
+      return { turns: history, matched };
+    }
+    case 'coordinator-output': {
+      const entry = action.turnId
+        ? history.find(
+            (t) =>
+              t.id === action.turnId &&
+              t.role === 'assistant' &&
+              t.finished !== true &&
+              typeof t.endedAt !== 'number'
+          )
+        : [...history]
+            .reverse()
+            .find(
+              (t) => t.role === 'assistant' && t.finished !== true && typeof t.endedAt !== 'number'
+            );
+      if (!entry) return { turns: history, matched: false };
+      if (action.output.kind === 'message') {
+        entry.items = [
+          ...(entry.items ?? []),
+          {
+            type: 'coordinator_message',
+            id: action.output.id,
+            body: action.output.body,
+            ...(action.output.images?.length ? { images: action.output.images } : {}),
+            ...(action.output.files?.length ? { files: action.output.files } : {}),
+            ...(action.output.replyTo ? { replyTo: action.output.replyTo } : {}),
+            ...(action.output.linkedSessionIds?.length
+              ? { linkedSessionIds: action.output.linkedSessionIds }
+              : {}),
+            ...(action.output.card ? { card: action.output.card } : {}),
+            ...(action.output.actions?.length ? { actions: action.output.actions } : {}),
+            createdAt: action.output.createdAt,
+          },
+        ];
+        if (action.output.replyTo?.threadRootId) {
+          const nextRoots = mergeThreadRootsScalar(entry.threadRoots, [
+            action.output.replyTo.threadRootId,
+          ]);
+          if (nextRoots) entry.threadRoots = nextRoots;
+        }
+      } else {
+        const withoutStatus = (entry.items ?? []).filter(
+          (item) => item.type !== 'coordinator_status'
+        );
+        const trimmed = action.output.status.trim();
+        entry.items = trimmed
+          ? [
+              ...withoutStatus,
+              {
+                type: 'coordinator_status',
+                status: trimmed,
+                updatedAt: action.output.updatedAt,
+              },
+            ]
+          : withoutStatus;
+      }
+      return { turns: history, matched: true };
+    }
+    case 'coordinator-action-resolved': {
+      const entry = history.find((t) => t.id === action.turnId && t.role === 'assistant');
+      if (!entry) return { turns: history, matched: false };
+      let matched = false;
+      for (const item of entry.items ?? []) {
+        if (item.type === 'coordinator_message' && item.id === action.bubbleId) {
+          const current = item.actionResolutions?.[action.actionId];
+          if (
+            current &&
+            current.status === action.resolution.status &&
+            current.summary === action.resolution.summary
+          ) {
+            return { turns: history, matched: true };
+          }
+          item.actionResolutions = {
+            ...(item.actionResolutions ?? {}),
+            [action.actionId]: action.resolution,
+          };
+          matched = true;
+          break;
+        }
+      }
       return { turns: history, matched };
     }
   }

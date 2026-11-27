@@ -403,6 +403,35 @@ describe('Workspace placement under openers across groups', () => {
     // cannot host the row, so it stays where it was.
     expect(place(natural, [opener], () => false)).toBe(natural);
   });
+
+  it('merges GitHub repository groups whose names differ only by casing and displays the newest casing', () => {
+    const legacyLower = makeRow({
+      sessionId: 'legacy-lower',
+      repoFullName: 'LodyAI/lody',
+      latestMessageAt: 100,
+    });
+    const currentUpper = makeRow({
+      sessionId: 'current-upper',
+      repoFullName: 'LodyAI/Lody',
+      latestMessageAt: 200,
+    });
+
+    const groups = buildGroups(
+      [legacyLower, currentUpper],
+      [
+        { repoFullName: 'LodyAI/lody', collapsed: true },
+        { repoFullName: 'LodyAI/Lody', collapsed: false },
+      ],
+      false
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.repoFullName).toBe('LodyAI/Lody');
+    expect(groups[0]?.collapsed).toBe(true);
+    expect(groups[0]?.sessions.map((row) => row.sessionId)).toEqual([
+      'current-upper',
+      'legacy-lower',
+    ]);
+  });
 });
 
 describe('desktop sidebar mark-unread menus', () => {

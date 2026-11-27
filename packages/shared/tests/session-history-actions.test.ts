@@ -13,6 +13,13 @@ import type { SessionId } from '../src/ids';
 import type { StoredLodyOperation } from '../src/session-orchestration';
 import { createHistoryWriter } from '../src/history-writer';
 import { planOperationProgress } from '../src/session-data/operation-progress';
+import { formatCoordinatorAnchorId, parseCoordinatorAnchorId } from '../src/coordinator-threads';
+import {
+  computeCoordinatorActionDedupKey,
+  matchUserMessageToOpenCoordinatorCards,
+  normalizeCoordinatorActionSpecs,
+  normalizeCoordinatorProactiveCard,
+} from '../src/coordinator-actions';
 const sid = 'actions' as SessionId;
 const row = (id: string, role: SessionTurn['role'] = 'assistant'): SessionEntry => ({
   id,
@@ -614,4 +621,421 @@ it('keeps update-interruption provenance on the user turn so peers can offer Con
   expect(await copy.history.readTurn('interrupted')).toMatchObject({
     turn: { cancellationReason: 'machine_update' },
   });
+});
+
+it('syncs coordinator bubble replies, originThreadId progress, and shallow directory threadRoots without extra Loro containers', async () => {
+  expect(
+    parseCoordinatorAnchorId(
+      formatCoordinatorAnchorId({
+        kind: 'coordinator_bubble',
+        turnId: 'assistant:550e8400-e29b-41d4-a716-446655440000',
+        bubbleId: 'b-root-uuid',
+      })
+    )
+  ).toEqual({
+    kind: 'coordinator_bubble',
+    turnId: 'assistant:550e8400-e29b-41d4-a716-446655440000',
+    bubbleId: 'b-root-uuid',
+  });
+  expect(parseCoordinatorAnchorId('bubble:assistant:goal:resume:synthetic:b-2')).toEqual({
+    kind: 'coordinator_bubble',
+    turnId: 'assistant:goal:resume:synthetic',
+    bubbleId: 'b-2',
+  });
+
+  const doc = new LoroDoc();
+  const data = createLoroSessionData({ sessionId: sid, doc });
+  const replyToRoot = {
+    target: {
+      kind: 'coordinator_bubble' as const,
+      turnId: 'assistant:root-turn',
+      bubbleId: 'b-root',
+    },
+    threadRootId: 'bubble:assistant:root-turn:b-root',
+    author: 'coordinator' as const,
+    previewText: '旧链接保留多久？',
+  };
+
+  await data.commands.appendTurn({
+    id: 'user-reply-1',
+    role: 'user',
+    timestamp: '2026-11-21T00:00:01.000Z',
+    threadRoots: 'bubble:assistant:root-turn:b-root',
+    inputConfig: {
+      prompt: '保留 7 天',
+      inputBlocks: [{ type: 'text', text: '保留 7 天' }],
+      cliType: 'builtin',
+      agentType: 'claude',
+      replyTo: replyToRoot,
+    },
+    items: [{ type: 'text', text: '保留 7 天' }],
+  });
+
+  await data.commands.appendTurn({
+    id: 'assistant:user-reply-1',
+    role: 'assistant',
+    timestamp: '2026-11-21T00:00:02.000Z',
+    items: [],
+  });
+  await data.commands.applyHistoryAction({
+    kind: 'coordinator-output',
+    turnId: 'assistant:user-reply-1',
+    output: {
+      kind: 'message',
+      id: 'b-reply-a',
+      body: '已转告子任务继续处理。',
+      replyTo: {
+        target: { kind: 'user_turn', turnId: 'user-reply-1' },
+        threadRootId: 'bubble:assistant:root-turn:b-root',
+        author: 'user',
+        previewText: '保留 7 天',
+      },
+      linkedSessionIds: ['child-task-1' as SessionId],
+      createdAt: 1001,
+    },
+  });
+  await data.commands.applyHistoryAction({
+    kind: 'coordinator-output',
+    turnId: 'assistant:user-reply-1',
+    output: {
+      kind: 'message',
+      id: 'b-reply-b',
+      body: '另一条话串的任务也已完成。',
+      replyTo: {
+        target: {
+          kind: 'coordinator_bubble',
+          turnId: 'assistant:other-turn',
+          bubbleId: 'b-other',
+        },
+        threadRootId: 'bubble:assistant:other-turn:b-other',
+        author: 'coordinator',
+        previewText: '另一条话串',
+      },
+      createdAt: 1002,
+    },
+  });
+
+  await data.commands.applyHistoryAction({
+    kind: 'operation-progress',
+    operation: {
+      workspaceId: 'workspace' as StoredLodyOperation['workspaceId'],
+      ownerMachineId: 'machine' as StoredLodyOperation['ownerMachineId'],
+      requesterSessionId: sid,
+      requesterUserId: 'user',
+      operationId: 'op-thread-a',
+      kind: 'session_create',
+      fingerprint: 'synthetic-thread',
+      canonicalCommand: {},
+      frozenContinuationConfig: {
+        inputConfig: {},
+        originThreadId: 'bubble:assistant:other-turn:b-other',
+      },
+      initiatorChainDepth: 0,
+      createdAt: '2026-11-21T00:00:03.000Z',
+      deadlineAt: '2026-11-22T00:00:03.000Z',
+      state: 'active',
+      items: [
+        {
+          status: 'active',
+          inputDurable: true,
+          target: { sessionId: 'child-task-2' as SessionId, userTurnId: 'u-2' },
+        },
+      ],
+    },
+    timestamp: '2026-11-21T00:00:03.000Z',
+    statuses: [['child-task-2\0u-2', 'running']],
+  });
+
+  const peer = new LoroDoc();
+  peer.import(doc.export({ mode: 'snapshot' }));
+  const copy = createLoroSessionData({ sessionId: sid, doc: peer });
+
+  const directory = await copy.history.readDirectory(0, 10);
+  expect(
+    directory.map((row) => ({
+      threadRoots: row.state === 'ready' ? row.scalars.threadRoots : undefined,
+    }))
+  ).toEqual([
+    { threadRoots: 'bubble:assistant:root-turn:b-root' },
+    { threadRoots: 'bubble:assistant:root-turn:b-root\nbubble:assistant:other-turn:b-other' },
+    { threadRoots: 'bubble:assistant:other-turn:b-other' },
+  ]);
+
+  const userTurn = await copy.history.readTurn('user-reply-1');
+  expect(userTurn).toMatchObject({
+    state: 'ready',
+    turn: {
+      threadRoots: 'bubble:assistant:root-turn:b-root',
+      inputConfig: { replyTo: replyToRoot },
+    },
+  });
+
+  const assistantTurn = await copy.history.readTurn('assistant:user-reply-1');
+  expect(assistantTurn).toMatchObject({
+    state: 'ready',
+    turn: {
+      threadRoots: 'bubble:assistant:root-turn:b-root\nbubble:assistant:other-turn:b-other',
+      items: [
+        {
+          type: 'coordinator_message',
+          id: 'b-reply-a',
+          linkedSessionIds: ['child-task-1'],
+          replyTo: { threadRootId: 'bubble:assistant:root-turn:b-root' },
+        },
+        {
+          type: 'coordinator_message',
+          id: 'b-reply-b',
+          replyTo: { threadRootId: 'bubble:assistant:other-turn:b-other' },
+        },
+      ],
+    },
+  });
+
+  await data.commands.applyHistoryAction({
+    kind: 'coordinator-output',
+    turnId: 'assistant:user-reply-1',
+    output: {
+      kind: 'message',
+      id: 'b-actions',
+      body: 'PR 已就绪，选择下一步操作：',
+      actions: [
+        {
+          id: 'act-merge',
+          label: 'Rebase 合并',
+          tone: 'primary',
+          source: 'agent',
+          intent: {
+            kind: 'client_command',
+            command: 'github.pr_merge',
+            params: { sessionId: 'child-task-1', method: 'rebase' },
+          },
+        },
+        {
+          id: 'act-create-pr',
+          label: '帮子任务创建 PR',
+          source: 'agent',
+          intent: {
+            kind: 'session_dispatch',
+            sessionId: 'child-task-2' as SessionId,
+            prompt: '请提交分支并创建 PR',
+            mode: 'send',
+          },
+        },
+      ],
+      createdAt: 1005,
+    },
+  });
+
+  const resolvedRes = await data.commands.applyHistoryAction({
+    kind: 'coordinator-action-resolved',
+    turnId: 'assistant:user-reply-1',
+    bubbleId: 'b-actions',
+    actionId: 'act-create-pr',
+    resolution: {
+      status: 'executed',
+      resolvedAt: 2000,
+      summary: '已派发创建 PR',
+    },
+  });
+  expect(resolvedRes.matched).toBe(true);
+
+  const peer2 = new LoroDoc();
+  peer2.import(doc.export({ mode: 'snapshot' }));
+  const copy2 = createLoroSessionData({ sessionId: sid, doc: peer2 });
+  const updatedAssistant = await copy2.history.readTurn('assistant:user-reply-1');
+  expect(updatedAssistant).toMatchObject({
+    state: 'ready',
+    turn: {
+      items: [
+        { id: 'b-reply-a' },
+        { id: 'b-reply-b' },
+        {
+          type: 'coordinator_message',
+          id: 'b-actions',
+          actions: [
+            { id: 'act-merge', label: 'Rebase 合并' },
+            { id: 'act-create-pr', label: '帮子任务创建 PR' },
+          ],
+          actionResolutions: {
+            'act-create-pr': {
+              status: 'executed',
+              resolvedAt: 2000,
+              summary: '已派发创建 PR',
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  expect(
+    computeCoordinatorActionDedupKey({
+      id: 'a1',
+      label: 'Rebase 合并',
+      intent: {
+        kind: 'client_command',
+        command: 'github.pr_merge',
+        params: { sessionId: 'lody://session/child-task-1?workspace=ws' },
+      },
+    })
+  ).toBe('pr.merge:child-task-1');
+  expect(
+    computeCoordinatorActionDedupKey({
+      id: 'a2',
+      label: '创建 PR',
+      intent: {
+        kind: 'session_dispatch',
+        sessionId: 'child-task-2' as SessionId,
+        prompt: 'push and create a pull request',
+      },
+    })
+  ).toBe('pr.create:child-task-2');
+  expect(
+    normalizeCoordinatorActionSpecs([
+      {
+        id: 'known',
+        label: 'Keep 7 days',
+        intent: { kind: 'coordinator_prompt', prompt: 'Keep 7 days' },
+      },
+      {
+        id: 'future-unknown',
+        label: 'Future Teleport',
+        intent: { kind: 'future_quantum_leap', target: 'mars' },
+      },
+    ])
+  ).toEqual([
+    {
+      id: 'known',
+      label: 'Keep 7 days',
+      intent: { kind: 'coordinator_prompt', prompt: 'Keep 7 days' },
+    },
+  ]);
+
+  const cardWrite = await data.commands.applyHistoryAction({
+    kind: 'coordinator-output',
+    turnId: 'assistant:user-reply-1',
+    output: {
+      kind: 'message',
+      id: 'b-card-only',
+      body: '',
+      card: {
+        kind: 'next_step',
+        title: 'iOS 输入框配置同步问题已定位',
+        summary: '冷启动读取后未订阅机器能力更新，建议直接安排修复并提 PR。',
+        actions: [
+          {
+            id: 'card-act-1',
+            label: '让天才程序员修复并创建 PR',
+            description: '在现有排查会话上实现修复、补测试并提 PR。',
+            tone: 'primary',
+            intent: {
+              kind: 'session_dispatch',
+              sessionId: 'child-task-1' as SessionId,
+              prompt: '请修复该问题并创建 PR',
+              mode: 'send',
+            },
+          },
+        ],
+      },
+      createdAt: 2200,
+    },
+  });
+  expect(cardWrite.matched).toBe(true);
+
+  const peer3 = new LoroDoc();
+  peer3.import(doc.export({ mode: 'snapshot' }));
+  const copy3 = createLoroSessionData({ sessionId: sid, doc: peer3 });
+  const assistantWithCard = await copy3.history.readTurn('assistant:user-reply-1');
+  expect(assistantWithCard).toMatchObject({
+    state: 'ready',
+    turn: {
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'coordinator_message',
+          id: 'b-card-only',
+          body: '',
+          card: {
+            kind: 'next_step',
+            title: 'iOS 输入框配置同步问题已定位',
+            summary: '冷启动读取后未订阅机器能力更新，建议直接安排修复并提 PR。',
+            actions: [
+              expect.objectContaining({
+                id: 'card-act-1',
+                label: '让天才程序员修复并创建 PR',
+              }),
+            ],
+          },
+        }),
+      ]),
+    },
+  });
+
+  expect(
+    normalizeCoordinatorProactiveCard({
+      kind: 'review_ready',
+      title: 'PR ready',
+      actions: [
+        {
+          id: 'ok-1',
+          label: 'Merge',
+          intent: { kind: 'client_command', command: 'github.pr_merge', params: {} },
+        },
+        {
+          id: 'future-2',
+          label: 'Future',
+          intent: { kind: 'unknown_future_intent' },
+        },
+      ],
+    })
+  ).toEqual({
+    kind: 'review_ready',
+    title: 'PR ready',
+    actions: [
+      {
+        id: 'ok-1',
+        label: 'Merge',
+        intent: { kind: 'client_command', command: 'github.pr_merge', params: {} },
+      },
+    ],
+  });
+
+  const openCards = [
+    {
+      key: 't3\0card-speed',
+      turnId: 't3',
+      bubbleId: 'card-speed',
+      cardTitle: 'Composer 单闪电与双闪电已可预览',
+      taskNumbers: [3],
+      taskTitles: ['修复 Lody composer 速度图标'],
+      prNumbers: [2631],
+    },
+    {
+      key: 't4\0card-avatar',
+      turnId: 't4',
+      bubbleId: 'card-avatar',
+      isImmediatelyPrecedingTurn: true,
+      cardTitle: '10 种 Lottie 头像可离线试玩',
+      cardSummary: '水母是默认角色，已可导出选中头像。',
+      taskNumbers: [4],
+      taskTitles: ['Lody 水生动物 Lottie 可定制头像'],
+    },
+  ];
+  expect(
+    matchUserMessageToOpenCoordinatorCards({
+      text: '头像的效果有一些粗糙，你让它可以先生成图片给我看',
+      openCards,
+    })
+  ).toEqual(['t4\0card-avatar']);
+  expect(
+    matchUserMessageToOpenCoordinatorCards({
+      text: '把 T3 的 #2631 先合并了吧',
+      openCards,
+    })
+  ).toEqual(['t3\0card-speed']);
+  expect(
+    matchUserMessageToOpenCoordinatorCards({
+      text: '好，就按推荐的执行',
+      openCards,
+    })
+  ).toEqual(['t4\0card-avatar']);
 });

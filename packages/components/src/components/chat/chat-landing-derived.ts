@@ -346,7 +346,9 @@ export function getChatLandingProjectRecency(
   const byProject = new Map<string, number>();
   const byGroup = new Map<string, number>();
   for (const session of sessions) {
-    recordLatestTimestamp(byRepo, getSessionGitHubRepoFullName(session), session.lastMessageAt);
+    const repoFullName = getSessionGitHubRepoFullName(session);
+    recordLatestTimestamp(byRepo, repoFullName, session.lastMessageAt);
+    recordLatestTimestamp(byRepo, repoFullName?.toLowerCase() ?? null, session.lastMessageAt);
     recordLatestTimestamp(byProject, getSessionLocalProjectKey(session), session.lastMessageAt);
     recordLatestTimestamp(byGroup, session.projectRun?.id ?? null, session.lastMessageAt);
   }
@@ -359,8 +361,10 @@ export function compareChatLandingRepositoryByRecency(
   latestMessageAtByRepo: ReadonlyMap<string, number>
 ): number {
   const timestampComparison = compareNullableTimestampDesc(
-    latestMessageAtByRepo.get(left.fullName),
-    latestMessageAtByRepo.get(right.fullName)
+    latestMessageAtByRepo.get(left.fullName) ??
+      latestMessageAtByRepo.get(left.fullName.toLowerCase()),
+    latestMessageAtByRepo.get(right.fullName) ??
+      latestMessageAtByRepo.get(right.fullName.toLowerCase())
   );
   if (timestampComparison !== 0) return timestampComparison;
   return left.fullName.localeCompare(right.fullName);
@@ -688,6 +692,11 @@ export type ChatLandingSearch = {
   repo?: string;
   /** Project group id, with `context: 'group'`. */
   group?: string;
+  /**
+   * Developer mode: the next conversation started here is a coordinator. A mode of
+   * the page, not a one-shot event, so selection mirroring keeps it.
+   */
+  coordinator?: true;
   pinSection?: string;
 };
 
@@ -706,6 +715,9 @@ export function parseChatLandingSearch(search: Record<string, unknown>): ChatLan
     project: typeof search.project === 'string' ? search.project : undefined,
     repo: typeof search.repo === 'string' ? search.repo : undefined,
     group: typeof search.group === 'string' ? search.group : undefined,
+    ...(search.coordinator === true || search.coordinator === 'true'
+      ? { coordinator: true as const }
+      : {}),
     pinSection:
       typeof search.pinSection === 'string' && search.pinSection ? search.pinSection : undefined,
   };

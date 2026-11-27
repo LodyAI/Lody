@@ -412,6 +412,7 @@ export async function fetchAcpCapabilities(
       const capabilities = normalizeAcpSessionCapabilities(sessionResponse, {
         sessionFork: client.supportsSessionFork?.() === true,
         sessionTitle: client.supportsSessionTitleGeneration(),
+        systemPrompt: client.supportsSystemPrompt(),
         rateLimits: client.getRateLimitsCapability(),
         acknowledgedSteer: client.supportsAcknowledgedSteer(),
         goalActions: client.getGoalCapability()?.actions.slice(),

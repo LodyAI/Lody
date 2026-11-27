@@ -1,4 +1,5 @@
 import { historyValuesEqual } from '../history-values-equal';
+import { mergeThreadRootsScalar } from '../coordinator-threads';
 import type { LodyOperationItemResult, StoredLodyOperation } from '../session-orchestration';
 import type {
   OperationProgressContent,
@@ -64,10 +65,12 @@ export const buildOperationProgressContent = (
     return acc;
   }, []);
   if (items.length === 0) return null;
+  const originThreadId = operation.frozenContinuationConfig.originThreadId?.trim();
   return {
     type: 'operation_progress',
     operationId: operation.operationId,
     operationKind: operation.kind,
+    ...(originThreadId ? { originThreadId } : {}),
     items,
   };
 };
@@ -141,12 +144,14 @@ export function planOperationProgress(
     if (!content) return history;
     const merged = mergeOperationProgressContent(existingProgress, content);
     const nextItems = [merged];
+    const nextThreadRoots = mergeThreadRootsScalar(existing?.threadRoots, [merged.originThreadId]);
     const entry: SessionEntry = {
       ...(existing ?? {}),
       id,
       role: 'system',
       userId: operation.requesterUserId,
       timestamp: existing?.timestamp ?? timestamp,
+      ...(nextThreadRoots ? { threadRoots: nextThreadRoots } : {}),
       items: nextItems,
       fileDiff: existing?.fileDiff ?? [],
       finished: true,
@@ -212,31 +217,51 @@ export function planOperationCompletion(
   turn: SessionEntry
 ): SessionEntry[] {
   const progressMessageId = findProgressMessageId(history, operation);
+  const originThreadId = operation.frozenContinuationConfig.originThreadId?.trim();
   const desired = turn.items?.find((item) => item.type === 'operation_completion');
   if (desired?.type !== 'operation_completion') throw new Error('Missing completion item');
   const existing = history.find((entry) => entry.id === turn.id);
-  if (!existing)
+  if (!existing) {
+    const nextThreadRoots = mergeThreadRootsScalar(turn.threadRoots, [
+      originThreadId,
+      desired.originThreadId,
+    ]);
     return [
       ...history,
       {
         ...turn,
+        ...(nextThreadRoots ? { threadRoots: nextThreadRoots } : {}),
         items: turn.items?.map((item) =>
-          item === desired && progressMessageId ? { ...item, progressMessageId } : item
+          item === desired
+            ? {
+                ...item,
+                ...(progressMessageId ? { progressMessageId } : {}),
+                ...(originThreadId ? { originThreadId } : {}),
+              }
+            : item
         ),
       },
     ];
+  }
   if (existing.role !== 'system') return history;
-  return history.map((entry) =>
-    entry !== existing
-      ? entry
-      : {
-          ...entry,
-          items: entry.items?.map((item) => {
-            if (item.type !== 'operation_completion' || item.deliveryId !== desired.deliveryId)
-              return item;
-            const next = progressMessageId ? { ...item, progressMessageId } : { ...item };
-            return next;
-          }),
-        }
-  );
+  return history.map((entry) => {
+    if (entry !== existing) return entry;
+    const nextThreadRoots = mergeThreadRootsScalar(entry.threadRoots, [
+      originThreadId,
+      desired.originThreadId,
+    ]);
+    return {
+      ...entry,
+      ...(nextThreadRoots ? { threadRoots: nextThreadRoots } : {}),
+      items: entry.items?.map((item) => {
+        if (item.type !== 'operation_completion' || item.deliveryId !== desired.deliveryId)
+          return item;
+        return {
+          ...item,
+          ...(progressMessageId ? { progressMessageId } : {}),
+          ...(originThreadId ? { originThreadId } : {}),
+        };
+      }),
+    };
+  });
 }

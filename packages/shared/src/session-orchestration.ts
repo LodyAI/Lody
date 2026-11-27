@@ -12,6 +12,7 @@ export const LODY_OPERATION_MIN_DEADLINE_SECONDS = 60;
 export const LODY_OPERATION_MAX_DEADLINE_SECONDS = 604_800;
 export const LODY_OPERATION_COMMAND_MAX_BYTES = 256 * 1024;
 export const LODY_OPERATION_COMPLETION_MAX_BYTES = 64 * 1024;
+export const LODY_OPERATION_OUTPUT_MAX_ATTACHMENTS = 16;
 export const LODY_MAX_CHAIN_DEPTH = 16;
 /** Dispatches from a Turn at or beyond this depth report the remaining chain budget. */
 export const LODY_CHAIN_DEPTH_SOFT_LIMIT = 8;
@@ -65,9 +66,27 @@ export const LodyErrorSchema = z
 export type LodyError = z.infer<typeof LodyErrorSchema>;
 
 const OperationTargetSchema = z.object({ sessionId: z.string(), userTurnId: z.string() }).strict();
+export const LodyOperationOutputAttachmentSchema = z
+  .object({
+    kind: z.enum(['image', 'file']),
+    ref: z.string().trim().min(1).max(256),
+    fileName: z.string().max(255).optional(),
+    mimeType: z.string().max(255),
+    sizeBytes: z.number().int().nonnegative().optional(),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export type LodyOperationOutputAttachment = z.infer<typeof LodyOperationOutputAttachmentSchema>;
+
 const OperationOutputPreviewSchema = z
   .object({
     text: z.string(),
+    attachments: z
+      .array(LodyOperationOutputAttachmentSchema)
+      .max(LODY_OPERATION_OUTPUT_MAX_ATTACHMENTS)
+      .optional(),
     truncated: z.literal(true).optional(),
     omittedBytes: z.number().int().nonnegative().optional(),
   })
@@ -160,6 +179,7 @@ export type OperationProgressContent = {
   type: 'operation_progress';
   operationId: string;
   operationKind: OperationProgressKind;
+  originThreadId?: string;
   items: OperationProgressItem[];
 };
 
@@ -178,6 +198,7 @@ export type LodyOperationItemTarget = {
 
 export type LodyOperationOutputPreview = {
   text: string;
+  attachments?: LodyOperationOutputAttachment[];
   truncated?: true;
   omittedBytes?: number;
 };
@@ -254,6 +275,8 @@ export type FrozenOperationContinuationConfig = {
   inputConfig: SessionTurnInputConfig;
   /** Frozen causal Turn for delegated Operations; recovery must not re-resolve it. */
   sourceTurnId?: string;
+  /** Coordinator thread root anchor (`turn:...` or `bubble:...`) active when dispatched. */
+  originThreadId?: string;
   /** Human requests whose result this requester is still assembling. Not authorization. */
   notificationOriginTurnIds?: string[];
   /**
@@ -313,6 +336,8 @@ export type OperationCompletionContent = {
   operationKind: LodyOperationKind;
   /** Stable system history entry id for the matching operation_progress card, when one exists. */
   progressMessageId?: string;
+  /** Coordinator thread root anchor under which this Operation was dispatched, when applicable. */
+  originThreadId?: string;
   completion: LodyOperationCompletion;
 };
 

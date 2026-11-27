@@ -27,6 +27,9 @@ export type StickyWorkGroupRow =
         | { kind: 'footer' }
         | { kind: 'plan' }
         | { kind: 'subagent_tasks' }
+        | { kind: 'coordinator_bubble' }
+        | { kind: 'coordinator_card' }
+        | { kind: 'coordinator_notice' }
         | { kind: 'content' };
     }
   | {

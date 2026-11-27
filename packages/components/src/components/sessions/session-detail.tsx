@@ -64,12 +64,14 @@ import {
   statusViewTier,
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
+  isCoordinatorSession,
   isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
   SessionForkOperationSchema,
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsProtocolCapability,
   type CommentReferencePayload,
+  type CoordinatorReplyRef,
   type LocalProjectHistoryProvider,
   type LocalProjectId,
   type LocalProjectMeta,
@@ -84,6 +86,7 @@ import {
 } from '@lody/shared';
 import {
   SessionChatInterface,
+  type CoordinatorThreadHostState,
   type SessionChatInterfaceHandle,
   type SessionChatInterfaceProps,
   type SessionChatToolbar,
@@ -288,6 +291,10 @@ import {
   type PersistedSidePanelTab,
 } from '@/lib/session-draft-tabs';
 import {
+  readCoordinatorReplyDraft,
+  writeCoordinatorReplyDraft,
+} from '@/components/project-mode/coordinator-composer-draft';
+import {
   getPullRequestNumber,
   getPullRequestRepoFullName,
   getSessionGitHubState,
@@ -387,6 +394,29 @@ import {
 } from '@/lib/session-create-analytics';
 import { persistAgentSessionDefaults } from '@/lib/local-storage-cache';
 import { SessionChangesSidebar } from './session-changes-sidebar';
+import { developerModeEnabledAtom } from '@/atoms/settings';
+import {
+  parseBrowserAddress,
+  resolveSessionPrimaryPullRequest,
+  type SessionPullRequestView,
+} from '@lody/shared';
+import { parseGitHubReferenceUrl } from '@/components/ai-gui/github-reference-link';
+import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
+import { ProjectBoard } from '@/components/project-mode/project-board';
+import { CoordinatorConversationProvider } from '@/components/project-mode/coordinator-conversation';
+import { ConnectedCoordinatorThreadPanel } from '@/components/project-mode/coordinator-thread-panel';
+import {
+  getCoordinatorThreadPanelTabId,
+  parseCoordinatorThreadPanelTabId,
+} from '@/components/project-mode/coordinator-thread-model';
+import { getSessionCoordinatorProjectKey } from '@/components/project-mode/project-board-model';
+import {
+  formatExternalUrlTabLabel,
+  OwnedSessionFileViewer,
+  OwnedUrlViewer,
+  PROJECT_BOARD_PANEL_TAB_ID,
+  usePanelSessionMetas,
+} from '@/components/project-mode/coordinator-side-panel';
 
 type SidebarTab = PersistedSidePanelTab;
 
@@ -402,6 +432,11 @@ type ViewerTab =
       focusRequestSeq?: number;
       /** One-shot request to enter the executable HTML preview after opening. */
       htmlPreviewRequestSeq?: number;
+      /**
+       * Project mode: opened from a conversation hosted in the panel, read from
+       * that conversation's own workspace. Never persisted.
+       */
+      ownerSessionId?: SessionId;
     }
   | {
       id: string;
@@ -415,6 +450,20 @@ type ViewerTab =
       label: string;
     }
   | {
+      id: string;
+      type: 'pr';
+      repoFullName: string;
+      prNumber: number;
+      ownerSessionId?: SessionId | null;
+      label: string;
+    }
+  | {
+      id: string;
+      type: 'url';
+      url: string;
+      label: string;
+    }
+  | {
       /** A message attachment: bytes come from the attachment store, not a workspace path. */
       id: string;
       type: 'attachment';
@@ -424,8 +473,16 @@ type ViewerTab =
       label: string;
     };
 
-const getViewerTabAnalyticsType = (tabId: string): 'file' | 'diff' | 'attachment' =>
-  tabId.startsWith('file:') ? 'file' : tabId.startsWith('attachment:') ? 'attachment' : 'diff';
+const getViewerTabAnalyticsType = (tabId: string): 'file' | 'diff' | 'attachment' | 'pr' | 'url' =>
+  tabId.startsWith('file:')
+    ? 'file'
+    : tabId.startsWith('attachment:')
+      ? 'attachment'
+      : tabId.startsWith('pr:')
+        ? 'pr'
+        : tabId.startsWith('url:')
+          ? 'url'
+          : 'diff';
 
 type SessionDetailOpenFileOptions = {
   /** Analytics only. */
@@ -920,6 +977,18 @@ const areViewerTabsEquivalent = (prev: ViewerTab, next: ViewerTab): boolean => {
     );
   }
 
+  if (prev.type === 'pr' && next.type === 'pr') {
+    return (
+      prev.repoFullName === next.repoFullName &&
+      prev.prNumber === next.prNumber &&
+      prev.ownerSessionId === next.ownerSessionId
+    );
+  }
+
+  if (prev.type === 'url' && next.type === 'url') {
+    return prev.url === next.url;
+  }
+
   return false;
 };
 
@@ -1218,9 +1287,6 @@ const SessionDetail = ({
     insideWorkspaceFrame: true,
     includeDesktopWeb: true,
   });
-  // Publish ephemeral "viewing this session" presence (drives the owning
-  // machine's PR poller priority); actively cleared on switch/hide/unmount.
-  usePublishSessionViewing(sessionId);
   const [desktopToolbarContainer, setDesktopToolbarContainer] = useState<HTMLElement | null>(null);
   const chatRefsMap = useRef<
     Map<string, SessionChatInterfaceHandle | DraftSessionChatInterfaceHandle | null>
@@ -1263,6 +1329,9 @@ const SessionDetail = ({
   );
   const [activeSideSessionId, setActiveSideSessionId] = useState<SessionId | null>(
     () => initialTabState.sidePanel.sideSessionId
+  );
+  usePublishSessionViewing(
+    isSidebarVisible && activeSideSessionId ? activeSideSessionId : sessionId
   );
   const [openedSidebarTabs, setOpenedSidebarTabs] = useState<SidebarTab[]>(
     () => initialTabState.sidePanel.tabs
@@ -1440,7 +1509,8 @@ const SessionDetail = ({
   );
   const codeCollabRequestedRole = useCodeCollabRequestedRole();
   const hasFileProviderViewerTabs = useMemo(
-    () => viewerTabs.some((tab) => tab.type === 'file' || tab.type === 'diff'),
+    () =>
+      viewerTabs.some((tab) => (tab.type === 'file' && !tab.ownerSessionId) || tab.type === 'diff'),
     [viewerTabs]
   );
   const isChangesSidebarActive =
@@ -1571,6 +1641,23 @@ const SessionDetail = ({
   // session doc per side chat on every session-detail mount — even for a user
   // who never expands the panel. A side chat mounts when it is first selected
   // and stays mounted afterwards, so switching panels never tears down its state.
+  /** Project mode: independent conversations opened from the board into the right panel. */
+  const [panelSessionIds, setPanelSessionIds] = useState<SessionId[]>([]);
+  const coordinatorReplyStorageScope = currentWorkspaceId
+    ? `${currentWorkspaceId}:${sessionId}`
+    : null;
+  const [coordinatorReplyDraft, setCoordinatorReplyDraft] = useState<CoordinatorReplyRef | null>(
+    () => readCoordinatorReplyDraft(currentWorkspaceId, sessionId)
+  );
+  const [hydratedCoordinatorReplyScope, setHydratedCoordinatorReplyScope] = useState<string | null>(
+    coordinatorReplyStorageScope
+  );
+  const [coordinatorThreadHostState, setCoordinatorThreadHostState] =
+    useState<CoordinatorThreadHostState | null>(null);
+  const [openedThreadTabs, setOpenedThreadTabs] = useState<
+    Array<{ threadRootId: string; previewHint?: string }>
+  >([]);
+  const pendingChatPrefillRef = useRef<Map<string, string>>(new Map());
   const [mountedSideSessionIds, setMountedSideSessionIds] = useState<Set<SessionId>>(
     () => new Set()
   );
@@ -1612,6 +1699,12 @@ const SessionDetail = ({
     setDirtyForkConfirmation(null);
     setClosingSideSessionIds(new Set());
     setMountedSideSessionIds(new Set());
+    setPanelSessionIds([]);
+    setHydratedCoordinatorReplyScope(coordinatorReplyStorageScope);
+    setCoordinatorReplyDraft(readCoordinatorReplyDraft(currentWorkspaceId, sessionId));
+    setCoordinatorThreadHostState(null);
+    setOpenedThreadTabs([]);
+    pendingChatPrefillRef.current.clear();
     setMountedChatSessionIds(new Set());
     setTabOrderState(readStoredTabOrder(sessionId));
     setViewerTabs(nextInitialTabState.viewerTabs);
@@ -1620,6 +1713,17 @@ const SessionDetail = ({
     setMobileDiffState(null);
     setMobileFilesBrowserOpen(false);
     setFileProviderRequestedByInteraction(false);
+  } else if (
+    coordinatorReplyStorageScope &&
+    hydratedCoordinatorReplyScope !== coordinatorReplyStorageScope
+  ) {
+    setHydratedCoordinatorReplyScope(coordinatorReplyStorageScope);
+    if (!coordinatorReplyDraft) {
+      const restoredReply = readCoordinatorReplyDraft(currentWorkspaceId, sessionId);
+      if (restoredReply) {
+        setCoordinatorReplyDraft(restoredReply);
+      }
+    }
   }
 
   const setDraftTabs = useCallback(
@@ -1661,6 +1765,26 @@ const SessionDetail = ({
   const visibleSideSessions = useMemo(
     () => sideSessions.filter((sideSession) => !requestingForkTargetIds.has(sideSession.id)),
     [requestingForkTargetIds, sideSessions]
+  );
+  const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
+  const isProjectCoordinator = Boolean(
+    developerModeEnabled && activeSession && isCoordinatorSession(activeSession)
+  );
+  const coordinatorProject = useMemo(
+    () =>
+      isProjectCoordinator && activeSession ? getSessionCoordinatorProjectKey(activeSession) : null,
+    [activeSession, isProjectCoordinator]
+  );
+  const panelSessions = usePanelSessionMetas(isProjectCoordinator ? panelSessionIds : []);
+  const panelSessionIdSet = useMemo(
+    () => new Set<string>(panelSessions.map((panelSession) => panelSession.id)),
+    [panelSessions]
+  );
+  /** Everything rendered as a conversation inside the right panel. */
+  const panelHostedSessions = useMemo(
+    () =>
+      panelSessions.length > 0 ? [...visibleSideSessions, ...panelSessions] : visibleSideSessions,
+    [panelSessions, visibleSideSessions]
   );
 
   const sessionGroupIds = useMemo(
@@ -2534,6 +2658,15 @@ const SessionDetail = ({
   const setChatTabRef = useCallback(
     (tabId: string, ref: SessionChatInterfaceHandle | DraftSessionChatInterfaceHandle | null) => {
       chatRefsMap.current.set(tabId, ref);
+      if (ref && 'setInputText' in ref) {
+        const pendingText = pendingChatPrefillRef.current.get(tabId);
+        if (pendingText !== undefined) {
+          pendingChatPrefillRef.current.delete(tabId);
+          requestAnimationFrame(() => {
+            ref.setInputText(pendingText);
+          });
+        }
+      }
     },
     []
   );
@@ -4355,7 +4488,7 @@ const SessionDetail = ({
     void (async () => {
       const resolutions = await Promise.all(
         viewerTabs.map(async (tab) => {
-          if (tab.type !== 'file') {
+          if (tab.type !== 'file' || tab.ownerSessionId) {
             return { tab, next: tab };
           }
 
@@ -4781,6 +4914,28 @@ const SessionDetail = ({
       return option ? [{ ...option, closeable: true }] : [];
     });
     return [
+      ...(isProjectCoordinator
+        ? [
+            {
+              id: PROJECT_BOARD_PANEL_TAB_ID,
+              label: t('projectMode.board.title', 'All conversations'),
+              kind: 'board' as const,
+              closeable: false,
+            },
+            ...openedThreadTabs.map((threadTab): SessionSidePanelTabItem => {
+              const shortHint = threadTab.previewHint?.trim()
+                ? threadTab.previewHint.trim().slice(0, 28)
+                : '';
+              const prefix = t('projectMode.thread.tabPrefix', 'Thread');
+              return {
+                id: getCoordinatorThreadPanelTabId(threadTab.threadRootId),
+                label: shortHint ? `${prefix}: ${shortHint}` : prefix,
+                kind: 'session',
+                closeable: true,
+              };
+            }),
+          ]
+        : []),
       ...fixedTabs,
       ...visibleSideSessions.map((sideSession): SessionSidePanelTabItem => ({
         id: getSideSessionPanelTabId(sideSession.id),
@@ -4789,14 +4944,23 @@ const SessionDetail = ({
         closeable: true,
         pending: closingSideSessionIds.has(sideSession.id),
       })),
+      ...panelSessions.map((panelSession): SessionSidePanelTabItem => ({
+        id: getSideSessionPanelTabId(panelSession.id),
+        label: panelSession.title?.trim() || t('sessions.untitled', 'Untitled session'),
+        kind: 'session',
+        closeable: true,
+      })),
       ...viewerTabItems.map((tab): SessionSidePanelTabItem => ({
         ...tab,
-        kind: tab.type,
+        kind: tab.type === 'url' ? 'browser' : tab.type,
         closeable: true,
       })),
     ];
   }, [
     closingSideSessionIds,
+    isProjectCoordinator,
+    openedThreadTabs,
+    panelSessions,
     sidePanelFixedOptions,
     t,
     viewerTabItems,
@@ -5268,13 +5432,27 @@ const SessionDetail = ({
         : activeTabSessionId;
     writeStoredLastActiveTabState(sessionId, {
       sessionTabId: persistedSessionTabId,
-      // Attachment tabs are not restored: their payload is message data, not a path.
-      viewerTab: activeViewerTab?.type === 'attachment' ? null : activeViewerTab,
+      // Attachment, owned-session file, PR, and URL tabs are not restored across reloads.
+      viewerTab:
+        !activeViewerTab ||
+        activeViewerTab.type === 'attachment' ||
+        (activeViewerTab.type === 'file' && activeViewerTab.ownerSessionId) ||
+        activeViewerTab.type === 'pr' ||
+        activeViewerTab.type === 'url'
+          ? null
+          : activeViewerTab,
       sidePanel: {
         open: isSidebarOpen,
-        tab: activeSidebarTab,
+        tab:
+          (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID ||
+          Boolean(activeSidebarTab && parseCoordinatorThreadPanelTabId(activeSidebarTab as string))
+            ? null
+            : activeSidebarTab,
         tabs: openedSidebarTabs,
-        sideSessionId: activeSideSessionId,
+        sideSessionId:
+          activeSideSessionId && panelSessionIdSet.has(activeSideSessionId)
+            ? null
+            : activeSideSessionId,
         split: sidePanelSplit,
       },
     });
@@ -5287,6 +5465,7 @@ const SessionDetail = ({
     activeViewerTab,
     isSidebarOpen,
     openedSidebarTabs,
+    panelSessionIdSet,
     sessionId,
     sidePanelSplit,
   ]);
@@ -5302,10 +5481,10 @@ const SessionDetail = ({
   const effectiveActiveSideSessionId = useMemo(
     () =>
       activeSideSessionId &&
-      visibleSideSessions.some((sideSession) => sideSession.id === activeSideSessionId)
+      panelHostedSessions.some((sideSession) => sideSession.id === activeSideSessionId)
         ? activeSideSessionId
         : null,
-    [activeSideSessionId, visibleSideSessions]
+    [activeSideSessionId, panelHostedSessions]
   );
   useEffect(() => {
     if (!effectiveActiveSideSessionId || mountedSideSessionIds.has(effectiveActiveSideSessionId)) {
@@ -5385,7 +5564,11 @@ const SessionDetail = ({
         handleViewerTabSelect(tabId);
         return;
       }
-      if (parseSideSessionPanelTabId(tabId)) {
+      if (
+        parseSideSessionPanelTabId(tabId) ||
+        tabId === PROJECT_BOARD_PANEL_TAB_ID ||
+        parseCoordinatorThreadPanelTabId(tabId) !== null
+      ) {
         selectSidePanelTab(tabId);
         return;
       }
@@ -5396,7 +5579,24 @@ const SessionDetail = ({
 
   const handleSidePanelTabClose = useCallback(
     (tabId: string) => {
+      const threadRootId = parseCoordinatorThreadPanelTabId(tabId);
+      if (threadRootId) {
+        const { fallbackTabId } = getSidePanelTabStateAfterClose(sidePanelTabIds, tabId);
+        setOpenedThreadTabs((current) =>
+          current.filter((entry) => entry.threadRootId !== threadRootId)
+        );
+        if ((activeSidebarTab as string | null) === tabId) {
+          selectSidePanelTab(fallbackTabId);
+        }
+        return;
+      }
       const sideSessionId = parseSideSessionPanelTabId(tabId) as SessionId | null;
+      if (sideSessionId && panelSessionIdSet.has(sideSessionId)) {
+        const { fallbackTabId } = getSidePanelTabStateAfterClose(sidePanelTabIds, tabId);
+        setPanelSessionIds((current) => current.filter((id) => id !== sideSessionId));
+        if (activeSideSessionId === sideSessionId) selectSidePanelTab(fallbackTabId);
+        return;
+      }
       if (sideSessionId) {
         void handleCloseSideSession(sideSessionId);
         return;
@@ -5407,7 +5607,16 @@ const SessionDetail = ({
       }
       handleCloseSidebarTab(tabId as SidebarTab);
     },
-    [handleCloseSideSession, handleCloseSidebarTab, handleCloseViewerTab]
+    [
+      activeSideSessionId,
+      activeSidebarTab,
+      handleCloseSideSession,
+      handleCloseSidebarTab,
+      handleCloseViewerTab,
+      panelSessionIdSet,
+      selectSidePanelTab,
+      sidePanelTabIds,
+    ]
   );
 
   const activeSidePanelTabId =
@@ -5415,6 +5624,271 @@ const SessionDetail = ({
     (effectiveActiveSideSessionId
       ? getSideSessionPanelTabId(effectiveActiveSideSessionId)
       : activeSidebarTab);
+
+  const boardEntrySessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isProjectCoordinator || isMobile) return;
+    if (boardEntrySessionRef.current === sessionId) return;
+    boardEntrySessionRef.current = sessionId;
+    if (activeSidePanelTabId === null) selectSidePanelTab(PROJECT_BOARD_PANEL_TAB_ID);
+    if (!isSidebarOpen) {
+      setIsSidebarOpen(true);
+      setSidebarRestoreSeq((seq) => seq + 1);
+    }
+  }, [
+    activeSidePanelTabId,
+    isMobile,
+    isProjectCoordinator,
+    isSidebarOpen,
+    selectSidePanelTab,
+    sessionId,
+  ]);
+
+  /** Opens a board conversation as a right-panel tab, keeping the coordinator on the left. */
+  const handleOpenPanelSession = useCallback(
+    (panelSessionId: string) => {
+      const id = panelSessionId as SessionId;
+      setPanelSessionIds((current) => (current.includes(id) ? current : [...current, id]));
+      selectSidePanelTab(getSideSessionPanelTabId(id));
+      setIsSidebarOpen(true);
+    },
+    [selectSidePanelTab]
+  );
+
+  const handleCoordinatorNavigateSession = useCallback(
+    (target: SessionNavigationTarget) => {
+      const targetId = (target.tabSessionId ?? target.sessionId) as SessionId;
+      if (!targetId || targetId === sessionId) return;
+      handleOpenPanelSession(targetId);
+    },
+    [handleOpenPanelSession, sessionId]
+  );
+
+  const handleReplyToCoordinatorBubble = useCallback(
+    (reply: CoordinatorReplyRef) => {
+      writeCoordinatorReplyDraft(currentWorkspaceId, sessionId, reply);
+      setCoordinatorReplyDraft(reply);
+      requestAnimationFrame(() => {
+        const handle = chatRefsMap.current.get(sessionId);
+        if (handle && 'focusInput' in handle) {
+          handle.focusInput();
+        }
+      });
+    },
+    [currentWorkspaceId, sessionId]
+  );
+
+  const handleClearCoordinatorReplyDraft = useCallback(() => {
+    writeCoordinatorReplyDraft(currentWorkspaceId, sessionId, null);
+    setCoordinatorReplyDraft(null);
+  }, [currentWorkspaceId, sessionId]);
+
+  const handleOpenCoordinatorThread = useCallback(
+    (threadRootId: string, previewHint?: string) => {
+      const tabId = getCoordinatorThreadPanelTabId(threadRootId);
+      setOpenedThreadTabs((current) => {
+        const existingIdx = current.findIndex((item) => item.threadRootId === threadRootId);
+        if (existingIdx !== -1) {
+          if (previewHint && !current[existingIdx]?.previewHint) {
+            const next = [...current];
+            next[existingIdx] = { ...current[existingIdx]!, previewHint };
+            return next;
+          }
+          return current;
+        }
+        return [...current, { threadRootId, previewHint }];
+      });
+      if (!isMobile) {
+        selectSidePanelTab(tabId);
+        setIsSidebarOpen(true);
+      }
+    },
+    [isMobile, selectSidePanelTab]
+  );
+
+  const handleSendCoordinatorThreadReply = useCallback(
+    async (prompt: string, replyTo: CoordinatorReplyRef): Promise<boolean> => {
+      const handle = chatRefsMap.current.get(sessionId);
+      if (!handle || !('sendCoordinatorThreadReply' in handle)) return false;
+      return handle.sendCoordinatorThreadReply(prompt, replyTo);
+    },
+    [sessionId]
+  );
+
+  const handlePrefillCoordinatorPrompt = useCallback(
+    (prompt: string, replyTo: CoordinatorReplyRef) => {
+      writeCoordinatorReplyDraft(currentWorkspaceId, sessionId, replyTo);
+      setCoordinatorReplyDraft(replyTo);
+      requestAnimationFrame(() => {
+        const handle = chatRefsMap.current.get(sessionId);
+        if (handle && 'setInputText' in handle) {
+          handle.setInputText(prompt);
+        }
+      });
+    },
+    [currentWorkspaceId, sessionId]
+  );
+
+  const handleSendCoordinatorTaskCardPrompt = useCallback(
+    (prompt: string) => {
+      const handle = chatRefsMap.current.get(sessionId);
+      if (!handle || !('sendCoordinatorThreadReply' in handle)) return;
+      void handle.sendCoordinatorThreadReply(prompt);
+    },
+    [sessionId]
+  );
+
+  const handlePrefillCoordinatorTaskCardPrompt = useCallback(
+    (prompt: string) => {
+      const handle = chatRefsMap.current.get(sessionId);
+      if (handle && 'setInputText' in handle) {
+        handle.setInputText(prompt);
+      }
+    },
+    [sessionId]
+  );
+
+  const handlePrefillChildSession = useCallback(
+    (targetSessionId: SessionId, prompt: string) => {
+      handleOpenPanelSession(targetSessionId);
+      const handle = chatRefsMap.current.get(targetSessionId);
+      if (handle && 'setInputText' in handle) {
+        requestAnimationFrame(() => {
+          handle.setInputText(prompt);
+        });
+      } else {
+        pendingChatPrefillRef.current.set(targetSessionId, prompt);
+      }
+    },
+    [handleOpenPanelSession]
+  );
+
+  const handleViewerUrlTabTitleChange = useCallback((tabId: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setViewerTabs((current) => {
+      const idx = current.findIndex((tab) => tab.id === tabId && tab.type === 'url');
+      if (idx === -1 || current[idx]?.label === trimmed) return current;
+      const next = [...current];
+      const existing = next[idx];
+      if (!existing || existing.type !== 'url') return current;
+      next[idx] = { ...existing, label: trimmed };
+      return next;
+    });
+  }, []);
+
+  const handleOpenOwnedPrTab = useCallback(
+    (
+      ownerSessionId: SessionId | null,
+      pr: Pick<SessionPullRequestView, 'repoFullName' | 'number' | 'url'>
+    ): boolean => {
+      const parsed = parseGitHubReferenceUrl(pr.url);
+      const repoFullName =
+        pr.repoFullName?.trim() || (parsed ? `${parsed.owner}/${parsed.repo}` : '');
+      const prNumber = pr.number ?? (parsed?.kind === 'pull' ? parsed.number : null);
+      if (!repoFullName || prNumber === null) return false;
+      const repoName = repoFullName.split('/')[1] ?? repoFullName;
+      const tabId = `pr:${repoFullName.toLowerCase()}#${prNumber}`;
+      upsertViewerTab({
+        id: tabId,
+        type: 'pr',
+        repoFullName,
+        prNumber,
+        ownerSessionId,
+        label: `${repoName} #${prNumber}`,
+      });
+      return true;
+    },
+    [upsertViewerTab]
+  );
+
+  /**
+   * Opens GitHub PR links, web session links for this workspace, and public
+   * HTTP(S) URLs clicked inside the coordinator conversation as right-panel tabs.
+   */
+  const handleOpenCoordinatorExternalLink = useCallback(
+    (rawHref: string, linkLabel?: string): boolean => {
+      const trimmed = rawHref.trim();
+      if (!trimmed || isMobile) return false;
+
+      if (workspaceSlug) {
+        const appSessionMatch =
+          /^https?:\/\/[^/]+\/([^/]+)\/sessions\/([A-Za-z0-9_-]+)(?:[/?#].*)?$/i.exec(trimmed);
+        if (appSessionMatch) {
+          const [, linkWorkspaceSlug, linkedSessionId] = appSessionMatch;
+          if (
+            decodeURIComponent(linkWorkspaceSlug ?? '') === workspaceSlug &&
+            linkedSessionId &&
+            linkedSessionId !== sessionId
+          ) {
+            handleOpenPanelSession(linkedSessionId);
+            return true;
+          }
+        }
+      }
+
+      const githubRef = parseGitHubReferenceUrl(trimmed);
+      if (githubRef?.kind === 'pull') {
+        return handleOpenOwnedPrTab(null, {
+          repoFullName: `${githubRef.owner}/${githubRef.repo}`,
+          number: githubRef.number,
+          url: trimmed,
+        });
+      }
+
+      try {
+        const parsed = parseBrowserAddress(trimmed);
+        if (parsed.engine !== 'public-web') return false;
+        if (getPublicBrowserBridge()?.capability !== 'web-contents-view-v1') {
+          return false;
+        }
+        const tabId = `url:${parsed.logicalUrl}`;
+        upsertViewerTab({
+          id: tabId,
+          type: 'url',
+          url: parsed.logicalUrl,
+          label: formatExternalUrlTabLabel(parsed.logicalUrl, linkLabel),
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [
+      handleOpenOwnedPrTab,
+      handleOpenPanelSession,
+      isMobile,
+      sessionId,
+      upsertViewerTab,
+      workspaceSlug,
+    ]
+  );
+
+  /** A file link in a panel-hosted conversation opens a tab on that conversation's workspace. */
+  const handleOpenOwnedFile = useCallback(
+    (ownerSessionId: SessionId, rawPath: string, previewHtml = false) => {
+      const target = resolveDirectMarkdownFileOpenTarget(rawPath);
+      if (!target) {
+        void writeTextToClipboard(rawPath).then((copied) => {
+          if (copied) toast.success(t('sessions.fileViewer.pathCopied', 'File path copied'));
+        });
+        return;
+      }
+      const requestSeq = nextFocusRequestSeq();
+      upsertViewerTab({
+        id: `file:owned:${ownerSessionId}:${target.filePath}`,
+        type: 'file',
+        filePath: target.filePath,
+        label: getBasename(target.filePath),
+        startLine: target.startLine,
+        endLine: target.endLine,
+        focusRequestSeq: requestSeq,
+        ownerSessionId,
+        ...(previewHtml ? { htmlPreviewRequestSeq: requestSeq } : {}),
+      });
+    },
+    [nextFocusRequestSeq, t, upsertViewerTab]
+  );
   const resolveFocusedTabCloseTarget = useCallback(
     () =>
       getSessionTabCloseTarget({
@@ -5662,7 +6136,7 @@ const SessionDetail = ({
       list.push({
         id: v.id,
         label: v.label,
-        kind: v.type,
+        kind: v.type === 'url' ? 'browser' : v.type,
         active:
           v.type === 'file'
             ? mobileFileViewerOpen && mobileFileViewerTabId === v.id
@@ -6153,6 +6627,17 @@ const SessionDetail = ({
         active={active}
         className={className}
       />
+    ) : tab.type === 'file' && tab.ownerSessionId ? (
+      <OwnedSessionFileViewer
+        ownerSessionId={tab.ownerSessionId}
+        filePath={tab.filePath}
+        startLine={tab.startLine}
+        endLine={tab.endLine}
+        focusRequestSeq={tab.focusRequestSeq}
+        htmlPreviewRequestSeq={tab.htmlPreviewRequestSeq}
+        active={active}
+        className={className}
+      />
     ) : tab.type === 'file' ? (
       <SessionFileContentView
         key={`${activeSession.id}:${tab.id}`}
@@ -6215,6 +6700,23 @@ const SessionDetail = ({
           });
         }}
         className={className}
+      />
+    ) : tab.type === 'pr' ? (
+      <PrTabContainer
+        repoFullName={tab.repoFullName}
+        prNumber={tab.prNumber}
+        sessionId={tab.ownerSessionId ?? null}
+        actionSessionId={tab.ownerSessionId ?? null}
+        visible={active}
+        className={className}
+      />
+    ) : tab.type === 'url' ? (
+      <OwnedUrlViewer
+        tabId={tab.id}
+        initialUrl={tab.url}
+        active={active}
+        className={className}
+        onTitleChange={(title) => handleViewerUrlTabTitleChange(tab.id, title)}
       />
     ) : (
       <SessionConversationDiffPanel
@@ -7337,9 +7839,13 @@ const SessionDetail = ({
       ) : null}
     </div>
   );
-  const defaultSizes = showFixedSidePanelBody
-    ? { main: 75, sidebar: 25 }
-    : { main: 60, sidebar: 40 };
+  const activeCoordinatorThreadRootId = activeSidebarTab
+    ? parseCoordinatorThreadPanelTabId(activeSidebarTab as string)
+    : null;
+  const defaultSizes =
+    showFixedSidePanelBody && activeCoordinatorThreadRootId === null
+      ? { main: 75, sidebar: 25 }
+      : { main: 60, sidebar: 40 };
 
   // The hidden sidebar's own header controls: Toggle, Back and Forward.
   const leftSidebarExpandButton = isLeftSidebarHidden ? (
@@ -7432,7 +7938,18 @@ const SessionDetail = ({
       ),
       onOpenPrTab: handleOpenPrTab,
       onOpenAllChanges: handleOpenAllChanges,
-      onNavigateSession: handleNavigateSession,
+      onNavigateSession:
+        isProjectCoordinator && chatSession.id === sessionId
+          ? handleCoordinatorNavigateSession
+          : handleNavigateSession,
+      ...(isProjectCoordinator && chatSession.id === sessionId
+        ? {
+            coordinatorReplyDraft,
+            onClearCoordinatorReplyDraft: handleClearCoordinatorReplyDraft,
+            onOpenCoordinatorThread: handleOpenCoordinatorThread,
+            onCoordinatorThreadHostStateChange: setCoordinatorThreadHostState,
+          }
+        : {}),
       onConversationPrepared: pendingForkSourceId
         ? () => handleForkedConversationPrepared(pendingForkSourceId, chatSession.id)
         : undefined,
@@ -7462,6 +7979,29 @@ const SessionDetail = ({
           const externalHistoryProviderLabel = externalHistoryRefresh
             ? getExternalHistoryProviderLabel(externalHistoryRefresh.provider)
             : undefined;
+          const chatSurface = (
+            <SessionChatSurface
+              {...getSharedChatSurfaceProps(tabSession, isActive)}
+              paintSessionMentionOverlay={false}
+              isChildTab={tabSession.id !== sessionId}
+              isExternalHistoryRefreshing={externalHistoryRefresh !== undefined}
+              externalHistoryProviderLabel={externalHistoryProviderLabel}
+              messageFileDiffEntriesByTurn={
+                tabSession.id === activeSessionTabId ? messageFileDiffEntriesByTurn : undefined
+              }
+              onOpenBrowser={
+                previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
+              }
+              changesDiffStat={changesDiffStat}
+              onForkLastAssistant={
+                canForkSession(tabSession)
+                  ? (turnId, destination) => handleForkDestination(tabSession, turnId, destination)
+                  : undefined
+              }
+              forkWorktreeAvailability={getForkWorktreeAvailability(tabSession)}
+              forkingAssistantMessageId={pendingForks[tabSession.id]?.turnId}
+            />
+          );
           return (
             <div
               key={tabSession.id}
@@ -7474,28 +8014,27 @@ const SessionDetail = ({
               }
               aria-hidden={!isActive}
             >
-              <SessionChatSurface
-                {...getSharedChatSurfaceProps(tabSession, isActive)}
-                paintSessionMentionOverlay={false}
-                isChildTab={tabSession.id !== sessionId}
-                isExternalHistoryRefreshing={externalHistoryRefresh !== undefined}
-                externalHistoryProviderLabel={externalHistoryProviderLabel}
-                messageFileDiffEntriesByTurn={
-                  tabSession.id === activeSessionTabId ? messageFileDiffEntriesByTurn : undefined
-                }
-                onOpenBrowser={
-                  previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
-                }
-                changesDiffStat={changesDiffStat}
-                onForkLastAssistant={
-                  canForkSession(tabSession)
-                    ? (turnId, destination) =>
-                        handleForkDestination(tabSession, turnId, destination)
-                    : undefined
-                }
-                forkWorktreeAvailability={getForkWorktreeAvailability(tabSession)}
-                forkingAssistantMessageId={pendingForks[tabSession.id]?.turnId}
-              />
+              {isProjectCoordinator && tabSession.id === sessionId ? (
+                <CoordinatorConversationProvider
+                  coordinatorSessionId={tabSession.id}
+                  project={coordinatorProject}
+                  onOpenTask={handleOpenPanelSession}
+                  onOpenPr={(ownerId, pr) => {
+                    handleOpenOwnedPrTab(ownerId as SessionId, pr);
+                  }}
+                  onOpenExternalLink={handleOpenCoordinatorExternalLink}
+                  replyCountByRootId={coordinatorThreadHostState?.threadIndex.replyCountByRootId}
+                  onReplyToBubble={handleReplyToCoordinatorBubble}
+                  onOpenThread={handleOpenCoordinatorThread}
+                  onSendCoordinatorPrompt={handleSendCoordinatorThreadReply}
+                  onPrefillCoordinatorPrompt={handlePrefillCoordinatorPrompt}
+                  onPrefillChildSession={handlePrefillChildSession}
+                >
+                  {chatSurface}
+                </CoordinatorConversationProvider>
+              ) : (
+                chatSurface
+              )}
             </div>
           );
         })}
@@ -7551,7 +8090,7 @@ const SessionDetail = ({
     );
   });
 
-  const desktopSideSessionSurfaces = visibleSideSessions
+  const desktopSideSessionSurfaces = panelHostedSessions
     .filter(
       (sideSession) =>
         mountedSideSessionIds.has(sideSession.id) ||
@@ -7576,6 +8115,23 @@ const SessionDetail = ({
           <SessionChatSurface
             {...getSharedChatSurfaceProps(sideSession, isActive, isActive && isSidebarVisible)}
             isChildTab
+            {...(panelSessionIdSet.has(sideSession.id)
+              ? {
+                  workspaceSession: sideSession,
+                  onFilePathClick: (filePath: string) =>
+                    handleOpenOwnedFile(sideSession.id, filePath),
+                  onFileDiffClick: (_turnId: string, filePath: string) =>
+                    handleOpenOwnedFile(sideSession.id, filePath),
+                  onOpenHtmlFile: (filePath: string) =>
+                    handleOpenOwnedFile(sideSession.id, filePath, true),
+                  onOpenBrowser: undefined,
+                  onOpenPrTab: () => {
+                    const pr = resolveSessionPrimaryPullRequest(sideSession);
+                    if (pr) handleOpenOwnedPrTab(sideSession.id, pr);
+                  },
+                  onOpenAllChanges: undefined,
+                }
+              : {})}
           />
         </div>
       );
@@ -7630,14 +8186,98 @@ const SessionDetail = ({
             className={
               stylex.props(
                 detailStyles.absoluteFill,
-                (!showFixedSidePanelBody || activeSidebarTab === null) && detailStyles.invisibleFill
+                (!showFixedSidePanelBody ||
+                  activeSidebarTab === null ||
+                  (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID ||
+                  activeCoordinatorThreadRootId !== null) &&
+                  detailStyles.invisibleFill
               ).className
             }
-            inert={!showFixedSidePanelBody || activeSidebarTab === null}
-            aria-hidden={!showFixedSidePanelBody || activeSidebarTab === null}
+            inert={
+              !showFixedSidePanelBody ||
+              activeSidebarTab === null ||
+              (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID ||
+              activeCoordinatorThreadRootId !== null
+            }
+            aria-hidden={
+              !showFixedSidePanelBody ||
+              activeSidebarTab === null ||
+              (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID ||
+              activeCoordinatorThreadRootId !== null
+            }
           >
             {sidebarContent}
           </div>
+        ) : null}
+        {isProjectCoordinator && activeSession ? (
+          <>
+            <div
+              className={
+                stylex.props(
+                  detailStyles.absoluteFill,
+                  !(
+                    showFixedSidePanelBody &&
+                    (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID
+                  ) && detailStyles.hidden
+                ).className
+              }
+              aria-hidden={
+                !(
+                  showFixedSidePanelBody &&
+                  (activeSidebarTab as string) === PROJECT_BOARD_PANEL_TAB_ID
+                )
+              }
+            >
+              <ProjectBoard
+                coordinatorSessionId={activeSession.id}
+                project={coordinatorProject}
+                onOpenSession={handleOpenPanelSession}
+                onOpenPr={(ownerId, pr) => {
+                  handleOpenOwnedPrTab(ownerId as SessionId, pr);
+                }}
+                onSendCoordinatorPrompt={handleSendCoordinatorTaskCardPrompt}
+                onPrefillCoordinatorPrompt={handlePrefillCoordinatorTaskCardPrompt}
+                hideTitle
+              />
+            </div>
+            {openedThreadTabs.map((threadTab) => {
+              const isThreadActive =
+                showFixedSidePanelBody && activeCoordinatorThreadRootId === threadTab.threadRootId;
+              return (
+                <div
+                  key={threadTab.threadRootId}
+                  className={
+                    stylex.props(
+                      detailStyles.absoluteFill,
+                      detailStyles.conversationContainment,
+                      !isThreadActive && detailStyles.hidden
+                    ).className
+                  }
+                  aria-hidden={!isThreadActive || !isSidebarVisible}
+                >
+                  <ConnectedCoordinatorThreadPanel
+                    coordinatorSessionId={activeSession.id}
+                    project={coordinatorProject}
+                    threadRootId={threadTab.threadRootId}
+                    previewHint={threadTab.previewHint}
+                    conversationView={coordinatorThreadHostState?.conversationView ?? null}
+                    threadIndex={coordinatorThreadHostState?.threadIndex}
+                    onOpenTask={handleOpenPanelSession}
+                    onOpenPr={(ownerId, pr) => {
+                      handleOpenOwnedPrTab(ownerId as SessionId, pr);
+                    }}
+                    onOpenExternalLink={handleOpenCoordinatorExternalLink}
+                    onNavigateSession={handleCoordinatorNavigateSession}
+                    onSendReply={handleSendCoordinatorThreadReply}
+                    onPrefillChildSession={handlePrefillChildSession}
+                    agentActivityLabel={coordinatorThreadHostState?.agentActivityLabel ?? null}
+                    agentActivityTone={coordinatorThreadHostState?.agentActivityTone ?? 'primary'}
+                    isVisible={isThreadActive && isSidebarVisible}
+                  />
+                </div>
+              );
+            })}
+          </>
         ) : null}
         {showFixedSidePanelBody && activeSidebarTab === null && sidePanelTabs.length === 0 ? (
           <SessionSidePanelEmptyState

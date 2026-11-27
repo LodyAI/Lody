@@ -150,15 +150,25 @@ vi.mock('../src/hooks/use-code-collab-session-file-provider', () => ({
 
 import {
   SessionChatInputArea,
+  evictSessionChatInputMemoryDraftsForTest,
   setSessionChatInputTextDraft,
   type SessionChatInputAreaHandle,
   type SessionChatInputAreaProps,
 } from '../src/components/sessions/session-chat-input-area';
+import {
+  coordinatorReplyDraftKey,
+  coordinatorThreadDraftKey,
+  evictCoordinatorComposerMemoryDraftsForTest,
+  readCoordinatorReplyDraft,
+  readCoordinatorThreadDraft,
+  writeCoordinatorReplyDraft,
+  writeCoordinatorThreadDraft,
+} from '../src/components/project-mode/coordinator-composer-draft';
 import { initI18n } from '../src/i18n';
 import { PASTED_TEXT_FILE_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
 import { queueTask } from '../src/components/sessions/message-queue/queue-task';
 import { toast } from '@/lib/toast';
-import { formatMessageQuote, getSessionRoomId } from '@lody/shared';
+import { createCoordinatorReplyRef, formatMessageQuote, getSessionRoomId } from '@lody/shared';
 import { conversationQuoteDraftKey } from '../src/lib/conversation-quote-draft';
 import { composerIn, type ComposerTestHandle } from './composer-test-utils';
 import { createConversationViewFromHistory } from '../src/lib/conversation-view/create-conversation-view-from-history';
@@ -894,6 +904,127 @@ describe('SessionChatInputArea submission feedback', () => {
       )
     ).not.toBeNull();
     localStorage.removeItem(key);
+  });
+
+  it('persists plain composer text across a cold reload and retires it only after acceptance', async () => {
+    const workspace = 'plain-draft-restart-workspace';
+    const sessionId = `plain-draft-restart-${++nextSession}`;
+    getDefaultStore().set(currentWorkspaceIdAtom, workspace as never);
+    const key = conversationQuoteDraftKey(workspace, sessionId);
+
+    const firstInput = await renderComposer({
+      sessionId,
+      overrides: { initialInputText: undefined },
+      onSendMessage: async () => true,
+    });
+    await act(async () => {
+      firstInput.edit('先让审核员对照实际尺寸检查一轮，不要直接合并');
+    });
+    expect(localStorage.getItem(key)).toBe(
+      JSON.stringify({ text: '先让审核员对照实际尺寸检查一轮，不要直接合并' })
+    );
+
+    await act(async () => root?.unmount());
+    root = null;
+    container?.remove();
+    container = null;
+    evictSessionChatInputMemoryDraftsForTest(sessionId as SessionId);
+
+    const submitted: SessionInputBlock[][] = [];
+    const reloadedInput = await renderComposer({
+      sessionId,
+      overrides: { initialInputText: undefined },
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return true;
+      },
+    });
+    expect(reloadedInput.value).toBe('先让审核员对照实际尺寸检查一轮，不要直接合并');
+
+    await submit('button');
+    expect(submitted).toEqual([
+      [{ type: 'text', text: '先让审核员对照实际尺寸检查一轮，不要直接合并' }],
+    ]);
+    expect(reloadedInput.value).toBe('');
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  it('hydrates a persisted composer draft when workspaceId resolves after initial mount instead of wiping it', async () => {
+    const workspace = 'delayed-workspace-id';
+    const sessionId = `delayed-draft-${++nextSession}`;
+    const key = conversationQuoteDraftKey(workspace, sessionId);
+    localStorage.setItem(key, JSON.stringify({ text: '等真机同步恢复后再发一版验证' }));
+    getDefaultStore().set(currentWorkspaceIdAtom, null);
+
+    const textarea = await renderComposer({
+      sessionId,
+      overrides: { initialInputText: undefined },
+      onSendMessage: async () => true,
+    });
+    expect(textarea.value).toBe('');
+    expect(localStorage.getItem(key)).not.toBeNull();
+
+    await act(async () => {
+      getDefaultStore().set(currentWorkspaceIdAtom, workspace as never);
+    });
+    expect(textarea.value).toBe('等真机同步恢复后再发一版验证');
+    expect(localStorage.getItem(key)).toBe(JSON.stringify({ text: '等真机同步恢复后再发一版验证' }));
+    localStorage.removeItem(key);
+  });
+
+  it('persists coordinator reply-banner and thread composer drafts across reload and clears them on completion', () => {
+    const workspace = 'coordinator-draft-workspace';
+    const coordinatorSessionId = `coord-session-${++nextSession}` as SessionId;
+    const threadRootId = 'bubble:assistant:turn-1:bubble-1';
+    const replyRef = createCoordinatorReplyRef({
+      target: {
+        kind: 'coordinator_bubble',
+        turnId: 'assistant:turn-1',
+        bubbleId: 'bubble-1',
+      },
+      author: 'coordinator',
+      text: '10 种 Lottie 头像可离线试玩',
+    });
+
+    writeCoordinatorReplyDraft(workspace, coordinatorSessionId, replyRef);
+    writeCoordinatorThreadDraft(workspace, coordinatorSessionId, threadRootId, {
+      prompt: '先按 24px 渲染水母和章鱼两个样例',
+      subReplyTarget: replyRef,
+    });
+    expect(
+      localStorage.getItem(coordinatorReplyDraftKey(workspace, coordinatorSessionId))
+    ).not.toBeNull();
+    expect(
+      localStorage.getItem(
+        coordinatorThreadDraftKey(workspace, coordinatorSessionId, threadRootId)
+      )
+    ).not.toBeNull();
+
+    evictCoordinatorComposerMemoryDraftsForTest();
+    expect(readCoordinatorReplyDraft(workspace, coordinatorSessionId)).toEqual(replyRef);
+    expect(readCoordinatorThreadDraft(workspace, coordinatorSessionId, threadRootId)).toEqual({
+      prompt: '先按 24px 渲染水母和章鱼两个样例',
+      subReplyTarget: replyRef,
+    });
+
+    writeCoordinatorReplyDraft(workspace, coordinatorSessionId, null);
+    writeCoordinatorThreadDraft(workspace, coordinatorSessionId, threadRootId, {
+      prompt: '',
+      subReplyTarget: null,
+    });
+    expect(readCoordinatorReplyDraft(workspace, coordinatorSessionId)).toBeNull();
+    expect(readCoordinatorThreadDraft(workspace, coordinatorSessionId, threadRootId)).toEqual({
+      prompt: '',
+      subReplyTarget: null,
+    });
+    expect(
+      localStorage.getItem(coordinatorReplyDraftKey(workspace, coordinatorSessionId))
+    ).toBeNull();
+    expect(
+      localStorage.getItem(
+        coordinatorThreadDraftKey(workspace, coordinatorSessionId, threadRootId)
+      )
+    ).toBeNull();
   });
 
   it('expands the current quote range when typing and Enter occur before the next render', async () => {

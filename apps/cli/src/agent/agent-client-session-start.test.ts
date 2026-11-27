@@ -57,6 +57,10 @@ import { Effect } from 'effect';
 import { McpAuthenticationLegacy } from '@/mcp/authentication/legacy';
 import { makeMcpAuthenticationIO } from '@/mcp/authentication/io';
 import { applyAcpSessionRunConfig } from '@/session/acp-session-config-applier';
+import {
+  COORDINATOR_SYSTEM_PROMPT,
+  resolveSessionSystemPrompt,
+} from '@/session/coordinator-system-prompt';
 
 function deferred<T>() {
   let resolvePromise!: (value: T) => void;
@@ -979,6 +983,73 @@ describe('AgentClient session startup', () => {
         }),
       ],
     });
+  });
+
+  it('delivers the coordinator system prompt on every session establishment', async () => {
+    connectionMocks.initialize.mockResolvedValue({
+      agentCapabilities: {
+        sessionCapabilities: { systemPrompt: {}, resume: {}, fork: {} },
+        _meta: { lody: { forkAtTurn: { version: 1 } } },
+      },
+    });
+    connectionMocks.resumeSession.mockResolvedValue({});
+    connectionMocks.unstable_forkSession.mockResolvedValue({ sessionId: 'acp-session-2' });
+    const systemPrompt = resolveSessionSystemPrompt('v1');
+    expect(systemPrompt).toBe(COORDINATOR_SYSTEM_PROMPT);
+    const expected = {
+      mode: 'append',
+      content: [{ type: 'text', text: COORDINATOR_SYSTEM_PROMPT }],
+    };
+    const createClient = () =>
+      new AgentClient({
+        logger: createLogger(),
+        sessionId: 'session-coordinator' as SessionId,
+        terminalManager: {} as never,
+        agentConfig: { cliType: 'builtin', agentType: 'claude' },
+        systemPrompt,
+        onUpdateMessage: vi.fn(),
+        onRequestPermission: vi.fn(),
+      });
+
+    const client = createClient();
+    await client.startSession({} as never, '/workdir');
+    expect(client.supportsSystemPrompt()).toBe(true);
+    expect(connectionMocks.newSession).toHaveBeenCalledWith({
+      cwd: '/workdir',
+      mcpServers: [],
+      systemPrompt: expected,
+    });
+    await client.prepareReplacementSession('provider-turn-1');
+    expect(connectionMocks.unstable_forkSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'acp-session-1', systemPrompt: expected })
+    );
+
+    await createClient().startSession({} as never, '/workdir', 'acp-session-1' as never);
+    expect(connectionMocks.resumeSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'acp-session-1', systemPrompt: expected })
+    );
+  });
+
+  it('refuses a coordinator on an agent without system prompt support', async () => {
+    connectionMocks.initialize.mockResolvedValue({
+      agentCapabilities: { sessionCapabilities: { systemPrompt: null } },
+    });
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'session-coordinator-unsupported' as SessionId,
+      terminalManager: {} as never,
+      systemPrompt: COORDINATOR_SYSTEM_PROMPT,
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+
+    await expect(client.startSession({} as never, '/workdir')).rejects.toThrow(
+      '[ACP_SYSTEM_PROMPT_UNSUPPORTED]'
+    );
+    expect(connectionMocks.newSession).not.toHaveBeenCalled();
+    expect(client.supportsSystemPrompt()).toBe(false);
+    expect(() => resolveSessionSystemPrompt('unsupported')).toThrow('[COORDINATOR_UNSUPPORTED]');
+    expect(resolveSessionSystemPrompt('none')).toBeUndefined();
   });
 
   it('keeps the live MCP mount until an edit-and-resend candidate is adopted', async () => {

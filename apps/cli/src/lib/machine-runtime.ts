@@ -452,6 +452,18 @@ export class MachineRuntime {
     return await handler.handleLocalMachineRpc(message, signal);
   }
 
+  setCoordinatorTriggers(
+    service: import('@/automations/connectors/service').CoordinatorTriggerService | undefined
+  ): void {
+    this.handler?.setCoordinatorTriggers(service);
+  }
+
+  readCoordinatorStoreDiagnostics(sessionId: SessionId) {
+    const handler = this.handler;
+    if (!handler) return { cursors: [], operations: [] };
+    return handler.readCoordinatorStoreDiagnostics(sessionId);
+  }
+
   private initializeGCManager(): void {
     if (!this.handler) {
       return;

@@ -1,12 +1,45 @@
 import { describe, expect, it } from 'vitest';
-import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
-import { getMessageItemPrefix } from '../src/lib/session-chat-search';
-import { buildChatVirtualRows, type ChatStreamItem } from '../src/components/ai-gui/view';
+import type { MessageContent, SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
+import {
+  extractSessionSearchBlocks,
+  getCoordinatorMessageSearchBlockId,
+  getMessageItemPrefix,
+} from '../src/lib/session-chat-search';
+import {
+  areAssistantChatVirtualRowsEqual,
+  buildChatVirtualRows,
+  resolveActiveCoordinatorStatus,
+  type AssistantChatVirtualRow,
+  type ChatStreamItem,
+} from '../src/components/ai-gui/view';
 import {
   collectStickyWorkGroups,
   resolveActiveStickyWorkGroup,
   resolveStickyCollapseTargetScreenY,
 } from '../src/components/ai-gui/sticky-work-group';
+import {
+  buildCoordinatorThreadDirectoryIndex,
+  collectThreadLinkedSessionIds,
+  filterThreadStreamItems,
+} from '../src/components/project-mode/coordinator-thread-model';
+import {
+  COORDINATOR_CARD_DISMISSED_ACTION_ID,
+  COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID,
+  buildLatestCoordinatorBubbleByTaskId,
+  buildSupersededCoordinatorCardKeys,
+  createCoordinatorActionCommandRegistry,
+  formatCoordinatorBubbleKey,
+  resolveCoordinatorBubbleActions,
+  resolveCoordinatorProactiveCard,
+} from '../src/components/project-mode/coordinator-action-engine';
+import {
+  claimCoordinatorBubbleAvatarPlayback,
+  inferCoordinatorBubbleMood,
+  resetCoordinatorAvatarPlaybackForTest,
+  seedCoordinatorAvatarStreamSnapshot,
+} from '../src/components/project-mode/coordinator-avatar-mood';
+import type { ProjectBoardRow } from '../src/components/project-mode/project-board-model';
+import type { TurnIndexRow } from '../src/lib/conversation-view';
 
 // Guards the per-turn row cache behind view.tsx `buildChatVirtualRows`: rows for
 // unchanged turns must be reference-stable across rebuilds, or the shallow-compare
@@ -29,7 +62,7 @@ const toolCall = (): MessageContent =>
 
 const makeMessage = (
   id: string,
-  role: 'user' | 'assistant',
+  role: 'user' | 'assistant' | 'system',
   items: MessageContent[],
   finished?: boolean
 ): SessionHistoryParsed =>
@@ -226,6 +259,1220 @@ describe('Thought visibility', () => {
     const args = fixture('interrupted', [thought, toolCall(), nextThought], true);
     expect(visibleContents(buildChatVirtualRows(args))).toEqual([]);
     expect(headers(buildChatVirtualRows(args))).toHaveLength(1);
+  });
+});
+
+describe('coordinator conversation bubbles and search', () => {
+  it('renders one virtual row per coordinator_message while hiding raw text, thoughts, and tool calls', () => {
+    const turnWithBubbles = wrap(
+      makeMessage(
+        'coord-turn-1',
+        'assistant',
+        [
+          { type: 'thought', text: 'Internal reasoning' },
+          text('Internal plain text that must never show'),
+          toolCall(),
+          { type: 'coordinator_status', status: '正在查看可用 Role…' },
+          { type: 'coordinator_message', id: 'b1', body: '我先查一下合适的 Role，马上派发。' },
+          toolCall(),
+          { type: 'coordinator_message', id: 'b2', body: '已经交给 **天才程序员** 处理。' },
+          {
+            type: 'coordinator_message',
+            id: 'b3',
+            body: '',
+            images: [
+              {
+                imageId: 'img-1',
+                mimeType: 'image/png',
+                fileName: 'shot.png',
+                sizeBytes: 512,
+                uploadedAt: 1000,
+                storageSessionId: 'child-s1' as SessionId,
+              },
+            ],
+          },
+        ],
+        true
+      )
+    );
+    const turnWithoutBubbles = wrap(
+      makeMessage(
+        'coord-turn-2',
+        'assistant',
+        [{ type: 'thought', text: 'Working silently' }, text('Hidden text'), toolCall()],
+        false
+      )
+    );
+
+    const rows = buildChatVirtualRows({
+      items: [turnWithBubbles, turnWithoutBubbles],
+      lastAssistantMessageId: 'coord-turn-2',
+      expansionVersion: 0,
+      coordinatorBubbles: true,
+    });
+
+    expect(rows).toHaveLength(3);
+    expect(rows.map((row) => row.key)).toEqual([
+      'assistant:coord-turn-1:bubble:b1',
+      'assistant:coord-turn-1:bubble:b2',
+      'assistant:coord-turn-1:bubble:b3',
+    ]);
+    expect(
+      rows.map((row) =>
+        row.type === 'assistant' && row.content.kind === 'coordinator_bubble'
+          ? row.content.entry.body
+          : null
+      )
+    ).toEqual(['我先查一下合适的 Role，马上派发。', '已经交给 **天才程序员** 处理。', '']);
+
+    const searchBlocks = extractSessionSearchBlocks(
+      [
+        makeMessage('user-1', 'user', [text('帮我修一下这个问题')]) as unknown as SessionHistory,
+        turnWithBubbles.message as unknown as SessionHistory,
+      ],
+      { coordinator: true }
+    );
+    expect(searchBlocks.map((block) => block.blockId)).toEqual([
+      `${getMessageItemPrefix('user-1', 0)}:text`,
+      getCoordinatorMessageSearchBlockId('coord-turn-1', 4),
+      getCoordinatorMessageSearchBlockId('coord-turn-1', 6),
+    ]);
+  });
+
+  it('shows instant fallback status before the first coordinator output, switches to explicit status, and avoids end-of-turn or stale-daemon flashes', () => {
+    const defaultWorkingLabel = '正在看…';
+    const userTurn = wrap(makeMessage('u-1', 'user', [text('帮我看看 PR 状态')], true));
+
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [],
+        localUserMessagesCount: 1,
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+
+    const thinkingTurn = wrap(
+      makeMessage('a-1', 'assistant', [{ type: 'thought', text: 'Planning' }, toolCall()], false)
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, thinkingTurn],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+
+    const dispatchingTurn = wrap(
+      makeMessage(
+        'a-1',
+        'assistant',
+        [
+          { type: 'coordinator_message', id: 'b-open', body: '收到，我去查一下并派发任务。' },
+          { type: 'coordinator_status', status: '正在派发子对话…' },
+        ],
+        false
+      )
+    );
+    const progressSystemRow = wrap(
+      makeMessage(
+        'sys-progress',
+        'system',
+        [
+          {
+            type: 'operation_progress',
+            operationId: 'op-1',
+            operationKind: 'session_create',
+            items: [
+              {
+                target: { sessionId: 'child-1' as SessionId, userTurnId: 'cu-1' },
+                status: 'running',
+              },
+            ],
+          } as unknown as MessageContent,
+        ],
+        true
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, dispatchingTurn, progressSystemRow],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在派发子对话…', tone: 'primary' });
+
+    const directReplyTurn = wrap(
+      makeMessage(
+        'a-1',
+        'assistant',
+        [{ type: 'coordinator_message', id: 'b-ans', body: '目前没有未合并的 PR。' }],
+        false
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, directReplyTurn],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toBeNull();
+
+    const finishedTurn = wrap(
+      makeMessage(
+        'a-1',
+        'assistant',
+        [
+          { type: 'coordinator_status', status: '正在派发子对话…' },
+          { type: 'coordinator_message', id: 'b-done', body: '已交给天才程序员处理。' },
+        ],
+        true
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, finishedTurn, progressSystemRow],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toBeNull();
+
+    const completionReceiptRow = wrap(
+      makeMessage(
+        'sys-complete',
+        'system',
+        [
+          {
+            type: 'operation_completion',
+            deliveryId: 'del-1',
+            operationId: 'op-1',
+            operationKind: 'session_create',
+            completion: {},
+          } as unknown as MessageContent,
+        ],
+        true
+      )
+    );
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, finishedTurn, progressSystemRow, completionReceiptRow],
+        agentActivityLabel: defaultWorkingLabel,
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '正在看…', tone: 'primary' });
+
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, dispatchingTurn],
+        agentActivityLabel: null,
+        defaultWorkingLabel,
+      })
+    ).toBeNull();
+
+    expect(
+      resolveActiveCoordinatorStatus({
+        items: [userTurn, directReplyTurn],
+        agentActivityLabel: '等待授权',
+        agentActivityTone: 'warning',
+        defaultWorkingLabel,
+      })
+    ).toEqual({ label: '等待授权', tone: 'warning' });
+  });
+
+  it('indexes thread reply counts from directory scalars, preserves colon-prefixed root bubbles and causal opening turns, and collects linked child sessions', () => {
+    const rootA = 'bubble:assistant:user-open-1:bubble-1';
+    const rootB = 'bubble:assistant:user-open-1:bubble-2';
+    const rootUser = 'turn:user-open-1';
+
+    const indexRows: TurnIndexRow[] = [
+      { id: 'user-open-1', role: 'user', timestamp: '1' } as TurnIndexRow,
+      {
+        id: 'assistant:user-open-1',
+        userTurnId: 'user-open-1',
+        role: 'assistant',
+        timestamp: '2',
+      } as TurnIndexRow,
+      {
+        id: 'user-reply-a',
+        role: 'user',
+        timestamp: '3',
+        threadRoots: rootA,
+      } as TurnIndexRow,
+      {
+        id: 'sys-progress-a',
+        role: 'system',
+        timestamp: '4',
+        threadRoots: rootA,
+      } as TurnIndexRow,
+      {
+        id: 'assistant:user-reply-a',
+        userTurnId: 'user-reply-a',
+        role: 'assistant',
+        timestamp: '5',
+        threadRoots: `${rootA}\n${rootB}`,
+      } as TurnIndexRow,
+      {
+        id: 'user-reply-root-user',
+        role: 'user',
+        timestamp: '6',
+        threadRoots: rootUser,
+      } as TurnIndexRow,
+    ];
+
+    const directoryIndex = buildCoordinatorThreadDirectoryIndex(indexRows);
+    expect(directoryIndex.replyCountByRootId.get(rootA)).toBe(2);
+    expect(directoryIndex.replyCountByRootId.get(rootB)).toBe(1);
+    expect(directoryIndex.replyCountByRootId.get(rootUser)).toBe(1);
+    expect(directoryIndex.turnIdsByRootId.get(rootA)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-a',
+      'sys-progress-a',
+      'assistant:user-reply-a',
+    ]);
+    expect(directoryIndex.turnIdsByRootId.get(rootUser)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-root-user',
+    ]);
+
+    const stream: ChatStreamItem[] = [
+      wrap(makeMessage('user-open-1', 'user', [text('Please check Task 1 and Task 2')], true)),
+      wrap({
+        ...makeMessage(
+          'assistant:user-open-1',
+          'assistant',
+          [
+            {
+              type: 'coordinator_message',
+              id: 'bubble-1',
+              body: 'Root A asks about [Task 1](lody://session/child-1)',
+              linkedSessionIds: ['child-1' as SessionId],
+            },
+            {
+              type: 'coordinator_message',
+              id: 'bubble-2',
+              body: 'Root B talks about [Task 2](lody://session/child-2)',
+              linkedSessionIds: ['child-2' as SessionId],
+            },
+          ],
+          true
+        ),
+        userTurnId: 'user-open-1',
+      }),
+      wrap({
+        ...makeMessage('user-reply-a', 'user', [text('Go ahead with 7 days')], true),
+        threadRoots: rootA,
+        inputConfig: {
+          prompt: 'Go ahead with 7 days',
+          replyTo: {
+            target: {
+              kind: 'coordinator_bubble',
+              turnId: 'assistant:user-open-1',
+              bubbleId: 'bubble-1',
+            },
+            threadRootId: rootA,
+            author: 'coordinator',
+            previewText: 'Root A asks',
+          },
+        },
+      }),
+      wrap(
+        makeMessage(
+          'sys-batch',
+          'system',
+          [
+            {
+              type: 'operation_completion_batch',
+              batchId: 'batch-mixed',
+              memberCount: 2,
+              deliveryStatus: 'settled',
+              members: [
+                {
+                  type: 'operation_completion',
+                  deliveryId: 'd-a',
+                  operationId: 'op-a',
+                  operationKind: 'session_chat',
+                  originThreadId: rootA,
+                  completion: {
+                    type: 'result',
+                    value: {
+                      items: [
+                        {
+                          status: 'succeeded',
+                          target: { sessionId: 'child-3' as SessionId, userTurnId: 'u3' },
+                          output: { text: 'Done A' },
+                        },
+                      ],
+                    },
+                  },
+                },
+                {
+                  type: 'operation_completion',
+                  deliveryId: 'd-b',
+                  operationId: 'op-b',
+                  operationKind: 'session_chat',
+                  originThreadId: rootB,
+                  completion: {
+                    type: 'result',
+                    value: {
+                      items: [
+                        {
+                          status: 'succeeded',
+                          target: { sessionId: 'child-2' as SessionId, userTurnId: 'u2' },
+                          output: { text: 'Done B' },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            } as unknown as MessageContent,
+          ],
+          true
+        )
+      ),
+      wrap({
+        ...makeMessage(
+          'assistant:user-reply-a',
+          'assistant',
+          [
+            {
+              type: 'coordinator_message',
+              id: 'reply-a',
+              body: 'Forwarded to Task 1',
+              replyTo: {
+                target: { kind: 'user_turn', turnId: 'user-reply-a' },
+                threadRootId: rootA,
+                author: 'user',
+              },
+            },
+            {
+              type: 'coordinator_message',
+              id: 'reply-b',
+              body: 'Task 2 finished',
+              replyTo: {
+                target: {
+                  kind: 'coordinator_bubble',
+                  turnId: 'assistant:user-open-1',
+                  bubbleId: 'bubble-2',
+                },
+                threadRootId: rootB,
+                author: 'coordinator',
+              },
+            },
+          ],
+          true
+        ),
+        userTurnId: 'user-reply-a',
+        threadRoots: `${rootA}\n${rootB}`,
+      }),
+      wrap({
+        ...makeMessage('user-reply-root-user', 'user', [text('Also check Task 3')], true),
+        threadRoots: rootUser,
+        inputConfig: {
+          prompt: 'Also check Task 3',
+          replyTo: {
+            target: { kind: 'user_turn', turnId: 'user-open-1' },
+            threadRootId: rootUser,
+            author: 'user',
+            previewText: 'Please check Task 1 and Task 2',
+          },
+        },
+      }),
+      wrap(makeMessage('unrelated-user', 'user', [text('Something else')], true)),
+    ];
+
+    const projectedA = filterThreadStreamItems(stream, rootA);
+    expect(projectedA).toHaveLength(5);
+    const projectedMessagesA = projectedA.flatMap((item) =>
+      item.type === 'message' ? [item.message] : []
+    );
+    expect(projectedMessagesA.map((m) => m.id)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-a',
+      'sys-batch',
+      'assistant:user-reply-a',
+    ]);
+    expect(projectedMessagesA[1]?.items).toEqual([
+      expect.objectContaining({ type: 'coordinator_message', id: 'bubble-1' }),
+    ]);
+    expect(projectedMessagesA[3]?.items).toEqual([
+      expect.objectContaining({
+        type: 'operation_completion_batch',
+        memberCount: 1,
+        members: [expect.objectContaining({ deliveryId: 'd-a' })],
+      }),
+    ]);
+    expect(projectedMessagesA[4]?.items).toEqual([
+      expect.objectContaining({ type: 'coordinator_message', id: 'reply-a' }),
+    ]);
+
+    expect(collectThreadLinkedSessionIds(projectedMessagesA)).toEqual(['child-1', 'child-3']);
+
+    const projectedUserRoot = filterThreadStreamItems(stream, rootUser).flatMap((item) =>
+      item.type === 'message' ? [item.message] : []
+    );
+    expect(projectedUserRoot.map((m) => m.id)).toEqual([
+      'user-open-1',
+      'assistant:user-open-1',
+      'user-reply-root-user',
+    ]);
+    expect(projectedUserRoot[1]?.items).toHaveLength(2);
+  });
+
+  it('merges agent actions ahead of fallback rules by semantic dedupKey, filters unknown commands, and projects live SessionMeta state', async () => {
+    const translate = (_key: string, fallback: string, opts?: Record<string, unknown>) =>
+      fallback.replace(/\{\{(\w+)\}\}/gu, (_, name: string) => String(opts?.[name] ?? ''));
+
+    const taskPrReady: ProjectBoardRow = {
+      session: {
+        id: 'task-pr' as SessionId,
+        title: 'Refactor auth',
+        isArchived: false,
+      } as ProjectBoardRow['session'],
+      taskNumber: 1,
+      bucket: 'review',
+      latestMessageAt: 1000,
+      pullRequest: {
+        pr: { url: 'https://github.com/LodyAI/lody/pull/42', status: 'open' },
+        url: 'https://github.com/LodyAI/lody/pull/42',
+        status: 'open',
+        repoFullName: 'LodyAI/lody',
+        number: 42,
+        readiness: 'y',
+        state: { m: 'c', s: 's', t: 10 },
+      },
+    };
+    const taskNoPrDirty: ProjectBoardRow = {
+      session: {
+        id: 'task-nopr' as SessionId,
+        title: 'Add metrics',
+        isArchived: false,
+        repoFullName: 'LodyAI/lody',
+        diffStats: { allChange: { add: 24, del: 4, files: 2 } },
+      } as ProjectBoardRow['session'],
+      taskNumber: 2,
+      bucket: 'review',
+      latestMessageAt: 1000,
+      pullRequest: null,
+    };
+
+    const tasksMap = new Map<string, ProjectBoardRow>([
+      ['task-pr', taskPrReady],
+      ['task-nopr', taskNoPrDirty],
+    ]);
+
+    const earlierBubbleEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-earlier',
+      body: 'Started [T1](lody://session/task-pr)',
+      linkedSessionIds: ['task-pr' as SessionId],
+    };
+    const latestBubbleEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-latest',
+      body: 'Both tasks finished!',
+      linkedSessionIds: ['task-pr' as SessionId, 'task-nopr' as SessionId],
+      actions: [
+        {
+          id: 'agent-rebase-merge',
+          label: 'Rebase & merge #42',
+          tone: 'primary',
+          source: 'agent',
+          intent: {
+            kind: 'client_command',
+            command: 'github.pr_merge',
+            params: { sessionId: 'task-pr', method: 'rebase' },
+          },
+        },
+        {
+          id: 'agent-future-cmd',
+          label: 'Future deploy',
+          source: 'agent',
+          intent: {
+            kind: 'client_command',
+            command: 'deploy.rocket_ship',
+            params: {},
+          },
+        },
+        {
+          id: 'agent-e2e',
+          label: 'Run E2E suite',
+          source: 'agent',
+          intent: {
+            kind: 'coordinator_prompt',
+            prompt: 'Dispatch E2E role now',
+            mode: 'send',
+          },
+        },
+      ],
+    };
+
+    const items: ChatStreamItem[] = [
+      wrap(makeMessage('assistant:u1', 'assistant', [earlierBubbleEntry], true)),
+      wrap(makeMessage('assistant:u2', 'assistant', [latestBubbleEntry], true)),
+    ];
+    const latestByTask = buildLatestCoordinatorBubbleByTaskId(items);
+
+    expect(
+      resolveCoordinatorBubbleActions({
+        turnId: 'assistant:u1',
+        entry: earlierBubbleEntry,
+        tasksById: tasksMap,
+        latestBubbleByTaskId: latestByTask,
+        translate,
+      })
+    ).toEqual([]);
+
+    const resolvedInitial = resolveCoordinatorBubbleActions({
+      turnId: 'assistant:u2',
+      entry: latestBubbleEntry,
+      tasksById: tasksMap,
+      latestBubbleByTaskId: latestByTask,
+      translate,
+      maxActions: 6,
+    });
+    expect(
+      resolvedInitial.map((a) => ({ id: a.spec.id, label: a.displayLabel, state: a.liveState }))
+    ).toEqual([
+      { id: 'agent-rebase-merge', label: 'Rebase & merge #42', state: 'ready' },
+      { id: 'agent-e2e', label: 'Run E2E suite', state: 'ready' },
+      { id: 'rule:pr-open:task-pr', label: 'View #42', state: 'ready' },
+      { id: 'rule:pr-create:task-nopr', label: 'Create PR (T2)', state: 'ready' },
+      { id: 'rule:task-accept:task-pr', label: 'Accept T1', state: 'ready' },
+      { id: 'rule:task-accept:task-nopr', label: 'Accept T2', state: 'ready' },
+    ]);
+
+    const tasksAfterLiveWorldChanges = new Map<string, ProjectBoardRow>([
+      [
+        'task-pr',
+        {
+          ...taskPrReady,
+          bucket: 'accepted',
+          session: { ...taskPrReady.session, isArchived: true },
+          pullRequest: { ...taskPrReady.pullRequest!, status: 'merged' },
+        },
+      ],
+      [
+        'task-nopr',
+        {
+          ...taskNoPrDirty,
+          pullRequest: {
+            pr: { url: 'https://github.com/LodyAI/lody/pull/43', status: 'open' },
+            url: 'https://github.com/LodyAI/lody/pull/43',
+            status: 'open',
+            repoFullName: 'LodyAI/lody',
+            number: 43,
+            readiness: null,
+            state: null,
+          },
+        },
+      ],
+    ]);
+
+    const resolvedAfterWorldUpdate = resolveCoordinatorBubbleActions({
+      turnId: 'assistant:u2',
+      entry: {
+        ...latestBubbleEntry,
+        actionResolutions: {
+          'agent-e2e': { status: 'executed', resolvedAt: 2000 },
+        },
+      },
+      tasksById: tasksAfterLiveWorldChanges,
+      latestBubbleByTaskId: latestByTask,
+      translate,
+      maxActions: 6,
+    });
+    expect(resolvedAfterWorldUpdate.slice(0, 2)).toEqual([
+      expect.objectContaining({
+        spec: expect.objectContaining({ id: 'agent-rebase-merge' }),
+        liveState: 'completed',
+        displayLabel: '#42 merged',
+      }),
+      expect.objectContaining({
+        spec: expect.objectContaining({ id: 'agent-e2e' }),
+        liveState: 'completed',
+        displayLabel: 'Run E2E suite',
+      }),
+    ]);
+
+    const registry = createCoordinatorActionCommandRegistry();
+    const calls: string[] = [];
+    registry.register('preview.open_sim', async (params) => {
+      calls.push(String(params?.device ?? 'ios'));
+      return { persistResolution: true, summary: 'Opened simulator' };
+    });
+    expect(registry.has('preview.open_sim')).toBe(true);
+    const execRes = await registry.execute(
+      'preview.open_sim',
+      { device: 'pixel-9' },
+      {
+        coordinatorSessionId: 'coord-1' as SessionId,
+        turnId: 'assistant:u2',
+        bubbleId: 'b-latest',
+        bubbleBody: 'Done',
+        action: latestBubbleEntry.actions![0]!,
+        tasks: tasksMap,
+      }
+    );
+    expect(calls).toEqual(['pixel-9']);
+    expect(execRes).toEqual({ persistResolution: true, summary: 'Opened simulator' });
+
+    const bubblePlusCardEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-with-card',
+      body: '两边都定位到了同一个 iOS 配置缓存缺陷。',
+      linkedSessionIds: ['task-pr' as SessionId, 'task-nopr' as SessionId],
+      card: {
+        kind: 'next_step',
+        title: '下一步建议：修复 iOS 配置重新加载逻辑',
+        summary: '机器同步完成后重新触发配置刷新即可彻底解决。',
+        actions: [
+          {
+            id: 'card-fix-pr',
+            label: '让天才程序员修复并开 PR',
+            description: '复用排查上下文修改代码并提交 PR。',
+            tone: 'primary',
+            source: 'agent',
+            intent: {
+              kind: 'session_dispatch',
+              sessionId: 'task-nopr' as SessionId,
+              prompt: '修复并创建 PR',
+              mode: 'send',
+            },
+          },
+          {
+            id: 'card-merge-42',
+            label: '合并 #42',
+            source: 'agent',
+            intent: {
+              kind: 'client_command',
+              command: 'github.pr_merge',
+              params: { sessionId: 'task-pr' },
+            },
+          },
+        ],
+      },
+    };
+
+    const cardOnlyEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-card-only',
+      body: '',
+      card: {
+        kind: 'decision',
+        title: '确认兼容窗口',
+        actions: [
+          {
+            id: 'opt-7d',
+            label: '保留 7 天',
+            intent: { kind: 'coordinator_prompt', prompt: '保留 7 天', mode: 'send' },
+          },
+        ],
+      },
+    };
+
+    const plainBubbleEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-plain',
+      body: '收到，马上安排。',
+    };
+
+    const turnA = wrap(
+      makeMessage(
+        'assistant:card-turn',
+        'assistant',
+        [plainBubbleEntry, bubblePlusCardEntry, cardOnlyEntry],
+        true
+      )
+    );
+    const rowsA = buildChatVirtualRows({
+      items: [turnA],
+      lastAssistantMessageId: 'assistant:card-turn',
+      expansionVersion: 0,
+      coordinatorBubbles: true,
+    });
+    expect(rowsA.map((r) => r.key)).toEqual([
+      'assistant:assistant:card-turn:bubble:b-plain',
+      'assistant:assistant:card-turn:bubble:b-with-card',
+      'assistant:assistant:card-turn:card:b-with-card',
+      'assistant:assistant:card-turn:card:b-card-only',
+    ]);
+
+    expect(
+      resolveCoordinatorProactiveCard({
+        entry: plainBubbleEntry,
+        tasksById: tasksMap,
+        translate,
+      })
+    ).toBeNull();
+
+    const resolvedCardInitial = resolveCoordinatorProactiveCard({
+      entry: bubblePlusCardEntry,
+      tasksById: tasksMap,
+      translate,
+    });
+    expect(resolvedCardInitial).toMatchObject({
+      kind: 'next_step',
+      title: '下一步建议：修复 iOS 配置重新加载逻辑',
+      linkedTasks: [taskPrReady, taskNoPrDirty],
+      chosenAction: undefined,
+      actions: [
+        expect.objectContaining({ liveState: 'ready', displayLabel: '让天才程序员修复并开 PR' }),
+        expect.objectContaining({ liveState: 'ready', displayLabel: '合并 #42' }),
+      ],
+    });
+
+    const chosenRunningCard = resolveCoordinatorProactiveCard({
+      entry: {
+        ...bubblePlusCardEntry,
+        actionResolutions: {
+          'card-fix-pr': { status: 'executed', resolvedAt: 3000 },
+        },
+      },
+      tasksById: new Map<string, ProjectBoardRow>([
+        ['task-pr', taskPrReady],
+        ['task-nopr', { ...taskNoPrDirty, bucket: 'working' }],
+      ]),
+      translate,
+    });
+    expect(chosenRunningCard?.chosenAction).toMatchObject({
+      liveState: 'running',
+      wasChosen: true,
+      statusBadgeLabel: 'In progress',
+      spec: expect.objectContaining({
+        id: 'card-fix-pr',
+        label: '让天才程序员修复并开 PR',
+      }),
+    });
+
+    const updatedCardEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      ...bubblePlusCardEntry,
+      actionResolutions: {
+        [COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID]: {
+          status: 'executed',
+          resolvedAt: 5000,
+          summary: '让天才程序员修复并直接合并',
+        },
+      },
+    };
+    const resolvedCardAfterFeedback = resolveCoordinatorProactiveCard({
+      entry: updatedCardEntry,
+      tasksById: tasksAfterLiveWorldChanges,
+      translate,
+    });
+    expect(resolvedCardAfterFeedback).toMatchObject({
+      customFeedbackSummary: '让天才程序员修复并直接合并',
+      actions: [
+        expect.objectContaining({ liveState: 'completed', displayLabel: '#43 created' }),
+        expect.objectContaining({ liveState: 'completed', displayLabel: '#42 merged' }),
+      ],
+    });
+
+    const turnB = wrap(
+      makeMessage(
+        'assistant:card-turn',
+        'assistant',
+        [plainBubbleEntry, updatedCardEntry, cardOnlyEntry],
+        true
+      )
+    );
+    const rowsB = buildChatVirtualRows({
+      items: [turnB],
+      lastAssistantMessageId: 'assistant:card-turn',
+      expansionVersion: 0,
+      coordinatorBubbles: true,
+    });
+    const cardRowA = rowsA[2] as AssistantChatVirtualRow;
+    const cardRowB = rowsB[2] as AssistantChatVirtualRow;
+    expect(areAssistantChatVirtualRowsEqual({ ...cardRowB, item: cardRowA.item }, cardRowA)).toBe(
+      false
+    );
+
+    const streamWithFollowupUser: ChatStreamItem[] = [
+      turnA,
+      wrap(
+        makeMessage(
+          'user-followup-1',
+          'user',
+          [{ type: 'text', text: '兼容窗口改成保留 14 天吧' }],
+          true
+        )
+      ),
+    ];
+    const supersededKeys = buildSupersededCoordinatorCardKeys({
+      items: streamWithFollowupUser,
+      tasksById: tasksMap,
+    });
+    expect(
+      supersededKeys.has(formatCoordinatorBubbleKey('assistant:card-turn', 'b-card-only'))
+    ).toBe(true);
+    expect(
+      supersededKeys.has(formatCoordinatorBubbleKey('assistant:card-turn', 'b-with-card'))
+    ).toBe(false);
+
+    const dismissedCardResolved = resolveCoordinatorProactiveCard({
+      entry: {
+        type: 'coordinator_message',
+        id: 'b-dismissed',
+        body: '可创建 PR 或安排审查',
+        card: {
+          title: '下一步建议',
+          actions: [
+            {
+              id: 'act-1',
+              label: '创建 PR',
+              intent: { kind: 'coordinator_prompt', prompt: '创建 PR', mode: 'send' },
+            },
+          ],
+        },
+        actionResolutions: {
+          [COORDINATOR_CARD_DISMISSED_ACTION_ID]: {
+            status: 'dismissed',
+            resolvedAt: 1000,
+          },
+        },
+      },
+      tasksById: tasksMap,
+      translate: (_key, fallback) => fallback,
+    });
+    expect(dismissedCardResolved?.isDismissed).toBe(true);
+
+    const implSession = {
+      id: 'wi-impl' as SessionId,
+      title: 'Implement submodule PR',
+      isArchived: false,
+      latestUserMsgId: 'u-impl-1',
+    } as ProjectBoardRow['session'];
+    const reviewSession = {
+      id: 'wi-review' as SessionId,
+      title: 'Review main repo PR',
+      isArchived: false,
+      latestUserMsgId: 'u-rev-1',
+    } as ProjectBoardRow['session'];
+    const prSubmodule = {
+      pr: { url: 'https://github.com/LodyAI/acp-pi/pull/18', status: 'open' as const },
+      url: 'https://github.com/LodyAI/acp-pi/pull/18',
+      status: 'open' as const,
+      repoFullName: 'LodyAI/acp-pi',
+      number: 18,
+      readiness: 'y' as const,
+      state: { m: 'c' as const, s: 's' as const, t: 10 },
+    };
+    const prMainRepo = {
+      pr: { url: 'https://github.com/LodyAI/lody/pull/99', status: 'draft' as const },
+      url: 'https://github.com/LodyAI/lody/pull/99',
+      status: 'draft' as const,
+      repoFullName: 'LodyAI/lody',
+      number: 99,
+      readiness: null,
+      state: null,
+    };
+    const groupedRow: ProjectBoardRow = {
+      workItemId: 'wi-impl',
+      workItemTitle: 'Cross-repo ACP upgrade',
+      collaborationMode: 'delegated',
+      externalRefs: [],
+      session: implSession,
+      members: [
+        {
+          session: implSession,
+          role: 'implement',
+          bucket: 'review',
+          latestMessageAt: 2000,
+          hasUnreadActivity: false,
+          pullRequest: prSubmodule,
+          pullRequests: [prSubmodule],
+        },
+        {
+          session: reviewSession,
+          role: 'review',
+          bucket: 'review',
+          latestMessageAt: 2100,
+          hasUnreadActivity: false,
+          pullRequest: prMainRepo,
+          pullRequests: [prMainRepo],
+        },
+      ],
+      taskNumber: 4,
+      bucket: 'review',
+      latestMessageAt: 2100,
+      pullRequest: prSubmodule,
+      pullRequests: [prSubmodule, prMainRepo],
+    };
+    const groupedTasks = new Map<string, ProjectBoardRow>([
+      ['wi-impl', groupedRow],
+      ['wi-review', groupedRow],
+    ]);
+
+    const multiMemberCardEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-grouped-card',
+      body: '子模块与主仓 PR 都准备好了。',
+      linkedSessionIds: ['wi-impl' as SessionId, 'wi-review' as SessionId],
+      card: {
+        kind: 'next_step',
+        title: '推进跨仓 PR',
+        workItemId: 'wi-impl',
+        snapshotTurnBySession: {
+          'wi-impl': 'u-impl-1',
+          'wi-review': 'u-rev-1',
+        },
+        actions: [
+          {
+            id: 'merge-sub',
+            label: '先合并 acp-pi #18',
+            source: 'agent',
+            intent: {
+              kind: 'client_command',
+              command: 'github.pr_merge',
+              params: { sessionId: 'wi-impl', prUrl: prSubmodule.url },
+            },
+          },
+        ],
+      },
+      createdAt: 2200,
+    };
+
+    const groupedResolvedCard = resolveCoordinatorProactiveCard({
+      entry: multiMemberCardEntry,
+      tasksById: groupedTasks,
+      translate,
+    });
+    expect(groupedResolvedCard?.linkedTasks).toHaveLength(1);
+    expect(groupedResolvedCard?.linkedTasks[0]?.workItemId).toBe('wi-impl');
+
+    const multiPrBubble: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-multi-pr-rules',
+      body: '请查看跨仓进展 [T4](lody://session/wi-impl)',
+      linkedSessionIds: ['wi-impl' as SessionId],
+    };
+    const multiPrStream = [
+      wrap(makeMessage('assistant:multi-pr', 'assistant', [multiPrBubble], true)),
+    ];
+    const multiPrActions = resolveCoordinatorBubbleActions({
+      turnId: 'assistant:multi-pr',
+      entry: multiPrBubble,
+      tasksById: groupedTasks,
+      latestBubbleByTaskId: buildLatestCoordinatorBubbleByTaskId(multiPrStream),
+      translate,
+      maxActions: 6,
+    });
+    expect(multiPrActions.map((a) => ({ label: a.displayLabel, intent: a.spec.intent }))).toEqual([
+      {
+        label: 'Merge acp-pi #18',
+        intent: {
+          kind: 'client_command',
+          command: 'github.pr_merge',
+          params: { sessionId: 'wi-impl', prUrl: prSubmodule.url, method: 'squash' },
+        },
+      },
+      {
+        label: 'View acp-pi #18',
+        intent: {
+          kind: 'client_command',
+          command: 'panel.open',
+          params: { target: 'pr', sessionId: 'wi-impl', url: prSubmodule.url },
+        },
+      },
+      {
+        label: 'Mark lody #99 ready',
+        intent: {
+          kind: 'client_command',
+          command: 'github.pr_ready',
+          params: { sessionId: 'wi-review', prUrl: prMainRepo.url },
+        },
+      },
+      {
+        label: 'View lody #99',
+        intent: {
+          kind: 'client_command',
+          command: 'panel.open',
+          params: { target: 'pr', sessionId: 'wi-review', url: prMainRepo.url },
+        },
+      },
+      {
+        label: 'Accept T4',
+        intent: {
+          kind: 'client_command',
+          command: 'task.accept',
+          params: { sessionId: 'wi-impl', sessionIds: ['wi-impl', 'wi-review'] },
+        },
+      },
+    ]);
+
+    const groupedCardStream = [
+      wrap(makeMessage('assistant:grouped-card-turn', 'assistant', [multiMemberCardEntry], true)),
+    ];
+    const groupedCardKey = formatCoordinatorBubbleKey(
+      'assistant:grouped-card-turn',
+      'b-grouped-card'
+    );
+    expect(
+      buildSupersededCoordinatorCardKeys({
+        items: groupedCardStream,
+        tasksById: groupedTasks,
+      }).has(groupedCardKey)
+    ).toBe(false);
+
+    const advancedReviewSession = {
+      ...reviewSession,
+      latestUserMsgId: 'u-rev-direct-2',
+    };
+    const groupedRowAfterDirectChildChat: ProjectBoardRow = {
+      ...groupedRow,
+      members: [
+        groupedRow.members[0]!,
+        { ...groupedRow.members[1]!, session: advancedReviewSession },
+      ],
+    };
+    const groupedTasksAfterChildChat = new Map<string, ProjectBoardRow>([
+      ['wi-impl', groupedRowAfterDirectChildChat],
+      ['wi-review', groupedRowAfterDirectChildChat],
+    ]);
+    expect(
+      buildSupersededCoordinatorCardKeys({
+        items: groupedCardStream,
+        tasksById: groupedTasksAfterChildChat,
+      }).has(groupedCardKey)
+    ).toBe(true);
+
+    const handoffCardEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-handoff-card',
+      body: '已为原型设计会话注入上下文，建议直接在右侧与它迭代布局细节。',
+      linkedSessionIds: ['wi-impl' as SessionId],
+      card: {
+        kind: 'handoff',
+        title: '切换到右侧直连共创',
+        summary: '高频 UI 细节微调无需经协调者中转，点击即可在右侧面板直接沟通。',
+        actions: [
+          {
+            id: 'open-direct',
+            label: '在右侧面板直接沟通',
+            tone: 'primary',
+            source: 'agent',
+            intent: {
+              kind: 'client_command',
+              command: 'panel.open',
+              params: { target: 'session', sessionId: 'wi-impl', handoff: true },
+            },
+          },
+        ],
+      },
+      actionResolutions: {
+        'open-direct': {
+          status: 'executed',
+          resolvedAt: 3000,
+          summary: 'Opened in side panel',
+        },
+      },
+    };
+    const resolvedHandoffCard = resolveCoordinatorProactiveCard({
+      entry: handoffCardEntry,
+      tasksById: groupedTasks,
+      translate,
+    });
+    expect(resolvedHandoffCard).toMatchObject({
+      kind: 'handoff',
+      title: '切换到右侧直连共创',
+      chosenAction: {
+        liveState: 'completed',
+        wasChosen: true,
+        displayLabel: 'Opened in side panel',
+      },
+    });
+  });
+
+  it('selects coordinator avatar moods from message content and restricts Lottie playback to one-shot live arrivals', () => {
+    expect(
+      inferCoordinatorBubbleMood({
+        body: '我会安排排查 iOS 对话页为什么有时只显示 ACP 图标，也请审查员独立看一遍。',
+      })
+    ).toBe('thinking');
+    expect(
+      inferCoordinatorBubbleMood({
+        body: 'Composer 单闪电与双闪电已可预览，回归测试通过。',
+      })
+    ).toBe('happy');
+    expect(
+      inferCoordinatorBubbleMood({
+        body: '这里有两个分支命名不一致，不确定你希望保留哪一个？',
+      })
+    ).toBe('confused');
+    expect(
+      inferCoordinatorBubbleMood({
+        body: '抱歉，构建失败且单测未通过，暂时无法合并。',
+      })
+    ).toBe('sad');
+    expect(
+      inferCoordinatorBubbleMood({
+        body: '检测到密钥泄露风险，严禁直接推送到公开仓库！',
+      })
+    ).toBe('angry');
+
+    resetCoordinatorAvatarPlaybackForTest();
+    const mountAt = 100_000;
+    const scopeKey = 'coord-session-1:main';
+    const historicalTurn = makeMessage(
+      'assistant:hist-1',
+      'assistant',
+      [
+        {
+          type: 'coordinator_message',
+          id: 'hist-bubble',
+          body: '历史已完成消息',
+          createdAt: mountAt - 60_000,
+        },
+      ],
+      true
+    );
+
+    seedCoordinatorAvatarStreamSnapshot(scopeKey, [historicalTurn], true, mountAt);
+    expect(
+      claimCoordinatorBubbleAvatarPlayback(
+        scopeKey,
+        'assistant:hist-1:hist-bubble',
+        mountAt - 60_000,
+        mountAt
+      )
+    ).toBe(false);
+
+    expect(
+      claimCoordinatorBubbleAvatarPlayback(
+        scopeKey,
+        'assistant:older-page:old-bubble',
+        mountAt - 30_000,
+        mountAt + 5_000
+      )
+    ).toBe(false);
+
+    expect(
+      claimCoordinatorBubbleAvatarPlayback(
+        scopeKey,
+        'assistant:live-1:new-bubble',
+        mountAt + 3_000,
+        mountAt + 3_050
+      )
+    ).toBe(true);
+    expect(
+      claimCoordinatorBubbleAvatarPlayback(
+        scopeKey,
+        'assistant:live-1:new-bubble',
+        mountAt + 3_000,
+        mountAt + 4_000
+      )
+    ).toBe(false);
   });
 });
 

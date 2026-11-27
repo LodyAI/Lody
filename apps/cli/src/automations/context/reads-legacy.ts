@@ -2,12 +2,14 @@ import { providerBindingFingerprint } from '@/session/automation-observations';
 import { evaluateCapacity } from '../runtime/capacity';
 import {
   getSessionRoomId,
+  isCoordinatorSession,
   isLoroRepoDocDeleted,
   resolveSessionPullRequests,
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
 import {
+  automationCoordinatorWorkItemsReadParametersSchema,
   automationReadRequestSchema,
   automationReadResponseSchema,
   automationEmptyReadParametersSchema,
@@ -21,6 +23,11 @@ import type { SessionAutomationAuthority } from '@/session/session-automation-au
 import type { AutomationLedger } from '../storage/ledger';
 import { readWorkflowRuns } from '../sources/workflows';
 import { pullRequestCheckpointId } from '../sources/pull-requests';
+import {
+  COORDINATOR_WORK_ITEMS_RESOURCE,
+  readCoordinatorWorkItemsSnapshot,
+  type ObservedCoordinatorWorkItem,
+} from './coordinator-watch-gate';
 
 /** Read adapters expose owner snapshots, never condition names or ambient process capabilities. */
 export async function readAutomationContext(options: {
@@ -30,8 +37,9 @@ export async function readAutomationContext(options: {
   wait: AutomationWait;
   input: AutomationReadRequest;
   now: number;
+  onCoordinatorWorkItemsObserved?: (items: readonly ObservedCoordinatorWorkItem[]) => void;
 }): Promise<AutomationReadResponse> {
-  const { ledger, manager, authority, wait, now } = options;
+  const { ledger, manager, authority, wait, now, onCoordinatorWorkItemsObserved } = options;
   const input = automationReadRequestSchema.parse(options.input);
   const current = ledger.wait(wait.id);
   if (
@@ -56,7 +64,8 @@ export async function readAutomationContext(options: {
   const access = await authority.canEdit(meta.id, wait.ownerUserId);
   if (access === 'no') throw new Error('AUTOMATION_PERMISSION_DENIED');
   if (access === 'unknown') throw new Error('AUTOMATION_PERMISSION_UNCONFIRMED');
-  if (input.resource !== 'events') automationEmptyReadParametersSchema.parse(input.parameters);
+  if (input.resource !== 'events' && input.resource !== COORDINATOR_WORK_ITEMS_RESOURCE)
+    automationEmptyReadParametersSchema.parse(input.parameters);
   // Record demand even when the first read has no snapshot yet.
   if (current.state === 'checking') ledger.recordRead(wait.id, input.resource, [], now);
   let value: unknown;
@@ -123,6 +132,21 @@ export async function readAutomationContext(options: {
     case 'events': {
       const parameters = automationEventReadParametersSchema.parse(input.parameters);
       value = ledger.sessionEvents(meta.id, parameters.since, parameters.limit);
+      break;
+    }
+    case COORDINATOR_WORK_ITEMS_RESOURCE: {
+      if (!isCoordinatorSession(meta)) throw new Error('AUTOMATION_READ_UNAVAILABLE');
+      const parameters = automationCoordinatorWorkItemsReadParametersSchema.parse(input.parameters);
+      const snapshot = await readCoordinatorWorkItemsSnapshot({
+        ledger,
+        manager,
+        coordinatorMeta: meta,
+        ownerUserId: wait.ownerUserId,
+        parameters,
+        now,
+      });
+      onCoordinatorWorkItemsObserved?.(snapshot);
+      value = snapshot;
       break;
     }
     default:

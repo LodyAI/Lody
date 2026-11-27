@@ -1014,7 +1014,86 @@ export type LocalSessionControlRequest =
   | PreviewCandidateReportRequest
   | SessionPreviewCreateRequest
   | SessionPreviewRevokeRequest
-  | SessionPreviewStatusRequest;
+  | SessionPreviewStatusRequest
+  | SessionCoordinatorDiagnosticsRequest
+  | SessionCoordinatorTriggersRequest;
+
+export type SessionCoordinatorTriggersRequest = {
+  type: 'session/coordinator-triggers';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+  action: import('./coordinator-triggers').CoordinatorTriggerAction;
+};
+
+export type SessionCoordinatorTriggersResponse = {
+  type: 'session/coordinator-triggers_response';
+  sessionId: SessionId;
+  ok: boolean;
+  error?: string;
+  triggerId?: string;
+  matchedCount?: number;
+  connectors?: import('./coordinator-triggers').CoordinatorConnectorStatusSummary;
+};
+
+export type SessionCoordinatorDiagnosticsRequest = {
+  type: 'session/coordinator-diagnostics';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+};
+
+export type CoordinatorDiagnosticsCursorEntry = {
+  targetSessionId: string;
+  latestUserMsgId?: string;
+  lastMessageAt: number;
+  statusSignature: string;
+  prSignature: string;
+  updatedAt: number;
+};
+
+export type CoordinatorDiagnosticsOperationEntry = {
+  operationId: string;
+  kind: string;
+  state: 'active' | 'finished';
+  createdAt: string;
+  finishedAt?: string;
+  targets: Array<{
+    sessionId?: string;
+    status: string;
+  }>;
+};
+
+export type CoordinatorDiagnosticsWaitEntry = {
+  id: string;
+  reason?: string;
+  program?: string;
+  state: string;
+  checks: number;
+  consecutiveErrors: number;
+  lastError?: string;
+  nextCheckAt: number;
+  expiresAt?: number;
+  reads?: string[];
+  continuation?: {
+    state: string;
+    reason?: string;
+  };
+};
+
+export type SessionCoordinatorDiagnosticsResponse = {
+  type: 'session/coordinator-diagnostics_response';
+  sessionId: SessionId;
+  observedAt: number;
+  cursors: CoordinatorDiagnosticsCursorEntry[];
+  lastTurnDelta?: {
+    userTurnId: string;
+    deltaText: string;
+    updatedAt: number;
+  };
+  operations: CoordinatorDiagnosticsOperationEntry[];
+  waits: CoordinatorDiagnosticsWaitEntry[];
+};
 
 export type LocalSessionControlResponse =
   | DshProvidersResponse
@@ -1048,7 +1127,9 @@ export type LocalSessionControlResponse =
   | PreviewCandidateReportResponse
   | SessionPreviewCreateResponse
   | SessionPreviewRevokeResponse
-  | SessionPreviewStatusResponse;
+  | SessionPreviewStatusResponse
+  | SessionCoordinatorDiagnosticsResponse
+  | SessionCoordinatorTriggersResponse;
 
 export type LocalProjectFileListResult = {
   paths: string[];

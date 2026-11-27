@@ -532,7 +532,7 @@ export function placeWorkspaceSessionsWithOpeners(
   };
   for (const task of natural.chatSessions) addTask(task, 'chats');
   for (const task of natural.repoSessions)
-    addTask(task, `repo:${(task.repoFullName ?? '').trim()}`);
+    addTask(task, `repo:${(task.repoFullName ?? '').trim().toLowerCase()}`);
   for (const task of natural.projectGroupSessions)
     addTask(task, `group:${task.projectGroup?.id ?? ''}`);
   const sessionById = new Map<string, SessionMeta>();

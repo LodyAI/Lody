@@ -1,5 +1,6 @@
 import type { MachineStatusResponse } from '@lody/shared';
 import { readManagedOperation } from './managed-daemon-release';
+import { resolveCoordinatorPromptReplyHeader } from './coordinator-reply-context';
 import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
 import type { SessionDirectoryListRequest } from '@lody/shared';
 import {
@@ -11,6 +12,7 @@ import {
   type SessionHistorySubscription,
   type SessionHistorySubscriptionRequest,
   isContainedSession,
+  isCoordinatorSession,
   withAgentSessionDefaults,
 } from '@lody/shared';
 import { setTimeout as backfillWait } from 'node:timers/promises';
@@ -261,6 +263,10 @@ import {
 import { getHostMachineProtocolCapabilities } from '../agent/managed-agent-runtime';
 import { ISession, SessionManager } from '../session/session-manager';
 import { getDefaultSessionWorkdir } from '../session/session';
+import {
+  extractChildDirectTailSummary,
+  resolveCoordinatorProjectFactsDelta,
+} from './coordinator-project-delta';
 import { captureCli } from '@/lib/analytics/posthog';
 import { LoroDocumentManager, SessionDocument, subscribeSessionChanges } from './loro/doc';
 import {
@@ -2798,6 +2804,113 @@ export class MessageHandler {
     }
   }
 
+  private async readReplyContextHeader(
+    workspaceId: WorkspaceId,
+    sessionId: SessionId,
+    userTurnId: string | undefined
+  ): Promise<string | undefined> {
+    if (!userTurnId) return undefined;
+    try {
+      const ownMetaRow = await this.workspaceDocument.repo
+        .getDocMeta(getSessionRoomId(sessionId))
+        .catch(() => undefined);
+      const isCoordinator = isCoordinatorSession(ownMetaRow?.meta as SessionMeta | undefined);
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      return await resolveCoordinatorPromptReplyHeader({
+        history: backend.history,
+        workspaceId,
+        userTurnId,
+        isCoordinator,
+        readSessionTitle: async (targetId) => {
+          const targetRow = await this.workspaceDocument.repo
+            .getDocMeta(getSessionRoomId(targetId))
+            .catch(() => undefined);
+          return (targetRow?.meta as SessionMeta | undefined)?.title;
+        },
+        readSessionLatestUserMsgId: async (targetId) => {
+          const targetRow = await this.workspaceDocument.repo
+            .getDocMeta(getSessionRoomId(targetId))
+            .catch(() => undefined);
+          return (targetRow?.meta as SessionMeta | undefined)?.latestUserMsgId;
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `[${sessionId}] Omitting reply context for ${userTurnId}: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
+  private coordinatorTriggers?: import('@/automations/connectors/service').CoordinatorTriggerService;
+
+  setCoordinatorTriggers(
+    service: import('@/automations/connectors/service').CoordinatorTriggerService | undefined
+  ): void {
+    this.coordinatorTriggers = service;
+  }
+
+  readCoordinatorStoreDiagnostics(sessionId: SessionId) {
+    return this.operationCoordinator.readCoordinatorStoreDiagnostics(sessionId);
+  }
+
+  private async readProjectFactsDeltaHeader(
+    workspaceId: WorkspaceId,
+    sessionId: SessionId,
+    userTurnId: string | undefined
+  ): Promise<string | undefined> {
+    if (!userTurnId) return undefined;
+    try {
+      const ownMetaRow = await this.workspaceDocument.repo
+        .getDocMeta(getSessionRoomId(sessionId))
+        .catch(() => undefined);
+      const ownMeta = ownMetaRow?.meta as SessionMeta | undefined;
+      if (!isCoordinatorSession(ownMeta) || !ownMeta?.userId) return undefined;
+      const cursorStore = this.operationCoordinator.getCoordinatorCursorStore();
+      if (!cursorStore) return undefined;
+      const [sessionDoc, aliveSessions] = await Promise.all([
+        this.workspaceDocument.getOrCreateSessionDoc(sessionId),
+        listAliveSessionMetas(this.workspaceDocument),
+      ]);
+      const docState = await sessionDoc.getDocState();
+      return await resolveCoordinatorProjectFactsDelta({
+        workspaceId,
+        coordinatorSessionId: sessionId,
+        coordinatorUserId: ownMeta.userId,
+        userTurnId,
+        allSessionMetas: aliveSessions.map((entry) => entry.meta),
+        rawWorkItems: docState?.workItems,
+        cursorStore,
+        readChildTail: async (childSessionId, previousLatestUserMsgId) => {
+          const childMetaRow = await this.workspaceDocument.repo
+            .getDocMeta(getSessionRoomId(childSessionId))
+            .catch(() => undefined);
+          const childMeta = childMetaRow?.meta as SessionMeta | undefined;
+          const remoteTimeout =
+            childMeta?.machineId && childMeta.machineId !== this.machineId ? 800 : 0;
+          return await this.workspaceDocument.readSessionDocTransiently(
+            childSessionId,
+            async (childDoc) => {
+              const childBackend = await this.getSessionBackend(childDoc);
+              return await extractChildDirectTailSummary({
+                history: childBackend.history,
+                coordinatorSessionId: sessionId,
+                previousLatestUserMsgId,
+              });
+            },
+            { remoteSyncTimeoutMs: remoteTimeout }
+          );
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `[${sessionId}] Omitting project facts delta for ${userTurnId}: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
   private async buildAcpPromptBlocks(args: {
     requesterUserId?: string;
     workspaceId: WorkspaceId;
@@ -2942,9 +3055,15 @@ export class MessageHandler {
     });
 
     // Build the full text prompt: comment references first, then user text
-    const senderHeader = await this.readSenderHeader(args.sessionId, args.userTurnId);
+    const [senderHeader, replyContextHeader, projectFactsDeltaHeader] = await Promise.all([
+      this.readSenderHeader(args.sessionId, args.userTurnId),
+      this.readReplyContextHeader(args.workspaceId, args.sessionId, args.userTurnId),
+      this.readProjectFactsDeltaHeader(args.workspaceId, args.sessionId, args.userTurnId),
+    ]);
     const allTextParts = [
       ...(senderHeader ? [senderHeader] : []),
+      ...(projectFactsDeltaHeader ? [projectFactsDeltaHeader] : []),
+      ...(replyContextHeader ? [replyContextHeader] : []),
       ...commentRefTexts,
       ...visualAnnotationRefTexts,
       ...textParts,
@@ -7972,6 +8091,8 @@ export class MessageHandler {
           machineId: this.machineId,
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
+          readActiveAssistantTurnId: (sessionId) => this.store.getTurnId(sessionId),
+          ...(this.coordinatorTriggers ? { coordinatorTriggers: this.coordinatorTriggers } : {}),
           host: localSessionHost,
           wakeOperations: () => {
             void this.operationCoordinator.wake('mcp-handoff');
@@ -8027,6 +8148,8 @@ export class MessageHandler {
               { pendingInput: 'preserve', prePromptSession: 'discard', pauseInbox: false }
             );
           },
+          readActiveAssistantTurnId: (sessionId) => this.store.getTurnId(sessionId),
+          ...(this.coordinatorTriggers ? { coordinatorTriggers: this.coordinatorTriggers } : {}),
           withdrawQueuedInput: async (args) => await this.withdrawQueuedInput(args),
           ...localSessionHost,
         },

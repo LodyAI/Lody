@@ -661,6 +661,10 @@ export interface LoroSidebarProps {
   activeNav?: LoroSidebarNavKey | null;
 
   topContent?: ReactNode;
+  /** Rendered under the navigation rows, above the list (project mode's view switch). */
+  navAccessory?: ReactNode;
+  /** When set, replaces every list the sidebar would show (project mode's project list). */
+  listOverride?: ReactNode;
   /** The filter trigger element rendered in-flow on the first visible section
       header. Caller-owned so its open state survives remounting between slots. */
   desktopFilterAction?: ReactNode;
@@ -1301,6 +1305,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   maxWidth = MAX_DESKTOP_SIDEBAR_WIDTH,
   activeNav = null,
   topContent,
+  navAccessory,
+  listOverride,
   desktopFilterAction,
   desktopFilterBar,
   onFilterShortcut,
@@ -2107,6 +2113,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             shortcut={searchBinding}
           />
         </div>
+        {navAccessory}
 
         {!isMobile ? desktopFilterBar : null}
         <ScrollArea
@@ -2130,188 +2137,194 @@ export const LoroSidebar = memo(function LoroSidebar({
               .className
           }
         >
-          <div {...stylex.props(shellStyles.relative)}>
-            {hasPinnedItems ? (
-              <div
-                className={
-                  stylex.props(
-                    pinnedSectionCollapsed
-                      ? shellStyles.pinnedStackCollapsed
-                      : shellStyles.pinnedStackOpen
-                  ).className
-                }
-              >
-                <SidebarPinnedSections
-                  sections={resolvedPinnedSections}
-                  defaultLabel={mergedLabels.pinned}
-                  defaultCollapsed={pinnedSectionCollapsed}
-                  onToggleDefault={onTogglePinnedSection}
-                  collapsedSectionIds={collapsedPinSectionIds}
-                  hiddenCounts={pinnedHiddenCounts}
-                  onToggleSection={onTogglePinSection}
-                  hiddenSectionKeys={hiddenPinSectionKeys}
-                  onSetSectionHidden={onSetPinSectionHidden}
-                  headerAction={sectionHeaderFilterAction ?? undefined}
-                  actions={pinSectionActions}
-                  onDropIntoFocus={organizeMode === 'status' ? onDropFocusItem : undefined}
-                  emptyTitle={mergedLabels.updated.emptyTitle}
-                  emptyDescription={mergedLabels.updated.emptyDescription}
-                  listProps={pinnedListProps}
-                />
-              </div>
-            ) : null}
-            {organizeMode !== 'workspace' ? (
-              // Design intent: 'updated' mode is a flat firehose of recent
-              // sessions. It deliberately drops Workspace-mode structure
-              // (per-repo groups with collapse/reorder, per-project headers
-              // with rename/remove, per-group "+" new-session affordance,
-              // GitHub Worktrees / Local Projects section headers). Users who
-              // need that structure switch back via the footer popover; the
-              // sidebar-state.sidebarOrganizeModeAtom persists the choice.
-              // Per-row actions (rename, pin, archive, copy URL, copy branch,
-              // open PR) are wired through the props below so the two modes
-              // are at parity for individual sessions even though section-
-              // level affordances diverge. 'status' mode lists the same rows,
-              // split into status groups.
-              !hasPinnedItems || updatedIsLoading || Boolean(updatedItems?.length) ? (
+          {listOverride ? (
+            <div {...stylex.props(shellStyles.relative)}>{listOverride}</div>
+          ) : (
+            <div {...stylex.props(shellStyles.relative)}>
+              {hasPinnedItems ? (
                 <div
                   className={
-                    hasPinnedItems ? undefined : stylex.props(shellStyles.pinnedStack).className
+                    stylex.props(
+                      pinnedSectionCollapsed
+                        ? shellStyles.pinnedStackCollapsed
+                        : shellStyles.pinnedStackOpen
+                    ).className
                   }
                 >
-                  <SidebarUpdatedSessionList
-                    items={updatedItems ?? []}
-                    now={now}
-                    isMobile={isMobile}
-                    isLoading={updatedIsLoading}
-                    grouping={organizeMode === 'status' ? 'status' : 'recency'}
-                    showProjectContext={showUpdatedProjectNames}
-                    selectedItemId={updatedSelectedItemId ?? null}
-                    labels={mergedLabels.updated}
-                    collapsedBuckets={updatedBucketsCollapsed}
-                    revealedRowsByBucket={updatedRevealedRows}
-                    onSelectItem={onSelectUpdatedItem}
-                    onToggleBucket={onToggleUpdatedBucket}
-                    onShowMore={onShowMoreUpdatedRows}
-                    onShowLess={onShowLessUpdatedRows}
-                    onArchiveItem={onArchiveUpdatedItem}
-                    onMarkItemUnread={onMarkUpdatedItemUnread}
-                    onRenameItem={onRenameUpdatedItem}
-                    onTogglePinItem={onToggleUpdatedItemPinned}
-                    onSnoozeItem={onSnoozeUpdatedItem}
-                    onSettleItem={onSettleUpdatedItem}
-                    onMoveItemToFocus={onMoveUpdatedItemToFocus}
-                    onDropFocusSession={onDropFocusItem}
-                    onDropFocusIntoPinSection={pinSectionActions?.onDropItem}
-                    onCopyItemUrl={onCopyUpdatedItemUrl}
-                    onShareItemWithTeam={onShareUpdatedItemWithTeam}
-                    onOpenPullRequest={onOpenUpdatedItemPullRequest}
-                    getItemHref={getUpdatedItemHref}
-                    headerAction={
-                      hasPinnedItems ? undefined : (sectionHeaderFilterAction ?? undefined)
-                    }
+                  <SidebarPinnedSections
+                    sections={resolvedPinnedSections}
+                    defaultLabel={mergedLabels.pinned}
+                    defaultCollapsed={pinnedSectionCollapsed}
+                    onToggleDefault={onTogglePinnedSection}
+                    collapsedSectionIds={collapsedPinSectionIds}
+                    hiddenCounts={pinnedHiddenCounts}
+                    onToggleSection={onTogglePinSection}
+                    hiddenSectionKeys={hiddenPinSectionKeys}
+                    onSetSectionHidden={onSetPinSectionHidden}
+                    headerAction={sectionHeaderFilterAction ?? undefined}
+                    actions={pinSectionActions}
+                    onDropIntoFocus={organizeMode === 'status' ? onDropFocusItem : undefined}
+                    emptyTitle={mergedLabels.updated.emptyTitle}
+                    emptyDescription={mergedLabels.updated.emptyDescription}
+                    listProps={pinnedListProps}
                   />
                 </div>
-              ) : null
-            ) : (
-              <>
-                {/* pb-1 (not pb-3): the last topContent item is the GitHub
-                  Worktrees section header, whose repo list renders just below
-                  as the sibling SessionList — the header must hug its content. */}
-                {topContent ? (
+              ) : null}
+              {organizeMode !== 'workspace' ? (
+                // Design intent: 'updated' mode is a flat firehose of recent
+                // sessions. It deliberately drops Workspace-mode structure
+                // (per-repo groups with collapse/reorder, per-project headers
+                // with rename/remove, per-group "+" new-session affordance,
+                // GitHub Worktrees / Local Projects section headers). Users who
+                // need that structure switch back via the footer popover; the
+                // sidebar-state.sidebarOrganizeModeAtom persists the choice.
+                // Per-row actions (rename, pin, archive, copy URL, copy branch,
+                // open PR) are wired through the props below so the two modes
+                // are at parity for individual sessions even though section-
+                // level affordances diverge. 'status' mode lists the same rows,
+                // split into status groups.
+                !hasPinnedItems || updatedIsLoading || Boolean(updatedItems?.length) ? (
                   <div
                     className={
-                      stylex.props(
-                        hasPinnedItems ? shellStyles.pinnedBottom : shellStyles.pinnedStack
-                      ).className
+                      hasPinnedItems ? undefined : stylex.props(shellStyles.pinnedStack).className
                     }
                   >
-                    {topContent}
+                    <SidebarUpdatedSessionList
+                      items={updatedItems ?? []}
+                      now={now}
+                      isMobile={isMobile}
+                      isLoading={updatedIsLoading}
+                      grouping={organizeMode === 'status' ? 'status' : 'recency'}
+                      showProjectContext={showUpdatedProjectNames}
+                      selectedItemId={updatedSelectedItemId ?? null}
+                      labels={mergedLabels.updated}
+                      collapsedBuckets={updatedBucketsCollapsed}
+                      revealedRowsByBucket={updatedRevealedRows}
+                      onSelectItem={onSelectUpdatedItem}
+                      onToggleBucket={onToggleUpdatedBucket}
+                      onShowMore={onShowMoreUpdatedRows}
+                      onShowLess={onShowLessUpdatedRows}
+                      onArchiveItem={onArchiveUpdatedItem}
+                      onMarkItemUnread={onMarkUpdatedItemUnread}
+                      onRenameItem={onRenameUpdatedItem}
+                      onTogglePinItem={onToggleUpdatedItemPinned}
+                      onSnoozeItem={onSnoozeUpdatedItem}
+                      onSettleItem={onSettleUpdatedItem}
+                      onMoveItemToFocus={onMoveUpdatedItemToFocus}
+                      onDropFocusSession={onDropFocusItem}
+                      onDropFocusIntoPinSection={pinSectionActions?.onDropItem}
+                      onCopyItemUrl={onCopyUpdatedItemUrl}
+                      onShareItemWithTeam={onShareUpdatedItemWithTeam}
+                      onOpenPullRequest={onOpenUpdatedItemPullRequest}
+                      getItemHref={getUpdatedItemHref}
+                      headerAction={
+                        hasPinnedItems ? undefined : (sectionHeaderFilterAction ?? undefined)
+                      }
+                    />
                   </div>
-                ) : null}
-                {sessionListProps ? (
-                  <SessionList
-                    {...sessionListProps}
-                    className={sessionListClassName}
-                    emptyState={workspaceEmptyState}
-                    headerAction={
-                      topContent || hasPinnedItems || afterSessionListContent
-                        ? sessionListProps.headerAction
-                        : (sessionListProps.headerAction ?? sectionHeaderFilterAction ?? undefined)
-                    }
-                  />
-                ) : null}
-                {afterSessionListContent}
-              </>
-            )}
-            {organizeMode === 'workspace' && !topContent && !sessionListProps ? (
-              <div {...stylex.props(shellStyles.repoStack)}>
-                {repoSections.map((section, sectionIndex) => (
-                  <div key={section.id} {...stylex.props(shellStyles.repoGroup)}>
+                ) : null
+              ) : (
+                <>
+                  {/* pb-1 (not pb-3): the last topContent item is the GitHub
+                  Worktrees section header, whose repo list renders just below
+                  as the sibling SessionList — the header must hug its content. */}
+                  {topContent ? (
                     <div
-                      className={cn(
-                        SIDEBAR_CONTROL_TEXT_CLASS,
-                        stylex.props(shellStyles.repoHeader).className
-                      )}
+                      className={
+                        stylex.props(
+                          hasPinnedItems ? shellStyles.pinnedBottom : shellStyles.pinnedStack
+                        ).className
+                      }
                     >
-                      <Github {...stylex.props(shellStyles.repoHeaderGlyph)} />
-                      <span {...stylex.props(shellStyles.clipped)}>{section.repoFullName}</span>
-                      {sectionIndex === 0 && sectionHeaderFilterAction ? (
-                        <span {...stylex.props(shellStyles.repoHeaderAction)}>
-                          {sectionHeaderFilterAction}
-                        </span>
-                      ) : null}
+                      {topContent}
                     </div>
-
-                    {/* A project with no sessions yet is its header alone, not an empty tray. */}
-                    {section.items.length > 0 ? (
-                      <GlassSurface className={stylex.props(shellStyles.trayPadding).className}>
-                        <ul>
-                          {section.items.map((item) => (
-                            <li key={item.id} {...stylex.props(shellStyles.trayItem)}>
-                              <div
-                                className={cn(
-                                  SIDEBAR_ROW_TEXT_CLASS,
-                                  stylex.props(
-                                    shellStyles.repoRow,
-                                    item.isSelected
-                                      ? shellStyles.repoRowSelected
-                                      : shellStyles.repoRowIdle
-                                  ).className
-                                )}
-                              >
-                                <span {...stylex.props(shellStyles.repoDot)} />
-                                <span {...stylex.props(shellStyles.repoTitle)}>{item.title}</span>
-                                {item.ageLabel ? (
-                                  <span
-                                    className={cn(
-                                      SIDEBAR_CAPTION_TEXT_CLASS,
-                                      stylex.props(shellStyles.repoAge).className
-                                    )}
-                                  >
-                                    {item.ageLabel}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </GlassSurface>
-                    ) : null}
-                  </div>
-                ))}
-
-                <div {...stylex.props(shellStyles.chatsPadding)}>
-                  {resolvedChatsSessionListProps ? (
+                  ) : null}
+                  {sessionListProps ? (
                     <SessionList
-                      {...resolvedChatsSessionListProps}
-                      className={chatsSessionListClassName}
+                      {...sessionListProps}
+                      className={sessionListClassName}
+                      emptyState={workspaceEmptyState}
+                      headerAction={
+                        topContent || hasPinnedItems || afterSessionListContent
+                          ? sessionListProps.headerAction
+                          : (sessionListProps.headerAction ??
+                            sectionHeaderFilterAction ??
+                            undefined)
+                      }
                     />
                   ) : null}
+                  {afterSessionListContent}
+                </>
+              )}
+              {organizeMode === 'workspace' && !topContent && !sessionListProps ? (
+                <div {...stylex.props(shellStyles.repoStack)}>
+                  {repoSections.map((section, sectionIndex) => (
+                    <div key={section.id} {...stylex.props(shellStyles.repoGroup)}>
+                      <div
+                        className={cn(
+                          SIDEBAR_CONTROL_TEXT_CLASS,
+                          stylex.props(shellStyles.repoHeader).className
+                        )}
+                      >
+                        <Github {...stylex.props(shellStyles.repoHeaderGlyph)} />
+                        <span {...stylex.props(shellStyles.clipped)}>{section.repoFullName}</span>
+                        {sectionIndex === 0 && sectionHeaderFilterAction ? (
+                          <span {...stylex.props(shellStyles.repoHeaderAction)}>
+                            {sectionHeaderFilterAction}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {/* A project with no sessions yet is its header alone, not an empty tray. */}
+                      {section.items.length > 0 ? (
+                        <GlassSurface className={stylex.props(shellStyles.trayPadding).className}>
+                          <ul>
+                            {section.items.map((item) => (
+                              <li key={item.id} {...stylex.props(shellStyles.trayItem)}>
+                                <div
+                                  className={cn(
+                                    SIDEBAR_ROW_TEXT_CLASS,
+                                    stylex.props(
+                                      shellStyles.repoRow,
+                                      item.isSelected
+                                        ? shellStyles.repoRowSelected
+                                        : shellStyles.repoRowIdle
+                                    ).className
+                                  )}
+                                >
+                                  <span {...stylex.props(shellStyles.repoDot)} />
+                                  <span {...stylex.props(shellStyles.repoTitle)}>{item.title}</span>
+                                  {item.ageLabel ? (
+                                    <span
+                                      className={cn(
+                                        SIDEBAR_CAPTION_TEXT_CLASS,
+                                        stylex.props(shellStyles.repoAge).className
+                                      )}
+                                    >
+                                      {item.ageLabel}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </GlassSurface>
+                      ) : null}
+                    </div>
+                  ))}
+
+                  <div {...stylex.props(shellStyles.chatsPadding)}>
+                    {resolvedChatsSessionListProps ? (
+                      <SessionList
+                        {...resolvedChatsSessionListProps}
+                        className={chatsSessionListClassName}
+                      />
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </div>
+              ) : null}
+            </div>
+          )}
         </ScrollArea>
 
         {bottomFloatingContent ? (

@@ -434,6 +434,17 @@ export type ImageGenerationEndEvent = {
 
 const IMAGE_GENERATION_REVISED_PROMPT_PREFIX = 'Revised prompt: ';
 
+/**
+ * Unstable ACP `sessionCapabilities.systemPrompt`: an object (`{}`) means the agent
+ * accepts an `append` client system prompt; omitted or `null` means it does not.
+ * The pinned SDK types predate the field, so it is read structurally.
+ */
+export function readSystemPromptCapability(sessionCapabilities: unknown): boolean {
+  if (!isRecord(sessionCapabilities)) return false;
+  const capability = sessionCapabilities.systemPrompt;
+  return isRecord(capability) && !Array.isArray(capability);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -551,6 +562,15 @@ export interface AgentClientOptions {
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   /**
+   * Client system prompt sent as standard ACP `systemPrompt` (append mode) on every
+   * session establishment: new, load, resume and fork. Requires the agent to
+   * advertise `sessionCapabilities.systemPrompt`; startup fails otherwise, and the
+   * text is never moved into a user message.
+   */
+  systemPrompt?: string;
+  /** Exposes coordinator-only MCP tools to this ACP session. */
+  coordinator?: boolean;
+  /**
    * Overrides terminal capability advertisement. Builtin Grok defaults to false so its
    * adapter uses the native local runner; other agents default to true.
    */
@@ -607,6 +627,7 @@ export class AgentClient implements acp.Client {
   private supportsClose = false;
   private supportsDelete = false;
   private supportsFork = false;
+  private systemPromptSupported = false;
   private supportsForkAtTurn = false;
   private agentInfo: acp.Implementation | undefined;
   /** `realpath` of the workdir, negotiated with Antigravity as the ACP `cwd`. */
@@ -693,6 +714,7 @@ export class AgentClient implements acp.Client {
               workspaceId: this.options.workspaceId,
               machineId: this.options.machineId,
               workdir,
+              coordinator: this.options.coordinator === true,
             }),
           },
         ];
@@ -708,6 +730,7 @@ export class AgentClient implements acp.Client {
       { name: 'LODY_MCP_WORKSPACE_ID', value: this.options.workspaceId },
       { name: 'LODY_MCP_MACHINE_ID', value: this.options.machineId },
       { name: 'LODY_MCP_WORKDIR', value: workdir },
+      ...(this.options.coordinator === true ? [{ name: 'LODY_MCP_COORDINATOR', value: '1' }] : []),
     ];
 
     // ACP MCP config is an explicit environment allowlist. The MCP subprocess
@@ -1740,9 +1763,21 @@ export class AgentClient implements acp.Client {
     const roots = this.additionalDirectories.length
       ? { additionalDirectories: this.additionalDirectories }
       : {};
-    if (clientIdentifier === undefined && Object.keys(lody).length === 0) return roots;
+    const systemPrompt =
+      this.options.systemPrompt !== undefined
+        ? {
+            systemPrompt: {
+              mode: 'append' as const,
+              content: [{ type: 'text' as const, text: this.options.systemPrompt }],
+            },
+          }
+        : {};
+    if (clientIdentifier === undefined && Object.keys(lody).length === 0) {
+      return { ...roots, ...systemPrompt };
+    }
     return {
       ...roots,
+      ...systemPrompt,
       _meta: {
         ...(clientIdentifier !== undefined ? { clientIdentifier } : {}),
         ...(Object.keys(lody).length > 0 ? { lody } : {}),
@@ -1979,6 +2014,9 @@ export class AgentClient implements acp.Client {
     this.supportsDelete = !!initResponse.agentCapabilities?.sessionCapabilities?.delete;
     const forkCapability = initResponse.agentCapabilities?.sessionCapabilities?.fork;
     this.supportsFork = !!forkCapability;
+    this.systemPromptSupported = readSystemPromptCapability(
+      initResponse.agentCapabilities?.sessionCapabilities
+    );
     const extensionMeta = initResponse.agentCapabilities?._meta as
       | Record<string, unknown>
       | null
@@ -2014,6 +2052,16 @@ export class AgentClient implements acp.Client {
           initResponse.agentCapabilities?.sessionCapabilities?.additionalDirectories != null
         ),
         startupAbort
+      );
+    }
+    if (this.options.systemPrompt !== undefined && !this.systemPromptSupported) {
+      captureAcpSessionEstablishFailed({
+        ...startupAnalyticsProps,
+        sessionPath: forkSessionId ? 'fork' : resumeSessionId ? 'resume' : 'new',
+        reason: 'protocol_error',
+      });
+      throw new Error(
+        '[ACP_SYSTEM_PROMPT_UNSUPPORTED] This agent does not accept a system prompt, so it cannot run a coordinator conversation. Choose an agent that supports system prompts.'
       );
     }
     const sessionStartMeta = this.getSessionStartMeta();
@@ -2443,6 +2491,11 @@ export class AgentClient implements acp.Client {
 
   supportsSessionFork(): boolean {
     return this.supportsFork;
+  }
+
+  /** The agent advertised standard ACP `sessionCapabilities.systemPrompt` in `initialize`. */
+  supportsSystemPrompt(): boolean {
+    return this.systemPromptSupported;
   }
 
   supportsActiveTurnFork(): boolean {

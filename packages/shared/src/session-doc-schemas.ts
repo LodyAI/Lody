@@ -23,6 +23,11 @@ import type {
   SessionId,
 } from '.';
 import type { SessionHistorySendStatus, SessionHistoryStatus, SessionPlanEntry } from './schema';
+import type {
+  CoordinatorCollaborationMode,
+  CoordinatorWorkItemStage,
+} from './coordinator-work-items';
+import type { ConnectorPluginId, CoordinatorTriggerPolicyMode } from './coordinator-triggers';
 
 const historyItemAnySchema = schema.Any({ defaultLoroText: false });
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -188,6 +193,7 @@ const historyMessageItemSchema = schema
           case 'operation_progress':
             return typeof v.operationId === 'string' &&
               (v.operationKind === 'session_create' || v.operationKind === 'session_create_many') &&
+              (v.originThreadId === undefined || typeof v.originThreadId === 'string') &&
               Array.isArray(v.items) &&
               v.items.every(
                 (item) =>
@@ -240,6 +246,25 @@ const historyMessageItemSchema = schema
               v.anchor !== null
               ? true
               : 'Missing visual annotation reference metadata';
+          case 'coordinator_message':
+            return typeof v.id === 'string' &&
+              v.id.length > 0 &&
+              typeof v.body === 'string' &&
+              (v.images === undefined || Array.isArray(v.images)) &&
+              (v.files === undefined || Array.isArray(v.files)) &&
+              (v.replyTo === undefined || isRecord(v.replyTo)) &&
+              (v.linkedSessionIds === undefined || Array.isArray(v.linkedSessionIds)) &&
+              (v.card === undefined || isRecord(v.card)) &&
+              (v.actions === undefined || Array.isArray(v.actions)) &&
+              (v.actionResolutions === undefined || isRecord(v.actionResolutions)) &&
+              (v.createdAt === undefined || typeof v.createdAt === 'number')
+              ? true
+              : 'Missing coordinator message metadata';
+          case 'coordinator_status':
+            return typeof v.status === 'string' &&
+              (v.updatedAt === undefined || typeof v.updatedAt === 'number')
+              ? true
+              : 'Missing coordinator status metadata';
           default:
             // Synced history may contain variants written by newer peers.
             // Rejecting one here blocks every subsequent Mirror.setState,
@@ -286,6 +311,7 @@ const acpSessionConfigSchema = schema
       modeId: schema.String({ required: false }),
       modelId: schema.String({ required: false }),
       issuePRMentions: schema.LoroList(issuePrMentionSchema, undefined, { required: false }),
+      replyTo: schema.Any({ required: false, defaultLoroText: false }),
       resume: schema.String({ required: false }),
       /** Config option values (configId → value) for setSessionConfigOption */
       configOptionValues: schema.Any({ required: false }),
@@ -336,6 +362,8 @@ export const sessionHistorySchema = schema.LoroMap({
   // Total time in milliseconds spent waiting for permission approvals during this turn.
   // Effective agent working time = (endedAt - Date.parse(timestamp)) - permissionWaitMs
   permissionWaitMs: schema.Number({ required: false }),
+  /** Newline-joined canonical coordinator thread root IDs touched by this turn. */
+  threadRoots: schema.String({ required: false }),
   role: schema.String<Role>(),
   status: schema.String<SessionHistoryStatus>({ required: false }),
   scheduleRun: schema.LoroMap(
@@ -458,6 +486,57 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
   { required: false }
 );
 
+const coordinatorWorkItemExternalRefDocSchema = schema.LoroMap({
+  kind: schema.String(),
+  uri: schema.String(),
+  label: schema.String({ required: false }),
+});
+
+export const coordinatorWorkItemDocSchema = schema.LoroMap({
+  id: schema.String(),
+  taskNumber: schema.Number({ required: false }),
+  title: schema.String({ required: false }),
+  stage: schema.String<CoordinatorWorkItemStage>({ required: false }),
+  summary: schema.String({ required: false }),
+  progressNote: schema.String({ required: false }),
+  pendingAction: schema.String({ required: false }),
+  mode: schema.String<CoordinatorCollaborationMode>({ required: false }),
+  externalRefs: schema.LoroList(coordinatorWorkItemExternalRefDocSchema, undefined, {
+    required: false,
+  }),
+  acceptedAt: schema.Number({ required: false }),
+  archivedAt: schema.Number({ required: false }),
+  createdAt: schema.Number(),
+  updatedAt: schema.Number(),
+});
+
+export const coordinatorWorkItemsDocSchema = schema
+  .LoroMap({}, { required: false })
+  .catchall(coordinatorWorkItemDocSchema);
+
+export const coordinatorTriggerDocSchema = schema.LoroMap({
+  id: schema.String(),
+  pluginId: schema.String<ConnectorPluginId>(),
+  scheduleId: schema.String({ required: false }),
+  title: schema.String(),
+  enabled: schema.Boolean(),
+  summary: schema.String({ required: false }),
+  configJson: schema.String({ required: false }),
+  instruction: schema.String(),
+  policyMode: schema.String<CoordinatorTriggerPolicyMode>(),
+  allowedRoleIds: schema.LoroList(schema.String(), undefined, { required: false }),
+  maxChildrenPerRun: schema.Number({ required: false }),
+  lastCheckAt: schema.Number({ required: false }),
+  lastTriggeredAt: schema.Number({ required: false }),
+  lastError: schema.String({ required: false }),
+  createdAt: schema.Number(),
+  updatedAt: schema.Number(),
+});
+
+export const coordinatorTriggersDocSchema = schema
+  .LoroMap({}, { required: false })
+  .catchall(coordinatorTriggerDocSchema);
+
 /**
  * Root schema for a session doc.
  *
@@ -510,4 +589,8 @@ export const sessionDocSchema = schema({
   preview: sessionPreviewDocSchema,
   externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
   acpRuntimeConfig: sessionAcpRuntimeConfigDocSchema,
+  /** Coordinator control-plane task-group (`WorkItem`) map; absent on ordinary sessions. */
+  workItems: coordinatorWorkItemsDocSchema,
+  /** Coordinator control-plane mounted triggers & schedule policy projection; absent on ordinary sessions. */
+  triggers: coordinatorTriggersDocSchema,
 });

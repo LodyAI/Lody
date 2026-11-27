@@ -61,6 +61,7 @@ const FrozenConfigSchema = z
     agentConfigId: z.string().optional(),
     inputConfig: z.record(z.string(), z.unknown()),
     sourceTurnId: z.string().trim().min(1).optional(),
+    originThreadId: z.string().trim().min(1).max(320).optional(),
     notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
     targetDispatchConfigs: z
       .array(
@@ -264,6 +265,7 @@ const boundCompletionFreeText = (
           ...(label !== undefined ? { label } : {}),
           output: {
             text: boundedOutput.value,
+            ...(item.output.attachments?.length ? { attachments: item.output.attachments } : {}),
             ...(outputOmittedBytes > 0
               ? { truncated: true as const, omittedBytes: outputOmittedBytes }
               : {}),
@@ -333,6 +335,35 @@ export type AcceptOperationOptions = {
    * acceptance (quoted messages). Defaults to the canonical command itself.
    */
   fingerprintCommand?: unknown;
+};
+
+export type CoordinatorReadCursorRow = {
+  targetSessionId: string;
+  latestUserMsgId?: string;
+  lastMessageAt: number;
+  statusSignature: string;
+  prSignature: string;
+  updatedAt: number;
+};
+
+export type CoordinatorReadCursorInput = {
+  targetSessionId: string;
+  latestUserMsgId?: string;
+  lastMessageAt: number;
+  statusSignature: string;
+  prSignature: string;
+};
+
+export type CoordinatorCursorStorePort = {
+  readCoordinatorTurnDelta(coordinatorSessionId: SessionId, userTurnId: string): string | undefined;
+  readCoordinatorCursors(coordinatorSessionId: SessionId): Map<string, CoordinatorReadCursorRow>;
+  commitCoordinatorTurnDelta(args: {
+    coordinatorSessionId: SessionId;
+    userTurnId: string;
+    deltaText: string;
+    cursors: readonly CoordinatorReadCursorInput[];
+    removedTargetIds?: readonly string[];
+  }): void;
 };
 
 export class LodyOperationStore {
@@ -920,7 +951,207 @@ export class LodyOperationStore {
       this.db
         .prepare('DELETE FROM operations WHERE requester_session_id = ?')
         .run(requesterSessionId);
+      this.db
+        .prepare(
+          'DELETE FROM coordinator_read_cursors WHERE coordinator_session_id = ? OR target_session_id = ?'
+        )
+        .run(requesterSessionId, requesterSessionId);
+      this.db
+        .prepare('DELETE FROM coordinator_turn_deltas WHERE coordinator_session_id = ?')
+        .run(requesterSessionId);
     }).immediate();
+  }
+
+  readCoordinatorTurnDelta(
+    coordinatorSessionId: SessionId,
+    userTurnId: string
+  ): string | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT delta_text FROM coordinator_turn_deltas WHERE coordinator_session_id = ? AND user_turn_id = ?'
+      )
+      .get(coordinatorSessionId, userTurnId) as { delta_text: string } | undefined;
+    return row?.delta_text;
+  }
+
+  readCoordinatorCursors(coordinatorSessionId: SessionId): Map<string, CoordinatorReadCursorRow> {
+    const rows = this.db
+      .prepare(
+        `SELECT target_session_id, latest_user_msg_id, last_message_at, status_signature, pr_signature, updated_at
+         FROM coordinator_read_cursors
+         WHERE coordinator_session_id = ?`
+      )
+      .all(coordinatorSessionId) as Array<{
+      target_session_id: string;
+      latest_user_msg_id: string | null;
+      last_message_at: number;
+      status_signature: string;
+      pr_signature: string;
+      updated_at: number;
+    }>;
+    const out = new Map<string, CoordinatorReadCursorRow>();
+    for (const row of rows) {
+      out.set(row.target_session_id, {
+        targetSessionId: row.target_session_id,
+        ...(row.latest_user_msg_id ? { latestUserMsgId: row.latest_user_msg_id } : {}),
+        lastMessageAt: row.last_message_at,
+        statusSignature: row.status_signature,
+        prSignature: row.pr_signature,
+        updatedAt: row.updated_at,
+      });
+    }
+    return out;
+  }
+
+  commitCoordinatorTurnDelta(args: {
+    coordinatorSessionId: SessionId;
+    userTurnId: string;
+    deltaText: string;
+    cursors: readonly CoordinatorReadCursorInput[];
+    removedTargetIds?: readonly string[];
+  }): void {
+    const nowMs = this.now();
+    this.transaction(() => {
+      if (args.removedTargetIds && args.removedTargetIds.length > 0) {
+        const deleteStmt = this.db.prepare(
+          'DELETE FROM coordinator_read_cursors WHERE coordinator_session_id = ? AND target_session_id = ?'
+        );
+        for (const targetId of args.removedTargetIds) {
+          deleteStmt.run(args.coordinatorSessionId, targetId);
+        }
+      }
+      if (args.cursors.length > 0) {
+        const upsertStmt = this.db.prepare(
+          `INSERT INTO coordinator_read_cursors (
+             coordinator_session_id,
+             target_session_id,
+             latest_user_msg_id,
+             last_message_at,
+             status_signature,
+             pr_signature,
+             updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(coordinator_session_id, target_session_id) DO UPDATE SET
+             latest_user_msg_id = excluded.latest_user_msg_id,
+             last_message_at = excluded.last_message_at,
+             status_signature = excluded.status_signature,
+             pr_signature = excluded.pr_signature,
+             updated_at = excluded.updated_at`
+        );
+        for (const cursor of args.cursors) {
+          upsertStmt.run(
+            args.coordinatorSessionId,
+            cursor.targetSessionId,
+            cursor.latestUserMsgId ?? null,
+            cursor.lastMessageAt,
+            cursor.statusSignature,
+            cursor.prSignature,
+            nowMs
+          );
+        }
+      }
+      this.db
+        .prepare(
+          `INSERT INTO coordinator_turn_deltas (
+             coordinator_session_id,
+             user_turn_id,
+             delta_text,
+             updated_at
+           ) VALUES (?, ?, ?, ?)
+           ON CONFLICT(coordinator_session_id) DO UPDATE SET
+             user_turn_id = excluded.user_turn_id,
+             delta_text = excluded.delta_text,
+             updated_at = excluded.updated_at`
+        )
+        .run(args.coordinatorSessionId, args.userTurnId, args.deltaText, nowMs);
+    }).immediate();
+  }
+
+  readCoordinatorStoreDiagnostics(coordinatorSessionId: SessionId): {
+    cursors: CoordinatorReadCursorRow[];
+    lastTurnDelta?: { userTurnId: string; deltaText: string; updatedAt: number };
+    operations: Array<{
+      operationId: string;
+      kind: string;
+      state: 'active' | 'finished';
+      createdAt: string;
+      finishedAt?: string;
+      targets: Array<{ sessionId?: string; status: string }>;
+    }>;
+  } {
+    const cursors = [...this.readCoordinatorCursors(coordinatorSessionId).values()].sort(
+      (a, b) =>
+        b.lastMessageAt - a.lastMessageAt || a.targetSessionId.localeCompare(b.targetSessionId)
+    );
+    const deltaRow = this.db
+      .prepare(
+        'SELECT user_turn_id, delta_text, updated_at FROM coordinator_turn_deltas WHERE coordinator_session_id = ?'
+      )
+      .get(coordinatorSessionId) as
+      | { user_turn_id: string; delta_text: string; updated_at: number }
+      | undefined;
+    const opRows = this.db
+      .prepare(
+        `SELECT operation_id, kind, state, created_at, finished_at, items_json
+         FROM operations
+         WHERE requester_session_id = ?
+         ORDER BY created_at DESC, operation_id DESC
+         LIMIT 20`
+      )
+      .all(coordinatorSessionId) as Array<{
+      operation_id: string;
+      kind: string;
+      state: 'active' | 'finished';
+      created_at: string;
+      finished_at: string | null;
+      items_json: string;
+    }>;
+    const operations = opRows.map((row) => {
+      let parsedItems: Array<Record<string, unknown>> = [];
+      try {
+        const decoded = JSON.parse(row.items_json);
+        if (Array.isArray(decoded)) parsedItems = decoded as Array<Record<string, unknown>>;
+      } catch {
+        parsedItems = [];
+      }
+      const targets = parsedItems.map((item) => {
+        const target =
+          item.target && typeof item.target === 'object'
+            ? (item.target as Record<string, unknown>)
+            : undefined;
+        const sid =
+          typeof target?.sessionId === 'string'
+            ? target.sessionId
+            : typeof item.sessionId === 'string'
+              ? item.sessionId
+              : undefined;
+        return {
+          ...(sid ? { sessionId: sid } : {}),
+          status: typeof item.status === 'string' ? item.status : 'unknown',
+        };
+      });
+      return {
+        operationId: row.operation_id,
+        kind: row.kind,
+        state: row.state,
+        createdAt: row.created_at,
+        ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
+        targets,
+      };
+    });
+    return {
+      cursors,
+      ...(deltaRow
+        ? {
+            lastTurnDelta: {
+              userTurnId: deltaRow.user_turn_id,
+              deltaText: deltaRow.delta_text,
+              updatedAt: deltaRow.updated_at,
+            },
+          }
+        : {}),
+      operations,
+    };
   }
 
   snapshot(operation: StoredLodyOperation): LodyOperationSnapshot {
@@ -1289,6 +1520,22 @@ export class LodyOperationStore {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS coordinator_read_cursors (
+        coordinator_session_id TEXT NOT NULL,
+        target_session_id TEXT NOT NULL,
+        latest_user_msg_id TEXT,
+        last_message_at INTEGER NOT NULL DEFAULT 0,
+        status_signature TEXT NOT NULL DEFAULT '',
+        pr_signature TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (coordinator_session_id, target_session_id)
+      );
+      CREATE TABLE IF NOT EXISTS coordinator_turn_deltas (
+        coordinator_session_id TEXT PRIMARY KEY,
+        user_turn_id TEXT NOT NULL,
+        delta_text TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
       if (hasInbox) {
         // Passive upgrade copies with no batch are legacy backlog, not new work.
@@ -1328,6 +1575,8 @@ export class LodyOperationStore {
       'table:orchestration_meta',
       'table:operation_authors',
       'table:operation_inputs',
+      'table:coordinator_read_cursors',
+      'table:coordinator_turn_deltas',
     ]);
     const existingObjects = this.db
       .prepare(
