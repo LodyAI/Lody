@@ -14,7 +14,7 @@ import { Select } from '@lody/ui/select';
 import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import { Dialog } from '@/ui/dialog';
 import { settingsSurface as surface } from './surface';
-import { discountBadgeValues } from './discount-badge-values';
+import { discountBadgeValues, resolvePromoCampaignName } from './discount-badge-values';
 
 const styles = stylex.create({
   form: { display: 'flex', flexDirection: 'column', gap: space[4] },
@@ -357,6 +357,8 @@ export function SeatCostNotice({
       ? preview.regularProratedAmount
       : preview.proratedAmount;
   const promoPercent = promoExpired ? 0 : (preview.promoDiscountPercent ?? 0);
+  const customPromoName =
+    promoPercent > 0 ? resolvePromoCampaignName(preview.promoName, i18n.language) : null;
   const showRegularProrated =
     promoPercent > 0 &&
     preview.regularProratedAmount != null &&
@@ -368,7 +370,9 @@ export function SeatCostNotice({
         <span {...stylex.props(styles.amountGroup)}>
           {promoPercent > 0 ? (
             <Badge tone="success">
-              {t('referral.offerBadge', discountBadgeValues(promoPercent))}
+              {customPromoName
+                ? `${customPromoName} · ${t('referral.offerBadge', discountBadgeValues(promoPercent))}`
+                : t('referral.offerBadge', discountBadgeValues(promoPercent))}
             </Badge>
           ) : null}
           {showRegularProrated ? (

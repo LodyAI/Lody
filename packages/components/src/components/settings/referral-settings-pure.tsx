@@ -20,7 +20,8 @@ import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { Dialog } from '@/ui/dialog';
 import { CompactSection } from './compact-layout';
-import { discountBadgeValues } from './discount-badge-values';
+import { discountBadgeValues, resolvePromoCampaignName } from './discount-badge-values';
+export { resolvePromoCampaignName };
 import { formatUsd } from './billing-setting-pure';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
@@ -610,7 +611,7 @@ export function PromoOfferNotice({
   policy?: PromoPolicy | null;
   retained?: PromoCheckoutOffer['retained'];
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const activeRetained = retained && retained.interval === interval ? retained : null;
   const effectivePercent =
     discountPercent > 0 ? discountPercent : (activeRetained?.discountPercent ?? 0);
@@ -619,6 +620,11 @@ export function PromoOfferNotice({
     first: formatUsd(Math.round((regularCents * (100 - effectivePercent)) / 100)),
     regular: formatUsd(regularCents),
   };
+  const rawName =
+    discountPercent > 0 && policy
+      ? (policy.name ?? activeRetained?.name)
+      : (activeRetained?.name ?? policy?.name);
+  const customTitle = resolvePromoCampaignName(rawName, i18n.language);
   const dateRange =
     discountPercent > 0 && policy
       ? { startsAt: policy.startsAt, endsAt: policy.endsAt }
@@ -629,7 +635,7 @@ export function PromoOfferNotice({
     <div {...stylex.props(surface.formBlock, styles.head)} role="status">
       <div {...stylex.props(styles.text)}>
         <p {...stylex.props(surface.rowLabel)}>
-          {t('billing.promoOfferTitle')}{' '}
+          {customTitle ?? t('billing.promoOfferTitle')}{' '}
           <Badge tone="success">
             {t('referral.offerBadge', discountBadgeValues(effectivePercent))}
           </Badge>

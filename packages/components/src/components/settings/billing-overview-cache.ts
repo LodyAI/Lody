@@ -2,8 +2,11 @@ import { z } from 'zod';
 import { createLocalStorageCache } from '@/lib/local-storage-cache';
 import type { BillingOverviewData } from './billing-setting-pure';
 
+const promoNameSchema = z.union([z.string(), z.record(z.string(), z.string())]).nullable().optional();
+
 const promoPolicySchema = z.object({
   campaignId: z.string(),
+  name: promoNameSchema,
   startsAt: z.number(),
   endsAt: z.number(),
   monthly: z.object({ discountPercent: z.number() }).nullable().optional(),
@@ -22,6 +25,7 @@ const promoCheckoutOfferSchema = z.object({
   retained: z
     .object({
       campaignId: z.string(),
+      name: promoNameSchema,
       interval: z.enum(['month', 'year']),
       discountPercent: z.number(),
       startsAt: z.number(),

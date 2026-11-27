@@ -19,11 +19,11 @@ import { PricingPageLink } from '../shared/pricing-page-link';
 import { FounderCallLink } from '../shared/founder-call-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { CompactLinkRow, CompactRow, CompactSection } from './compact-layout';
+import { discountBadgeValues, resolvePromoCampaignName } from './discount-badge-values';
 import {
   PromoOfferNotice,
   ReferralCreditNotice,
   ReferralOfferNotice,
-  discountBadgeValues,
 } from './referral-settings-pure';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
@@ -562,7 +562,7 @@ export function BillingSettingsView({
   referral = null,
   referralCreditCents = 0,
 }: BillingSettingsViewProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [code, setCode] = useState('');
 
   if (overview === null) {
@@ -878,10 +878,17 @@ export function BillingSettingsView({
                   overview.billingInterval === 'month' &&
                   (promoOffer?.upgradeToYearlyDiscountPercent ?? 0) > 0 ? (
                     <Badge tone="success">
-                      {t(
-                        'referral.offerBadge',
-                        discountBadgeValues(promoOffer!.upgradeToYearlyDiscountPercent!)
-                      )}
+                      {(() => {
+                        const customUpgradeName = resolvePromoCampaignName(
+                          promoOffer?.policy?.name,
+                          i18n.language
+                        );
+                        const offerText = t(
+                          'referral.offerBadge',
+                          discountBadgeValues(promoOffer!.upgradeToYearlyDiscountPercent!)
+                        );
+                        return customUpgradeName ? `${customUpgradeName} · ${offerText}` : offerText;
+                      })()}
                     </Badge>
                   ) : null}
                 </span>

@@ -263,6 +263,61 @@ describe('campaign checkout display', () => {
     expect(container.textContent).toContain('Promotional discount');
     expect(container.textContent).toContain('$72');
     expect(container.textContent).not.toContain('Referral discount');
+
+    await initI18n('zh_CN');
+    await act(async () =>
+      root.render(
+        <BillingSettingsView
+          {...baseProps}
+          overview={{
+            ...OPTIMISTIC_BILLING_OVERVIEW,
+            canManageBilling: true,
+            pricing: {
+              ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+              promo: {
+                policy: {
+                  ...promoPolicy,
+                  name: { zh: '黑五特惠', en: 'Black Friday' },
+                },
+                yearlyDiscountPercent: 20,
+                monthlyDiscountPercent: 20,
+              },
+            },
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('黑五特惠');
+
+    await initI18n('en');
+    await act(async () =>
+      root.render(
+        <BillingSettingsView
+          {...baseProps}
+          overview={{
+            ...OPTIMISTIC_BILLING_OVERVIEW,
+            billingAccountId: 'ba_1',
+            canManageBilling: true,
+            effectivePlanTier: 'plus',
+            entitlementSource: 'stripe',
+            subscriptionStatus: 'active',
+            billingInterval: 'month',
+            currentPeriodEnd: Date.UTC(2026, 11, 15),
+            pricing: {
+              ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+              promo: {
+                policy: {
+                  ...promoPolicy,
+                  name: { zh: '黑五特惠', en: 'Black Friday' },
+                },
+                upgradeToYearlyDiscountPercent: 20,
+              },
+            },
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Black Friday · 20% off');
   });
 });
 

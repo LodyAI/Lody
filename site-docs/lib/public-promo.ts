@@ -1,7 +1,10 @@
 import type { SiteLocale } from '@site/src/site-pages/shared';
 
+export type PromoCampaignName = string | Record<string, string>;
+
 export type PublicPromoActive = {
   id: string;
+  name?: PromoCampaignName | null;
   startsAt: number;
   endsAt: number;
   monthlyDiscountPercent: number | null;
@@ -69,6 +72,93 @@ export function resolvePublicPromoEndpoint(
   return null;
 }
 
+const PROMO_CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/u;
+
+function parsePromoCampaignName(raw: unknown): PromoCampaignName | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'string') {
+    if (PROMO_CONTROL_CHARS_RE.test(raw)) {
+      throw new Error('Invalid public promo campaign name');
+    }
+    const trimmed = raw.trim();
+    if (trimmed.length < 1 || trimmed.length > 80) {
+      throw new Error('Invalid public promo campaign name');
+    }
+    return trimmed;
+  }
+  if (!isRecord(raw)) {
+    throw new Error('Invalid public promo campaign name');
+  }
+  const entries = Object.entries(raw);
+  if (entries.length < 1 || entries.length > 16) {
+    throw new Error('Invalid public promo campaign name');
+  }
+  const normalized: Record<string, string> = {};
+  for (const [rawKey, rawValue] of entries) {
+    if (PROMO_CONTROL_CHARS_RE.test(rawKey) || typeof rawValue !== 'string' || PROMO_CONTROL_CHARS_RE.test(rawValue)) {
+      throw new Error('Invalid public promo campaign name');
+    }
+    const key = rawKey.trim().toLowerCase();
+    const value = rawValue.trim();
+    if (key.length < 1 || key.length > 32 || value.length < 1 || value.length > 80) {
+      throw new Error('Invalid public promo campaign name');
+    }
+    normalized[key] = value;
+  }
+  return normalized;
+}
+
+function normalizePromoLocaleKey(raw: string): string {
+  const lower = raw.trim().toLowerCase().replace(/_/gu, '-');
+  if (
+    lower === 'zh-hant' ||
+    lower.startsWith('zh-hant-') ||
+    lower === 'zh-tw' ||
+    lower.startsWith('zh-tw-') ||
+    lower === 'zh-hk' ||
+    lower.startsWith('zh-hk-') ||
+    lower === 'zh-mo' ||
+    lower.startsWith('zh-mo-')
+  ) {
+    return 'zh-hant';
+  }
+  if (lower === 'zh' || lower.startsWith('zh-')) return 'zh';
+  return lower.split('-')[0] || 'en';
+}
+
+export function resolvePublicPromoName(
+  promo: PublicPromoActive | null | undefined,
+  locale: SiteLocale
+): string | null {
+  const raw = promo?.name;
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'string') {
+    const trimmed = raw.replace(/[\u0000-\u001f\u007f]/gu, '').trim().slice(0, 80).trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (!isRecord(raw)) return null;
+  const entries = new Map<string, string>();
+  let firstNonEmpty: string | null = null;
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value !== 'string') continue;
+    const cleaned = value.replace(/[\u0000-\u001f\u007f]/gu, '').trim().slice(0, 80).trim();
+    if (!cleaned) continue;
+    if (firstNonEmpty === null) firstNonEmpty = cleaned;
+    const exactKey = key.trim().toLowerCase().replace(/_/gu, '-');
+    if (exactKey && !entries.has(exactKey)) entries.set(exactKey, cleaned);
+    const normalizedKey = normalizePromoLocaleKey(key);
+    if (normalizedKey && !entries.has(normalizedKey)) entries.set(normalizedKey, cleaned);
+  }
+  if (firstNonEmpty === null) return null;
+  const target = normalizePromoLocaleKey(locale);
+  if (entries.has(target)) return entries.get(target)!;
+  if (target === 'zh-hant' && entries.has('zh')) return entries.get('zh')!;
+  if (target === 'zh' && entries.has('zh-hant')) return entries.get('zh-hant')!;
+  if (entries.has('en')) return entries.get('en')!;
+  if (entries.has('default')) return entries.get('default')!;
+  return firstNonEmpty;
+}
+
 export function parsePublicPromoSnapshot(value: unknown): PublicPromoSnapshot {
   if (!isRecord(value) || typeof value.serverNow !== 'number' || !Number.isFinite(value.serverNow)) {
     throw new Error('Invalid public promo payload');
@@ -113,9 +203,11 @@ export function parsePublicPromoSnapshot(value: unknown): PublicPromoSnapshot {
   if (monthly === undefined || yearly === undefined || (monthly === null && yearly === null)) {
     throw new Error('Invalid public promo discount percentages');
   }
+  const name = parsePromoCampaignName(raw.name);
   return {
     active: {
       id: raw.id.trim(),
+      name,
       startsAt: raw.startsAt,
       endsAt: raw.endsAt,
       monthlyDiscountPercent: monthly,
@@ -341,6 +433,7 @@ export function formatLandingPromoBannerCopy(
   const badge = isUpTo
     ? formatUpToPromoBadge(bestPercent, locale)
     : formatPublicPromoBadge(bestPercent, locale);
+  const customName = resolvePublicPromoName(promo, locale);
   const rateZh = formatChineseRate(bestPercent);
 
   switch (locale) {
@@ -363,9 +456,10 @@ export function formatLandingPromoBannerCopy(
           : []),
       ];
       const discountClause = isUpTo ? `低至 ${rateZh} 折` : `立享 ${rateZh} 折`;
+      const prefix = customName ? `${customName} · Lody Plus` : 'Lody Plus 限时特惠';
       return {
         badge,
-        message: `Lody Plus 限时特惠：${joinLocalizedScopes(scopes, '与', '、')}${discountClause} · ${endDate} 截止`,
+        message: `${prefix}：${joinLocalizedScopes(scopes, '与', '、')}${discountClause} · ${endDate} 截止`,
         cta: '查看定价',
         dismissLabel: '关闭活动提示',
       };
@@ -389,9 +483,10 @@ export function formatLandingPromoBannerCopy(
           : []),
       ];
       const discountClause = isUpTo ? `低至 ${rateZh} 折` : `立享 ${rateZh} 折`;
+      const prefix = customName ? `${customName} · Lody Plus` : 'Lody Plus 限時特惠';
       return {
         badge,
-        message: `Lody Plus 限時特惠：${joinLocalizedScopes(scopes, '與', '、')}${discountClause} · ${endDate} 截止`,
+        message: `${prefix}：${joinLocalizedScopes(scopes, '與', '、')}${discountClause} · ${endDate} 截止`,
         cta: '查看定價',
         dismissLabel: '關閉活動提示',
       };
@@ -415,9 +510,10 @@ export function formatLandingPromoBannerCopy(
           : []),
       ];
       const rateLabel = isUpTo ? `最大 ${bestPercent}% OFF` : `${bestPercent}% OFF`;
+      const prefix = customName ? `${customName} · Lody Plus` : 'Lody Plus 期間限定セール';
       return {
         badge,
-        message: `Lody Plus 期間限定セール：${scopes.join('・')}が ${rateLabel}（${endDate} まで）`,
+        message: `${prefix}：${scopes.join('・')}が ${rateLabel}（${endDate} まで）`,
         cta: '料金を見る',
         dismissLabel: 'バナーを閉じる',
       };
@@ -441,9 +537,10 @@ export function formatLandingPromoBannerCopy(
           : []),
       ];
       const rateLabel = isUpTo ? `최대 ${bestPercent}% 할인` : `${bestPercent}% 할인`;
+      const prefix = customName ? `${customName} · Lody Plus` : 'Lody Plus 기간 한정 혜택';
       return {
         badge,
-        message: `Lody Plus 기간 한정 혜택: ${joinLocalizedScopes(scopes, ' 및 ', ', ')} ${rateLabel} (${endDate} 마감)`,
+        message: `${prefix}: ${joinLocalizedScopes(scopes, ' 및 ', ', ')} ${rateLabel} (${endDate} 마감)`,
         cta: '요금 보기',
         dismissLabel: '배너 닫기',
       };
@@ -471,7 +568,7 @@ export function formatLandingPromoBannerCopy(
         : `${bestPercent}% de dto.`;
       return {
         badge,
-        message: `Oferta limitada: ${rateLabel} en ${joinLocalizedScopes(scopes, ' y ')} · Hasta el ${endDate}`,
+        message: `${customName ?? 'Oferta limitada'}: ${rateLabel} en ${joinLocalizedScopes(scopes, ' y ')} · Hasta el ${endDate}`,
         cta: 'Ver precios',
         dismissLabel: 'Cerrar aviso',
       };
@@ -497,7 +594,7 @@ export function formatLandingPromoBannerCopy(
       const rateLabel = isUpTo ? `jusqu’à −${bestPercent} %` : `−${bestPercent} %`;
       return {
         badge,
-        message: `Offre limitée : ${rateLabel} sur ${joinLocalizedScopes(scopes, ' et ')} · Jusqu’au ${endDate}`,
+        message: `${customName ?? 'Offre limitée'} : ${rateLabel} sur ${joinLocalizedScopes(scopes, ' et ')} · Jusqu’au ${endDate}`,
         cta: 'Voir les tarifs',
         dismissLabel: 'Fermer la bannière',
       };
@@ -523,7 +620,7 @@ export function formatLandingPromoBannerCopy(
       const rateLabel = isUpTo ? `скидка до ${bestPercent}%` : `скидка ${bestPercent}%`;
       return {
         badge,
-        message: `Акция: ${rateLabel} на ${joinLocalizedScopes(scopes, ' и ')} · До ${endDate}`,
+        message: `${customName ?? 'Акция'}: ${rateLabel} на ${joinLocalizedScopes(scopes, ' и ')} · До ${endDate}`,
         cta: 'Смотреть тарифы',
         dismissLabel: 'Закрыть баннер',
       };
@@ -550,7 +647,7 @@ export function formatLandingPromoBannerCopy(
       const rateLabel = isUpTo ? `up to ${bestPercent}% off` : `${bestPercent}% off`;
       return {
         badge,
-        message: `Limited-time offer: ${rateLabel} ${joinLocalizedScopes(scopes, ' & ')} · Ends ${endDate}`,
+        message: `${customName ?? 'Limited-time offer'}: ${rateLabel} ${joinLocalizedScopes(scopes, ' & ')} · Ends ${endDate}`,
         cta: 'View pricing',
         dismissLabel: 'Dismiss promotional banner',
       };

@@ -309,8 +309,11 @@ type CheckoutUrls = {
   returnTarget?: 'desktop' | 'web';
 };
 
+export type PromoCampaignName = string | Record<string, string>;
+
 export interface PromoPolicy {
   campaignId: string;
+  name?: PromoCampaignName | null;
   startsAt: number;
   endsAt: number;
   monthly?: { discountPercent: number } | null;
@@ -322,6 +325,7 @@ export interface PromoPolicy {
 
 export interface PromoRetainedCheckout {
   campaignId: string;
+  name?: PromoCampaignName | null;
   interval: BillingInterval;
   discountPercent: number;
   startsAt: number;
@@ -872,6 +876,7 @@ export type CloudApi = {
         promoApplied: boolean;
         promoKind?: 'early_bird_forever' | 'campaign_once';
         promoDiscountPercent?: number;
+        promoName?: PromoCampaignName | null;
       } | null
     >;
     reconcileWorkspaceCheckout: Action<

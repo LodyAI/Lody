@@ -452,6 +452,8 @@
 .pricing-plan-eyebrow {
   align-self: flex-start;
   justify-content: flex-start;
+  flex-wrap: wrap;
+  row-gap: 0.35rem;
   transform: none;
   min-height: 1.1rem;
   font-size: 0.78rem;

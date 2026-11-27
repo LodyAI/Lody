@@ -8,7 +8,7 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { settingsSurface } from './surface';
-import { discountBadgeValues } from './referral-settings-pure';
+import { discountBadgeValues, resolvePromoCampaignName } from './discount-badge-values';
 
 export type IntervalPreview = FunctionReturnType<
   CloudApi['billing']['previewSubscriptionIntervalChange']
@@ -90,12 +90,21 @@ export function BillingIntervalDialog({
       preview.subtotalAmount,
     ]);
     if (preview.promoDiscountAmount) {
+      const customPromoName =
+        preview.promoKind === 'campaign_once'
+          ? resolvePromoCampaignName(preview.promoName, i18n.language)
+          : null;
       const promoLabel =
         preview.promoKind === 'campaign_once' && preview.promoDiscountPercent
-          ? t(
-              'billing.switchPromoDiscountWithPercent',
-              discountBadgeValues(preview.promoDiscountPercent)
-            )
+          ? customPromoName
+            ? `${customPromoName} (${t(
+                'referral.offerBadge',
+                discountBadgeValues(preview.promoDiscountPercent)
+              )})`
+            : t(
+                'billing.switchPromoDiscountWithPercent',
+                discountBadgeValues(preview.promoDiscountPercent)
+              )
           : t('billing.upcomingDiscount');
       rows.push([promoLabel, preview.promoDiscountAmount]);
     }
