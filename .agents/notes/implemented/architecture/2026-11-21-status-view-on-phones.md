@@ -155,6 +155,8 @@ tests and in the Android runtime tests.
 | Section header ⋯            | New section, Rename, Move up, Move down, Delete                    |
 | Conversation page "…" sheet | Later, Settle, Move to Focus                                       |
 
+On native iOS and Android, swiping a Settled row also offers Focus.
+
 Drags reorder Focus, reorder and move rows between pin sections, pin a row dropped
 into the Pinned area, and restore a Later or Settled row dropped into Focus. The
 list scrolls at its edges, holds the dropped order until the write reads back, and
