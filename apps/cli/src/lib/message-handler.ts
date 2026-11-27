@@ -924,6 +924,7 @@ export class MessageHandler {
   private readonly worktreeGc: WorktreeGarbageCollector;
   private worktreeGcTimer: NodeJS.Timeout | null = null;
   private detachWorktreeGcSyncListener: (() => void) | null = null;
+  private localProjectWorktreeRemovalInFlight = 0;
   private readonly deleteLocalProjectInFlight = new Set<LocalProjectId>();
   private machineFlockCommandWatcher: MachineFlockCommandWatcher;
   // Desktop local-transport backfill: in-flight task keys (`${sessionId}:${fileId}`)
@@ -5168,6 +5169,9 @@ export class MessageHandler {
   }
 
   private isWorktreeRuntimeActive(sessionId: SessionId, worktreePath?: string): boolean {
+    if (this.localProjectWorktreeRemovalInFlight > 0) {
+      return true;
+    }
     if (this.sessionManager.isWorktreeSessionBusy(sessionId)) {
       return true;
     }
@@ -5529,6 +5533,18 @@ export class MessageHandler {
   }
 
   private async deleteLocalProjectResources(
+    localProjectId: LocalProjectId,
+    command: MachineDeleteLocalProjectCommand
+  ): Promise<MachineDeleteLocalProjectCommand['cleanupResult'] | undefined> {
+    this.localProjectWorktreeRemovalInFlight += 1;
+    try {
+      return await this.deleteLocalProjectResourcesInner(localProjectId, command);
+    } finally {
+      this.localProjectWorktreeRemovalInFlight -= 1;
+    }
+  }
+
+  private async deleteLocalProjectResourcesInner(
     localProjectId: LocalProjectId,
     command: MachineDeleteLocalProjectCommand
   ): Promise<MachineDeleteLocalProjectCommand['cleanupResult'] | undefined> {
