@@ -1,19 +1,22 @@
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { E2eeMachineSharingSettings } from './e2ee/machine-sharing-settings';
 import { useTranslation } from 'react-i18next';
-import { Bot, Folder } from 'lucide-react';
+import { Bot, Folder, Plus, Trash2 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
+import { useRemoveLocalProject } from '@/hooks/use-remove-local-project';
+import { AddLocalProjectDialogContainer } from '@/components/local-projects/add-local-project-dialog-container';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { settingsSurface as surface } from './surface';
+import { CompactSection } from './compact-layout';
 import type { ProjectSettingsRow } from './project-settings';
 import { AgentIcon } from '@/components/icons/agent-icon';
 
@@ -35,6 +38,10 @@ type MachineConnectedResourcesProps = {
   preloadedProjects: MachineConnectedProject[];
   projectsLoading: boolean;
   readOnly?: boolean;
+  /** Render only folders (Access tab), only agents (Overview tab), or both. */
+  section?: 'all' | 'folders' | 'agents';
+  /** Nested desktop detail already owns horizontal alignment — drop extra inset. */
+  flush?: boolean;
   onManageAgents: () => void;
 };
 
@@ -45,6 +52,7 @@ type MachineConnectedResourcesProps = {
  */
 export function MachineConnectedResources(props: MachineConnectedResourcesProps) {
   const mode = useAtomValue(workspaceContentModeAtom);
+  const section = props.section ?? 'all';
   if (
     mode?.descriptor &&
     'contentMode' in mode.descriptor &&
@@ -52,23 +60,29 @@ export function MachineConnectedResources(props: MachineConnectedResourcesProps)
   ) {
     return (
       <>
-        <E2eeMachineSharingSettings
-          machineId={props.machineId}
-          projects={props.preloadedProjects.flatMap((project) =>
-            project.localProjectId
-              ? [{ id: project.localProjectId, name: project.name, rootPath: project.rootPath }]
-              : []
-          )}
-        />
-        <MachineConnectedResourcesContent
-          machineId={props.machineId}
-          configs={props.configs}
-          projects={[]}
-          projectsLoading={props.projectsLoading}
-          readOnly={!!props.readOnly}
-          hideFolders
-          onManageAgents={props.onManageAgents}
-        />
+        {section !== 'agents' ? (
+          <E2eeMachineSharingSettings
+            machineId={props.machineId}
+            projects={props.preloadedProjects.flatMap((project) =>
+              project.localProjectId
+                ? [{ id: project.localProjectId, name: project.name, rootPath: project.rootPath }]
+                : []
+            )}
+          />
+        ) : null}
+        {section !== 'folders' ? (
+          <MachineConnectedResourcesContent
+            machineId={props.machineId}
+            configs={props.configs}
+            projects={[]}
+            projectsLoading={props.projectsLoading}
+            readOnly={!!props.readOnly}
+            hideFolders
+            hideAgents={false}
+            flush={props.flush}
+            onManageAgents={props.onManageAgents}
+          />
+        ) : null}
       </>
     );
   }
@@ -80,6 +94,9 @@ export function MachineConnectedResources(props: MachineConnectedResourcesProps)
         projects={props.preloadedProjects}
         projectsLoading={props.projectsLoading}
         readOnly
+        hideFolders={section === 'agents'}
+        hideAgents={section === 'folders'}
+        flush={props.flush}
         onManageAgents={props.onManageAgents}
       />
     );
@@ -93,9 +110,13 @@ function ManageableMachineConnectedResources({
   configs,
   preloadedProjects,
   projectsLoading,
+  section = 'all',
+  flush = false,
   onManageAgents,
 }: MachineConnectedResourcesProps) {
   const { sections, isLoading, onSharedWithTeamChange } = useLocalProjectsAdmin();
+  const { removeLocalProject } = useRemoveLocalProject();
+  const [addFolderOpen, setAddFolderOpen] = useState(false);
   const adminProjects = useMemo(
     () => sections.find((section) => section.machineId === machineId)?.rows ?? [],
     [machineId, sections]
@@ -112,15 +133,36 @@ function ManageableMachineConnectedResources({
       : preloadedProjects;
 
   return (
-    <MachineConnectedResourcesContent
-      machineId={machineId}
-      configs={configs}
-      projects={projects}
-      projectsLoading={(isLoading || projectsLoading) && projects.length === 0}
-      readOnly={false}
-      onManageAgents={onManageAgents}
-      onSharedWithTeamChange={onSharedWithTeamChange}
-    />
+    <>
+      <MachineConnectedResourcesContent
+        machineId={machineId}
+        configs={configs}
+        projects={projects}
+        projectsLoading={(isLoading || projectsLoading) && projects.length === 0}
+        readOnly={false}
+        hideFolders={section === 'agents'}
+        hideAgents={section === 'folders'}
+        flush={flush}
+        onManageAgents={onManageAgents}
+        onSharedWithTeamChange={onSharedWithTeamChange}
+        onAddFolder={() => setAddFolderOpen(true)}
+        onRemoveFolder={(row) => {
+          void removeLocalProject({
+            machineId: row.machineId,
+            localProjectId: row.project.id,
+            projectName: row.project.name,
+            originalRootPath: row.project.rootPath,
+          });
+        }}
+      />
+      {section !== 'agents' ? (
+        <AddLocalProjectDialogContainer
+          open={addFolderOpen}
+          onOpenChange={setAddFolderOpen}
+          initialMachineId={machineId}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -132,7 +174,11 @@ function MachineConnectedResourcesContent({
   readOnly,
   onManageAgents,
   onSharedWithTeamChange,
+  onAddFolder,
+  onRemoveFolder,
   hideFolders,
+  hideAgents,
+  flush,
 }: {
   machineId: MachineId;
   configs: AgentConfigMeta[];
@@ -140,131 +186,214 @@ function MachineConnectedResourcesContent({
   projectsLoading: boolean;
   readOnly: boolean;
   hideFolders?: boolean;
+  hideAgents?: boolean;
+  flush?: boolean;
   onManageAgents: () => void;
   onSharedWithTeamChange?: (row: ProjectSettingsRow, sharedWithTeam: boolean) => Promise<void>;
+  onAddFolder?: () => void;
+  onRemoveFolder?: (row: ProjectSettingsRow) => void;
 }) {
   const { t } = useTranslation();
+
+  const foldersAction =
+    !readOnly && onAddFolder ? (
+      <Button type="button" variant="secondary" size="small" onClick={onAddFolder}>
+        <Plus aria-hidden {...stylex.props(styles.actionIcon)} />
+        {t('settings.machines.addFolder', 'Add folder')}
+      </Button>
+    ) : null;
+
+  const agentsAction = !readOnly ? (
+    <Button
+      data-testid="settings-machine-manage-agents"
+      data-machine-id={machineId}
+      variant="secondary"
+      size="small"
+      onClick={onManageAgents}
+    >
+      {t('settings.machines.manageAgents', 'Manage in Agents')}
+    </Button>
+  ) : null;
+
+  const folderRows = projects.map((project, index) => {
+    const adminRow = project.adminRow;
+    return (
+      <div
+        key={project.key}
+        {...stylex.props(styles.row, !flush && index > 0 && surface.lineRuled)}
+      >
+        <div {...stylex.props(styles.rowText)}>
+          <div {...stylex.props(styles.truncate, styles.name)}>{project.name}</div>
+          <div {...stylex.props(styles.truncate, styles.path)}>{project.rootPath}</div>
+        </div>
+        {!readOnly && adminRow && onSharedWithTeamChange ? (
+          <>
+            <span {...stylex.props(styles.access)}>
+              {t('workspace.projects.shareToggle', 'Share project with team')}
+            </span>
+            <Switch
+              checked={project.sharedWithTeam}
+              disabled={adminRow.isUpdating || !adminRow.canUpdateSharing}
+              aria-label={t('workspace.projects.shareToggle', 'Share project with team')}
+              onCheckedChange={(checked) => {
+                void onSharedWithTeamChange(adminRow, checked);
+              }}
+            />
+            {onRemoveFolder ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="small"
+                icon
+                aria-label={t('settings.machines.unlinkFolder', 'Remove folder')}
+                onClick={() => onRemoveFolder(adminRow)}
+              >
+                <Trash2 aria-hidden {...stylex.props(styles.actionIcon)} />
+              </Button>
+            ) : null}
+          </>
+        ) : (
+          <span {...stylex.props(styles.access)}>
+            {project.sharedWithTeam
+              ? t('workspace.machines.shared', 'Shared')
+              : t('workspace.machines.private', 'Private')}
+          </span>
+        )}
+      </div>
+    );
+  });
+
+  if (flush) {
+    return (
+      <div {...stylex.props(styles.root, styles.rootFlush)}>
+        {!hideFolders && (
+          <CompactSection
+            title={t('settings.machines.connectedFolders', 'Connected folders')}
+            headerRight={foldersAction}
+            headerRightUnclipped
+            boxed
+          >
+            {projectsLoading ? (
+              <p {...stylex.props(styles.cardNote)}>{t('common.loading', 'Loading...')}</p>
+            ) : projects.length === 0 ? (
+              <p {...stylex.props(styles.cardNote)}>
+                {t('settings.machines.noConnectedFoldersShort', 'No folders connected yet.')}
+              </p>
+            ) : (
+              folderRows
+            )}
+          </CompactSection>
+        )}
+
+        {!hideAgents && (
+          <CompactSection
+            title={t('settings.machines.connectedAgents', 'Connected agents')}
+            headerRight={agentsAction}
+            headerRightUnclipped
+            boxed
+          >
+            {configs.length === 0 ? (
+              <p {...stylex.props(styles.cardNote)}>
+                {t('settings.machines.noConnectedAgents', 'No agents configured for this machine.')}
+              </p>
+            ) : (
+              <div {...stylex.props(styles.cardChips)}>
+                {configs.map((config) => (
+                  <Badge
+                    key={config.id}
+                    icon={
+                      <AgentIcon
+                        cliType={config.cliType}
+                        agentType={config.agentType}
+                        brandId={config.brandId}
+                        env={config.env}
+                        className={stylex.props(styles.agentIcon).className}
+                      />
+                    }
+                  >
+                    {config.name}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </CompactSection>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div {...stylex.props(styles.root)}>
       {!hideFolders && (
         <section {...stylex.props(styles.group)}>
-          <div {...stylex.props(styles.heading)}>
-            <Folder aria-hidden {...stylex.props(styles.headingIcon)} />
-            <h3 {...stylex.props(styles.title)}>
-              {t('settings.machines.connectedFolders', 'Connected folders')}
-            </h3>
+          <div {...stylex.props(styles.headingRow)}>
+            <div {...stylex.props(styles.heading)}>
+              <Folder aria-hidden {...stylex.props(styles.headingIcon)} />
+              <h3 {...stylex.props(styles.title)}>
+                {t('settings.machines.connectedFolders', 'Connected folders')}
+              </h3>
+            </div>
+            {foldersAction}
           </div>
-          {!readOnly ? (
-            <p {...stylex.props(styles.hint)}>
-              {t(
-                'settings.machines.folderSharingHint',
-                'Sharing a folder also makes this machine available to the workspace.'
-              )}
-            </p>
-          ) : null}
           {projectsLoading ? (
             <p {...stylex.props(styles.note)}>{t('common.loading', 'Loading...')}</p>
           ) : projects.length === 0 ? (
             <p {...stylex.props(styles.note)}>
-              {t('settings.machines.noConnectedFolders', 'No connected folders on this machine.')}
+              {t('settings.machines.noConnectedFoldersShort', 'No folders connected yet.')}
             </p>
           ) : (
-            // Inside the machine's card, so the list is a region fill with ruled
-            // rows rather than a second card.
-            <div {...stylex.props(surface.formBlock, styles.list)}>
-              {projects.map((project, index) => {
-                const adminRow = project.adminRow;
-                return (
-                  <div
-                    key={project.key}
-                    {...stylex.props(styles.row, index > 0 && surface.lineRuled)}
-                  >
-                    <div {...stylex.props(styles.rowText)}>
-                      <div {...stylex.props(styles.truncate, styles.name)}>{project.name}</div>
-                      <div {...stylex.props(styles.truncate, styles.path)}>{project.rootPath}</div>
-                    </div>
-                    {!readOnly && adminRow && onSharedWithTeamChange ? (
-                      <>
-                        {/* Same grammar as the machine's "Share machine" row: the
-                          label names what turning the switch on does, and the
-                          switch position carries the state. State text only
-                          makes sense when no control is offered. */}
-                        <span {...stylex.props(styles.access)}>
-                          {t('workspace.projects.shareToggle', 'Share project with team')}
-                        </span>
-                        <Switch
-                          checked={project.sharedWithTeam}
-                          disabled={adminRow.isUpdating || !adminRow.canUpdateSharing}
-                          aria-label={t(
-                            'workspace.projects.shareToggle',
-                            'Share project with team'
-                          )}
-                          onCheckedChange={(checked) => {
-                            void onSharedWithTeamChange(adminRow, checked);
-                          }}
-                        />
-                      </>
-                    ) : (
-                      <span {...stylex.props(styles.access)}>
-                        {project.sharedWithTeam
-                          ? t('workspace.machines.shared', 'Shared')
-                          : t('workspace.machines.private', 'Private')}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <div {...stylex.props(surface.formBlock, styles.list)}>{folderRows}</div>
           )}
         </section>
       )}
 
-      <section {...stylex.props(styles.group)}>
-        <div {...stylex.props(styles.headingRow)}>
-          <div {...stylex.props(styles.heading)}>
-            <Bot aria-hidden {...stylex.props(styles.headingIcon)} />
-            <h3 {...stylex.props(styles.title)}>
-              {t('settings.machines.connectedAgents', 'Connected agents')}
-            </h3>
-          </div>
-          {!readOnly ? (
-            <Button
-              data-testid="settings-machine-manage-agents"
-              data-machine-id={machineId}
-              variant="secondary"
-              size="small"
-              onClick={onManageAgents}
-            >
-              {t('settings.machines.manageAgents', 'Manage in Agents')}
-            </Button>
-          ) : null}
-        </div>
-        {configs.length === 0 ? (
-          <p {...stylex.props(styles.note)}>
-            {t('settings.machines.noConnectedAgents', 'No agents configured for this machine.')}
-          </p>
-        ) : (
-          <div {...stylex.props(styles.chips)}>
-            {configs.map((config) => (
-              <Badge
-                key={config.id}
-                icon={
-                  <AgentIcon
-                    cliType={config.cliType}
-                    agentType={config.agentType}
-                    brandId={config.brandId}
-                    env={config.env}
-                    className={stylex.props(styles.agentIcon).className}
-                  />
-                }
+      {!hideAgents && (
+        <section {...stylex.props(styles.group)}>
+          <div {...stylex.props(styles.headingRow)}>
+            <div {...stylex.props(styles.heading)}>
+              <Bot aria-hidden {...stylex.props(styles.headingIcon)} />
+              <h3 {...stylex.props(styles.title)}>
+                {t('settings.machines.connectedAgents', 'Connected agents')}
+              </h3>
+            </div>
+            {!readOnly ? (
+              <Button
+                data-testid="settings-machine-manage-agents"
+                data-machine-id={machineId}
+                variant="secondary"
+                size="small"
+                onClick={onManageAgents}
               >
-                {config.name}
-              </Badge>
-            ))}
+                {t('settings.machines.manageAgents', 'Manage in Agents')}
+              </Button>
+            ) : null}
           </div>
-        )}
-      </section>
+          {configs.length === 0 ? (
+            <p {...stylex.props(styles.note)}>
+              {t('settings.machines.noConnectedAgents', 'No agents configured for this machine.')}
+            </p>
+          ) : (
+            <div {...stylex.props(styles.chips)}>
+              {configs.map((config) => (
+                <Badge
+                  key={config.id}
+                  icon={
+                    <AgentIcon
+                      cliType={config.cliType}
+                      agentType={config.agentType}
+                      brandId={config.brandId}
+                      env={config.env}
+                      className={stylex.props(styles.agentIcon).className}
+                    />
+                  }
+                >
+                  {config.name}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
@@ -278,6 +407,11 @@ const styles = stylex.create({
     paddingTop: '20px',
     paddingBottom: space[4],
   },
+  rootFlush: {
+    paddingInline: 0,
+    paddingTop: space[1],
+    paddingBottom: 0,
+  },
   group: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
   headingRow: {
     display: 'flex',
@@ -287,6 +421,7 @@ const styles = stylex.create({
   },
   heading: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
   headingIcon: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
+  actionIcon: { flexShrink: 0, width: '14px', height: '14px' },
   title: {
     margin: 0,
     fontSize: uiText.footnoteSize,
@@ -300,6 +435,20 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   note: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
+  cardNote: {
+    margin: 0,
+    paddingInline: space[4],
+    paddingBlock: space[3],
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  cardChips: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: space[1.5],
+    paddingInline: space[4],
+    paddingBlock: space[3],
+  },
   /** The region fill holds rows that run edge to edge, so it drops its padding. */
   list: { paddingInline: 0, paddingBlock: 0, overflow: 'hidden' },
   row: {

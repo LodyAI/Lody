@@ -184,6 +184,179 @@ describe('MachineDetailPane revoke machine access', () => {
   });
 });
 
+describe('machine fleet filtering', () => {
+  it('counts and filters machines by preset and search query across name, os, and owner', async () => {
+    const { countMachineFleetFilters, filterMachineFleetItems } =
+      await import('../src/components/settings/machine-fleet-filter');
+    const items = [
+      {
+        machine: { ...machine, id: 'm-1' as MachineId, name: 'MacBook-Pro', os: 'macOS 15.2' },
+        isOwn: true,
+        isOnline: true,
+        sharedWithTeam: true,
+      },
+      {
+        machine: {
+          ...machine,
+          id: 'm-2' as MachineId,
+          name: 'loro-beast',
+          os: 'Ubuntu 24.04',
+          ownerUserId: 'user-2',
+        },
+        isOwn: false,
+        isOnline: true,
+        sharedWithTeam: true,
+      },
+      {
+        machine: {
+          ...machine,
+          id: 'm-3' as MachineId,
+          name: 'win-box',
+          os: 'Windows 11',
+          ownerUserId: 'user-1',
+        },
+        isOwn: true,
+        isOnline: false,
+        sharedWithTeam: false,
+      },
+    ];
+    const owners = new Map([
+      ['user-1', { id: 'user-1', name: 'Zixuan Chen' }],
+      ['user-2', { id: 'user-2', name: 'Bob Smith' }],
+    ]);
+
+    expect(countMachineFleetFilters(items)).toEqual({ all: 3, online: 2, mine: 2 });
+    expect(
+      filterMachineFleetItems(items, { preset: 'online', query: '', ownerByUserId: owners }).map(
+        (item) => item.machine.id
+      )
+    ).toEqual(['m-1', 'm-2']);
+    expect(
+      filterMachineFleetItems(items, { preset: 'mine', query: '', ownerByUserId: owners }).map(
+        (item) => item.machine.id
+      )
+    ).toEqual(['m-1', 'm-3']);
+    expect(
+      filterMachineFleetItems(items, { preset: 'all', query: 'bob', ownerByUserId: owners }).map(
+        (item) => item.machine.id
+      )
+    ).toEqual(['m-2']);
+    expect(
+      filterMachineFleetItems(items, {
+        preset: 'all',
+        query: 'windows',
+        ownerByUserId: owners,
+      }).map((item) => item.machine.id)
+    ).toEqual(['m-3']);
+  });
+});
+
+describe('nested MachineDetailPane desktop tabs', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  beforeEach(async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    await initI18n('en');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    if (root) {
+      act(() => root?.unmount());
+    }
+    root = undefined;
+    container?.remove();
+    container = undefined;
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('renders a single scrollable detail page for owned machines and hides owner controls for teammates', async () => {
+    const onBack = vi.fn();
+    await act(async () => {
+      root?.render(
+        <Tooltip.Provider>
+          <MachineDetailPane
+            mode="devices"
+            machine={machine}
+            configs={[]}
+            isOwn
+            isLocal
+            ownerName={null}
+            sharedWithTeam={false}
+            canDelete
+            onBack={onBack}
+            onRename={vi.fn(async () => {})}
+            onDelete={vi.fn(async () => {})}
+            onSharedWithTeamChange={vi.fn(async () => {})}
+            onAddConfig={vi.fn()}
+            onEditConfig={vi.fn()}
+            onPing={vi.fn(async () => 18)}
+            canRevokeCredentials
+            onRevokeCredentials={vi.fn(async () => {})}
+            accessContent={<div>Folders Slot</div>}
+            agentsContent={<div>Agents Slot</div>}
+          />
+        </Tooltip.Provider>
+      );
+    });
+
+    // All sections are directly visible in one continuous scroll without sub-tabs.
+    expect(document.body.querySelectorAll('[role="tab"]').length).toBe(0);
+    expect(document.body.textContent).toContain('Folders Slot');
+    expect(document.body.textContent).toContain('Agents Slot');
+    expect(
+      document.body.querySelector('button[aria-label="Revoke machine access"]')
+    ).not.toBeNull();
+    expect(
+      document.body.querySelector('button[aria-label="Remove from workspace"]')
+    ).not.toBeNull();
+
+    // Re-render as read-only teammate machine: Danger zone and owner controls must not render.
+    await act(async () => {
+      root?.render(
+        <Tooltip.Provider>
+          <MachineDetailPane
+            mode="devices"
+            readOnly
+            machine={machine}
+            configs={[]}
+            isOwn={false}
+            isLocal={false}
+            ownerName="Bob Smith"
+            sharedWithTeam
+            canDelete={false}
+            onBack={onBack}
+            onRename={vi.fn(async () => {})}
+            onDelete={vi.fn(async () => {})}
+            onAddConfig={vi.fn()}
+            onEditConfig={vi.fn()}
+          />
+        </Tooltip.Provider>
+      );
+    });
+    expect(document.body.querySelector('button[aria-label="Revoke machine access"]')).toBeNull();
+    expect(document.body.querySelector('button[aria-label="Remove from workspace"]')).toBeNull();
+  });
+});
+
 describe('advanced daemon identity restore', () => {
   let root: Root;
   let container: HTMLDivElement;

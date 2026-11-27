@@ -24,6 +24,7 @@ import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { listAddableProviders, type AgentConfigFormData } from './agent-config-dialog';
 import {
   Activity,
+  ArrowLeft,
   Bot,
   ChevronUp,
   Download,
@@ -55,7 +56,18 @@ import { MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { ProviderRow, type ProviderRefreshHandler } from './provider-row';
 import { ProviderSetupRow } from './provider-setup-row';
 import { DeviceResourceMonitor } from './device-resource-monitor';
-import { CompactSection, SettingsEmptyList, settingsRecordsCard } from './compact-layout';
+import {
+  CompactRow,
+  CompactSection,
+  SettingsEmptyList,
+  settingsRecordsCard,
+} from './compact-layout';
+import {
+  SettingsPageActions,
+  SettingsPageBreadcrumb,
+  SettingsPageLead,
+  useInSettingsPane,
+} from './settings-page-header';
 import { settingsSurface as surface } from './surface';
 import type { MachineMonitorViewState } from '@/hooks/use-machine-monitor';
 import {
@@ -229,6 +241,64 @@ const styles = stylex.create({
   updateVersion: { fontFamily: MONO, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   body: { flexGrow: 1, minHeight: 0, overflowY: 'auto' },
   bodyInAccordion: { overflowY: 'visible' },
+
+  /** Nested desktop machine detail (Option B): breadcrumb + calm hero + 3 sub-tabs. */
+  nestedPane: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[4],
+    width: '100%',
+    minWidth: 0,
+  },
+  nestedBackRow: { display: 'flex', alignItems: 'center' },
+  nestedBackBtn: { marginInlineStart: `calc(-1 * ${space[2]})` },
+  nestedHero: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: space[3],
+  },
+  nestedHeroMain: { display: 'flex', flexDirection: 'column', gap: space[1], minWidth: 0 },
+  nestedTitleRow: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  nestedTitle: {
+    margin: 0,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: uiText.titleSize,
+    fontWeight: 600,
+    lineHeight: uiText.titleLeading,
+    color: colors.label,
+  },
+  nestedMeta: {
+    margin: 0,
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[1.5],
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  nestedHeroActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
+  nestedPingOk: {
+    color: colors.success,
+    backgroundColor: `color-mix(in oklab, ${colors.success} 12%, transparent)`,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  nestedTabBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[4],
+    minWidth: 0,
+  },
+  nestedRenameRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: '220px',
+  },
 });
 
 export type MachineProvidersSectionProps = {
@@ -426,6 +496,14 @@ export type MachineDetailPaneProps = {
   onTerminateMonitorSession?: (session: AcpSessionMonitorSnapshot) => Promise<void>;
   /** Extra owner-only information shown below the resource monitor. */
   footer?: ReactNode;
+  /** Desktop nested detail view (Option B): renders ← Machines breadcrumb + 3 sub-tabs. */
+  onBack?: () => void;
+  /** Optional split slots used by the nested detail tabs (Access & Folders, Overview agents). */
+  accessContent?: ReactNode;
+  agentsContent?: ReactNode;
+  /** Optional externally tracked Ping latency (shared with the Fleet List row). */
+  initialPingLatencyMs?: number | null;
+  onPingLatencyChange?: (machineId: MachineId, latencyMs: number) => void;
   /** Desktop Machines embeds the detail directly below its full-width accordion row. */
   accordion?: {
     meta: WorkspaceMachineAccordionMeta;
@@ -469,6 +547,11 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
     onOpenMonitorSession,
     onTerminateMonitorSession,
     footer,
+    onBack,
+    accessContent,
+    agentsContent,
+    initialPingLatencyMs = null,
+    onPingLatencyChange,
     accordion,
   } = props;
   const { t } = useTranslation();
@@ -478,10 +561,23 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
     !('contentMode' in contentMode.descriptor) ||
     contentMode.descriptor.contentMode !== 'e2ee';
   const isMobile = useIsMobile();
+  const inSettingsPane = useInSettingsPane();
   const monitoredOnline = useMachineOnlineStatus(machine.id) === 'online';
   // The accordion list already owns the workspace-wide presence snapshot. Reuse
   // it so collapsing and expanding a row cannot briefly change the status dot.
   const isOnline = accordion ? accordion.meta.isOnline : monitoredOnline;
+
+  const trackedOnPing = useMemo(
+    () =>
+      onPing
+        ? async (machineId: MachineId) => {
+            const latency = await onPing(machineId);
+            onPingLatencyChange?.(machineId, latency);
+            return latency;
+          }
+        : undefined,
+    [onPing, onPingLatencyChange]
+  );
 
   const {
     renaming,
@@ -512,15 +608,17 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
     onRename,
     onDelete,
     onSharedWithTeamChange,
-    onPing,
+    onPing: trackedOnPing,
     onRestartDaemon,
     onUpgradeDaemon,
   });
+  const effectivePingLatencyMs = pingLatencyMs ?? initialPingLatencyMs;
   const pendingRenameRef = useRef(false);
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [revoking, setRevoking] = useState(false);
 
   const manageableOwnMachine = isOwn && !readOnly;
+  const isNestedDesktopView = !isMobile && mode === 'devices' && !!onBack;
   const shareControlVisible =
     !isMobile && !renaming && manageableOwnMachine && ordinarySharing && !!onSharedWithTeamChange;
   const restartVisible = !isMobile && !renaming && !readOnly && !!onRestartDaemon;
@@ -573,486 +671,853 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
     </>
   );
 
+  const nestedHeroActions = manageableOwnMachine ? (
+    <>
+      {onPing ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          disabled={!isOnline || pinging}
+          xstyle={isOnline && effectivePingLatencyMs !== null ? styles.nestedPingOk : undefined}
+          onClick={() => void handlePing()}
+        >
+          {pinging ? (
+            <Spinner size="small" label={null} />
+          ) : (
+            <Activity {...stylex.props(styles.icon14)} />
+          )}
+          {isOnline && effectivePingLatencyMs !== null
+            ? `${t('settings.agent.machinePing.latency', '{{latency}} ms', {
+                latency: String(effectivePingLatencyMs),
+              })} · ${t('settings.agent.machinePing.button', 'Ping')}`
+            : t('settings.agent.machinePing.button', 'Ping')}
+        </Button>
+      ) : null}
+      {onRestartDaemon ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          disabled={!isOnline || restartingDaemon || upgradingDaemon}
+          onClick={() => void handleRestartDaemon()}
+        >
+          {restartingDaemon ? (
+            <Spinner size="small" label={null} />
+          ) : (
+            <RotateCcw {...stylex.props(styles.icon14)} />
+          )}
+          {t('settings.machines.restartShort', 'Restart')}
+        </Button>
+      ) : null}
+    </>
+  ) : null;
+
+  const nestedMetaContent = (
+    <>
+      <span>
+        {isOnline
+          ? t('workspace.machines.online', 'Online')
+          : t('workspace.machines.offline', 'Offline')}
+      </span>
+      {ownerName && !isOwn ? (
+        <>
+          <span aria-hidden> · </span>
+          <span>
+            {t('workspace.machines.ownedBy', {
+              owner: ownerName,
+              defaultValue: 'Owned by {{owner}}',
+            })}
+          </span>
+        </>
+      ) : null}
+      <span aria-hidden> · </span>
+      <span>{machine.os || '-'}</span>
+      <span aria-hidden> · </span>
+      <span {...stylex.props(styles.mono)}>
+        {machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}
+      </span>
+    </>
+  );
+
+  const nestedLeadingDot = (
+    <span
+      role="img"
+      aria-label={
+        isOnline
+          ? t('workspace.machines.online', 'Online')
+          : t('workspace.machines.offline', 'Offline')
+      }
+      {...stylex.props(styles.statusDot, isOnline && styles.statusDotOnline)}
+    />
+  );
+
+  const nestedTrailingBadges = (
+    <>
+      {manageableOwnMachine && !renaming ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="mini"
+          icon
+          aria-label={t('workspace.machines.editName', 'Edit machine name')}
+          onClick={() => setRenaming(true)}
+        >
+          <Pencil {...stylex.props(styles.iconFill)} />
+        </Button>
+      ) : null}
+      {renameSaving ? <Spinner size="small" /> : null}
+      {isLocal ? <Badge>{t('workspace.machines.thisDevice', 'This machine')}</Badge> : null}
+      {!isOwn ? <Badge>{t('settings.machines.readOnly', 'Read-only')}</Badge> : null}
+    </>
+  );
+
+  const nestedRenameEditor = renaming ? (
+    <Input
+      ref={inputRef}
+      value={renameDraft}
+      disabled={renameSaving}
+      size="small"
+      className={stylex.props(styles.renameInput).className}
+      onChange={(event) => setRenameDraft(event.target.value.replace(/[\r\n]+/g, ' '))}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setRenameDraft(machine.name);
+          setRenaming(false);
+          return;
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+      }}
+      onBlur={() => void commitRename()}
+    />
+  ) : null;
+
   return (
     <div {...stylex.props(styles.pane, accordion && styles.paneInAccordion)}>
-      {detailToolbarVisible ? (
-        <header
-          {...stylex.props(
-            styles.header,
-            externalAccordionHeader && styles.headerCompact,
-            accordion && !externalAccordionHeader && styles.headerSticky
-          )}
-        >
-          <MobileSettingsDetailHeader active={isMobile}>
-            <div {...stylex.props(styles.toolbar)}>
-              {accordion && !externalAccordionHeader ? (
-                <span
-                  role="img"
-                  aria-label={
-                    isOnline
-                      ? t('workspace.machines.online', 'Online')
-                      : t('workspace.machines.offline', 'Offline')
-                  }
-                  {...stylex.props(styles.statusDot, isOnline && styles.statusDotOnline)}
-                />
-              ) : null}
-              <div {...stylex.props(isMobile ? styles.titleGroupMobile : styles.titleGroup)}>
-                {renaming ? (
-                  <Input
-                    ref={inputRef}
-                    value={renameDraft}
-                    disabled={renameSaving}
-                    size="small"
-                    className={stylex.props(styles.renameInput).className}
-                    onChange={(event) =>
-                      setRenameDraft(event.target.value.replace(/[\r\n]+/g, ' '))
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') {
-                        event.preventDefault();
-                        setRenameDraft(machine.name);
-                        setRenaming(false);
-                        return;
-                      }
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        event.currentTarget.blur();
-                      }
-                    }}
-                    onBlur={() => void commitRename()}
-                  />
-                ) : externalAccordionHeader ? (
-                  manageableOwnMachine ? (
-                    <Button variant="ghost" size="small" onClick={() => setRenaming(true)}>
-                      <Pencil {...stylex.props(styles.icon12)} />
-                      {t('workspace.machines.editName', 'Edit machine name')}
-                    </Button>
-                  ) : null
-                ) : (
+      {isNestedDesktopView ? (
+        <div {...stylex.props(styles.nestedPane)}>
+          {inSettingsPane && onBack ? (
+            <>
+              <SettingsPageBreadcrumb
+                label={renaming ? '' : machine.name || machine.id}
+                onBack={onBack}
+                leading={
                   <>
-                    <h2 {...stylex.props(styles.title, isMobile && styles.titleMobile)}>
-                      {machine.name || machine.id}
-                    </h2>
-                    {renameSaving && <Spinner size="small" />}
-                    {!isMobile && manageableOwnMachine && (
-                      <Button
-                        variant="ghost"
-                        size="mini"
-                        icon
-                        aria-label={t('workspace.machines.editName', 'Edit machine name')}
-                        onClick={() => setRenaming(true)}
-                      >
-                        <Pencil {...stylex.props(styles.iconFill)} />
-                      </Button>
-                    )}
+                    {nestedLeadingDot}
+                    {nestedRenameEditor}
                   </>
-                )}
-              </div>
-              {onPing && !renaming && !isMobile && (
-                <div {...stylex.props(styles.ping, !shareControlVisible && styles.pushEnd)}>
-                  <Button
-                    variant="ghost"
-                    size="small"
-                    disabled={pinging}
-                    onClick={() => void handlePing()}
-                  >
-                    {pinging ? (
-                      <Spinner size="small" />
-                    ) : (
-                      <Activity {...stylex.props(styles.icon14)} />
-                    )}
-                    {t('settings.agent.machinePing.button', 'Ping')}
-                  </Button>
-                  {pingLatencyMs !== null && (
-                    <span {...stylex.props(styles.latency)}>
-                      {t('settings.agent.machinePing.latency', '{{latency}} ms', {
-                        latency: String(pingLatencyMs),
-                      })}
-                    </span>
-                  )}
-                </div>
-              )}
-              {shareControlVisible && (
-                <div {...stylex.props(styles.share)}>
-                  <span {...stylex.props(styles.shareLabel)}>
-                    {t('workspace.machines.shareMachineLabel', 'Share machine')}
-                  </span>
-                  {sharing ? (
-                    <Spinner size="small" />
-                  ) : (
-                    <Switch
-                      checked={effectiveShared}
-                      onCheckedChange={(checked) => void handleSharedToggle(checked)}
-                      aria-label={t('workspace.machines.shareToggle', {
-                        machineName: machine.name,
-                        defaultValue: 'Share {{machineName}} with the team',
-                      })}
-                    />
-                  )}
-                </div>
-              )}
-              {restartVisible && (
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        icon
-                        aria-label={t(
-                          'settings.agent.machineLifecycle.restartButton',
-                          'Restart daemon'
-                        )}
-                        disabled={restartingDaemon || upgradingDaemon}
-                        onClick={() => void handleRestartDaemon()}
-                      >
-                        {restartingDaemon ? (
-                          <Spinner size="small" />
-                        ) : (
-                          <RotateCcw {...stylex.props(styles.iconFill)} />
-                        )}
-                      </Button>
-                    }
-                  />
-                  <Tooltip.Content>
-                    {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-              )}
-              {managementGroupVisible && destructiveGroupVisible && (
-                <div aria-hidden {...stylex.props(styles.groupRule)} />
-              )}
-              {revokeVisible && (
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        icon
-                        tone="destructive"
-                        aria-label={t(
-                          'settings.devices.credentials.disconnect',
-                          'Revoke machine access'
-                        )}
-                        onClick={() => setRevokeOpen(true)}
-                      >
-                        <Unplug {...stylex.props(styles.iconFill)} />
-                      </Button>
-                    }
-                  />
-                  <Tooltip.Content>
-                    {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-              )}
-              {removeVisible ? (
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    render={
-                      <span {...stylex.props(styles.tooltipAnchor)}>
-                        <Button
-                          variant="ghost"
-                          size="small"
-                          tone="destructive"
-                          aria-label={t(
-                            'workspace.machines.removeFromWorkspace',
-                            'Remove from workspace'
-                          )}
-                          disabled={!canDelete}
-                          onClick={() => setDeleteOpen(true)}
-                        >
-                          <LogOut {...stylex.props(styles.icon14)} />
-                          {t('workspace.machines.removeFromWorkspace', 'Remove from workspace')}
-                        </Button>
-                      </span>
-                    }
-                  />
-                  {!canDelete ? (
-                    <Tooltip.Content>
-                      {t(
-                        'workspace.machines.removeUnavailableOnline',
-                        'Stop Lody on this machine before removing it from this workspace.'
-                      )}
-                    </Tooltip.Content>
-                  ) : null}
-                </Tooltip.Root>
+                }
+                trailing={nestedTrailingBadges}
+              />
+              {nestedHeroActions ? (
+                <SettingsPageActions>{nestedHeroActions}</SettingsPageActions>
               ) : null}
-              {actionsMenuVisible && (
-                <Menu.Root>
-                  <Menu.Trigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        icon
-                        aria-label={t('workspace.machines.moreActions', 'Machine options')}
-                      >
-                        {sharing ? (
-                          <Spinner size="small" />
-                        ) : (
-                          <MoreHorizontal {...stylex.props(styles.iconFill)} />
-                        )}
-                      </Button>
-                    }
-                  />
-                  <Menu.Content
-                    align="end"
-                    finalFocus={() => {
-                      if (!pendingRenameRef.current) return undefined;
-                      pendingRenameRef.current = false;
-                      requestAnimationFrame(() => {
-                        inputRef.current?.focus();
-                        inputRef.current?.select();
-                      });
-                      return false;
-                    }}
-                  >
-                    {isMobile && manageableOwnMachine && (
-                      <Menu.Item
-                        icon={Pencil}
-                        onClick={() => {
-                          pendingRenameRef.current = true;
-                          setRenaming(true);
-                        }}
-                      >
-                        {t('workspace.machines.editName', 'Edit machine name')}
-                      </Menu.Item>
-                    )}
-                    {isMobile &&
-                      manageableOwnMachine &&
-                      ordinarySharing &&
-                      onSharedWithTeamChange && (
-                        <Menu.Item
-                          closeOnClick={false}
-                          onClick={() => {
-                            if (sharing) return;
-                            void handleSharedToggle(!effectiveShared);
-                          }}
-                          disabled={sharing}
-                          icon={Users}
-                          endContent={
-                            <Switch
-                              checked={effectiveShared}
-                              disabled={sharing}
-                              aria-hidden
-                              tabIndex={-1}
-                              className={stylex.props(styles.switchInMenu).className}
-                            />
-                          }
-                        >
-                          {t('workspace.machines.shareMachineLabel', 'Share machine')}
-                        </Menu.Item>
-                      )}
-                    {isMobile &&
-                      isOwn &&
-                      (onPing || (updateVisible && daemonUpdate) || onRestartDaemon) && (
-                        <Menu.Separator />
-                      )}
-                    {isMobile && onPing && (
-                      <Menu.Item
-                        closeOnClick={false}
-                        onClick={() => {
-                          void handlePing();
-                        }}
-                        disabled={pinging}
-                        icon={pinging ? <Spinner size="small" /> : Activity}
-                        shortcut={
-                          pingLatencyMs !== null ? (
-                            <span {...stylex.props(styles.mono)}>
-                              {t('settings.agent.machinePing.latency', '{{latency}} ms', {
-                                latency: String(pingLatencyMs),
-                              })}
-                            </span>
-                          ) : undefined
-                        }
-                      >
-                        {t('settings.agent.machinePing.button', 'Ping')}
-                      </Menu.Item>
-                    )}
-                    {isMobile && updateVisible && daemonUpdate && (
-                      <Menu.Item
-                        onClick={() => void handleUpgradeDaemon()}
-                        disabled={restartingDaemon || upgradingDaemon}
-                        icon={upgradingDaemon ? <Spinner size="small" /> : Download}
-                      >
-                        {t(
-                          'settings.agent.machineLifecycle.upgradeAndRestartButton',
-                          'Update and restart'
-                        )}
-                      </Menu.Item>
-                    )}
-                    {onRestartDaemon && (
-                      <Menu.Item
-                        onClick={() => void handleRestartDaemon()}
-                        disabled={restartingDaemon || upgradingDaemon}
-                        icon={restartingDaemon ? <Spinner size="small" /> : RotateCcw}
-                      >
-                        {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
-                      </Menu.Item>
-                    )}
-                    {isMobile && isOwn && (
-                      <>
-                        <Menu.Separator />
-                        <Menu.Item
-                          closeOnClick={false}
-                          onClick={() => {
-                            setDeleteOpen(true);
-                          }}
-                          disabled={!canDelete}
-                          tone="destructive"
-                          icon={LogOut}
-                        >
-                          {canDelete
-                            ? t('workspace.machines.removeFromWorkspace', 'Remove from workspace')
-                            : t(
-                                'workspace.machines.removeUnavailableOnlineShort',
-                                'Stop machine before removing'
-                              )}
-                        </Menu.Item>
-                      </>
-                    )}
-                  </Menu.Content>
-                </Menu.Root>
-              )}
-              {accordion && !externalAccordionHeader ? (
+              <SettingsPageLead>{nestedMetaContent}</SettingsPageLead>
+            </>
+          ) : (
+            <>
+              <div {...stylex.props(styles.nestedBackRow)}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="small"
-                  icon
-                  aria-label={t('settings.machines.collapseMachine', {
-                    machine: machine.name || machine.id,
-                    defaultValue: 'Collapse {{machine}}',
-                  })}
-                  aria-expanded={true}
-                  onClick={accordion.onCollapse}
+                  xstyle={styles.nestedBackBtn}
+                  onClick={onBack}
                 >
-                  <ChevronUp {...stylex.props(styles.iconFill)} aria-hidden />
+                  <ArrowLeft {...stylex.props(styles.icon14)} />
+                  {t('settings.tabs.machines', 'Machines')}
                 </Button>
-              ) : null}
-              {accordion && !externalAccordionHeader ? (
-                <WorkspaceMachineOwnerAvatar owner={accordion.meta.owner} />
-              ) : null}
-            </div>
-          </MobileSettingsDetailHeader>
-          {/* Desktop (story) keeps the meta badges in the header; on mobile they
-            move to the first line of the content, flush with the body. */}
-          {!isMobile && accordion ? (
-            externalAccordionHeader ? null : (
-              <div {...stylex.props(styles.summaryRow)}>
-                <WorkspaceMachineAccordionSummary meta={accordion.meta} showOwner={false} />
               </div>
-            )
-          ) : !isMobile ? (
-            <div {...stylex.props(styles.metaRow)}>{metaBadges}</div>
-          ) : null}
-          {daemonUpdateStatus && (
-            <div role="status" {...stylex.props(surface.formBlock, styles.update)}>
-              {t(`settings.agent.machineLifecycle.phase.${daemonUpdateStatus.phase}`, {
-                defaultValue: {
-                  preparing: 'Downloading and checking update',
-                  prepared: 'Update prepared',
-                  waiting: 'Waiting for running tasks to finish',
-                  switching: 'Switching daemon version',
-                  observing: 'Checking the new daemon',
-                  applied: 'Daemon updated to v{{version}}',
-                  'rollback-stop': 'Restoring the previous daemon',
-                  'rolled-back': 'Update failed; restored v{{previous}}',
-                  blocked: 'Update needs local recovery',
-                  failed: 'Update canceled or preparation failed; previous daemon retained',
-                  unconfirmed: 'Update outcome is not yet confirmed',
-                }[daemonUpdateStatus.phase],
-                version: daemonUpdateStatus.targetVersion,
-                previous: daemonUpdateStatus.previousVersion,
-              })}
-            </div>
-          )}
-          {updateVisible && daemonUpdate && (
-            <div {...stylex.props(surface.formBlock, styles.update)}>
-              <div {...stylex.props(styles.updateText)}>
-                <div {...stylex.props(styles.updateTitle)}>
-                  {t('settings.agent.machineLifecycle.updateAvailable', 'Update available')}
+              <header {...stylex.props(styles.nestedHero)}>
+                <div {...stylex.props(styles.nestedHeroMain)}>
+                  <div {...stylex.props(styles.nestedTitleRow)}>
+                    {nestedLeadingDot}
+                    {nestedRenameEditor ?? (
+                      <h2 {...stylex.props(styles.nestedTitle)}>{machine.name || machine.id}</h2>
+                    )}
+                    {nestedTrailingBadges}
+                  </div>
+                  <p {...stylex.props(styles.nestedMeta)}>{nestedMetaContent}</p>
                 </div>
-                <div {...stylex.props(styles.updateVersion)}>
-                  {t(
-                    'settings.agent.machineLifecycle.updateVersion',
-                    'v{{current}} → v{{latest}}',
-                    {
-                      current: daemonUpdate.currentVersion,
-                      latest: daemonUpdate.latestVersion,
-                    }
-                  )}
-                </div>
-              </div>
-              <Button
-                size="small"
-                disabled={restartingDaemon || upgradingDaemon}
-                onClick={() => void handleUpgradeDaemon()}
-              >
-                {upgradingDaemon ? (
-                  <Spinner size="small" />
-                ) : (
-                  <Download {...stylex.props(styles.icon14)} />
-                )}
-                {t('settings.agent.machineLifecycle.upgradeAfterIdleButton', 'Update when idle')}
-              </Button>
-              <Button
-                size="small"
-                variant="ghost"
-                disabled={restartingDaemon || upgradingDaemon}
-                onClick={() => void handleUpgradeDaemon('immediate')}
-              >
-                {t(
-                  'settings.agent.machineLifecycle.upgradeImmediatelyButton',
-                  'Update now (interrupt conversations)'
-                )}
-              </Button>
-            </div>
+                {nestedHeroActions ? (
+                  <div {...stylex.props(styles.nestedHeroActions)}>{nestedHeroActions}</div>
+                ) : null}
+              </header>
+            </>
           )}
-        </header>
-      ) : null}
 
-      <div {...stylex.props(styles.body, accordion && styles.bodyInAccordion)}>
-        {isMobile && (
-          <div {...stylex.props(styles.metaRow, styles.metaRowMobile)}>{metaBadges}</div>
-        )}
-        {mode === 'devices' ? (
-          <>
-            {footer}
+          <div {...stylex.props(styles.nestedTabBody)}>
+            {daemonUpdateStatus ? (
+              <div role="status" {...stylex.props(surface.formBlock, styles.update)}>
+                {t(`settings.agent.machineLifecycle.phase.${daemonUpdateStatus.phase}`, {
+                  defaultValue: {
+                    preparing: 'Downloading and checking update',
+                    prepared: 'Update prepared',
+                    waiting: 'Waiting for running tasks to finish',
+                    switching: 'Switching daemon version',
+                    observing: 'Checking the new daemon',
+                    applied: 'Daemon updated to v{{version}}',
+                    'rollback-stop': 'Restoring the previous daemon',
+                    'rolled-back': 'Update failed; restored v{{previous}}',
+                    blocked: 'Update needs local recovery',
+                    failed: 'Update canceled or preparation failed; previous daemon retained',
+                    unconfirmed: 'Update outcome is not yet confirmed',
+                  }[daemonUpdateStatus.phase],
+                  version: daemonUpdateStatus.targetVersion,
+                  previous: daemonUpdateStatus.previousVersion,
+                })}
+              </div>
+            ) : null}
+            {updateVisible && daemonUpdate ? (
+              <div {...stylex.props(surface.formBlock, styles.update)}>
+                <div {...stylex.props(styles.updateText)}>
+                  <div {...stylex.props(styles.updateTitle)}>
+                    {t('settings.agent.machineLifecycle.updateAvailable', 'Update available')}
+                  </div>
+                  <div {...stylex.props(styles.updateVersion)}>
+                    {t(
+                      'settings.agent.machineLifecycle.updateVersion',
+                      'v{{current}} → v{{latest}}',
+                      {
+                        current: daemonUpdate.currentVersion,
+                        latest: daemonUpdate.latestVersion,
+                      }
+                    )}
+                  </div>
+                </div>
+                <Button
+                  size="small"
+                  disabled={restartingDaemon || upgradingDaemon}
+                  onClick={() => void handleUpgradeDaemon()}
+                >
+                  {upgradingDaemon ? (
+                    <Spinner size="small" />
+                  ) : (
+                    <Download {...stylex.props(styles.icon14)} />
+                  )}
+                  {t('settings.agent.machineLifecycle.upgradeAfterIdleButton', 'Update when idle')}
+                </Button>
+                <Button
+                  size="small"
+                  variant="ghost"
+                  disabled={restartingDaemon || upgradingDaemon}
+                  onClick={() => void handleUpgradeDaemon('immediate')}
+                >
+                  {t(
+                    'settings.agent.machineLifecycle.upgradeImmediatelyButton',
+                    'Update now (interrupt conversations)'
+                  )}
+                </Button>
+              </div>
+            ) : null}
+
             <DeviceResourceMonitor
+              flush
               snapshot={monitorSnapshot}
               state={monitorState}
+              os={machine.os}
+              cliVersion={machine.cliVersion}
               sessionMetas={monitorSessionMetas}
               agentConfigs={configs}
               onOpenSession={onOpenMonitorSession}
               onTerminateSession={onTerminateMonitorSession}
             />
-          </>
-        ) : (
-          <MachineProvidersSection
-            machine={machine}
-            configs={configs}
-            setups={setups}
-            onAddConfig={onAddConfig}
-            onEditConfig={onEditConfig}
-            onDeleteConfig={onDeleteConfig}
-            onRefreshConfig={onRefreshConfig}
-            onRetrySetup={onRetrySetup}
-            onDeleteSetup={onDeleteSetup}
-          />
-        )}
-      </div>
 
-      {mode === 'devices' && isOwn && !readOnly && props.onRestoreIdentity ? (
-        <MachineIdentityRestore
-          key={machine.id}
-          machine={machine}
-          candidates={props.restoreIdentityCandidates ?? []}
-          encryptedWorkspace={!ordinarySharing}
-          onRestore={props.onRestoreIdentity}
-        />
-      ) : null}
+            {accessContent ?? footer}
+            {agentsContent ?? null}
+
+            {manageableOwnMachine &&
+            ((ordinarySharing && onSharedWithTeamChange) || props.onRestoreIdentity) ? (
+              <CompactSection boxed>
+                {ordinarySharing && onSharedWithTeamChange ? (
+                  <CompactRow
+                    label={t('workspace.machines.shareMachineLabel', 'Share machine')}
+                    helper={t(
+                      'settings.machines.shareMachineHelper',
+                      'Allow teammates to see shared folders and run sessions on this machine.'
+                    )}
+                  >
+                    {sharing ? (
+                      <Spinner size="small" />
+                    ) : (
+                      <Switch
+                        checked={effectiveShared}
+                        onCheckedChange={(checked) => void handleSharedToggle(checked)}
+                        aria-label={t('workspace.machines.shareToggle', {
+                          machineName: machine.name,
+                          defaultValue: 'Share {{machineName}} with the team',
+                        })}
+                      />
+                    )}
+                  </CompactRow>
+                ) : null}
+                {props.onRestoreIdentity ? (
+                  <MachineIdentityRestore
+                    key={machine.id}
+                    inline
+                    machine={machine}
+                    candidates={props.restoreIdentityCandidates ?? []}
+                    encryptedWorkspace={!ordinarySharing}
+                    onRestore={props.onRestoreIdentity}
+                  />
+                ) : null}
+              </CompactSection>
+            ) : null}
+
+            {manageableOwnMachine ? (
+              <CompactSection
+                title={t('settings.machines.dangerZone', 'Danger zone')}
+                tone="danger"
+                boxed
+              >
+                {canRevokeCredentials && onRevokeCredentials ? (
+                  <CompactRow
+                    label={t('settings.devices.credentials.disconnect', 'Revoke machine access')}
+                    helper={t(
+                      'settings.machines.revokeHelper',
+                      'Signs this machine out of every workspace. Reconnecting requires a new pairing.'
+                    )}
+                  >
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="small"
+                      tone="destructive"
+                      aria-label={t(
+                        'settings.devices.credentials.disconnect',
+                        'Revoke machine access'
+                      )}
+                      onClick={() => setRevokeOpen(true)}
+                    >
+                      {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
+                    </Button>
+                  </CompactRow>
+                ) : null}
+                <CompactRow
+                  label={t('workspace.machines.removeFromWorkspace', 'Remove from workspace')}
+                  helper={
+                    canDelete
+                      ? t(
+                          'settings.machines.removeOfflineHelper',
+                          'Remove this offline machine from the workspace.'
+                        )
+                      : t(
+                          'workspace.machines.removeUnavailableOnline',
+                          'Stop Lody on this machine before removing it from this workspace.'
+                        )
+                  }
+                >
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="small"
+                    tone="destructive"
+                    aria-label={t(
+                      'workspace.machines.removeFromWorkspace',
+                      'Remove from workspace'
+                    )}
+                    disabled={!canDelete}
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    {t('workspace.machines.removeAction', 'Remove')}
+                  </Button>
+                </CompactRow>
+              </CompactSection>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <>
+          {detailToolbarVisible ? (
+            <header
+              {...stylex.props(
+                styles.header,
+                externalAccordionHeader && styles.headerCompact,
+                accordion && !externalAccordionHeader && styles.headerSticky
+              )}
+            >
+              <MobileSettingsDetailHeader active={isMobile}>
+                <div {...stylex.props(styles.toolbar)}>
+                  {accordion && !externalAccordionHeader ? (
+                    <span
+                      role="img"
+                      aria-label={
+                        isOnline
+                          ? t('workspace.machines.online', 'Online')
+                          : t('workspace.machines.offline', 'Offline')
+                      }
+                      {...stylex.props(styles.statusDot, isOnline && styles.statusDotOnline)}
+                    />
+                  ) : null}
+                  <div {...stylex.props(isMobile ? styles.titleGroupMobile : styles.titleGroup)}>
+                    {renaming ? (
+                      <Input
+                        ref={inputRef}
+                        value={renameDraft}
+                        disabled={renameSaving}
+                        size="small"
+                        className={stylex.props(styles.renameInput).className}
+                        onChange={(event) =>
+                          setRenameDraft(event.target.value.replace(/[\r\n]+/g, ' '))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            setRenameDraft(machine.name);
+                            setRenaming(false);
+                            return;
+                          }
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            event.currentTarget.blur();
+                          }
+                        }}
+                        onBlur={() => void commitRename()}
+                      />
+                    ) : externalAccordionHeader ? (
+                      manageableOwnMachine ? (
+                        <Button variant="ghost" size="small" onClick={() => setRenaming(true)}>
+                          <Pencil {...stylex.props(styles.icon12)} />
+                          {t('workspace.machines.editName', 'Edit machine name')}
+                        </Button>
+                      ) : null
+                    ) : (
+                      <>
+                        <h2 {...stylex.props(styles.title, isMobile && styles.titleMobile)}>
+                          {machine.name || machine.id}
+                        </h2>
+                        {renameSaving && <Spinner size="small" />}
+                        {!isMobile && manageableOwnMachine && (
+                          <Button
+                            variant="ghost"
+                            size="mini"
+                            icon
+                            aria-label={t('workspace.machines.editName', 'Edit machine name')}
+                            onClick={() => setRenaming(true)}
+                          >
+                            <Pencil {...stylex.props(styles.iconFill)} />
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {onPing && !renaming && !isMobile && (
+                    <div {...stylex.props(styles.ping, !shareControlVisible && styles.pushEnd)}>
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        disabled={pinging}
+                        onClick={() => void handlePing()}
+                      >
+                        {pinging ? (
+                          <Spinner size="small" />
+                        ) : (
+                          <Activity {...stylex.props(styles.icon14)} />
+                        )}
+                        {t('settings.agent.machinePing.button', 'Ping')}
+                      </Button>
+                      {pingLatencyMs !== null && (
+                        <span {...stylex.props(styles.latency)}>
+                          {t('settings.agent.machinePing.latency', '{{latency}} ms', {
+                            latency: String(pingLatencyMs),
+                          })}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {shareControlVisible && (
+                    <div {...stylex.props(styles.share)}>
+                      <span {...stylex.props(styles.shareLabel)}>
+                        {t('workspace.machines.shareMachineLabel', 'Share machine')}
+                      </span>
+                      {sharing ? (
+                        <Spinner size="small" />
+                      ) : (
+                        <Switch
+                          checked={effectiveShared}
+                          onCheckedChange={(checked) => void handleSharedToggle(checked)}
+                          aria-label={t('workspace.machines.shareToggle', {
+                            machineName: machine.name,
+                            defaultValue: 'Share {{machineName}} with the team',
+                          })}
+                        />
+                      )}
+                    </div>
+                  )}
+                  {restartVisible && (
+                    <Tooltip.Root>
+                      <Tooltip.Trigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            icon
+                            aria-label={t(
+                              'settings.agent.machineLifecycle.restartButton',
+                              'Restart daemon'
+                            )}
+                            disabled={restartingDaemon || upgradingDaemon}
+                            onClick={() => void handleRestartDaemon()}
+                          >
+                            {restartingDaemon ? (
+                              <Spinner size="small" />
+                            ) : (
+                              <RotateCcw {...stylex.props(styles.iconFill)} />
+                            )}
+                          </Button>
+                        }
+                      />
+                      <Tooltip.Content>
+                        {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
+                      </Tooltip.Content>
+                    </Tooltip.Root>
+                  )}
+                  {managementGroupVisible && destructiveGroupVisible && (
+                    <div aria-hidden {...stylex.props(styles.groupRule)} />
+                  )}
+                  {revokeVisible && (
+                    <Tooltip.Root>
+                      <Tooltip.Trigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            icon
+                            tone="destructive"
+                            aria-label={t(
+                              'settings.devices.credentials.disconnect',
+                              'Revoke machine access'
+                            )}
+                            onClick={() => setRevokeOpen(true)}
+                          >
+                            <Unplug {...stylex.props(styles.iconFill)} />
+                          </Button>
+                        }
+                      />
+                      <Tooltip.Content>
+                        {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
+                      </Tooltip.Content>
+                    </Tooltip.Root>
+                  )}
+                  {removeVisible ? (
+                    <Tooltip.Root>
+                      <Tooltip.Trigger
+                        render={
+                          <span {...stylex.props(styles.tooltipAnchor)}>
+                            <Button
+                              variant="ghost"
+                              size="small"
+                              tone="destructive"
+                              aria-label={t(
+                                'workspace.machines.removeFromWorkspace',
+                                'Remove from workspace'
+                              )}
+                              disabled={!canDelete}
+                              onClick={() => setDeleteOpen(true)}
+                            >
+                              <LogOut {...stylex.props(styles.icon14)} />
+                              {t('workspace.machines.removeFromWorkspace', 'Remove from workspace')}
+                            </Button>
+                          </span>
+                        }
+                      />
+                      {!canDelete ? (
+                        <Tooltip.Content>
+                          {t(
+                            'workspace.machines.removeUnavailableOnline',
+                            'Stop Lody on this machine before removing it from this workspace.'
+                          )}
+                        </Tooltip.Content>
+                      ) : null}
+                    </Tooltip.Root>
+                  ) : null}
+                  {actionsMenuVisible && (
+                    <Menu.Root>
+                      <Menu.Trigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            icon
+                            aria-label={t('workspace.machines.moreActions', 'Machine options')}
+                          >
+                            {sharing ? (
+                              <Spinner size="small" />
+                            ) : (
+                              <MoreHorizontal {...stylex.props(styles.iconFill)} />
+                            )}
+                          </Button>
+                        }
+                      />
+                      <Menu.Content
+                        align="end"
+                        finalFocus={() => {
+                          if (!pendingRenameRef.current) return undefined;
+                          pendingRenameRef.current = false;
+                          requestAnimationFrame(() => {
+                            inputRef.current?.focus();
+                            inputRef.current?.select();
+                          });
+                          return false;
+                        }}
+                      >
+                        {isMobile && manageableOwnMachine && (
+                          <Menu.Item
+                            icon={Pencil}
+                            onClick={() => {
+                              pendingRenameRef.current = true;
+                              setRenaming(true);
+                            }}
+                          >
+                            {t('workspace.machines.editName', 'Edit machine name')}
+                          </Menu.Item>
+                        )}
+                        {isMobile &&
+                          manageableOwnMachine &&
+                          ordinarySharing &&
+                          onSharedWithTeamChange && (
+                            <Menu.Item
+                              closeOnClick={false}
+                              onClick={() => {
+                                if (sharing) return;
+                                void handleSharedToggle(!effectiveShared);
+                              }}
+                              disabled={sharing}
+                              icon={Users}
+                              endContent={
+                                <Switch
+                                  checked={effectiveShared}
+                                  disabled={sharing}
+                                  aria-hidden
+                                  tabIndex={-1}
+                                  className={stylex.props(styles.switchInMenu).className}
+                                />
+                              }
+                            >
+                              {t('workspace.machines.shareMachineLabel', 'Share machine')}
+                            </Menu.Item>
+                          )}
+                        {isMobile &&
+                          isOwn &&
+                          (onPing || (updateVisible && daemonUpdate) || onRestartDaemon) && (
+                            <Menu.Separator />
+                          )}
+                        {isMobile && onPing && (
+                          <Menu.Item
+                            closeOnClick={false}
+                            onClick={() => {
+                              void handlePing();
+                            }}
+                            disabled={pinging}
+                            icon={pinging ? <Spinner size="small" /> : Activity}
+                            shortcut={
+                              pingLatencyMs !== null ? (
+                                <span {...stylex.props(styles.mono)}>
+                                  {t('settings.agent.machinePing.latency', '{{latency}} ms', {
+                                    latency: String(pingLatencyMs),
+                                  })}
+                                </span>
+                              ) : undefined
+                            }
+                          >
+                            {t('settings.agent.machinePing.button', 'Ping')}
+                          </Menu.Item>
+                        )}
+                        {isMobile && updateVisible && daemonUpdate && (
+                          <Menu.Item
+                            onClick={() => void handleUpgradeDaemon()}
+                            disabled={restartingDaemon || upgradingDaemon}
+                            icon={upgradingDaemon ? <Spinner size="small" /> : Download}
+                          >
+                            {t(
+                              'settings.agent.machineLifecycle.upgradeAndRestartButton',
+                              'Update and restart'
+                            )}
+                          </Menu.Item>
+                        )}
+                        {onRestartDaemon && (
+                          <Menu.Item
+                            onClick={() => void handleRestartDaemon()}
+                            disabled={restartingDaemon || upgradingDaemon}
+                            icon={restartingDaemon ? <Spinner size="small" /> : RotateCcw}
+                          >
+                            {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
+                          </Menu.Item>
+                        )}
+                        {isMobile && isOwn && (
+                          <>
+                            <Menu.Separator />
+                            <Menu.Item
+                              closeOnClick={false}
+                              onClick={() => {
+                                setDeleteOpen(true);
+                              }}
+                              disabled={!canDelete}
+                              tone="destructive"
+                              icon={LogOut}
+                            >
+                              {canDelete
+                                ? t(
+                                    'workspace.machines.removeFromWorkspace',
+                                    'Remove from workspace'
+                                  )
+                                : t(
+                                    'workspace.machines.removeUnavailableOnlineShort',
+                                    'Stop machine before removing'
+                                  )}
+                            </Menu.Item>
+                          </>
+                        )}
+                      </Menu.Content>
+                    </Menu.Root>
+                  )}
+                  {accordion && !externalAccordionHeader ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="small"
+                      icon
+                      aria-label={t('settings.machines.collapseMachine', {
+                        machine: machine.name || machine.id,
+                        defaultValue: 'Collapse {{machine}}',
+                      })}
+                      aria-expanded={true}
+                      onClick={accordion.onCollapse}
+                    >
+                      <ChevronUp {...stylex.props(styles.iconFill)} aria-hidden />
+                    </Button>
+                  ) : null}
+                  {accordion && !externalAccordionHeader ? (
+                    <WorkspaceMachineOwnerAvatar owner={accordion.meta.owner} />
+                  ) : null}
+                </div>
+              </MobileSettingsDetailHeader>
+              {/* Desktop (story) keeps the meta badges in the header; on mobile they
+            move to the first line of the content, flush with the body. */}
+              {!isMobile && accordion ? (
+                externalAccordionHeader ? null : (
+                  <div {...stylex.props(styles.summaryRow)}>
+                    <WorkspaceMachineAccordionSummary meta={accordion.meta} showOwner={false} />
+                  </div>
+                )
+              ) : !isMobile ? (
+                <div {...stylex.props(styles.metaRow)}>{metaBadges}</div>
+              ) : null}
+              {daemonUpdateStatus && (
+                <div role="status" {...stylex.props(surface.formBlock, styles.update)}>
+                  {t(`settings.agent.machineLifecycle.phase.${daemonUpdateStatus.phase}`, {
+                    defaultValue: {
+                      preparing: 'Downloading and checking update',
+                      prepared: 'Update prepared',
+                      waiting: 'Waiting for running tasks to finish',
+                      switching: 'Switching daemon version',
+                      observing: 'Checking the new daemon',
+                      applied: 'Daemon updated to v{{version}}',
+                      'rollback-stop': 'Restoring the previous daemon',
+                      'rolled-back': 'Update failed; restored v{{previous}}',
+                      blocked: 'Update needs local recovery',
+                      failed: 'Update canceled or preparation failed; previous daemon retained',
+                      unconfirmed: 'Update outcome is not yet confirmed',
+                    }[daemonUpdateStatus.phase],
+                    version: daemonUpdateStatus.targetVersion,
+                    previous: daemonUpdateStatus.previousVersion,
+                  })}
+                </div>
+              )}
+              {updateVisible && daemonUpdate && (
+                <div {...stylex.props(surface.formBlock, styles.update)}>
+                  <div {...stylex.props(styles.updateText)}>
+                    <div {...stylex.props(styles.updateTitle)}>
+                      {t('settings.agent.machineLifecycle.updateAvailable', 'Update available')}
+                    </div>
+                    <div {...stylex.props(styles.updateVersion)}>
+                      {t(
+                        'settings.agent.machineLifecycle.updateVersion',
+                        'v{{current}} → v{{latest}}',
+                        {
+                          current: daemonUpdate.currentVersion,
+                          latest: daemonUpdate.latestVersion,
+                        }
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    size="small"
+                    disabled={restartingDaemon || upgradingDaemon}
+                    onClick={() => void handleUpgradeDaemon()}
+                  >
+                    {upgradingDaemon ? (
+                      <Spinner size="small" />
+                    ) : (
+                      <Download {...stylex.props(styles.icon14)} />
+                    )}
+                    {t(
+                      'settings.agent.machineLifecycle.upgradeAfterIdleButton',
+                      'Update when idle'
+                    )}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="ghost"
+                    disabled={restartingDaemon || upgradingDaemon}
+                    onClick={() => void handleUpgradeDaemon('immediate')}
+                  >
+                    {t(
+                      'settings.agent.machineLifecycle.upgradeImmediatelyButton',
+                      'Update now (interrupt conversations)'
+                    )}
+                  </Button>
+                </div>
+              )}
+            </header>
+          ) : null}
+
+          <div {...stylex.props(styles.body, accordion && styles.bodyInAccordion)}>
+            {isMobile && (
+              <div {...stylex.props(styles.metaRow, styles.metaRowMobile)}>{metaBadges}</div>
+            )}
+            {mode === 'devices' ? (
+              <>
+                {footer}
+                <DeviceResourceMonitor
+                  snapshot={monitorSnapshot}
+                  state={monitorState}
+                  sessionMetas={monitorSessionMetas}
+                  agentConfigs={configs}
+                  onOpenSession={onOpenMonitorSession}
+                  onTerminateSession={onTerminateMonitorSession}
+                />
+              </>
+            ) : (
+              <MachineProvidersSection
+                machine={machine}
+                configs={configs}
+                setups={setups}
+                onAddConfig={onAddConfig}
+                onEditConfig={onEditConfig}
+                onDeleteConfig={onDeleteConfig}
+                onRefreshConfig={onRefreshConfig}
+                onRetrySetup={onRetrySetup}
+                onDeleteSetup={onDeleteSetup}
+              />
+            )}
+          </div>
+
+          {mode === 'devices' && isOwn && !readOnly && props.onRestoreIdentity ? (
+            <MachineIdentityRestore
+              key={machine.id}
+              machine={machine}
+              candidates={props.restoreIdentityCandidates ?? []}
+              encryptedWorkspace={!ordinarySharing}
+              onRestore={props.onRestoreIdentity}
+            />
+          ) : null}
+        </>
+      )}
 
       <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialog.Content>

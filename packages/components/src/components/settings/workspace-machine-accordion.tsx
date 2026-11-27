@@ -2,9 +2,11 @@ import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MachineViewMeta } from '@lody/shared';
-import { Bot, ChevronDown, Folder, Laptop, LockKeyhole } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, Folder, Laptop, LockKeyhole } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Spinner } from '@lody/ui/spinner';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
@@ -157,6 +159,91 @@ const styles = stylex.create({
   },
   chevronOpen: { transform: 'rotate(180deg)' },
   detailPending: { minHeight: '96px' },
+
+  /** Fleet list row (Option B): scannable multi-column record row inside a boxed section. */
+  fleetRow: {
+    display: 'grid',
+    gridTemplateColumns: '10px minmax(0, 1fr) minmax(96px, 140px) 92px 16px',
+    alignItems: 'center',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: space[3],
+    cursor: 'pointer',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': colors.hoverFill,
+    },
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  fleetMain: {
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  fleetNameLine: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+  },
+  fleetName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: uiText.subheadlineSize,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  fleetMeta: {
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  fleetMono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
+  fleetOwner: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  fleetOwnerName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  fleetPingCell: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  fleetPingOk: {
+    color: colors.success,
+    backgroundColor: `color-mix(in oklab, ${colors.success} 12%, transparent)`,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  fleetStatusText: {
+    fontSize: uiText.footnoteSize,
+    color: colors.tertiaryLabel,
+  },
+  fleetChevron: {
+    flexShrink: 0,
+    width: '15px',
+    height: '15px',
+    color: colors.tertiaryLabel,
+  },
+  fleetUpdateBadge: {
+    color: colors.warning,
+    backgroundColor: `color-mix(in oklab, ${colors.warning} 12%, transparent)`,
+  },
 });
 
 export function WorkspaceMachineAccordionSummary({
@@ -348,5 +435,127 @@ export function WorkspaceMachineExpandedSection({
         {detailReady ? children : null}
       </div>
     </section>
+  );
+}
+
+export function WorkspaceMachineFleetRow({
+  meta,
+  isOwn,
+  hasUpdate = false,
+  pingLatencyMs = null,
+  pinging = false,
+  onPing,
+  onOpen,
+}: {
+  meta: WorkspaceMachineAccordionMeta;
+  isOwn: boolean;
+  hasUpdate?: boolean;
+  pingLatencyMs?: number | null;
+  pinging?: boolean;
+  onPing?: () => void;
+  onOpen: () => void;
+}) {
+  const { t } = useTranslation();
+  const machineName = meta.machine.name || meta.machine.id;
+  const statusLabel = meta.isOnline
+    ? t('workspace.machines.online', 'Online')
+    : t('workspace.machines.offline', 'Offline');
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      data-testid="settings-machine"
+      data-settings-machine-id={meta.machine.id}
+      aria-label={t('settings.machines.openMachine', {
+        machine: machineName,
+        defaultValue: 'Open {{machine}}',
+      })}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      {...stylex.props(styles.fleetRow)}
+    >
+      <span
+        role="img"
+        aria-label={statusLabel}
+        {...stylex.props(styles.dot, meta.isOnline && styles.dotOnline)}
+      >
+        {meta.isOnline ? <span aria-hidden {...stylex.props(styles.onlineHalo)} /> : null}
+      </span>
+
+      <div {...stylex.props(styles.fleetMain)}>
+        <div {...stylex.props(styles.fleetNameLine)}>
+          <span {...stylex.props(styles.fleetName)}>{machineName}</span>
+          {meta.isLocal ? (
+            <Badge>{t('workspace.machines.thisDevice', 'This machine')}</Badge>
+          ) : null}
+          {hasUpdate ? (
+            <Badge className={stylex.props(styles.fleetUpdateBadge).className}>
+              {t('settings.machines.updateBadge', 'Update')}
+            </Badge>
+          ) : null}
+        </div>
+        <div {...stylex.props(styles.fleetMeta)}>
+          {meta.machine.os || '-'} ·{' '}
+          <span {...stylex.props(styles.fleetMono)}>
+            {meta.machine.cliVersion ? `v${meta.machine.cliVersion}` : t('machines.never', 'Never')}
+          </span>{' '}
+          ·{' '}
+          {t('settings.machines.directoryCountSummary', {
+            count: meta.directoryCount,
+            defaultValue: '{{count}} directories',
+          })}{' '}
+          ·{' '}
+          {t('settings.machines.agentCountSummary', {
+            count: meta.agentCount,
+            defaultValue: '{{count}} Agents',
+          })}
+        </div>
+      </div>
+
+      <div {...stylex.props(styles.fleetOwner)}>
+        {meta.owner ? <UserAvatar user={meta.owner} size="small" /> : null}
+        <span {...stylex.props(styles.fleetOwnerName)}>
+          {isOwn
+            ? t('settings.machines.ownerYou', 'You')
+            : (meta.owner?.name ?? t('workspace.machines.teammate', 'Teammate'))}
+        </span>
+      </div>
+
+      <div {...stylex.props(styles.fleetPingCell)}>
+        {isOwn && meta.isOnline && onPing ? (
+          <Button
+            type="button"
+            variant={pingLatencyMs !== null ? 'ghost' : 'ghost'}
+            size="small"
+            disabled={pinging}
+            xstyle={pingLatencyMs !== null ? styles.fleetPingOk : undefined}
+            onClick={(event) => {
+              event.stopPropagation();
+              onPing();
+            }}
+          >
+            {pinging ? (
+              <Spinner size="small" label={null} />
+            ) : pingLatencyMs !== null ? (
+              t('settings.agent.machinePing.latency', '{{latency}} ms', {
+                latency: String(pingLatencyMs),
+              })
+            ) : (
+              t('settings.agent.machinePing.button', 'Ping')
+            )}
+          </Button>
+        ) : (
+          <span {...stylex.props(styles.fleetStatusText)}>{statusLabel}</span>
+        )}
+      </div>
+
+      <ChevronRight aria-hidden {...stylex.props(styles.fleetChevron)} />
+    </div>
   );
 }

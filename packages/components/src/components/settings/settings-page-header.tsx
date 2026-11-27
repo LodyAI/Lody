@@ -1,8 +1,10 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useLayoutEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { ChevronRight } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
-import { settingsCatalog as catalog } from './surface';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 
 const styles = stylex.create({
   /** Outside the pane, a page's actions keep to the end of their own line. */
@@ -11,6 +13,38 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: space[2],
+  },
+  breadcrumbRow: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+    maxWidth: '100%',
+  },
+  breadcrumbParent: {
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    color: {
+      default: colors.secondaryLabel,
+      ':hover': colors.label,
+    },
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  breadcrumbSep: {
+    flexShrink: 0,
+    width: '15px',
+    height: '15px',
+    color: colors.tertiaryLabel,
+  },
+  breadcrumbCurrent: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
 });
 
@@ -29,6 +63,10 @@ interface SettingsPaneHeaderSlots {
   lead: HTMLElement | null;
   /** The page pane itself, beside the nav. */
   pane: HTMLElement | null;
+  /** Portal target inside the pane title for a nested sub-page breadcrumb. */
+  breadcrumb?: HTMLElement | null;
+  parentLabel?: string;
+  setBreadcrumbActive?: (active: boolean) => void;
 }
 
 const SettingsPaneHeaderContext = createContext<SettingsPaneHeaderSlots | null>(null);
@@ -49,6 +87,49 @@ export function useInSettingsPane(): boolean {
  */
 export function useSettingsPane(): HTMLElement | null {
   return useContext(SettingsPaneHeaderContext)?.pane ?? null;
+}
+
+/**
+ * Replaces the desktop settings pane's plain page title with a clickable parent
+ * breadcrumb (`Machines › <label>`). Uses a portal so dynamic children never
+ * trigger parent state updates.
+ */
+export function SettingsPageBreadcrumb({
+  label,
+  onBack,
+  leading,
+  trailing,
+}: {
+  label: string;
+  onBack: () => void;
+  leading?: ReactNode;
+  trailing?: ReactNode;
+}) {
+  const slots = useContext(SettingsPaneHeaderContext);
+  const setBreadcrumbActive = slots?.setBreadcrumbActive;
+  useLayoutEffect(() => {
+    if (!setBreadcrumbActive) return undefined;
+    setBreadcrumbActive(true);
+    return () => setBreadcrumbActive(false);
+  }, [setBreadcrumbActive]);
+
+  if (!slots?.breadcrumb) return null;
+  return createPortal(
+    <span {...stylex.props(styles.breadcrumbRow)}>
+      <button
+        type="button"
+        onClick={onBack}
+        {...stylex.props(surface.pageTitle, styles.breadcrumbParent)}
+      >
+        {slots.parentLabel}
+      </button>
+      <ChevronRight aria-hidden="true" {...stylex.props(styles.breadcrumbSep)} />
+      {leading}
+      <span {...stylex.props(surface.pageTitle, styles.breadcrumbCurrent)}>{label}</span>
+      {trailing}
+    </span>,
+    slots.breadcrumb
+  );
 }
 
 /** A page's actions, beside its name in the pane header. */

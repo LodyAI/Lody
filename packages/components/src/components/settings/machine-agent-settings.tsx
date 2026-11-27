@@ -25,11 +25,11 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import { Check, ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, Search } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import { Input } from '@lody/ui/input';
 import { toast } from '@/lib/toast';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
-import { developerModeEnabledAtom } from '@/atoms/settings';
 import { settingsActionIntentAtom, settingsDialogOpenAtom } from '@/atoms/settings';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
@@ -81,7 +81,6 @@ import {
   useMobileSettingsFold,
 } from '@/components/mobile/mobile-settings-fold-context';
 import {
-  MachineListFilterButton,
   MachineTabList,
   buildMachineTabItems,
   type MachineTabItem,
@@ -112,10 +111,11 @@ import {
   type AgentConfigSubmitPayload,
 } from './agent-config-dialog';
 import {
-  WorkspaceMachineCollapsedRow,
-  WorkspaceMachineExpandedSection,
+  WorkspaceMachineFleetRow,
   type WorkspaceMachineAccordionMeta,
 } from './workspace-machine-accordion';
+import { CompactSection } from './compact-layout';
+import { filterMachineFleetItems, type MachineFleetFilterPreset } from './machine-fleet-filter';
 import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
 import { SettingsLineTabs } from './settings-line-tabs';
 import { settingsSurface as surface } from './surface';
@@ -268,6 +268,73 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  fleetToolbar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+  },
+  fleetSearchWrap: {
+    position: 'relative',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: '180px',
+    maxWidth: '300px',
+  },
+  fleetSearchIcon: {
+    position: 'absolute',
+    insetInlineStart: space[2],
+    top: '50%',
+    transform: 'translateY(-50%)',
+    width: '14px',
+    height: '14px',
+    color: colors.tertiaryLabel,
+    pointerEvents: 'none',
+    zIndex: 1,
+  },
+  fleetSearchInput: {
+    paddingInlineStart: '28px',
+  },
+  fleetFilterTray: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    padding: '3px',
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: colors.trayBackground,
+  },
+  fleetFilterPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    height: '26px',
+    paddingInline: space[3],
+    borderWidth: 0,
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: 'transparent',
+    color: colors.secondaryLabel,
+    fontFamily: 'inherit',
+    fontSize: uiText.footnoteSize,
+    fontWeight: 500,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    transitionProperty: 'background-color, color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  fleetFilterPillActive: {
+    backgroundColor: colors.trayRaised,
+    color: colors.label,
+    boxShadow: `0 0 0 0.5px ${colors.separator}, 0 1px 2px rgba(0, 0, 0, 0.06)`,
+  },
+  fleetFilterCount: {
+    fontSize: '11px',
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
   emptyNote: {
     display: 'flex',
     flexDirection: 'column',
@@ -431,7 +498,6 @@ export function MachineAgentSettings({
   const settingsFold = useMobileSettingsFold();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const authToken = useAtomValue(authTokenAtom);
-  const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
   const setSettingsDialogOpen = useSetAtom(settingsDialogOpenAtom);
   const sessionMetaCache = useAtomValue(sessionMetaCacheAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -477,6 +543,10 @@ export function MachineAgentSettings({
     useSetAtom(machineSettingsFilterAtom),
   ];
   const [mobileMachinePickerOpen, setMobileMachinePickerOpen] = useState(false);
+  const [fleetQuery, setFleetQuery] = useState('');
+  const [fleetPreset, setFleetPreset] = useState<MachineFleetFilterPreset>('all');
+  const [pingLatencyByMachineId, setPingLatencyByMachineId] = useState<Record<string, number>>({});
+  const [pingingMachineIds, setPingingMachineIds] = useState<ReadonlySet<string>>(() => new Set());
   const effectiveFilter = filter;
   const [desktopExpandedMachineId, setDesktopExpandedMachineId] = useState<MachineId | null>(
     selectedMachineId
@@ -1685,7 +1755,7 @@ export function MachineAgentSettings({
               onRefreshConfig={handleRefreshConfig}
               onRetrySetup={handleRetrySetup}
               onDeleteSetup={handleDeleteSetup}
-              onPing={isOwn && developerModeEnabled ? pingMachine : undefined}
+              onPing={isOwn ? pingMachine : undefined}
               daemonUpdate={isOwn ? selectedDaemonUpdate : undefined}
               daemonUpdateStatus={isOwn ? selectedManagedUpdate : undefined}
               onRestartDaemon={isOwn && selectedCanRemoteRestart ? restartMachine : undefined}
@@ -1766,10 +1836,6 @@ export function MachineAgentSettings({
           'Manage the AI agents available in this workspace'
         );
 
-  const filterButton =
-    mode === 'machines' && remoteMachinesAvailable ? (
-      <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
-    ) : null;
   const batchUpdateButton =
     mode === 'machines' &&
     remoteMachinesAvailable &&
@@ -1795,105 +1861,99 @@ export function MachineAgentSettings({
         requestUpgrade={requestBatchUpgrade}
       />
     ) : null;
-  // In the pane the header names the page; only the filter and batch update are this page's to add.
+  // In the pane the header names the page; batch update sits beside the title.
   const header = inSettingsPane ? (
     <SettingsPageActions>
-      {batchUpdateButton}
-      {filterButton}
+      {!resolvedSelectedMachine ? batchUpdateButton : null}
       {batchUpdateDialog}
     </SettingsPageActions>
   ) : (
     <div {...stylex.props(styles.heading)}>
       <div {...stylex.props(styles.headingLine)}>
         <h2 {...stylex.props(surface.pageTitle)}>{title}</h2>
-        {batchUpdateButton}
-        {filterButton}
+        {!resolvedSelectedMachine ? batchUpdateButton : null}
         {batchUpdateDialog}
       </div>
       <p {...stylex.props(styles.headingSubtitle)}>{subtitle}</p>
     </div>
   );
 
-  const sharedAccordionItems = separatesPrivateMachines
-    ? workspaceMachineSelectionPool.filter((item) => item.sharedWithTeam)
-    : workspaceMachineSelectionPool;
+  const handleInlinePing = useCallback(
+    async (machineId: MachineId) => {
+      if (pingingMachineIds.has(machineId)) return;
+      setPingingMachineIds((prev) => new Set(prev).add(machineId));
+      try {
+        const latencyMs = await pingMachine(machineId);
+        setPingLatencyByMachineId((prev) => ({ ...prev, [machineId]: latencyMs }));
+      } catch (error) {
+        toast.error(t('settings.agent.machinePing.failed', 'Failed to ping machine'), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        setPingingMachineIds((prev) => {
+          const next = new Set(prev);
+          next.delete(machineId);
+          return next;
+        });
+      }
+    },
+    [pingMachine, pingingMachineIds, t]
+  );
 
-  const renderDesktopMachineSection = (item: MachineTabItem) => {
+  const updateMachineIds = useMemo(
+    () => new Set(batchUpdateMachines.map((machine) => machine.id)),
+    [batchUpdateMachines]
+  );
+  const allFleetItems = useMemo(
+    () =>
+      separatesPrivateMachines
+        ? [...workspaceMachineSelectionPool, ...ownPrivateItems]
+        : workspaceMachineSelectionPool,
+    [ownPrivateItems, separatesPrivateMachines, workspaceMachineSelectionPool]
+  );
+  const filteredFleetShared = useMemo(
+    () =>
+      filterMachineFleetItems(
+        separatesPrivateMachines
+          ? workspaceMachineSelectionPool.filter((item) => item.sharedWithTeam)
+          : workspaceMachineSelectionPool,
+        { preset: fleetPreset, query: fleetQuery, ownerByUserId: machineOwnerMap }
+      ),
+    [
+      fleetPreset,
+      fleetQuery,
+      machineOwnerMap,
+      separatesPrivateMachines,
+      workspaceMachineSelectionPool,
+    ]
+  );
+  const filteredFleetPrivate = useMemo(
+    () =>
+      separatesPrivateMachines
+        ? filterMachineFleetItems(ownPrivateItems, {
+            preset: fleetPreset,
+            query: fleetQuery,
+            ownerByUserId: machineOwnerMap,
+          })
+        : [],
+    [fleetPreset, fleetQuery, machineOwnerMap, ownPrivateItems, separatesPrivateMachines]
+  );
+
+  const renderFleetRow = (item: MachineTabItem) => {
     const meta = getAccordionMeta(item);
-    const expanded = item.machine.id === resolvedSelectedMachine?.id;
-    if (!expanded) {
-      return (
-        <WorkspaceMachineCollapsedRow
-          key={item.machine.id}
-          meta={meta}
-          onExpand={() => selectDesktopMachine(item.machine.id)}
-        />
-      );
-    }
-
     return (
-      <WorkspaceMachineExpandedSection
+      <WorkspaceMachineFleetRow
         key={item.machine.id}
         meta={meta}
-        onCollapse={() => selectDesktopMachine(null)}
-      >
-        <MachineDetailPane
-          {...restoreIdentityProps}
-          key={item.machine.id}
-          mode="devices"
-          readOnly={!isOwn}
-          machine={item.machine}
-          configs={configsForMachine}
-          setups={setupsForMachine}
-          isOwn={isOwn}
-          isLocal={isLocal}
-          ownerName={ownerName}
-          sharedWithTeam={sharedWithTeam}
-          canDelete={isOwn && selectedCanDelete}
-          onRename={actions.renameMachine}
-          onDelete={actions.deleteMachine}
-          onSharedWithTeamChange={
-            isOwn && teamSharingAvailable ? actions.setSharedWithTeam : undefined
-          }
-          onAddConfig={() => openCreateDialog(item.machine)}
-          onEditConfig={(config) => openEditDialog(item.machine, config)}
-          onDeleteConfig={handleDeleteConfig}
-          onRefreshConfig={handleRefreshConfig}
-          onRetrySetup={handleRetrySetup}
-          onDeleteSetup={handleDeleteSetup}
-          onPing={isOwn && developerModeEnabled ? pingMachine : undefined}
-          daemonUpdate={isOwn ? selectedDaemonUpdate : undefined}
-          daemonUpdateStatus={isOwn ? selectedManagedUpdate : undefined}
-          onRestartDaemon={isOwn && selectedCanRemoteRestart ? restartMachine : undefined}
-          onUpgradeDaemon={isOwn && selectedDaemonUpdate ? upgradeMachine : undefined}
-          canRevokeCredentials={isOwn && (credentialState?.revocableCount ?? 0) > 0}
-          onRevokeCredentials={isOwn ? revokeMachineCredentials : undefined}
-          monitorSnapshot={machineMonitor.snapshot}
-          monitorState={machineMonitor.state}
-          monitorSessionMetas={monitorSessionMetas}
-          onOpenMonitorSession={openMonitorSession}
-          onTerminateMonitorSession={
-            isOwn
-              ? (monitoredSession) => terminateMonitorSession(item.machine, monitoredSession)
-              : undefined
-          }
-          footer={
-            <MachineConnectedResources
-              machineId={item.machine.id}
-              configs={configsForMachine}
-              preloadedProjects={connectedProjectsByMachineId.get(item.machine.id) ?? []}
-              projectsLoading={visibleLocalProjectsLoading}
-              readOnly={!isOwn}
-              onManageAgents={() => openAgentsForMachine(item.machine.id)}
-            />
-          }
-          accordion={{
-            meta,
-            onCollapse: () => selectDesktopMachine(null),
-            headerRenderedExternally: true,
-          }}
-        />
-      </WorkspaceMachineExpandedSection>
+        isOwn={item.isOwn}
+        hasUpdate={item.isOwn && item.isOnline && updateMachineIds.has(item.machine.id)}
+        pingLatencyMs={pingLatencyByMachineId[item.machine.id] ?? null}
+        pinging={pingingMachineIds.has(item.machine.id)}
+        onPing={
+          item.isOwn && item.isOnline ? () => void handleInlinePing(item.machine.id) : undefined
+        }
+        onOpen={() => selectDesktopMachine(item.machine.id)}
+      />
     );
   };
 
@@ -1927,7 +1987,7 @@ export function MachineAgentSettings({
               onRefreshConfig={handleRefreshConfig}
               onRetrySetup={handleRetrySetup}
               onDeleteSetup={handleDeleteSetup}
-              onPing={isOwn && developerModeEnabled ? pingMachine : undefined}
+              onPing={isOwn ? pingMachine : undefined}
               daemonUpdate={isOwn ? selectedDaemonUpdate : undefined}
               daemonUpdateStatus={isOwn ? selectedManagedUpdate : undefined}
               onRestartDaemon={isOwn && selectedCanRemoteRestart ? restartMachine : undefined}
@@ -1959,50 +2019,186 @@ export function MachineAgentSettings({
       );
     }
 
+    if (resolvedSelectedMachine) {
+      return (
+        <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
+          {banner}
+          {header}
+          <MachineDetailPane
+            {...restoreIdentityProps}
+            key={resolvedSelectedMachine.id}
+            mode="devices"
+            readOnly={!isOwn}
+            machine={resolvedSelectedMachine}
+            configs={configsForMachine}
+            setups={setupsForMachine}
+            isOwn={isOwn}
+            isLocal={isLocal}
+            ownerName={ownerName}
+            sharedWithTeam={sharedWithTeam}
+            canDelete={isOwn && selectedCanDelete}
+            onRename={actions.renameMachine}
+            onDelete={actions.deleteMachine}
+            onSharedWithTeamChange={
+              isOwn && teamSharingAvailable ? actions.setSharedWithTeam : undefined
+            }
+            onAddConfig={() => openCreateDialog(resolvedSelectedMachine)}
+            onEditConfig={(config) => openEditDialog(resolvedSelectedMachine, config)}
+            onDeleteConfig={handleDeleteConfig}
+            onRefreshConfig={handleRefreshConfig}
+            onRetrySetup={handleRetrySetup}
+            onDeleteSetup={handleDeleteSetup}
+            onPing={isOwn ? pingMachine : undefined}
+            initialPingLatencyMs={pingLatencyByMachineId[resolvedSelectedMachine.id] ?? null}
+            onPingLatencyChange={(machineId, latencyMs) =>
+              setPingLatencyByMachineId((prev) => ({ ...prev, [machineId]: latencyMs }))
+            }
+            daemonUpdate={isOwn ? selectedDaemonUpdate : undefined}
+            daemonUpdateStatus={isOwn ? selectedManagedUpdate : undefined}
+            onRestartDaemon={isOwn && selectedCanRemoteRestart ? restartMachine : undefined}
+            onUpgradeDaemon={isOwn && selectedDaemonUpdate ? upgradeMachine : undefined}
+            canRevokeCredentials={isOwn && (credentialState?.revocableCount ?? 0) > 0}
+            onRevokeCredentials={isOwn ? revokeMachineCredentials : undefined}
+            monitorSnapshot={machineMonitor.snapshot}
+            monitorState={machineMonitor.state}
+            monitorSessionMetas={monitorSessionMetas}
+            onOpenMonitorSession={openMonitorSession}
+            onTerminateMonitorSession={
+              isOwn
+                ? (monitoredSession) =>
+                    terminateMonitorSession(resolvedSelectedMachine, monitoredSession)
+                : undefined
+            }
+            onBack={() => selectDesktopMachine(null)}
+            accessContent={
+              <MachineConnectedResources
+                machineId={resolvedSelectedMachine.id}
+                configs={configsForMachine}
+                preloadedProjects={
+                  connectedProjectsByMachineId.get(resolvedSelectedMachine.id) ?? []
+                }
+                projectsLoading={visibleLocalProjectsLoading}
+                readOnly={!isOwn}
+                section="folders"
+                flush
+                onManageAgents={() => openAgentsForMachine(resolvedSelectedMachine.id)}
+              />
+            }
+            agentsContent={
+              <MachineConnectedResources
+                machineId={resolvedSelectedMachine.id}
+                configs={configsForMachine}
+                preloadedProjects={
+                  connectedProjectsByMachineId.get(resolvedSelectedMachine.id) ?? []
+                }
+                projectsLoading={visibleLocalProjectsLoading}
+                readOnly={!isOwn}
+                section="agents"
+                flush
+                onManageAgents={() => openAgentsForMachine(resolvedSelectedMachine.id)}
+              />
+            }
+          />
+          {dialog}
+        </div>
+      );
+    }
+
+    const fleetHasFilter = fleetPreset !== 'all' || fleetQuery.trim().length > 0;
+    const fleetEmpty = filteredFleetShared.length === 0 && filteredFleetPrivate.length === 0;
+
     return (
       <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
         {banner}
         {header}
 
-        <div {...stylex.props(styles.stack)}>
-          {sharedAccordionItems.length > 0 ? (
-            sharedAccordionItems.map(renderDesktopMachineSection)
-          ) : (
-            <div {...stylex.props(surface.card, styles.emptyNote)}>
-              {modeTotalBeforeFilter === 0
-                ? emptyMachinesLabel
-                : t(
-                    'settings.agent.machineTabs.filter.noMatch',
-                    'No machines match these filters.'
-                  )}
-              {modeTotalBeforeFilter > 0 ? (
-                <Button
-                  variant="link"
-                  size="small"
-                  onClick={() => setFilter({ onlineOnly: false, mineOnly: false })}
-                >
-                  {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
-                </Button>
-              ) : null}
-            </div>
-          )}
+        <div {...stylex.props(styles.fleetToolbar)}>
+          <div {...stylex.props(styles.fleetSearchWrap)}>
+            <Search aria-hidden {...stylex.props(styles.fleetSearchIcon)} />
+            <Input
+              size="small"
+              value={fleetQuery}
+              onChange={(event) => setFleetQuery(event.target.value)}
+              placeholder={t('settings.machines.searchPlaceholder', 'Search name, owner, or OS…')}
+              aria-label={t('settings.machines.searchPlaceholder', 'Search name, owner, or OS…')}
+              className={stylex.props(styles.fleetSearchInput).className}
+            />
+          </div>
+          <div
+            role="group"
+            aria-label={t('settings.agent.machineTabs.filter.label', 'Filter machines')}
+            {...stylex.props(styles.fleetFilterTray)}
+          >
+            {(
+              [
+                ['all', t('common.all', 'All')],
+                ['online', t('settings.agent.machineTabs.filter.online', 'Online')],
+                ['mine', t('settings.agent.machineTabs.filter.mine', 'My machines')],
+              ] as const
+            ).map(([presetId, label]) => (
+              <button
+                key={presetId}
+                type="button"
+                aria-pressed={fleetPreset === presetId}
+                onClick={() => setFleetPreset(presetId)}
+                {...stylex.props(
+                  styles.fleetFilterPill,
+                  fleetPreset === presetId && styles.fleetFilterPillActive
+                )}
+              >
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
-        {ownPrivateItems.length > 0 ? (
-          <section {...stylex.props(styles.privateSection)}>
-            <div {...stylex.props(styles.privateHeading)}>
-              <div {...stylex.props(styles.privateTitleLine)}>
-                <h3 {...stylex.props(styles.privateTitle)}>
-                  {t('settings.machines.yourPrivateMachines', 'Your private machines')}
-                </h3>
-                <span {...stylex.props(styles.count)}>{ownPrivateItems.length}</span>
-              </div>
-            </div>
-            <div {...stylex.props(styles.stack)}>
-              {ownPrivateItems.map(renderDesktopMachineSection)}
-            </div>
-          </section>
-        ) : null}
+        {fleetEmpty ? (
+          <div {...stylex.props(surface.card, styles.emptyNote)}>
+            {allFleetItems.length === 0
+              ? emptyMachinesLabel
+              : t('settings.agent.machineTabs.filter.noMatch', 'No machines match these filters.')}
+            {fleetHasFilter ? (
+              <Button
+                variant="link"
+                size="small"
+                onClick={() => {
+                  setFleetPreset('all');
+                  setFleetQuery('');
+                }}
+              >
+                {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <div {...stylex.props(styles.stack)}>
+            {filteredFleetShared.length > 0 ? (
+              <CompactSection
+                title={
+                  separatesPrivateMachines
+                    ? t('settings.machines.workspaceMachines', 'Workspace machines')
+                    : t('settings.tabs.machines', 'Machines')
+                }
+                boxed
+              >
+                {filteredFleetShared.map(renderFleetRow)}
+              </CompactSection>
+            ) : null}
+
+            {filteredFleetPrivate.length > 0 ? (
+              <CompactSection
+                title={t('settings.machines.yourPrivateMachines', 'Your private machines')}
+                description={t(
+                  'settings.machines.privateMachinesHint',
+                  'These machines are not available to other workspace members. Select one here to manage sharing.'
+                )}
+                boxed
+              >
+                {filteredFleetPrivate.map(renderFleetRow)}
+              </CompactSection>
+            ) : null}
+          </div>
+        )}
         {dialog}
       </div>
     );
