@@ -975,7 +975,7 @@ describe('recovery admission during an undelivered epoch', () => {
           const result = yield* workflow.setup();
           expect(result.outcome).toBe('Committed');
           expect(result.status.recoverable).toBe(true);
-          expect(entryReads).toBe(3);
+          expect(entryReads).toBe(1);
           expect(indexReads).toBe(2);
           expect(journalWrites).toBe(5);
 

@@ -126,7 +126,11 @@ export function recoveryFailure(error: unknown): Error {
   if (record?._tag === 'LocalStoreError' || record?._tag === 'KeyProtectorError')
     return new Error('e2ee_recovery_storage');
   if (error instanceof Error) {
-    if (/^(?:QuotaExceededError|InvalidStateError|UnknownError|NotReadableError)$/.test(error.name))
+    if (
+      /^(?:QuotaExceededError|InvalidStateError|UnknownError|NotReadableError|SecurityError)$/.test(
+        error.name
+      )
+    )
       return new Error('e2ee_recovery_storage');
     if (
       /^(?:NetworkError|TimeoutError)$/.test(error.name) ||
@@ -289,16 +293,27 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
   let knownMethods:
     | { vaultId: string; revision: number; hasPassword: boolean; hasPasskey: boolean }
     | undefined;
-  const rememberMethods = (vault: RecoveryVault) =>
-    Effect.gen(function* () {
-      const index = yield* vault.readIndex();
-      knownMethods = {
-        vaultId: vault.vaultId,
-        revision: index.header?.revision ?? -1,
-        hasPassword: index.value.password !== undefined,
-        hasPasskey: (index.value.passkeys?.length ?? 0) > 0,
-      };
-    });
+  const rememberMethods = (
+    vault: RecoveryVault,
+    known?: {
+      readonly revision: number;
+      readonly hasPassword: boolean;
+      readonly hasPasskey: boolean;
+    }
+  ) =>
+    known
+      ? Effect.sync(() => {
+          knownMethods = { vaultId: vault.vaultId, ...known };
+        })
+      : Effect.gen(function* () {
+          const index = yield* vault.readIndex();
+          knownMethods = {
+            vaultId: vault.vaultId,
+            revision: index.header?.revision ?? -1,
+            hasPassword: index.value.password !== undefined,
+            hasPasskey: (index.value.passkeys?.length ?? 0) > 0,
+          };
+        });
   const layers = (journal: RecoveryVaultLocalStore['Service']) =>
     RecoveryVaults.layer.pipe(
       Layer.provide(
@@ -418,7 +433,18 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
     work: (
       vaults: RecoveryVaults['Service'],
       passkey: () => E2eePasskeyPort
-    ) => Effect.Effect<RecoveryVault, unknown, Scope.Scope>
+    ) => Effect.Effect<
+      {
+        readonly vault: RecoveryVault;
+        readonly known?: {
+          readonly revision: number;
+          readonly hasPassword: boolean;
+          readonly hasPasskey: boolean;
+        };
+      },
+      unknown,
+      Scope.Scope
+    >
   ) =>
     run(
       Effect.scoped(
@@ -436,10 +462,10 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
           );
           const journal = yield* clientRecoveryJournal(accountId, check, options.platform);
           return yield* Effect.gen(function* () {
-            const vault = yield* work(yield* RecoveryVaults, () =>
+            const { vault, known } = yield* work(yield* RecoveryVaults, () =>
               port((bytes) => borrowed.add(bytes))
             );
-            yield* Effect.ignore(rememberMethods(vault));
+            yield* Effect.ignore(rememberMethods(vault, known));
             check();
             return { vaultId: vault.vaultId };
           }).pipe(Effect.provide(layers(journal)));
@@ -494,21 +520,20 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
             label: normalized,
             create: (input) => vaults.createWithPasskey({ ...input, locator: locator() }),
           });
-          return created.vault;
+          return {
+            vault: created.vault,
+            known: { revision: 0, hasPassword: false, hasPasskey: true },
+          };
         })
       ),
     createWithPassword: (password: string) =>
       createWith((vaults) =>
         Effect.gen(function* () {
           const created = yield* vaults.createWithPassword({ locator: locator(), password });
-          const reopened = yield* vaults.openWithPassword({
-            vaultId: created.vault.vaultId,
-            locator: locator(),
-            password,
-          });
-          if (reopened.vaultId !== created.vault.vaultId)
-            return yield* Effect.fail({ code: 'authentication' });
-          return reopened;
+          return {
+            vault: created.vault,
+            known: { revision: 0, hasPassword: true, hasPasskey: false },
+          };
         })
       ),
     saveFile: (
@@ -535,8 +560,19 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
     methods: (vaultId: string) =>
       read(
         Effect.gen(function* () {
-          const hasFile = (yield* store.readEntry(vaultId, vaultId)) !== null;
-          const index = yield* store.readIndex(vaultId);
+          const slotIds = Array.from({ length: MAX_VAULT_PASSWORD_GENERATIONS }, (_, generation) =>
+            passwordWrapEntryId(vaultId, generation)
+          );
+          const [fileEntry, slots, index] = yield* Effect.all([
+            store.readEntry(vaultId, vaultId),
+            store.readEntries
+              ? store.readEntries(vaultId, slotIds)
+              : Effect.forEach(slotIds, (entryId) => store.readEntry(vaultId, entryId), {
+                  concurrency: 4,
+                }),
+            store.readIndex(vaultId),
+          ]);
+          const hasFile = fileEntry !== null;
           if (
             knownMethods?.vaultId === vaultId &&
             knownMethods.revision === (index?.revision ?? -1)
@@ -546,12 +582,11 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
               hasPassword: knownMethods.hasPassword,
               hasPasskey: knownMethods.hasPasskey,
             };
-          const slots = yield* Effect.all(
-            Array.from({ length: MAX_VAULT_PASSWORD_GENERATIONS }, (_, generation) =>
-              store.readEntry(vaultId, passwordWrapEntryId(vaultId, generation))
-            )
-          );
-          return { hasFile, hasPassword: slots.some((entry) => entry !== null), hasPasskey: null };
+          return {
+            hasFile,
+            hasPassword: slots.some((entry) => entry !== null),
+            hasPasskey: null,
+          };
         })
       ),
     available: () =>

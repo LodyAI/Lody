@@ -251,6 +251,9 @@ export function makeAutomaticPairingRuntime(options: {
   const requesting = new Map<string, RequesterEntry>();
   const approving = new Map<string, ApproverEntry>();
   const notified = new Map<string, number>();
+  // Caches verified local identity presence for pending discovery only; approval still
+  // opens the real workspace session and verifies the ledger before signing.
+  const verifiedIdentities = new Set<string>();
   const { runtime } = options;
   const limits = options.relayTimeoutMs ?? {
     call: RELAY_TIMEOUT_MS,
@@ -779,6 +782,7 @@ export function makeAutomaticPairingRuntime(options: {
       return yield* Effect.fail(refuse('pairing-unavailable'));
     // The host journals its original before submit. A lost response retries this
     // same code/identity; makeAccountPairing treats that as the same request.
+    let justSubmitted = false;
     if (value.state._tag === 'ChannelReady') {
       const readyState = value.state;
       advanceRequester(value, 'ChannelReady', {
@@ -795,6 +799,7 @@ export function makeAutomaticPairingRuntime(options: {
       );
       if (submitted.expiresAt !== value.context.expiresAt)
         return yield* Effect.fail(refuse('pairing-update-required'));
+      justSubmitted = true;
       advanceRequester(value, 'ChannelReady', {
         _tag: 'RequestSubmitted',
         exchange: readyState.exchange,
@@ -802,10 +807,11 @@ export function makeAutomaticPairingRuntime(options: {
         comparisonCode: readyState.comparisonCode,
         lookupId: readyState.lookupId,
         code: readyState.code,
-        phase: 'preparing',
+        phase: 'waiting',
       });
     }
     if (yield* expiresRequester(value)) return snapshotRequester(value);
+    if (justSubmitted) return snapshotRequester(value);
     const state = yield* promise(() => runtime.accountPairingRequest!());
     yield* check();
     if (state?.status === 'declined' || state?.status === 'expired') {
@@ -909,8 +915,11 @@ export function makeAutomaticPairingRuntime(options: {
     if (!row.requesterKey)
       return options.includePreparingReviews ? reviewApprover(value, '') : null;
     const reveal = yield* exchange.reveal(row.requesterKey);
-    if (!row.reveal)
+    let revealedNow = false;
+    if (!row.reveal) {
       row = yield* checked(value.context, yield* relay.exchange({ id: value.context.id, reveal }));
+      revealedNow = true;
+    }
     if (row.state !== 'pending') {
       settleApproverTerminal(value, row.state === 'approved' ? 'joined' : row.state);
       return null;
@@ -926,6 +935,9 @@ export function makeAutomaticPairingRuntime(options: {
         lookupId: derived.lookupId,
         code: derived.code,
       });
+    }
+    if (revealedNow) {
+      return options.includePreparingReviews ? reviewApprover(value, '') : null;
     }
     const code =
       value.state._tag === 'ChannelDerived' || value.state._tag === 'WaitingForCode'
@@ -1078,10 +1090,14 @@ export function makeAutomaticPairingRuntime(options: {
             if (!options.canPresent() && notified.has(c.id)) return null;
             // Account catalogs and relay summaries are never proof that this device
             // may approve. Read only its retained, verified local identity first.
-            const identity = yield* promise(() =>
-              runtime.readIdentity!({ workspaceId: c.workspaceId, accountId: account! })
-            );
-            if (!identity || identity.genesisHash !== c.genesisHash) return null;
+            const identityKey = `${account!}:${c.workspaceId}:${c.genesisHash}`;
+            if (!verifiedIdentities.has(identityKey)) {
+              const identity = yield* promise(() =>
+                runtime.readIdentity!({ workspaceId: c.workspaceId, accountId: account! })
+              );
+              if (!identity || identity.genesisHash !== c.genesisHash) return null;
+              verifiedIdentities.add(identityKey);
+            }
             yield* check();
             if (!options.canPresent()) {
               if (notified.size < 10 && !notified.has(c.id)) {
