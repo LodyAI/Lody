@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { Context, Effect, Layer } from 'effect';
 import {
   personalCloudHostPorts,
@@ -22,6 +23,12 @@ import type {
 import { nativeCustody, type NativeKekBridge } from './native-custody';
 import { nativeKekBridge } from './native-bridge';
 import { nativeIrohPort } from './iroh-bridge';
+
+/** The unverified label an approving device shows for this phone. */
+const mobileDeviceName = () => {
+  const platform = Capacitor.getPlatform();
+  return platform === 'ios' ? 'Lody iOS' : platform === 'android' ? 'Lody Android' : 'Lody mobile';
+};
 
 const fail = (reason: ClientCustodyError['reason']) => new ClientCustodyError({ reason });
 
@@ -111,7 +118,7 @@ export function mobilePersonalHost(
         return store;
       },
       relay: pairingPorts.relay,
-      deviceName: 'Lody mobile',
+      deviceName: mobileDeviceName(),
       appendRecord: pairingPorts.appendRecord,
       historyBatch: pairingPorts.historyBatch,
       appendRecordsBatch: pairingPorts.appendRecordsBatch,

@@ -1,6 +1,6 @@
 ---
-title: "Espacios de trabajo con cifrado de extremo a extremo"
-description: "Guía en lenguaje sencillo sobre los espacios de trabajo con cifrado de extremo a extremo en Lody: quién puede ver el contenido, cómo invitar a compañeros de equipo y añadir dispositivos, y qué ocurre si pierdes tus dispositivos."
+title: 'Espacios de trabajo con cifrado de extremo a extremo'
+description: 'Guía en lenguaje sencillo sobre los espacios de trabajo con cifrado de extremo a extremo en Lody: quién puede ver el contenido, cómo invitar a compañeros de equipo y añadir dispositivos, y qué ocurre si pierdes tus dispositivos.'
 ---
 
 # Espacios de trabajo con cifrado de extremo a extremo
@@ -8,17 +8,19 @@ description: "Guía en lenguaje sencillo sobre los espacios de trabajo con cifra
 En un espacio de trabajo con cifrado de extremo a extremo, las conversaciones, los archivos y la salida de los agentes **solo pueden leerse en los dispositivos que hayas autorizado**. Los servidores de Lody transmiten y almacenan los datos, pero solo ven datos que no pueden leer.
 
 <Callout type="warn">
-Si pierdes todos los dispositivos autorizados y no tienes un archivo de recuperación, el espacio de trabajo no podrá volver a abrirse nunca y Lody no podrá recuperarlo. Configura un archivo de recuperación poco después de crear el espacio de trabajo.
+  Si pierdes todos los dispositivos autorizados y no tienes un archivo de recuperación, el espacio
+  de trabajo no podrá volver a abrirse nunca y Lody no podrá recuperarlo. Configura un archivo de
+  recuperación poco después de crear el espacio de trabajo.
 </Callout>
 
 ## En qué se diferencia de un espacio de trabajo estándar
 
-| | Espacio de trabajo estándar | Espacio de trabajo con cifrado de extremo a extremo |
-| --- | --- | --- |
-| Quién puede leer el contenido | Miembros con acceso y servidores de Lody | Solo dispositivos autorizados |
-| Uso de un nuevo dispositivo | Iniciar sesión | Iniciar sesión y, después, aprobarlo desde un dispositivo autorizado |
-| Aplicación web | Funciona de inmediato | Primero debe autorizarse el navegador |
-| Pérdida de todos los dispositivos | Volver a iniciar sesión | Requiere un archivo de recuperación o una clave de acceso (passkey) |
+|                                   | Espacio de trabajo estándar              | Espacio de trabajo con cifrado de extremo a extremo                  |
+| --------------------------------- | ---------------------------------------- | -------------------------------------------------------------------- |
+| Quién puede leer el contenido     | Miembros con acceso y servidores de Lody | Solo dispositivos autorizados                                        |
+| Uso de un nuevo dispositivo       | Iniciar sesión                           | Iniciar sesión y, después, aprobarlo desde un dispositivo autorizado |
+| Aplicación web                    | Funciona de inmediato                    | Primero debe autorizarse el navegador                                |
+| Pérdida de todos los dispositivos | Volver a iniciar sesión                  | Requiere un archivo de recuperación o una clave de acceso (passkey)  |
 
 ## Tareas habituales
 
@@ -35,7 +37,7 @@ Si pierdes todos los dispositivos autorizados y no tienes un archivo de recupera
 </Step>
 <Step>
 
-**Abrirlo en un nuevo dispositivo**: el nuevo dispositivo envía una solicitud automáticamente. Tu equipo o teléfono autorizado muestra una ventana de aprobación; comprueba que los números coincidan en ambas pantallas y selecciona Autorizar.
+**Abrirlo en un nuevo dispositivo**: el nuevo dispositivo envía una solicitud automáticamente y muestra un código de 6 dígitos. Tu equipo o teléfono autorizado muestra una ventana de aprobación; ingresa ese código (un teléfono puede escanear la pantalla del nuevo dispositivo), deja marcados los espacios de trabajo a los que debe unirse y selecciona Aprobar.
 
 </Step>
 <Step>
@@ -53,8 +55,16 @@ Si pierdes todos los dispositivos autorizados y no tienes un archivo de recupera
 ## Más información
 
 <Cards>
-  <Card title="Cómo funciona el registro de permisos" href="/es/docs/encrypted-workspaces-ledger" description="Quién puede añadir miembros y dispositivos, y por qué el servidor no puede añadir a nadie en secreto." />
-  <Card title="Qué demuestra el código de seguridad" href="/es/docs/encrypted-workspaces-security-code" description="Cómo se calcula el código y qué significa que coincida o no coincida." />
+  <Card
+    title="Cómo funciona el registro de permisos"
+    href="/es/docs/encrypted-workspaces-ledger"
+    description="Quién puede añadir miembros y dispositivos, y por qué el servidor no puede añadir a nadie en secreto."
+  />
+  <Card
+    title="Qué demuestra el código de seguridad"
+    href="/es/docs/encrypted-workspaces-security-code"
+    description="Cómo se calcula el código y qué significa que coincida o no coincida."
+  />
 </Cards>
 
 ## Límites conocidos

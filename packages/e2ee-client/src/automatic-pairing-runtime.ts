@@ -23,6 +23,7 @@ import {
 } from './automatic-pairing-crypto';
 
 type Hint = { workspaceId: string; name: string; genesisHash: string };
+type ApprovableWorkspace = { readonly workspaceId: string; readonly name: string };
 /** The relay transports public originals only. It never receives a pairing secret. */
 export interface AutomaticPairingRelay {
   subscribe?(changed: () => void): () => void;
@@ -147,6 +148,7 @@ type ApproverState =
       readonly nativeRequestId: string;
       readonly deviceName: string;
       readonly codeFailures: number;
+      readonly workspaces: readonly ApprovableWorkspace[];
     }
   | {
       readonly _tag: 'Authorizing';
@@ -156,6 +158,8 @@ type ApproverState =
       readonly code: string;
       readonly nativeRequestId: string;
       readonly deviceName: string;
+      readonly workspaces: readonly ApprovableWorkspace[];
+      readonly workspaceIds: readonly string[];
       readonly phase: 'waiting' | 'syncing';
     }
   | {
@@ -239,9 +243,6 @@ export function makeAutomaticPairingRuntime(options: {
   readonly accessLoss: (error: unknown) => 'e2ee_device_revoked' | 'e2ee_member_removed' | null;
   /** Advisory background hint only, after retained local identity verification. */
   readonly notifyPending?: (id: string) => void;
-  /** Surfaces `preparing` reviews once this device's local identity is verified, so
-   * Instant QR hosts can present their one-time QR immediately while ECDH finishes. */
-  readonly includePreparingReviews?: boolean;
   readonly crypto: Crypto;
   readonly now?: () => number;
   readonly run: <A>(work: Effect.Effect<A, unknown>) => Promise<A>;
@@ -442,15 +443,23 @@ export function makeAutomaticPairingRuntime(options: {
     value: ApproverEntry,
     requestId: string,
     deviceName = value.context.deviceName
-  ): E2eeAutomaticPairingReview => ({
-    id: value.context.id,
-    workspaceId: value.context.workspaceId,
-    workspaceName: workspace(value.context.workspaceId)?.name ?? value.context.workspaceId,
-    deviceName,
-    expiresAt: value.context.expiresAt,
-    phase: approverPhaseOf(value.state),
-    requestId,
-  });
+  ): E2eeAutomaticPairingReview => {
+    const state = value.state;
+    const workspaces =
+      state._tag === 'WaitingForCode' || state._tag === 'Authorizing'
+        ? state.workspaces.map((item) => ({ ...item }))
+        : undefined;
+    return {
+      id: value.context.id,
+      workspaceId: value.context.workspaceId,
+      workspaceName: workspace(value.context.workspaceId)?.name ?? value.context.workspaceId,
+      deviceName,
+      expiresAt: value.context.expiresAt,
+      phase: approverPhaseOf(state),
+      requestId,
+      ...(workspaces ? { workspaces } : {}),
+    };
+  };
 
   /** Never awaited: a hosted mutation can stay queued while offline. One write at a time;
    * a failure leaves the entry undelivered for the next discovery round. */
@@ -860,7 +869,7 @@ export function makeAutomaticPairingRuntime(options: {
       runtime.approveAccountPairing!({
         pairingString: authState.code,
         requestId: authState.nativeRequestId,
-        workspaceIds: [value.context.workspaceId],
+        workspaceIds: [...authState.workspaceIds],
       })
     );
     yield* check();
@@ -912,8 +921,7 @@ export function makeAutomaticPairingRuntime(options: {
       row.commitment.commitment !== commitment.commitment
     )
       return null;
-    if (!row.requesterKey)
-      return options.includePreparingReviews ? reviewApprover(value, '') : null;
+    if (!row.requesterKey) return null;
     const reveal = yield* exchange.reveal(row.requesterKey);
     let revealedNow = false;
     if (!row.reveal) {
@@ -937,7 +945,7 @@ export function makeAutomaticPairingRuntime(options: {
       });
     }
     if (revealedNow) {
-      return options.includePreparingReviews ? reviewApprover(value, '') : null;
+      return null;
     }
     const code =
       value.state._tag === 'ChannelDerived' || value.state._tag === 'WaitingForCode'
@@ -946,10 +954,17 @@ export function makeAutomaticPairingRuntime(options: {
     if (!code) return null;
     const preview = yield* promise(() => runtime.inspectAccountPairing!(code));
     yield* check();
-    if (!preview) return options.includePreparingReviews ? reviewApprover(value, '') : null;
-    if (!preview.workspaces.some((w) => w.workspaceId === value.context.workspaceId)) return null;
+    if (!preview) return null;
+    const own = preview.workspaces.find((w) => w.workspaceId === value.context.workspaceId);
+    if (!own) return null;
     if (preview.expiresAt !== value.context.expiresAt)
       return yield* Effect.fail(refuse('pairing-tampered'));
+    const workspaces: readonly ApprovableWorkspace[] = [
+      { workspaceId: own.workspaceId, name: own.name },
+      ...preview.workspaces
+        .filter((w) => w.workspaceId !== own.workspaceId)
+        .map((w) => ({ workspaceId: w.workspaceId, name: w.name })),
+    ];
     if (value.state._tag === 'ChannelDerived') {
       advanceApprover(value, 'ChannelDerived', {
         _tag: 'WaitingForCode',
@@ -960,12 +975,14 @@ export function makeAutomaticPairingRuntime(options: {
         nativeRequestId: preview.requestId,
         deviceName: preview.deviceName,
         codeFailures: 0,
+        workspaces,
       });
     } else if (value.state._tag === 'WaitingForCode') {
       advanceApprover(value, 'WaitingForCode', {
         ...value.state,
         nativeRequestId: preview.requestId,
         deviceName: preview.deviceName,
+        workspaces,
       });
     }
     return reviewApprover(value, preview.requestId, preview.deviceName);
@@ -1279,7 +1296,7 @@ export function makeAutomaticPairingRuntime(options: {
         )
       ),
     pendingAutomaticPairing: () => options.run(pending()),
-    approveAutomaticPairing: (id: string, enteredCode: string) =>
+    approveAutomaticPairing: (id: string, enteredCode: string, workspaceIds?: readonly string[]) =>
       options.run(
         Effect.gen(function* () {
           yield* check();
@@ -1326,6 +1343,9 @@ export function makeAutomaticPairingRuntime(options: {
                   sendDecline(id, value);
                   return yield* Effect.fail(refuse('pairing-code-locked'));
                 }
+                const chosen = new Set(
+                  workspaceIds ?? waitingState.workspaces.map((w) => w.workspaceId)
+                );
                 advanceApprover(value, 'WaitingForCode', {
                   _tag: 'Authorizing',
                   exchange: waitingState.exchange,
@@ -1334,6 +1354,10 @@ export function makeAutomaticPairingRuntime(options: {
                   code: waitingState.code,
                   nativeRequestId: waitingState.nativeRequestId,
                   deviceName: waitingState.deviceName,
+                  workspaces: waitingState.workspaces,
+                  workspaceIds: waitingState.workspaces
+                    .map((w) => w.workspaceId)
+                    .filter((wid) => wid === value.context.workspaceId || chosen.has(wid)),
                   phase: 'waiting',
                 });
               }

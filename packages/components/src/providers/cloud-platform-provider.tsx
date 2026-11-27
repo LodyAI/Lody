@@ -55,6 +55,7 @@ import { installCloudHttpPort } from '@/lib/cloud-http-port';
 import { localAgentEnabledAtom } from '@/atoms/local-probe';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
 import { createCloudSessionAccess } from './cloud-session-access';
+import { currentPairingDeviceName } from './e2ee-pairing-device';
 import { mintAutomationControlProof } from '@/lib/automation-control-api';
 
 const CLOUD_HTTP_PORT = {
@@ -452,12 +453,11 @@ export function CloudPlatformProvider({
         return session.data?.user?.id ?? atomStore.get(userAtom)?.id ?? null;
       },
       workspaces: () => accountPairingHints(workspacesStore.get()),
-      deviceName: electron ? 'Lody desktop' : 'Lody mobile',
+      deviceName: currentPairingDeviceName(Boolean(electron)),
       // A visible but unfocused window (another app in front, a second screen) still
       // answers; only a hidden window falls back to the system notification.
       canPresent: () => document.visibilityState === 'visible',
       accessLoss: e2eeAccessLoss,
-      includePreparingReviews: Boolean(electron && runtime.accountPairingCode),
       notifyPending: (id) => {
         if (!electron) return;
         void getIpcServices()

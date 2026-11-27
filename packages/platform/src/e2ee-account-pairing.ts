@@ -153,11 +153,14 @@ export type E2eeAutomaticPairingState = {
     | 'revoked'
     | 'removed';
 };
-/** A host-authenticated, current-workspace-only approval preview. It carries no
- * comparison code: the person types the code the new device shows, and the host
- * compares it locally. `deviceName` is the requester's own, unverified label. */
+/** A host-authenticated approval preview. It carries no comparison code: the person
+ * types the code the new device shows, and the host compares it locally. `deviceName`
+ * is the requester's own, unverified label. */
 export type E2eeAutomaticPairingReview = Omit<E2eeAutomaticPairingState, 'comparisonCode'> & {
   requestId: string;
+  /** Requested workspaces this device can approve, the request's own `workspaceId`
+   * first. Present once the request verified; absent while it is still preparing. */
+  workspaces?: readonly { workspaceId: string; name: string }[];
 };
 /** Optional real runtime capability. Discovery alone never grants access. */
 export interface E2eeAutomaticPairingRuntime {
@@ -174,7 +177,14 @@ export interface E2eeAutomaticPairingRuntime {
   pendingAutomaticPairing?(): Promise<E2eeAutomaticPairingReview[]>;
   /** Signs only when `enteredCode` equals this device's derived code. A mismatch refuses
    * with `pairing-code-mismatch`; the last allowed mismatch ends the request with
-   * `pairing-code-locked`. The code never leaves this device. */
-  approveAutomaticPairing?(id: string, enteredCode: string): Promise<void>;
+   * `pairing-code-locked`. The code never leaves this device. `workspaceIds` narrows the
+   * review's `workspaces`; omitted, all of them are approved. The request's own
+   * workspace is always included, ids outside the review are ignored, and the first
+   * matching entry fixes the set for every retry. */
+  approveAutomaticPairing?(
+    id: string,
+    enteredCode: string,
+    workspaceIds?: readonly string[]
+  ): Promise<void>;
   declineAutomaticPairing?(id: string): Promise<void>;
 }

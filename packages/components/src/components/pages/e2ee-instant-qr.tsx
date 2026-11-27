@@ -1,21 +1,15 @@
 import * as stylex from '@stylexjs/stylex';
-import { ChevronDown, CircleCheck, QrCode, RefreshCw } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  accountPairingErrorCode,
-  type E2eeAccountPairingApproval,
-  type E2eeWorkspaceRuntime,
-} from '@lody/platform';
+import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
 import { Collapsible } from '@lody/ui/collapsible';
-import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
+import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { holdPrivateTelemetrySurface } from '@/lib/posthog-privacy';
-import { E2eeAccountPairingApprove, failureKey, qrPayload } from './e2ee-account-pairing';
-import { LedgerQrCode } from './e2ee-ledger-verification';
+import { E2eeAccountPairingApprove } from './e2ee-account-pairing';
 import { useE2eeDeviceRequests } from './e2ee-device-requests';
 
 /** Pauses session recording while a pairing secret or approval is on screen. */
@@ -34,242 +28,26 @@ export function PrivatePairingSurface({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-export type InstantQrRuntime = Pick<
-  E2eeWorkspaceRuntime,
-  | 'accountPairingCode'
-  | 'inspectAccountPairing'
-  | 'approveAccountPairing'
-  | 'subscribeAccountPairingApproval'
->;
-export const supportsInstantQr = (runtime: InstantQrRuntime | undefined) =>
-  Boolean(
-    runtime?.accountPairingCode && runtime.inspectAccountPairing && runtime.approveAccountPairing
-  );
-
-export type InstantQrPhase =
-  | { kind: 'loading' }
-  | { kind: 'showing'; pairingString: string; expiresAt: number }
-  | { kind: 'joining'; deviceName: string; unavailable: string[]; retrying?: boolean }
-  | {
-      kind: 'joined';
-      deviceName: string;
-      result: E2eeAccountPairingApproval;
-      /** Requested workspaces this device cannot sign for; they stay pending. */
-      unavailable: string[];
-    }
-  | { kind: 'expired' }
-  | { kind: 'failed'; error: string };
-
-const INSTANT_QR_POLL_MS = 900;
-/** Slow fallback interval when live approval subscription is active. */
-const INSTANT_QR_FALLBACK_POLL_MS = 8_000;
-const formatCountdown = (seconds: number) =>
-  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-
-function useInstantQrSecondsLeft(expiresAt: number | undefined) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (expiresAt === undefined) return undefined;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [expiresAt]);
-  return expiresAt === undefined ? null : Math.max(0, Math.ceil((expiresAt - now) / 1000));
-}
-
-/**
- * One fresh approver-shows offer. The person showing this code on their own device is
- * the approval: once a request under it verifies, every listed workspace is signed
- * once, without a further confirmation. The secret never leaves this device's screen.
- */
-export function useInstantQrOffer(
-  runtime: InstantQrRuntime,
-  options: { active: boolean; pollMs?: number }
-) {
-  const [phase, setPhase] = useState<InstantQrPhase>({ kind: 'loading' });
-  const [generation, setGeneration] = useState(0);
-  const pollMs = options.pollMs ?? INSTANT_QR_POLL_MS;
-  const enabled = options.active && supportsInstantQr(runtime);
-  useEffect(() => {
-    if (!enabled) return undefined;
-    let alive = true;
-    let running = false;
-    let settled = false;
-    let signedAwaitingDelivery = false;
-    let offer: { pairingString: string; expiresAt: number } | null = null;
-    /** The verified request this offer approves, latched once: every later tick
-     * resumes the same approval with the same code, which never signs twice. */
-    let target: {
-      requestId: string;
-      deviceName: string;
-      workspaceIds: string[];
-      unavailable: string[];
-    } | null = null;
-    let timer: ReturnType<typeof setInterval> | undefined;
-    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-    let unsubscribe: (() => void) | undefined;
-    const finish = (next: InstantQrPhase) => {
-      settled = true;
-      if (timer !== undefined) clearInterval(timer);
-      if (expiryTimer !== undefined) clearTimeout(expiryTimer);
-      timer = undefined;
-      expiryTimer = undefined;
-      unsubscribe?.();
-      unsubscribe = undefined;
-      setPhase(next);
-    };
-    const poll = async () => {
-      if (!alive || running || settled || !offer) return;
-      // A hidden window does not sign; it resumes as soon as it is shown again.
-      if (document.visibilityState !== 'visible') return;
-      if (Date.now() >= offer.expiresAt && !signedAwaitingDelivery)
-        return finish({ kind: 'expired' });
-      running = true;
-      try {
-        if (!target) {
-          const preview = await runtime.inspectAccountPairing!(offer.pairingString);
-          if (!alive || !preview) return;
-          if (preview.workspaces.length === 0)
-            return finish({ kind: 'failed', error: 'e2ee.instantQr.nothingToShare' });
-          target = {
-            requestId: preview.requestId,
-            deviceName: preview.deviceName,
-            workspaceIds: preview.workspaces.map((workspace) => workspace.workspaceId),
-            unavailable: preview.unavailable.map((workspace) => workspace.name),
-          };
-          setPhase({
-            kind: 'joining',
-            deviceName: target.deviceName,
-            unavailable: target.unavailable,
-          });
-        }
-        const result = await runtime.approveAccountPairing!({
-          pairingString: offer.pairingString,
-          requestId: target.requestId,
-          workspaceIds: target.workspaceIds,
-        });
-        if (!alive) return;
-        const outcomes = result.workspaces.map((workspace) => workspace.outcome);
-        // Signed but not yet delivered: the next tick publishes the journaled original.
-        if (outcomes.includes('awaiting-delivery')) {
-          signedAwaitingDelivery = true;
-          setPhase({
-            kind: 'joining',
-            deviceName: target.deviceName,
-            unavailable: target.unavailable,
-          });
-          return;
-        }
-        finish(
-          outcomes.includes('admitted')
-            ? {
-                kind: 'joined',
-                deviceName: target.deviceName,
-                result,
-                unavailable: target.unavailable,
-              }
-            : { kind: 'failed', error: 'e2ee.accountPair.error.failed' }
-        );
-      } catch (failure) {
-        if (!alive) return;
-        // A typed refusal is final; anything else retries the same code next tick.
-        if (accountPairingErrorCode(failure))
-          finish({ kind: 'failed', error: failureKey(failure) });
-        else if (target)
-          setPhase({
-            kind: 'joining',
-            deviceName: target.deviceName,
-            unavailable: target.unavailable,
-            retrying: true,
-          });
-      } finally {
-        running = false;
-      }
-    };
-    const wake = () => void poll();
-    document.addEventListener('visibilitychange', wake);
-    window.addEventListener('online', wake);
-    setPhase({ kind: 'loading' });
-    void (async () => {
-      try {
-        const next = await runtime.accountPairingCode!();
-        if (!alive) return;
-        offer = next;
-        setPhase({ kind: 'showing', ...next });
-        let subscribed = false;
-        if (next.lookupId && runtime.subscribeAccountPairingApproval) {
-          try {
-            unsubscribe = runtime.subscribeAccountPairingApproval(next.lookupId, wake);
-            subscribed = true;
-          } catch {}
-        }
-        const effectivePollMs =
-          options.pollMs ?? (subscribed ? INSTANT_QR_FALLBACK_POLL_MS : pollMs);
-        timer = setInterval(() => void poll(), effectivePollMs);
-        const msUntilExpiry = Math.max(0, next.expiresAt - Date.now());
-        expiryTimer = setTimeout(() => void poll(), msUntilExpiry);
-      } catch (failure) {
-        if (alive) finish({ kind: 'failed', error: failureKey(failure) });
-      }
-    })();
-    return () => {
-      alive = false;
-      unsubscribe?.();
-      if (timer !== undefined) clearInterval(timer);
-      if (expiryTimer !== undefined) clearTimeout(expiryTimer);
-      document.removeEventListener('visibilitychange', wake);
-      window.removeEventListener('online', wake);
-    };
-  }, [runtime, enabled, generation, pollMs, options.pollMs]);
-  return { phase, refresh: () => setGeneration((value) => value + 1) };
-}
-
 const styles = stylex.create({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: space[3],
-    textAlign: 'center',
-  },
-  rootCompact: {
-    gap: space[2],
-  },
-  qr: {
-    backgroundColor: '#ffffff',
-    padding: space[2],
-    borderRadius: radius.medium,
-    boxShadow: '0 0 0 1px oklch(0 0 0 / 0.08)',
-    lineHeight: 0,
-  },
-  qrFaded: { opacity: 0.15, width: 212, height: 212 },
-  qrFadedCompact: { width: 180, height: 180 },
-  frame: { position: 'relative', display: 'grid', placeItems: 'center' },
-  overlay: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' },
-  lead: { margin: 0, fontWeight: 600 },
-  leadCompact: {
-    fontSize: type.subheadlineSize,
-    lineHeight: type.subheadlineLeading,
-    fontWeight: 500,
-  },
-  quiet: {
-    margin: 0,
-    color: colors.secondaryLabel,
-    fontSize: type.footnoteSize,
-    lineHeight: type.footnoteLeading,
-  },
-  status: {
-    margin: 0,
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: space[2],
-    fontSize: type.subheadlineSize,
-  },
-  success: { color: colors.success },
   card: { display: 'flex', flexDirection: 'column', gap: space[3] },
   cardLead: { margin: 0, color: colors.secondaryLabel },
-  actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
-  disclosure: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  disclosure: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    paddingTop: space[3],
+  },
+  // A long label wraps inside the card on a narrow phone instead of running past it.
+  disclosureTrigger: {
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    whiteSpace: 'normal',
+    textAlign: 'start',
+  },
+  disclosureIcon: { flexShrink: 0 },
   callout: {
     display: 'flex',
     alignItems: 'center',
@@ -281,210 +59,58 @@ const styles = stylex.create({
   },
 });
 
-/** Shows a one-time pairing QR code; a phone that scans it joins with no further step. */
-export function E2eeInstantQrApprove(props: {
-  runtime: InstantQrRuntime;
-  /** Called once a device joined through this code. */
-  onJoined?: (deviceName: string) => void;
-  pollMs?: number;
-  /** Compact density for dialogs where space is constrained. */
-  compact?: boolean;
-  /** Omit the inline expiry line when the parent header already displays it. */
-  hideExpiry?: boolean;
-}) {
+type AddDeviceRuntime = Pick<
+  E2eeWorkspaceRuntime,
+  | 'inspectAccountPairing'
+  | 'approveAccountPairing'
+  | 'declineAccountPairing'
+  | 'approveAutomaticPairing'
+>;
+
+/**
+ * The console's Add device card. A new device signs in and opens an encrypted
+ * workspace; this device then asks for the six-digit code it shows. A device
+ * without automatic pairing shows an offline pairing code, entered below.
+ */
+export function E2eeAddDeviceCard(props: { runtime: AddDeviceRuntime }) {
   const { t } = useTranslation();
-  const { phase, refresh } = useInstantQrOffer(props.runtime, {
-    active: true,
-    ...(props.pollMs === undefined ? {} : { pollMs: props.pollMs }),
-  });
   const requests = useE2eeDeviceRequests();
-  const joinedRef = useRef(() => {});
-  joinedRef.current = () => {
-    if (phase.kind !== 'joined') return;
-    // The joined device's automatic request needs no popup of its own afterwards.
-    requests?.joinedByCode();
-    props.onJoined?.(phase.deviceName);
-  };
-  const joinedDevice = phase.kind === 'joined' ? phase.deviceName : null;
-  useEffect(() => {
-    if (joinedDevice !== null) joinedRef.current();
-  }, [joinedDevice]);
-  const unavailable = phase.kind === 'joining' || phase.kind === 'joined' ? phase.unavailable : [];
-  const secondsLeft = useInstantQrSecondsLeft(
-    phase.kind === 'showing' ? phase.expiresAt : undefined
+  const manual = Boolean(
+    props.runtime.inspectAccountPairing && props.runtime.approveAccountPairing
   );
-  if (!supportsInstantQr(props.runtime)) return null;
-  const pairingString = phase.kind === 'showing' ? phase.pairingString : null;
+  // A host that can approve neither way has no device to add here.
+  if (!manual && !props.runtime.approveAutomaticPairing) return null;
   return (
-    <PrivatePairingSurface>
-      <div
-        data-testid="e2ee-instant-qr"
-        data-e2ee-pairing-surface=""
-        data-phase={phase.kind}
-        {...stylex.props(styles.root, props.compact && styles.rootCompact)}
-      >
-        <p {...stylex.props(styles.lead, props.compact && styles.leadCompact)}>
-          {t('e2ee.instantQr.lead')}
-        </p>
-        <div {...stylex.props(styles.frame)}>
-          {pairingString ? (
-            <div {...stylex.props(styles.qr)}>
-              <LedgerQrCode
-                payload={qrPayload(pairingString)}
-                size={props.compact ? 164 : 196}
-                label={t('e2ee.accountPair.code.label')}
-              />
-            </div>
-          ) : (
-            <div
-              aria-hidden="true"
-              {...stylex.props(styles.qr, styles.qrFaded, props.compact && styles.qrFadedCompact)}
-            />
-          )}
-          {phase.kind === 'loading' && (
-            <span {...stylex.props(styles.overlay)}>
-              <Spinner size="small" />
-            </span>
-          )}
-        </div>
-        <div aria-live="polite">
-          {phase.kind === 'showing' && (
-            <>
-              <p {...stylex.props(styles.quiet)}>{t('e2ee.instantQr.help')}</p>
-              {!props.hideExpiry && secondsLeft !== null && secondsLeft < 60 * 60 && (
-                <p data-testid="e2ee-instant-qr-expiry" {...stylex.props(styles.quiet)}>
-                  {secondsLeft === 0
-                    ? t('e2ee.auto.expired.short')
-                    : t('e2ee.auto.expiresIn', { time: formatCountdown(secondsLeft) })}
-                </p>
-              )}
-            </>
-          )}
-          {phase.kind === 'joining' && (
-            <>
-              <p role="status" {...stylex.props(styles.status)}>
-                <Spinner size="small" />
-                {t('e2ee.instantQr.joining', { device: phase.deviceName })}
-              </p>
-              {phase.retrying && (
-                <p
-                  role="status"
-                  data-testid="e2ee-instant-qr-retrying"
-                  {...stylex.props(styles.quiet)}
-                >
-                  {t('e2ee.instantQr.retrying')}
-                </p>
-              )}
-              <div {...stylex.props(styles.actions)}>
-                <Button variant="ghost" size="small" onClick={refresh}>
-                  {t('common.cancel')}
-                </Button>
-              </div>
-            </>
-          )}
-          {phase.kind === 'joined' && (
-            <p role="status" {...stylex.props(styles.status, styles.success)}>
-              <CircleCheck size={16} aria-hidden="true" />
-              {t('e2ee.instantQr.joined', { device: phase.deviceName })}
-            </p>
-          )}
-          {unavailable.length > 0 && (
-            <p {...stylex.props(styles.quiet)}>
-              {t('e2ee.instantQr.unavailable', {
-                count: unavailable.length,
-                names: unavailable.join(', '),
-              })}
-            </p>
-          )}
-          {phase.kind === 'expired' && (
-            <p role="status" {...stylex.props(styles.quiet)}>
-              {t('e2ee.instantQr.expired')}
-            </p>
-          )}
-          {phase.kind === 'failed' && (
-            <p role="alert" {...stylex.props(styles.quiet)}>
-              {t(phase.error)}
-            </p>
-          )}
-        </div>
-        {(phase.kind === 'expired' || phase.kind === 'failed' || phase.kind === 'joined') && (
-          <Button variant="secondary" size="small" onClick={refresh}>
-            <RefreshCw size={14} aria-hidden="true" />
-            {t(phase.kind === 'joined' ? 'e2ee.instantQr.another' : 'e2ee.instantQr.refresh')}
-          </Button>
-        )}
+    <Card.Root data-testid="e2ee-add-device">
+      <div {...stylex.props(styles.card)}>
+        <Card.Title>{t('e2ee.addDevice.title')}</Card.Title>
+        <p {...stylex.props(styles.cardLead)}>{t('e2ee.addDevice.lead')}</p>
+        {requests && requests.count > 0 && <E2eeWaitingRequestsCallout />}
       </div>
-    </PrivatePairingSurface>
-  );
-}
-
-type AddDeviceRuntime = InstantQrRuntime & Pick<E2eeWorkspaceRuntime, 'declineAccountPairing'>;
-
-/** The console's one way to add a personal device: a QR code a phone scans to join,
- * with manual code entry for a device that has no camera. */
-export function E2eeAddDeviceCard(props: {
-  runtime: AddDeviceRuntime;
-  /** Opened through an explicit "Add device": show the code at once. */
-  defaultShowQr?: boolean;
-}) {
-  const { t } = useTranslation();
-  const [showing, setShowing] = useState(props.defaultShowQr === true);
-  const requests = useE2eeDeviceRequests();
-  const [manual, setManual] = useState(false);
-  if (!supportsInstantQr(props.runtime))
-    return <E2eeAccountPairingApprove runtime={props.runtime} />;
-  return (
-    <>
-      <Card.Root data-testid="e2ee-add-device">
-        <div {...stylex.props(styles.card)}>
-          <Card.Title>{t('e2ee.addDevice.title')}</Card.Title>
-          <p {...stylex.props(styles.cardLead)}>{t('e2ee.addDevice.lead')}</p>
-          {requests && requests.count > 0 && <E2eeWaitingRequestsCallout />}
-          {showing ? (
-            <>
-              <E2eeInstantQrApprove runtime={props.runtime} />
-              <div {...stylex.props(styles.actions)}>
-                <Button variant="ghost" size="small" onClick={() => setShowing(false)}>
-                  {t('e2ee.addDevice.hideQr')}
-                </Button>
-              </div>
-            </>
-          ) : (
-            <div {...stylex.props(styles.actions)}>
-              <Button
-                data-testid="e2ee-add-device-show-qr"
-                onClick={() => {
-                  setManual(false);
-                  setShowing(true);
-                }}
-              >
-                <QrCode size={16} aria-hidden="true" />
-                {t('e2ee.addDevice.showQr')}
-              </Button>
-            </div>
-          )}
-        </div>
-      </Card.Root>
-      <Collapsible.Root
-        open={manual}
-        onOpenChange={(next) => {
-          setManual(next);
-          if (next) setShowing(false);
-        }}
-      >
-        <div {...stylex.props(styles.disclosure)}>
-          <Collapsible.Trigger
-            render={<Button variant="ghost" size="small" data-testid="e2ee-add-device-manual" />}
-          >
-            {t('e2ee.addDevice.manual')}
-            <ChevronDown size={14} aria-hidden="true" />
-          </Collapsible.Trigger>
-          <Collapsible.Panel>
-            <E2eeAccountPairingApprove runtime={props.runtime} />
-          </Collapsible.Panel>
-        </div>
-      </Collapsible.Root>
-    </>
+      {manual && (
+        <Collapsible.Root>
+          <div {...stylex.props(styles.disclosure)}>
+            <Collapsible.Trigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="small"
+                  height="auto"
+                  data-testid="e2ee-add-device-manual"
+                  xstyle={styles.disclosureTrigger}
+                />
+              }
+            >
+              {t('e2ee.addDevice.manual')}
+              <ChevronDown size={14} aria-hidden="true" {...stylex.props(styles.disclosureIcon)} />
+            </Collapsible.Trigger>
+            <Collapsible.Panel>
+              <E2eeAccountPairingApprove runtime={props.runtime} embedded />
+            </Collapsible.Panel>
+          </div>
+        </Collapsible.Root>
+      )}
+    </Card.Root>
   );
 }
 
@@ -503,8 +129,8 @@ export function parseAutoPairQr(text: string): { id: string; code: string } | nu
   return id && code && /^\d{6}$/.test(code) ? { id, code } : null;
 }
 
-/** Requests already waiting, reachable from inside Settings or the console: a new
- * computer is approved with its code there, not by scanning. */
+/** Requests already waiting, reachable from inside Settings or the console: the new
+ * device's code is typed there. */
 export function E2eeWaitingRequestsCallout() {
   const { t } = useTranslation();
   const requests = useE2eeDeviceRequests();

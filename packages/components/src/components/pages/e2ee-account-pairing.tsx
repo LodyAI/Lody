@@ -2,7 +2,7 @@ import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-
 import * as stylex from '@stylexjs/stylex';
 import { Result } from 'effect';
 import { Check, Copy, ScanLine } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PAIRING_URL_PREFIX, parsePairingString } from '@lody/e2ee-core/protocol';
 import {
@@ -21,10 +21,32 @@ import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text as type } from '@lody/ui/tokens/scales.stylex';
 import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
+import { useIsHandheldScanner } from '@/hooks/use-mobile';
 import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
 import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
+/** A card of its own, or a plain column inside the card that hosts it. */
+function Surface({
+  embedded,
+  children,
+  ...rest
+}: {
+  embedded: boolean;
+  children: ReactNode;
+  'data-testid': string;
+  'data-e2ee-pairing-surface': string;
+}) {
+  return embedded ? (
+    <div {...rest} {...stylex.props(styles.embedded)}>
+      {children}
+    </div>
+  ) : (
+    <Card.Root {...rest}>{children}</Card.Root>
+  );
+}
+
 const styles = stylex.create({
+  embedded: { display: 'flex', flexDirection: 'column', gap: space[3] },
   retryAlert: {
     display: 'flex',
     alignItems: 'center',
@@ -205,6 +227,12 @@ export function E2eeAccountPairingRequest(props: {
   const [personalComputer, setPersonalComputer] = useState(false);
   const personalRequired = Boolean(runtime.requirePersonalComputer || runtime.openBrowserRecovery);
   const [input, setInput] = useState('');
+  const [camera, setCamera] = useState(false);
+  // Phones scan the code another device shows; computers paste it.
+  const canScan =
+    useIsHandheldScanner() &&
+    typeof navigator !== 'undefined' &&
+    typeof navigator.mediaDevices?.getUserMedia === 'function';
   const joined = useRef(false);
   const accept = (next: E2eeAccountPairingRequestState | null) => {
     if (!live.current) return;
@@ -296,6 +324,18 @@ export function E2eeAccountPairingRequest(props: {
     setEntering(false);
     void start(input.trim());
   };
+  // A scanned code is submitted at once: the host parses it again and checks the account.
+  const { video, state: cameraState } = useQrCamera(camera, (scanned) => {
+    setCamera(false);
+    const value = scanned.trim();
+    const wrong = /^lody:\/\/auto-pair\?/i.test(value)
+      ? 'e2ee.instantQr.wrongRole'
+      : localCodeError(value);
+    if (wrong) return setError(wrong);
+    setEntering(false);
+    setInput('');
+    void start(value);
+  });
   if (!runtime.requestAccountPairing) return null;
   const terminal = state && state.status !== 'waiting' && state.status !== 'joined';
   return (
@@ -423,6 +463,37 @@ export function E2eeAccountPairingRequest(props: {
       {terminal && <p role="status">{t(`e2ee.accountPair.request.${state.status}`)}</p>}
       {entering && (
         <>
+          {canScan &&
+            (camera ? (
+              <>
+                <video ref={video} muted playsInline {...stylex.props(styles.video)} />
+                <div {...stylex.props(styles.actions)}>
+                  <Button variant="ghost" onClick={() => setCamera(false)}>
+                    {t('common.cancel')}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Button
+                disabled={phase === 'busy' || (personalRequired && !personalComputer)}
+                onClick={() => {
+                  setError(null);
+                  setCamera(true);
+                }}
+              >
+                <ScanLine size={16} aria-hidden="true" />
+                {t('e2ee.accountPair.request.scan')}
+              </Button>
+            ))}
+          {(cameraState === 'denied' || cameraState === 'unavailable') && (
+            <p {...stylex.props(styles.muted)}>
+              {t(
+                cameraState === 'denied'
+                  ? 'e2ee.verify.cameraDenied'
+                  : 'e2ee.verify.cameraUnavailable'
+              )}
+            </p>
+          )}
           <Textarea
             aria-label={t('e2ee.accountPair.code.label')}
             placeholder={t('e2ee.accountPair.code.placeholder')}
@@ -448,6 +519,7 @@ export function E2eeAccountPairingRequest(props: {
               disabled={phase === 'busy'}
               onClick={() => {
                 setEntering(false);
+                setCamera(false);
                 setInput('');
                 setError(null);
               }}
@@ -510,7 +582,11 @@ type ApprovePhase =
  * request before anything is shown; the user then reads the fixed warning, sees the
  * named target and its scope, and may deselect any workspace before approving.
  */
-export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime }) {
+export function E2eeAccountPairingApprove(props: {
+  runtime: ApproveRuntime;
+  /** Inside another card, under that card's own heading: no card or title of its own. */
+  embedded?: boolean;
+}) {
   const { runtime } = props;
   const { t } = useTranslation();
   const live = useLive();
@@ -561,8 +637,12 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime }) {
     setError(null);
   };
   return (
-    <Card.Root data-testid="e2ee-account-pairing-approve" data-e2ee-pairing-surface="">
-      <Card.Title>{t('e2ee.accountPair.approve.title')}</Card.Title>
+    <Surface
+      embedded={props.embedded === true}
+      data-testid="e2ee-account-pairing-approve"
+      data-e2ee-pairing-surface=""
+    >
+      {!props.embedded && <Card.Title>{t('e2ee.accountPair.approve.title')}</Card.Title>}
       {phase.kind === 'enter' && (
         <>
           <p {...stylex.props(styles.muted)}>{t('e2ee.accountPair.approve.lead')}</p>
@@ -738,6 +818,6 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime }) {
           {t(error)}
         </p>
       )}
-    </Card.Root>
+    </Surface>
   );
 }

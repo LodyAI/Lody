@@ -1530,4 +1530,189 @@ describe('approval coverage across workspaces', () => {
     );
     expect(state.lookupId).toBe(code.lookupId);
   });
+  /** Automatic pairing over this harness: an in-memory relay, a new phone and a computer
+   * that can approve both workspaces. */
+  const automatic = (
+    harness: ReturnType<typeof setup>,
+    options: {
+      loseFirstApprovalReply?: boolean;
+      /** The phone's host asks for every workspace instead of the one it opened. */
+      requestEvery?: boolean;
+    } = {}
+  ) => {
+    const rows = new Map<string, E2eeAutomaticPairingRecord>();
+    const discovery: AutomaticPairingRelay = {
+      pending: () =>
+        Effect.sync(() => structuredClone([...rows.values()].filter((r) => r.state === 'pending'))),
+      read: (id) => Effect.sync(() => structuredClone(rows.get(id) ?? null)),
+      exchange: (command) =>
+        Effect.sync(() => {
+          let row = rows.get(command.id);
+          if (!row) {
+            if (!command.context) throw new Error('missing discovery original');
+            row = {
+              context: structuredClone(command.context),
+              state: 'pending',
+            };
+            rows.set(command.id, row);
+          }
+          if (command.commitment) row.commitment ??= structuredClone(command.commitment);
+          if (command.requesterKey) row.requesterKey ??= command.requesterKey;
+          if (command.reveal) row.reveal ??= structuredClone(command.reveal);
+          if (command.terminal) row.state = command.terminal;
+          return structuredClone(row);
+        }),
+    };
+    const signed: string[][] = [];
+    let loseReply = options.loseFirstApprovalReply === true;
+    const genesisOf = { w1: '11'.repeat(32), w2: '12'.repeat(32) } as const;
+    const common = {
+      relay: discovery,
+      account: () => 'synthetic-account',
+      workspaces: () =>
+        (['w1', 'w2'] as const).map((workspaceId) => ({
+          workspaceId,
+          name: workspaceId,
+          genesisHash: genesisOf[workspaceId],
+        })),
+      deviceName: 'Synthetic phone',
+      canPresent: () => true,
+      accessLoss: exactAccessLoss,
+      crypto,
+      now: () => 0,
+      run: Effect.runPromise,
+    };
+    const phone = makeAutomaticPairingRuntime({
+      ...common,
+      runtime: {
+        requestAccountPairing: (
+          input: Parameters<typeof harness.requester.requestAccountPairing>[0]
+        ) => {
+          const { workspace: _named, ...every } = input as typeof input & { workspace?: unknown };
+          return Effect.runPromise(
+            harness.requester.requestAccountPairing(options.requestEvery ? every : input)
+          );
+        },
+        accountPairingRequest: () => Effect.runPromise(harness.requester.accountPairingRequest()),
+        cancelAccountPairing: () => Effect.runPromise(harness.requester.cancelAccountPairing()),
+        status: async () => ({
+          deviceKind: 'personal',
+          hasDeviceCredential: harness.installed.length > 0,
+          hasCurrentKey: harness.installed.length > 0,
+        }),
+      } as unknown as E2eeWorkspaceRuntime,
+    });
+    const desktop = makeAutomaticPairingRuntime({
+      ...common,
+      deviceName: 'Synthetic desktop',
+      runtime: {
+        inspectAccountPairing: (value: string) =>
+          Effect.runPromise(harness.approver.inspectAccountPairing(value)),
+        approveAccountPairing: async (
+          input: Parameters<typeof harness.approver.approveAccountPairing>[0]
+        ) => {
+          signed.push([...input.workspaceIds]);
+          const result = await Effect.runPromise(harness.approver.approveAccountPairing(input));
+          if (loseReply) {
+            loseReply = false;
+            throw new Error('synthetic lost approval reply');
+          }
+          return result;
+        },
+        declineAccountPairing: (
+          input: Parameters<typeof harness.approver.declineAccountPairing>[0]
+        ) => Effect.runPromise(harness.approver.declineAccountPairing(input)),
+        readIdentity: async ({ workspaceId }: { workspaceId: 'w1' | 'w2' }) => ({
+          workspaceId,
+          genesisHash: genesisOf[workspaceId],
+        }),
+      } as unknown as E2eeWorkspaceRuntime,
+    });
+    /** Runs the handshake until the computer sees the verified request. */
+    const review = async () => {
+      await phone.startAutomaticPairing('w1');
+      for (let round = 0; round < 8; round++) {
+        const [found] = await desktop.pendingAutomaticPairing();
+        if (found?.workspaces) {
+          const shown = (await phone.automaticPairingState('w1'))!.comparisonCode!;
+          return { review: found, shown };
+        }
+        await phone.automaticPairingState('w1');
+      }
+      throw new Error('the request never reached the computer');
+    };
+    return { phone, desktop, signed, review };
+  };
+
+  it('offers only the workspace the new device opened when it asks for that one', async () => {
+    const pair = automatic(setup({ approverHas: ['w1', 'w2'] }));
+    try {
+      const { review, shown } = await pair.review();
+      expect(review.workspaces).toEqual([{ workspaceId: 'w1', name: 'w1' }]);
+      await pair.desktop.approveAutomaticPairing!(review.id, shown, ['w1', 'w2']);
+      expect(pair.signed).toEqual([['w1']]);
+    } finally {
+      pair.phone.disposeAutomaticPairing();
+      pair.desktop.disposeAutomaticPairing();
+    }
+  });
+
+  it('approves every requested workspace by default once the typed code matches', async () => {
+    const harness = setup({ approverHas: ['w1', 'w2'] });
+    const pair = automatic(harness, { requestEvery: true });
+    try {
+      const { review, shown } = await pair.review();
+      expect(review.workspaces).toEqual([
+        { workspaceId: 'w1', name: 'w1' },
+        { workspaceId: 'w2', name: 'w2' },
+      ]);
+      await pair.desktop.approveAutomaticPairing!(review.id, shown);
+      expect(pair.signed).toEqual([['w1', 'w2']]);
+      expect((await pair.phone.automaticPairingState('w1'))?.phase).toBe('joined');
+      expect([...harness.installed].sort()).toEqual(['w1', 'w2']);
+    } finally {
+      pair.phone.disposeAutomaticPairing();
+      pair.desktop.disposeAutomaticPairing();
+    }
+  });
+
+  it('keeps the request own workspace in a narrowed choice and signs the same set on a retry', async () => {
+    const harness = setup({ approverHas: ['w1', 'w2'] });
+    const pair = automatic(harness, { loseFirstApprovalReply: true, requestEvery: true });
+    try {
+      const { review, shown } = await pair.review();
+      await expect(pair.desktop.approveAutomaticPairing!(review.id, shown, ['w9'])).rejects.toThrow(
+        'synthetic lost approval reply'
+      );
+      await pair.desktop.approveAutomaticPairing!(review.id, shown, ['w1', 'w2']);
+      expect(pair.signed).toEqual([['w1'], ['w1']]);
+      expect((await pair.phone.automaticPairingState('w1'))?.phase).toBe('joined');
+      expect(harness.installed).toEqual(['w1']);
+    } finally {
+      pair.phone.disposeAutomaticPairing();
+      pair.desktop.disposeAutomaticPairing();
+    }
+  });
+
+  it('still ends the request after three wrong codes, signing no workspace', async () => {
+    const harness = setup({ approverHas: ['w1', 'w2'] });
+    const pair = automatic(harness, { requestEvery: true });
+    try {
+      const { review, shown } = await pair.review();
+      const wrong = String((Number(shown) + 1) % 1_000_000).padStart(6, '0');
+      for (const attemptsLeft of [2, 1])
+        await expect(
+          pair.desktop.approveAutomaticPairing!(review.id, wrong, ['w1', 'w2'])
+        ).rejects.toMatchObject({ code: 'pairing-code-mismatch', attemptsLeft });
+      await expect(
+        pair.desktop.approveAutomaticPairing!(review.id, wrong, ['w1', 'w2'])
+      ).rejects.toThrow('e2ee_pairing-code-locked');
+      await expect(pair.desktop.approveAutomaticPairing!(review.id, shown)).rejects.toThrow();
+      expect(pair.signed).toEqual([]);
+      expect(harness.installed).toEqual([]);
+    } finally {
+      pair.phone.disposeAutomaticPairing();
+      pair.desktop.disposeAutomaticPairing();
+    }
+  });
 });
