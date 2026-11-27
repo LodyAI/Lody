@@ -13,7 +13,8 @@ look like the owner's own and used to bypass sharing and project checks. #2149 t
 failed closed. The owner decided on 2026-10-31 to restore this capability, reusing the
 signed-original chain instead of adding a new token. A derived input now records its
 origin inside the signed row, and on the same machine it starts only with the origin
-member's rights. Shared-member cross-machine derivation is still undecided, so it fails closed. No real
+member's rights. Shared-member cross-machine derivation is still undecided, so it fails closed. Inbox result continuations, which have
+no signed row, reuse the same root rules for every delegating Turn of their batch. No real
 backend or device run has been made.
 
 ## Decision
@@ -61,6 +62,31 @@ The owner settled these points on 2026-10-31, relayed by the E2EE coordinator.
   machine signs the next input itself. A machine-signed input remains invalid as a
   `derivedFrom` root. Machine-owned inputs retain separate authorization. Owner recovery after the driving turn ended remains available.
 
+## Inbox result continuations
+
+When delegated results return, the Inbox starts a system continuation in the requester
+Session. It has no history user row, so the start claim used to refuse it in every encrypted
+workspace (#3420). The owner settled the following points for #3420.
+
+- **Proof.** The batch is authorized; no synthetic user row is written. Every member keeps
+  the `sourceTurnId` its Operation froze at acceptance. `claimContinuation` resolves each
+  distinct source exactly as a derived input resolves its origin: a signed row, then
+  `derivedFrom` to the human root. Automation and Schedule roots carry Owner authority only.
+- **Authority.** Each root's current rights, sharing policy, project scope and freshness
+  gate are rechecked at start. A root must belong to the batch's frozen requester, so one
+  person's results never run with another's authority.
+- **Mixed batches.** Every source must authorize. Before submission, the execution removes
+  refused results from its own prepared batch (`narrow`); they return to the queue
+  unconsumed and are never dropped. A later continuation with only refused results is
+  refused visibly; those results then wait for the requester's next input.
+- **Quota.** A shared member's root spends one of its 20 derived starts per continuation.
+  Owner roots stay unbounded. Retries of the same continuation reuse their reservation.
+- **Location.** The continuation runs on the requester's machine, where its source Turns
+  live, so it is never a cross-machine derivation.
+- **Pending evidence.** An unreadable origin or ledger defers the whole batch as
+  `SessionTurnExecutionDeferred`. The execution withdraws, and the Inbox relaunch backoff
+  retries it.
+
 ## Shared-member cross-machine derivation (future)
 
 This is a direction the owner prefers, not an approved design; it is left for later Spec
@@ -81,6 +107,12 @@ discussion.
   new wire format and needs desktop, Web and mobile changes.
 - _An origin taken from `author` or another unsigned field._ Rejected. A member could edit
   it without breaking the signature check.
+- _A machine-signed synthetic user row per continuation, carrying `derivedFrom`._ It would
+  reuse the start verifier unchanged, but it adds a history row to every batch. The owner
+  chose batch authorization so the history shape stays unchanged.
+- _One root per batch, or the most restrictive authority of all roots._ A single-root rule
+  would delay unrelated results, and a merged authority would let a refused source ride
+  along. Removing refused members keeps both properties.
 - _Threading a flag through the MCP and Operation layers._ Rejected. Any layer that
   dropped it would silently yield owner authority. Classification happens where the row is
   written instead.
@@ -102,4 +134,12 @@ discussion.
 - Signed-ledger/SQLite tests cover Owner cross-machine verification and starts, 22 Owner
   starts, member quota/retry isolation and steering policy. Member cross-machine
   derivation, hosted backend checks and real-device behavior remain unverified.
-- Related: [machine sharing](../../proposed/architecture/2026-10-28-e2ee-machine-sharing.md); [#2149](https://github.com/LodyAI/Lody/pull/2149).
+- A continuation's execution record uses the Inbox input ID with a null content digest,
+  because no signed content exists. Its journal and SQLite formats are unchanged. Nested
+  delegation from a continuation is still refused, because its driving Turn has no signed
+  row to classify.
+- Gate tests in `apps/cli/tests/e2ee-runtime-execution.test.ts` cover Owner and member roots,
+  revocation, the requester match, budget exhaustion, mixed refusals and pending evidence.
+  `apps/cli/tests/session-execution-service-inbox.test.ts` runs real SQLite Inbox batches
+  through the execution service. Real encrypted workspaces remain unverified.
+- Related: [Operation Inbox](2026-10-12-operation-inbox.md); [machine sharing](../../proposed/architecture/2026-10-28-e2ee-machine-sharing.md); [#2149](https://github.com/LodyAI/Lody/pull/2149).

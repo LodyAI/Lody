@@ -49,7 +49,13 @@ export const AgentMessageAuthorSchema = z.object({
 });
 
 export const MessageAuthorSchema = z.discriminatedUnion('kind', [
-  z.object({ v: z.literal(1), kind: z.literal('human'), userId: id }),
+  z.object({
+    v: z.literal(1),
+    kind: z.literal('human'),
+    userId: id,
+    /** The sender's own workspace display name at submission. Display only. */
+    name: label.optional(),
+  }),
   AgentMessageAuthorSchema,
   z.object({ v: z.literal(1), kind: z.literal('system') }),
 ]);
@@ -239,4 +245,15 @@ export function formatAgentSenderHeader(author: AgentMessageAuthor, sourceTitle?
     '[Lody] This message was sent by another agent, not by a human.',
     `Source Session: ${source}${agent ? `, ${agent}` : ''}`,
   ].join('\n');
+}
+
+/**
+ * The header an agent receives when a different human starts speaking in the
+ * Session. Facts only; the name is a display label, never an authorization claim.
+ */
+export function formatHumanSenderHeader(name: string | undefined): string {
+  const label = name?.replace(/\s+/g, ' ').trim().slice(0, 256);
+  return label
+    ? `[Lody] This message is from ${label}.`
+    : '[Lody] This message is from another workspace member.';
 }

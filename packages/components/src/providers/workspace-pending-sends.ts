@@ -31,6 +31,8 @@ export function createWorkspacePendingSends(args: {
   token(): string | null;
   localMachineId(): MachineId | null;
   onDelivered?(sessionId: SessionId, turnId: string): void;
+  /** Called before held in-memory sends are discarded on runtime disposal. */
+  onDisposeHeld?(sends: readonly PendingSessionSend[]): void;
 }) {
   const { runtime } = args;
   const content = {
@@ -191,6 +193,14 @@ export function createWorkspacePendingSends(args: {
     acknowledgeLanded: inputOwner.acknowledgeLanded,
     resume: inputOwner.resume,
     async dispose() {
+      const remainingHeld = held.getSnapshot();
+      if (remainingHeld.length > 0) {
+        try {
+          args.onDisposeHeld?.(remainingHeld);
+        } catch (error) {
+          console.warn('Preserving held send drafts failed', error);
+        }
+      }
       held.dispose();
       for (const release of unsubscribe) release();
       listeners.clear();

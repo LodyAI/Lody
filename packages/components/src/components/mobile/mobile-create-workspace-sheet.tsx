@@ -16,9 +16,11 @@ import {
 } from '@/lib/create-e2ee-workspace';
 import {
   clearPendingE2eeWorkspace,
+  listPendingE2eeWorkspaces,
   savePendingE2eeWorkspace,
   type PendingE2eeWorkspace,
 } from '@/lib/e2ee-workspace-storage';
+import { isE2eeActionTimeoutError } from '../../providers/cloud-e2ee-workspaces';
 import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-creation-option';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
@@ -253,18 +255,24 @@ export function MobileCreateWorkspaceSheet({
     setCreating(true);
     setCreateError(null);
     let submitted: PendingE2eeWorkspace | null = null;
+    let isFreshIntent = false;
     try {
       if (encrypted) {
         const port = platform.e2eeWorkspaces;
         if (!port?.prepareCreation || !accountId) throw new Error('e2ee_creation_unavailable');
-        const intent: PendingE2eeWorkspace = {
+        const trimmedName = name.trim();
+        const existingIntent = listPendingE2eeWorkspaces(localStorage, accountId).find(
+          (item) => item.name === trimmedName && item.slug === slug
+        );
+        const intent: PendingE2eeWorkspace = existingIntent ?? {
           accountId,
           requestId: crypto.randomUUID(),
-          name: name.trim(),
+          name: trimmedName,
           slug,
         };
         submitted = intent;
-        savePendingE2eeWorkspace(localStorage, intent);
+        isFreshIntent = !existingIntent;
+        if (isFreshIntent) savePendingE2eeWorkspace(localStorage, intent);
         const created = await createPreparedE2eeWorkspace(port, localStorage, intent);
         handleClose(false);
         onCreated?.(created.slug, created.workspaceId);
@@ -278,6 +286,7 @@ export function MobileCreateWorkspaceSheet({
       if (
         encrypted &&
         submitted &&
+        isFreshIntent &&
         err instanceof Error &&
         err.message === 'e2ee_creation_cancelled'
       ) {
@@ -290,7 +299,11 @@ export function MobileCreateWorkspaceSheet({
       if (err instanceof Error && err.message === 'e2ee_creation_cancelled') return;
       if (encrypted) {
         setCreateError(
-          isE2eeCreationNotEnabled(err) ? t('e2ee.create.notEnabled') : t('e2ee.create.failed')
+          isE2eeCreationNotEnabled(err)
+            ? t('e2ee.create.notEnabled')
+            : isE2eeActionTimeoutError(err)
+              ? t('e2ee.create.timeout')
+              : t('e2ee.create.failed')
         );
       } else {
         setCreateError(t('organization.createFailed'));

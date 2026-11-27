@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { validateNightlyCandidate } from '../../apps/electron/nightly-candidate.mjs';
 import { admitCloudNightly } from './nightly-cloud-source.mjs';
 
 const HEAD_SHA = 'a'.repeat(40);
@@ -44,6 +45,7 @@ await test('verified mode freezes expected_sha when it is an ancestor of main an
   assert.equal(result.skipValidate, false);
   assert.equal(result.candidate.ossSha, TESTED_SHA);
   assert.equal(result.candidate.privateSha, TESTED_SHA);
+  assert.doesNotThrow(() => validateNightlyCandidate(result.candidate));
 });
 
 await test('verified mode rejects expected_sha that is not on main', () => {
@@ -74,6 +76,6 @@ await test('emergency mode skips validate, records audit reason, and rejects emp
   assert.equal(result.publish, true);
   assert.equal(result.mode, 'emergency');
   assert.equal(result.skipValidate, true);
-  assert.equal(result.candidate.releaseMode, 'emergency');
-  assert.equal(result.candidate.releaseReason, 'hotfix desktop startup crash');
+  assert.equal(result.reason, 'hotfix desktop startup crash');
+  assert.doesNotThrow(() => validateNightlyCandidate(result.candidate));
 });

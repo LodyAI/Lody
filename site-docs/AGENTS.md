@@ -94,7 +94,8 @@ tuning shortcut are in [`README.md`](README.md).
   double-suffixed. Visible `DocsTitle` stays unbranded.
 - Canonical page URLs should match Cloudflare Pages' directory form (`/`, `/<locale>/`,
   `/docs/.../`, `/<locale>/docs/.../`); file URLs keep their extension. `/home` and
-  `/<locale>/home` are compatibility routes and should stay `noindex,follow`.
+  `/<locale>/home` are compatibility routes that stay `noindex,follow`, omit
+  `canonical`/`og:url`/`hreflang`/JSON-LD, and receive no internal links.
 - Unmatched URLs must not SPA-fallback to the homepage: prerender `/404` to
   `out/client/404.html` (Cloudflare Pages serves that file with HTTP 404). The 404
   document is `noindex,follow` and must not canonicalize to `/`. Do not add a Vite

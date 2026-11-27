@@ -241,6 +241,228 @@ it('waits for cloud save before re-enabling desktop usage sharing and disables t
   }
 });
 
+it('allows immediate opt-out when account query fails or lags and prevents LodyPostHogProvider from bouncing back to on', async () => {
+  const { createElement, act, useSyncExternalStore } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { PlatformContext } = await import('@lody/platform/react');
+  const { createStore: createPlatformStore } = await import('@lody/platform');
+  const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
+  const { UsageSharingRow } = await import('../src/components/settings/usage-sharing-row');
+  const { LodyPostHogProvider } = await import('../src/providers/posthog-provider');
+  const {
+    pendingAccountChoice,
+    readDeviceUsageChoice,
+    usageSharingAllowed,
+  } = await import('../src/lib/usage-sharing');
+  const { initI18n } = await import('../src/i18n');
+  await initI18n('en');
+
+  const makeQueryStore = (initial: { data: boolean | undefined; error: Error | null }) => {
+    let state = initial;
+    const listeners = new Set<() => void>();
+    return {
+      get: () => state,
+      set: (next: { data: boolean | undefined; error: Error | null }) => {
+        state = next;
+        for (const listener of listeners) listener();
+      },
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+  };
+
+  vi.stubGlobal('__LODY_ELECTRON__', true);
+  let diskChoice: boolean | null = null;
+  const nativeWrites: boolean[] = [];
+  vi.stubGlobal('ipc', {
+    invoke: async (channel: string, arg?: unknown) => {
+      if (channel === 'app.getUsageSharingEnabled') return diskChoice;
+      if (channel === 'app.isUsageSharingDisabledByEnv') return false;
+      if (channel === 'app.setUsageSharingEnabled') {
+        diskChoice = arg as boolean;
+        nativeWrites.push(arg as boolean);
+        return;
+      }
+      throw new Error(`unexpected ipc: ${channel}`);
+    },
+  });
+
+  const session = createPlatformStore<import('@lody/platform').PlatformSessionState>({
+    status: 'authenticated',
+    user: { id: 'opaque_user_optout' },
+  });
+  const queryStore = makeQueryStore({ data: undefined, error: new Error('backend unavailable') });
+  const observedQueryArgs: unknown[] = [];
+  const observedMutations: unknown[] = [];
+  let rejectSave = true;
+
+  const platform = {
+    ...TEST_CLOUD_PLATFORM,
+    identity: { ...TEST_CLOUD_PLATFORM.identity, session },
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useOptionalAuthenticatedQuery: (_op: unknown, args: unknown) => {
+        observedQueryArgs.push(args);
+        const snap = useSyncExternalStore(queryStore.subscribe, queryStore.get, queryStore.get);
+        return { ...snap, retry: () => {} };
+      },
+      useMutation: () => async (args: unknown) => {
+        observedMutations.push(args);
+        if (rejectSave) throw new Error('offline');
+        return null;
+      },
+    },
+  } as unknown as typeof TEST_CLOUD_PLATFORM;
+
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  const peerHost = document.createElement('div');
+  const peerRoot = createRoot(peerHost);
+  const toggle = () => host.querySelector<HTMLButtonElement>('[role="switch"]')!;
+  try {
+    // 1) Query failed: switch is ON but MUST remain clickable so opt-out fails closed immediately.
+    await act(async () =>
+      root.render(
+        createElement(
+          PlatformContext.Provider,
+          { value: platform },
+          createElement(LodyPostHogProvider, null, createElement(UsageSharingRow))
+        )
+      )
+    );
+    expect(observedQueryArgs[0]).toEqual({});
+    expect(toggle().getAttribute('aria-checked')).toBe('true');
+    expect(toggle().disabled).toBe(false);
+
+    await act(async () => toggle().click());
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(diskChoice).toBe(false);
+    expect(usageSharingAllowed()).toBe(false);
+    expect(observedMutations).toEqual([{ enabled: false }]);
+    expect(pendingAccountChoice('opaque_user_optout')).toBe(false);
+
+    // 2) Server comes back online with stale account=true and save succeeds before query flips to false.
+    // Neither this window nor a second window/reload may bounce the choice back to true.
+    rejectSave = false;
+    observedMutations.length = 0;
+    await act(async () => queryStore.set({ data: true, error: null }));
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(diskChoice).toBe(false);
+    expect(observedMutations).toEqual([{ enabled: false }]);
+
+    // Mount a second provider (simulating another Electron window or reload) while account is still true:
+    await act(async () =>
+      peerRoot.render(
+        createElement(
+          PlatformContext.Provider,
+          { value: platform },
+          createElement(LodyPostHogProvider, null)
+        )
+      )
+    );
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(diskChoice).toBe(false);
+    expect(usageSharingAllowed()).toBe(false);
+
+    // Once server query confirms account=false, pending marker clears and opt-out remains stable.
+    await act(async () => queryStore.set({ data: false, error: null }));
+    expect(pendingAccountChoice('opaque_user_optout')).toBeNull();
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(diskChoice).toBe(false);
+
+    // 3) Re-enable and then click OFF against a healthy backend: only 1 mutation fires, no bounce-back.
+    observedMutations.length = 0;
+    await act(async () => toggle().click());
+    await act(async () => queryStore.set({ data: true, error: null }));
+    expect(toggle().getAttribute('aria-checked')).toBe('true');
+    expect(observedMutations).toEqual([{ enabled: true }]);
+
+    observedMutations.length = 0;
+    nativeWrites.length = 0;
+    await act(async () => toggle().click());
+    expect(observedMutations).toEqual([{ enabled: false }]);
+    expect(nativeWrites).toEqual([false]);
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(pendingAccountChoice('opaque_user_optout')).toBe(false);
+
+    await act(async () => queryStore.set({ data: false, error: null }));
+    expect(pendingAccountChoice('opaque_user_optout')).toBeNull();
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+  } finally {
+    await act(async () => {
+      root.unmount();
+      peerRoot.unmount();
+    });
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('preserves environment-forced telemetry opt-out in LodyPostHogProvider despite account=true', async () => {
+  const { createElement, act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { PlatformContext } = await import('@lody/platform/react');
+  const { createStore: createPlatformStore } = await import('@lody/platform');
+  const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
+  const { LodyPostHogProvider } = await import('../src/providers/posthog-provider');
+  const { readDeviceUsageChoice, usageSharingAllowed } = await import('../src/lib/usage-sharing');
+
+  vi.stubGlobal('__LODY_ELECTRON__', true);
+  const nativeWrites: boolean[] = [];
+  vi.stubGlobal('ipc', {
+    invoke: async (channel: string, arg?: unknown) => {
+      if (channel === 'app.getUsageSharingEnabled') return false;
+      if (channel === 'app.isUsageSharingDisabledByEnv') return true;
+      if (channel === 'app.setUsageSharingEnabled') {
+        nativeWrites.push(arg as boolean);
+        return;
+      }
+      throw new Error(`unexpected ipc: ${channel}`);
+    },
+  });
+  const session = createPlatformStore<import('@lody/platform').PlatformSessionState>({
+    status: 'authenticated',
+    user: { id: 'opaque_user_env' },
+  });
+  const platform = {
+    ...TEST_CLOUD_PLATFORM,
+    identity: { ...TEST_CLOUD_PLATFORM.identity, session },
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useOptionalAuthenticatedQuery: () => ({ data: true, error: null, retry: () => {} }),
+      useMutation: () => async () => null,
+    },
+  } as unknown as typeof TEST_CLOUD_PLATFORM;
+
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          PlatformContext.Provider,
+          { value: platform },
+          createElement(LodyPostHogProvider, null)
+        )
+      )
+    );
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(usageSharingAllowed()).toBe(false);
+    expect(nativeWrites).toEqual([]);
+  } finally {
+    await act(async () => root.unmount());
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+  }
+});
+
 it('renders the web cookie consent banner only in European consent regions and updates gtag on choice', async () => {
   const { createElement, act } = await import('react');
   const { createRoot } = await import('react-dom/client');

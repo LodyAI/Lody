@@ -151,7 +151,6 @@ jobs:
         with:
           ref: ${{ inputs.source-sha }}
           persist-credentials: false
-          submodules: recursive
 
       - name: Setup pnpm
         if: vars.SELFHOST_E2E_ENABLED == 'true'
@@ -216,11 +215,12 @@ jobs:
           (
             set -euo pipefail
             rm -rf "${SELFHOST_DIR}/lody-oss"
-            git clone --recursive --no-checkout "${OSS_WORKTREE}" "${SELFHOST_DIR}/lody-oss"
+            git clone --no-checkout "${OSS_WORKTREE}" "${SELFHOST_DIR}/lody-oss"
             git -C "${SELFHOST_DIR}/lody-oss" checkout --detach "${CANDIDATE_SHA}"
+            git -C "${SELFHOST_DIR}/lody-oss" submodule update --init --depth 1 -- packages
             cd "${SELFHOST_DIR}"
             corepack pnpm install --frozen-lockfile --prefer-offline
-            corepack pnpm --filter acp-extension-core build
+            corepack pnpm --filter acp-extension-core --filter acp-extension-dsh build
             corepack pnpm --dir lody-oss/e2e exec playwright install --with-deps chromium
             xvfb-run -a corepack pnpm verify:release -- --only cloud
           ) >"${SELFHOST_LOG}" 2>&1
@@ -234,10 +234,14 @@ jobs:
         run: rm -rf "${{ github.workspace }}/.selfhost-e2e" "${{ runner.temp }}/selfhost-cloud.log"
 
   selfhost-e2e:
-    name: Self-host E2EE & sync E2E
+    name: Self-host E2EE & sync E2E (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-24.04
     environment: ${{ inputs.target-environment }}
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     env:
       NODE_VERSION: '22.23.4'
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
@@ -248,7 +252,6 @@ jobs:
         with:
           ref: ${{ inputs.source-sha }}
           persist-credentials: false
-          submodules: recursive
 
       - name: Setup pnpm
         if: vars.SELFHOST_E2E_ENABLED == 'true'
@@ -302,7 +305,9 @@ jobs:
           CANDIDATE_SHA: ${{ inputs.source-sha }}
           SELFHOST_DIR: ${{ github.workspace }}/.selfhost-e2e
           SELFHOST_LOG: ${{ runner.temp }}/selfhost-e2e.log
-          SELFHOST_SUITE_LABEL: selfhost-e2e
+          SELFHOST_SUITE_LABEL: selfhost-e2e-${{ matrix.shard }}of3
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: '3'
           LODY_LORO_STREAMS_WS_ENABLED: '1'
           FEISHU_ALERT_WEBHOOK_URL: ${{ secrets.FEISHU_ALERT_WEBHOOK_URL }}
           FEISHU_ALERT_WEBHOOK_SECRET: ${{ secrets.FEISHU_ALERT_WEBHOOK_SECRET }}
@@ -313,12 +318,13 @@ jobs:
           (
             set -euo pipefail
             rm -rf "${SELFHOST_DIR}/lody-oss"
-            git clone --recursive --no-checkout "${OSS_WORKTREE}" "${SELFHOST_DIR}/lody-oss"
+            git clone --no-checkout "${OSS_WORKTREE}" "${SELFHOST_DIR}/lody-oss"
             git -C "${SELFHOST_DIR}/lody-oss" checkout --detach "${CANDIDATE_SHA}"
+            git -C "${SELFHOST_DIR}/lody-oss" submodule update --init --depth 1 -- packages
             cd "${SELFHOST_DIR}"
             corepack pnpm install --frozen-lockfile --prefer-offline
-            corepack pnpm --filter acp-extension-core build
-            corepack pnpm verify:release -- --only e2e
+            corepack pnpm --filter acp-extension-core --filter acp-extension-dsh build
+            corepack pnpm verify:release -- --only e2e --shard "${SHARD_INDEX}/${SHARD_TOTAL}"
           ) >"${SELFHOST_LOG}" 2>&1
           EXIT_CODE=$?
           set -e

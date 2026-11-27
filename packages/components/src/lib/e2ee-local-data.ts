@@ -50,14 +50,30 @@ export function readEncryptedLocalIdentity(
   accountId: string,
   workspaceId: string
 ): E2eeLocalDataIdentity | null {
-  const stored = localStorage.getItem(locatorKey(accountId, workspaceId));
+  const key = locatorKey(accountId, workspaceId);
+  const stored = localStorage.getItem(key);
   if (stored === null) return null;
-  const parsed = Identity.safeParse(JSON.parse(stored));
-  if (
-    !parsed.success ||
-    parsed.data.accountId !== accountId ||
-    parsed.data.workspaceId !== workspaceId
-  )
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(stored);
+  } catch {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* Ignore storage removal errors on corrupt entries. */
+    }
+    return null;
+  }
+  const parsed = Identity.safeParse(decoded);
+  if (!parsed.success) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* Ignore storage removal errors on corrupt entries. */
+    }
+    return null;
+  }
+  if (parsed.data.accountId !== accountId || parsed.data.workspaceId !== workspaceId)
     throw new Error('e2ee_invalid_local_identity');
   return parsed.data;
 }

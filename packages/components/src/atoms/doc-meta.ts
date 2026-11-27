@@ -617,7 +617,14 @@ async function fetchDocMeta(
   return Object.keys(entry.meta).length > 0 ? entry.meta : null;
 }
 
+export const DOC_META_SCAN_RETRY_DELAYS_MS = [1_000, 3_000] as const;
+export const docMetaRescanNonceAtom = atom(0);
+export const triggerDocMetaRescanAtom = atom(null, (_get, set) => {
+  set(docMetaRescanNonceAtom, (nonce) => nonce + 1);
+});
+
 export const docMetaSubscriptionAtom = atomEffect((get, set) => {
+  get(docMetaRescanNonceAtom);
   const runtime = get(activeWorkspaceRuntimeAtom);
   if (!runtime) {
     set(clearDocMetaCacheAtom);
@@ -1045,46 +1052,67 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   // later partial live patch must not clobber complete metadata already present in
   // the flock snapshot, and a resolving snapshot must not undo an archive/restore
   // already observed live.
-  void buildDocMetaCache(runtime.repo).then(
-    (cache) => {
-      if (cancelled) return;
-      set(sessionMetaCacheAtom, (prev) =>
-        mergeBootstrapMetaCache(cache.sessions, prev, existenceStateByDocId)
-      );
-      set(machineMetaCacheAtom, (prev) =>
-        mergeBootstrapMetaCache(cache.machines, prev, existenceStateByDocId)
-      );
-      set(agentConfigMetaCacheAtom, (prev) =>
-        mergeBootstrapMetaCache(cache.agents, prev, existenceStateByDocId)
-      );
-      set(docMetaCacheReadyAtom, true);
-      set(docMetaCacheScopeAtom, {
-        runtime,
-        workspaceId: runtime.workspaceId,
-        workspaceSlug: runtime.workspaceSlug,
-        ready: true,
-      });
-    },
-    (error: unknown) => {
-      if (cancelled) return;
-      // The scope stays not ready (the workspace keeps reading as syncing), so
-      // record why: the stuck-sync report names this failure instead of a hang.
-      console.warn('[doc-meta] initial metadata scan failed', {
-        workspaceId: runtime.workspaceId,
-        error,
-      });
-      set(docMetaCacheScopeAtom, {
-        runtime,
-        workspaceId: runtime.workspaceId,
-        workspaceSlug: runtime.workspaceSlug,
-        ready: false,
-        scanFailure: { errorType: describeErrorType(error) },
-      });
-    }
-  );
+  let scanRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  const runInitialScan = (attempt: number) => {
+    void buildDocMetaCache(runtime.repo).then(
+      (cache) => {
+        if (cancelled) return;
+        set(sessionMetaCacheAtom, (prev) =>
+          mergeBootstrapMetaCache(cache.sessions, prev, existenceStateByDocId)
+        );
+        set(machineMetaCacheAtom, (prev) =>
+          mergeBootstrapMetaCache(cache.machines, prev, existenceStateByDocId)
+        );
+        set(agentConfigMetaCacheAtom, (prev) =>
+          mergeBootstrapMetaCache(cache.agents, prev, existenceStateByDocId)
+        );
+        set(docMetaCacheReadyAtom, true);
+        set(docMetaCacheScopeAtom, {
+          runtime,
+          workspaceId: runtime.workspaceId,
+          workspaceSlug: runtime.workspaceSlug,
+          ready: true,
+        });
+      },
+      (error: unknown) => {
+        if (cancelled) return;
+        const retryDelayMs = DOC_META_SCAN_RETRY_DELAYS_MS[attempt];
+        if (retryDelayMs !== undefined) {
+          console.warn('[doc-meta] initial metadata scan failed; scheduling retry', {
+            workspaceId: runtime.workspaceId,
+            attempt: attempt + 1,
+            retryDelayMs,
+            error,
+          });
+          scanRetryTimer = setTimeout(() => {
+            scanRetryTimer = null;
+            if (!cancelled) runInitialScan(attempt + 1);
+          }, retryDelayMs);
+          return;
+        }
+        // Exhausted bounded automatic retries; record the failure for manual rescan/diagnostics.
+        console.warn('[doc-meta] initial metadata scan failed', {
+          workspaceId: runtime.workspaceId,
+          error,
+        });
+        set(docMetaCacheScopeAtom, {
+          runtime,
+          workspaceId: runtime.workspaceId,
+          workspaceSlug: runtime.workspaceSlug,
+          ready: false,
+          scanFailure: { errorType: describeErrorType(error) },
+        });
+      }
+    );
+  };
+  runInitialScan(0);
 
   return () => {
     cancelled = true;
+    if (scanRetryTimer) {
+      clearTimeout(scanRetryTimer);
+      scanRetryTimer = null;
+    }
     for (const docId of markedPendingDocIds) set(docMetaProjectionPendingAtomFamily(docId), false);
     if (flushTimer) {
       clearTimeout(flushTimer);

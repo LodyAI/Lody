@@ -647,7 +647,22 @@ export function LoginPage({
   useKeyboardAwareScrollIntoView(panelRef);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const focusEmailInput = useCallback(() => {
-    emailInputRef.current?.focus({ preventScroll: true });
+    const input = emailInputRef.current;
+    if (!input) return;
+    // Never steal focus when the user already moved into the email panel during
+    // the 320ms view-slot transition (e.g. focused the password field); doing so
+    // redirects password keystrokes into the email input in plaintext.
+    const activeElement = typeof document === 'undefined' ? null : document.activeElement;
+    if (
+      activeElement &&
+      activeElement !== document.body &&
+      activeElement !== document.documentElement &&
+      (input.form?.contains(activeElement) ||
+        activeElement.closest('[data-login-panel="1"]') !== null)
+    ) {
+      return;
+    }
+    input.focus({ preventScroll: true });
   }, []);
   const loginViewedRef = useRef(false);
   const electronOAuthQuery = getElectronOAuthQuery();

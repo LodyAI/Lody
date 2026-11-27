@@ -127,6 +127,46 @@ export class E2eeRpcOriginals {
       }
     });
   }
+  replaceSent(
+    key: string,
+    expectedFrame: Uint8Array,
+    record: StoredRpcOriginal
+  ): StoredRpcOriginal {
+    return this.database((db) => {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const existing = this.readRow(
+          db.prepare('SELECT * FROM originals WHERE direction=? AND key=?').get('sent', key)
+        );
+        if (
+          existing &&
+          (existing.frame.length !== expectedFrame.length ||
+            existing.frame.some((byte, index) => byte !== expectedFrame[index]))
+        ) {
+          db.exec('COMMIT');
+          return existing;
+        }
+        db.prepare('INSERT OR REPLACE INTO originals VALUES(?,?,?,?,?,?)').run(
+          'sent',
+          key,
+          record.target,
+          record.signer,
+          record.frame,
+          digest(record)
+        );
+        const saved = this.readRow(
+          db.prepare('SELECT * FROM originals WHERE direction=? AND key=?').get('sent', key)
+        );
+        if (!saved || digest(saved) !== digest(record))
+          throw new Error('e2ee_rpc_original_conflict');
+        db.exec('COMMIT');
+        return saved;
+      } catch (cause) {
+        db.exec('ROLLBACK');
+        throw cause;
+      }
+    });
+  }
   readResponse(key: string, sequence: number): Uint8Array | undefined {
     return this.database((db) => {
       const row = db

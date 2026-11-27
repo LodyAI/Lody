@@ -58,6 +58,7 @@ export function pageHead(args: {
   publishedTime?: string;
   image?: string;
   alternates?: Alternate[];
+  canonical?: boolean;
   robots?: Robots;
   /** Extra <link> tags appended after canonical/alternates (e.g. RSS feeds). */
   links?: Array<Record<string, string>>;
@@ -65,7 +66,8 @@ export function pageHead(args: {
   jsonLd?: Record<string, unknown> | readonly Record<string, unknown>[];
 }): SiteHead {
   const description = args.description ?? DEFAULT_DESCRIPTION;
-  const canonical = absolutePageUrl(args.path);
+  const includeCanonical = args.canonical !== false;
+  const canonical = includeCanonical ? absolutePageUrl(args.path) : undefined;
   const image = new URL(args.image ?? OG_IMAGE_PATH, SITE_URL).toString();
   const robots = robotsContent(args.robots);
   const jsonLdNodes = args.jsonLd ? (Array.isArray(args.jsonLd) ? args.jsonLd : [args.jsonLd]) : [];
@@ -77,7 +79,7 @@ export function pageHead(args: {
       ...(robots ? [{ name: 'robots', content: robots }] : []),
       { property: 'og:title', content: args.title },
       { property: 'og:description', content: description },
-      { property: 'og:url', content: canonical },
+      ...(canonical ? [{ property: 'og:url', content: canonical }] : []),
       { property: 'og:site_name', content: 'Lody' },
       { property: 'og:locale', content: OG_LOCALE_BY_BCP47[args.locale] },
       { property: 'og:type', content: args.type ?? 'website' },
@@ -91,7 +93,7 @@ export function pageHead(args: {
       { name: 'twitter:image', content: image },
     ],
     links: [
-      { rel: 'canonical', href: canonical },
+      ...(canonical ? [{ rel: 'canonical', href: canonical }] : []),
       ...(args.alternates ?? []).map((alternate) => ({
         rel: 'alternate',
         hrefLang: alternate.lang,

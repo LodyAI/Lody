@@ -230,7 +230,7 @@ export async function prepareSignedIntent(
     )
       throw notSent('sessions.sendError.e2eeTimeout');
     if (
-      /^(?:e2ee_)?(?:identity_pending|key_pending|key_unavailable|key-update-required|waiting_for_key|runtime_unavailable|approval-required)$/.test(
+      /^(?:e2ee_)?(?:identity_pending|key_pending|key_unavailable|key-update-required|waiting_for_key|runtime_unavailable|approval-required|epoch-mismatch|epoch_mismatch|stale-epoch|stale_epoch)$/.test(
         code ?? ''
       )
     )

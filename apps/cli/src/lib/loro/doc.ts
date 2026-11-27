@@ -161,6 +161,7 @@ import {
 } from '@/lib/agent-config-machine-flock';
 import { installCliHttpGlobalDispatcher } from '@/utils/http-transport';
 import { createCliStreamsTransport } from './streams-transport';
+import { resolveCliLoroStreamsWebSocketEnabled } from '@/platform/presence';
 
 // Cleanup failures can reach MCP and synced history. Project known causes instead
 // of copying arbitrary SDK messages, URLs, credentials, or Effect owner state.
@@ -1208,6 +1209,10 @@ export class LoroDocumentManager {
       content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
       bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,
+      webSocketEnabled: resolveCliLoroStreamsWebSocketEnabled(
+        undefined,
+        process.env.LODY_LORO_STREAMS_WS_ENABLED
+      ),
       tokenProvider: streamsTokens.legacy,
       repo: this.repo,
       documentRemoteCursorStore: this.documentRemoteCursorStore,

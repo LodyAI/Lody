@@ -13,9 +13,10 @@ Demo sequencing and screenshot notes live in
 ## Links off this site
 
 - `site-root-provider.tsx` overrides the Fumadocs Tanstack `Link`: hrefs in
-  `APP_OWNED_PATHS` (`/login`) stay plain anchors, because the client router owns no
-  such route and would render the site 404 over the web app. Register new web-app
-  paths there rather than patching one link.
+  `APP_OWNED_PATHS` (`/login`) stay plain anchors with `rel="nofollow"` (shared with
+  `SiteAnchor`), because the client router owns no such route and crawlers should not
+  follow auth entrypoints. Register new web-app paths in `lib/site-url.mjs` rather
+  than patching one link.
 - RouterLink `to` receives only a pathname; pass search and hash separately so
   `trailingSlash` cannot rewrite a fragment or query.
 

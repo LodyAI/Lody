@@ -20,9 +20,11 @@ import {
 } from '@/lib/create-e2ee-workspace';
 import {
   clearPendingE2eeWorkspace,
+  listPendingE2eeWorkspaces,
   savePendingE2eeWorkspace,
   type PendingE2eeWorkspace,
 } from '@/lib/e2ee-workspace-storage';
+import { isE2eeActionTimeoutError } from '../../providers/cloud-e2ee-workspaces';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { useTranslation } from 'react-i18next';
@@ -414,20 +416,26 @@ function CreateWorkspaceAuthed({
     });
 
     let submittedIntent: PendingE2eeWorkspace | null = null;
+    let isFreshIntent = false;
     try {
       if (useEncryption) {
         const port = platform.e2eeWorkspaces;
         if (!port?.prepareCreation || !accountId || paidRequired) {
           throw new Error('Encrypted workspace creation unavailable');
         }
-        const intent: PendingE2eeWorkspace = {
+        const trimmedName = workspaceName.trim();
+        const existingIntent = listPendingE2eeWorkspaces(localStorage, accountId).find(
+          (item) => item.name === trimmedName && item.slug === workspaceSlug
+        );
+        const intent: PendingE2eeWorkspace = existingIntent ?? {
           accountId,
           requestId: crypto.randomUUID(),
-          name: workspaceName.trim(),
+          name: trimmedName,
           slug: workspaceSlug,
         };
         submittedIntent = intent;
-        savePendingE2eeWorkspace(localStorage, intent);
+        isFreshIntent = !existingIntent;
+        if (isFreshIntent) savePendingE2eeWorkspace(localStorage, intent);
         const result = await createPreparedE2eeWorkspace(port, localStorage, intent);
         if (accountRef.current !== accountId) return;
         await navigate({
@@ -509,6 +517,7 @@ function CreateWorkspaceAuthed({
       if (
         useEncryption &&
         submittedIntent &&
+        isFreshIntent &&
         err instanceof Error &&
         err.message === 'e2ee_creation_cancelled'
       ) {
@@ -536,9 +545,11 @@ function CreateWorkspaceAuthed({
             : t('organization.createFailed')
           : isE2eeCreationNotEnabled(err)
             ? t('e2ee.create.notEnabled')
-            : refusalReason
-              ? t('e2ee.create.requestRemoved', { code: refusalReason })
-              : t('e2ee.create.failed')
+            : isE2eeActionTimeoutError(err)
+              ? t('e2ee.create.timeout')
+              : refusalReason
+                ? t('e2ee.create.requestRemoved', { code: refusalReason })
+                : t('e2ee.create.failed')
       );
       captureCreateFailed('create_rejected', startMs);
     } finally {

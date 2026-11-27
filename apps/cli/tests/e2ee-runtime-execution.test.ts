@@ -3428,3 +3428,213 @@ it.each(
     f.close();
   }
 });
+
+describe('encrypted Inbox result continuation authority', () => {
+  const selfDevice = 'cc'.repeat(32);
+  const ownerDevice = 'aa'.repeat(32);
+  const memberDevice = 'bb'.repeat(32);
+  const memberRequester = 'e2ee-member:member-crypto';
+  type Original =
+    | import('../src/lib/e2ee/agent-execution').VerifiedExecutionOriginal
+    | { state: 'pending-evidence' }
+    | { state: 'refused'; reason: 'e2ee_signature_invalid' };
+  type Grant = import('../src/lib/e2ee/agent-execution').ExecutionAuthorization;
+  const continuationGate = (directory: string, rows: Map<string, Original>) => {
+    const grants = new Map<string, Grant>([
+      [ownerDevice, { _tag: 'Authorized', principal: 'owner' }],
+      [memberDevice, { _tag: 'Authorized' }],
+    ]);
+    const gate = makeEncryptedAgentExecution({
+      machineUserId: 'synthetic-machine-account',
+      genesis: '11'.repeat(32),
+      workspaceId: 'workspace',
+      targetMachineId: 'machine',
+      journal: lazyExecutionJournal(join(directory, 'execution.sqlite'), () => 0),
+      selfDevice,
+      resolveVerifiedOriginal: (intent) => Effect.sync(() => rows.get(intent.userTurnId)),
+      authorizeExecution: (_workspaceId, device) =>
+        Effect.sync(() => grants.get(device) ?? { _tag: 'Denied', reason: 'not-authorized' }),
+      ledgerIdentity: {
+        ownsDevice: (device) => Effect.succeed(device === ownerDevice),
+        memberDevice: () => Effect.succeed(memberDevice),
+      },
+    });
+    return { gate, grants };
+  };
+  const continuation = (inputId: string, sourceTurnIds: string[], requesterUserId: string) => ({
+    workspaceId: 'workspace',
+    sessionId: 'requester',
+    inputId,
+    requesterUserId,
+    sourceTurnIds,
+  });
+  const withDirectory = (body: (directory: string) => Effect.Effect<void, unknown>) =>
+    Effect.scoped(
+      Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(join(tmpdir(), 'inbox-continuation-'))),
+        (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+      ).pipe(Effect.flatMap(body))
+    );
+
+  effectIt.effect('runs Owner continuations, including derived roots, without a start budget', () =>
+    withDirectory((directory) =>
+      Effect.gen(function* () {
+        const { gate } = continuationGate(
+          directory,
+          new Map<string, Original>([
+            ['owner-root', { requesterDevice: ownerDevice, requesterCryptoUserId: 'owner-crypto' }],
+            [
+              'owner-child',
+              {
+                requesterDevice: selfDevice,
+                requesterCryptoUserId: 'machine-crypto',
+                machineAuthored: true,
+                derivedFrom: { sessionId: 'requester', userTurnId: 'owner-root' },
+              },
+            ],
+          ])
+        );
+        for (let n = 0; n < 25; n++)
+          expect(
+            yield* gate.claimContinuation(
+              continuation(`inbox:${n}`, ['owner-root', 'owner-child'], 'synthetic-machine-account')
+            )
+          ).toMatchObject({ state: 'claimed', principal: 'owner' });
+        expect(
+          (yield* gate.claimContinuation(
+            continuation('inbox:0', ['owner-root'], 'synthetic-machine-account')
+          )).state
+        ).toBe('uncertain');
+      })
+    )
+  );
+
+  effectIt.effect(
+    'runs a shared member continuation as that member, within its root budget, until revoked',
+    () =>
+      withDirectory((directory) =>
+        Effect.gen(function* () {
+          const { gate } = continuationGate(
+            directory,
+            new Map<string, Original>([
+              [
+                'member-root',
+                { requesterDevice: memberDevice, requesterCryptoUserId: 'member-crypto' },
+              ],
+            ])
+          );
+          expect(
+            yield* gate.claimContinuation(continuation('inbox:0', ['member-root'], memberRequester))
+          ).toMatchObject({
+            state: 'claimed',
+            principal: 'derived',
+            origin: { requesterDevice: memberDevice },
+          });
+          expect(
+            (yield* gate.claimContinuation(
+              continuation('inbox:borrowed', ['member-root'], 'synthetic-machine-account')
+            )).state
+          ).toBe('denied');
+          for (let n = 1; n < 20; n++)
+            expect(
+              (yield* gate.claimContinuation(
+                continuation(`inbox:${n}`, ['member-root'], memberRequester)
+              )).state
+            ).toBe('claimed');
+          expect(
+            (yield* gate.claimContinuation(
+              continuation('inbox:over-budget', ['member-root'], memberRequester)
+            )).state
+          ).toBe('denied');
+
+          const revoked = continuationGate(
+            directory,
+            new Map<string, Original>([
+              [
+                'second-root',
+                { requesterDevice: memberDevice, requesterCryptoUserId: 'member-crypto' },
+              ],
+            ])
+          );
+          expect(
+            (yield* revoked.gate.claimContinuation(
+              continuation('inbox:before-revoke', ['second-root'], memberRequester)
+            )).state
+          ).toBe('claimed');
+          revoked.grants.set(memberDevice, { _tag: 'Denied', reason: 'not-authorized' });
+          expect(
+            yield* revoked.gate.claimContinuation(
+              continuation('inbox:after-revoke', ['second-root'], memberRequester)
+            )
+          ).toEqual({ state: 'denied', reason: 'e2ee_sender_not_authorized' });
+        })
+      )
+  );
+
+  effectIt.effect('names refused sources of a mixed batch without claiming it', () =>
+    withDirectory((directory) =>
+      Effect.gen(function* () {
+        const { gate } = continuationGate(
+          directory,
+          new Map<string, Original>([
+            [
+              'member-root',
+              { requesterDevice: memberDevice, requesterCryptoUserId: 'member-crypto' },
+            ],
+            ['tampered', { state: 'refused', reason: 'e2ee_signature_invalid' }],
+            [
+              'other-person',
+              { requesterDevice: ownerDevice, requesterCryptoUserId: 'owner-crypto' },
+            ],
+          ])
+        );
+        expect(
+          yield* gate.claimContinuation(
+            continuation(
+              'inbox:mixed',
+              ['member-root', 'tampered', 'other-person'],
+              memberRequester
+            )
+          )
+        ).toEqual({ state: 'partial', denied: ['tampered', 'other-person'] });
+        expect(
+          (yield* gate.claimContinuation(
+            continuation('inbox:mixed', ['member-root'], memberRequester)
+          )).state
+        ).toBe('claimed');
+        expect(
+          yield* gate.claimContinuation(
+            continuation('inbox:refused', ['tampered'], memberRequester)
+          )
+        ).toEqual({ state: 'denied', reason: 'e2ee_signature_invalid' });
+      })
+    )
+  );
+
+  effectIt.effect('waits for unavailable evidence instead of refusing any part', () =>
+    withDirectory((directory) =>
+      Effect.gen(function* () {
+        const rows = new Map<string, Original>([
+          ['owner-root', { requesterDevice: ownerDevice, requesterCryptoUserId: 'owner-crypto' }],
+          ['unsynced', { state: 'pending-evidence' }],
+          ['tampered', { state: 'refused', reason: 'e2ee_signature_invalid' }],
+        ]);
+        const { gate, grants } = continuationGate(directory, rows);
+        const owner = 'synthetic-machine-account';
+        expect(
+          (yield* gate.claimContinuation(
+            continuation('inbox:wait', ['owner-root', 'unsynced', 'tampered'], owner)
+          )).state
+        ).toBe('pending-evidence');
+        grants.set(ownerDevice, { _tag: 'Denied', reason: 'unavailable' });
+        expect(
+          (yield* gate.claimContinuation(continuation('inbox:ledger', ['owner-root'], owner))).state
+        ).toBe('pending-evidence');
+        grants.set(ownerDevice, { _tag: 'Authorized', principal: 'owner' });
+        expect(
+          (yield* gate.claimContinuation(continuation('inbox:ledger', ['owner-root'], owner))).state
+        ).toBe('claimed');
+      })
+    )
+  );
+});

@@ -8,6 +8,7 @@ import {
   buildElectronWebLoginCallbackUrl,
 } from '../src/lib/electron-oauth';
 import { runNativeOAuthSignIn, waitForNativeOAuthReturn } from '../src/lib/native-oauth';
+import { suppressEmailSignInRedirectFetchPlugin } from '../src/lib/auth';
 
 describe('email-verification-callback', () => {
   const baseInput = {
@@ -101,6 +102,31 @@ describe('email-verification-callback', () => {
       });
 
       expect(params.has('redirect')).toBe(false);
+    });
+  });
+
+  describe('suppressEmailSignInRedirectFetchPlugin', () => {
+    it('disables Better Auth auto-redirect for /sign-in/email so verified sign-in never races to /email-verified', () => {
+      const emailPayload = {
+        redirect: true,
+        url: 'https://app.lody.ai/email-verified?view=email&client_id=electron',
+        token: 'tok',
+      };
+      suppressEmailSignInRedirectFetchPlugin.hooks.onSuccess({
+        request: { url: new URL('https://auth.lody.ai/api/auth/sign-in/email') },
+        data: emailPayload,
+      });
+      expect(emailPayload.redirect).toBe(false);
+
+      const socialPayload = {
+        redirect: true,
+        url: 'https://github.com/login/oauth/authorize',
+      };
+      suppressEmailSignInRedirectFetchPlugin.hooks.onSuccess({
+        request: { url: new URL('https://auth.lody.ai/api/auth/sign-in/social') },
+        data: socialPayload,
+      });
+      expect(socialPayload.redirect).toBe(true);
     });
   });
 });

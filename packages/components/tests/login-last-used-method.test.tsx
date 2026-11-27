@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Provider, createStore } from 'jotai';
+import { frameData, frameSteps, MotionGlobalConfig } from 'framer-motion';
 
 import { LoginPage } from '../src/components/login-page';
 import { AuthProvider } from '../src/providers/convex-provider';
@@ -155,6 +156,55 @@ describe('login page last-used method', () => {
     await remount();
 
     expect(buttonsMarkedLastUsed()).toEqual(['Continue with email']);
+  });
+
+  // Entering the email view animates for 320ms before calling onEntered(). If a
+  // user has already focused the password field during that transition, the
+  // completion callback must not steal focus back to the email input (which
+  // would route password keystrokes into the visible email field).
+  it('does not steal focus from the password field when the email view transition completes', async () => {
+    const prevManualTiming = MotionGlobalConfig.useManualTiming;
+    const prevTimestamp = frameData.timestamp;
+    const prevDelta = frameData.delta;
+    MotionGlobalConfig.useManualTiming = true;
+    const stepFrame = (deltaMs: number) => {
+      frameData.delta = deltaMs;
+      frameData.timestamp += deltaMs;
+      frameData.isProcessing = true;
+      for (const step of Object.values(frameSteps)) {
+        step.process(frameData);
+      }
+      frameData.isProcessing = false;
+    };
+    try {
+      await render();
+      await click(/Continue with email/);
+
+      const stage = container.querySelector<HTMLElement>('[data-login-stage]');
+      const password = container.querySelector<HTMLInputElement>('#email-auth-password');
+      expect(stage?.dataset.loginPhase).toBe('moving');
+      expect(password).not.toBeNull();
+
+      await act(async () => {
+        password!.focus();
+      });
+      expect(document.activeElement).toBe(password);
+
+      // Motion's manual frame clock drives the 320ms transition, so real rAF never races it.
+      await act(async () => {
+        for (let i = 0; i < 12; i++) {
+          stepFrame(40);
+        }
+      });
+
+      expect(stage?.dataset.loginPhase).toBe('visible');
+      expect(document.activeElement).toBe(password);
+    } finally {
+      frameData.isProcessing = false;
+      frameData.delta = prevDelta;
+      frameData.timestamp = prevTimestamp;
+      MotionGlobalConfig.useManualTiming = prevManualTiming;
+    }
   });
 
   // The iOS shell overlays the keyboard without resizing the WebView, and the

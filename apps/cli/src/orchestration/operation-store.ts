@@ -18,6 +18,7 @@ import { OrchestrationConnection } from './platform/database';
 
 import { discoveryCursor, DiscoveryPageShape } from '@/lib/discovery-query';
 import {
+  describeLodyChainBudget,
   LODY_OPERATION_COMMAND_MAX_BYTES,
   LODY_OPERATION_COMPLETION_MAX_BYTES,
   LodyOperationIdSchema,
@@ -923,6 +924,7 @@ export class LodyOperationStore {
   }
 
   snapshot(operation: StoredLodyOperation): LodyOperationSnapshot {
+    const chainBudget = describeLodyChainBudget(operation.initiatorChainDepth);
     if (operation.state === 'finished') {
       if (!operation.completion || !operation.finishedAt) {
         throw new Error('Finished Operation is missing completion fields.');
@@ -935,6 +937,7 @@ export class LodyOperationStore {
         deadlineAt: operation.deadlineAt,
         finishedAt: operation.finishedAt,
         completion: operation.completion,
+        ...(chainBudget ? { chainBudget } : {}),
       };
     }
     const totalItems = operation.items.length;
@@ -947,6 +950,7 @@ export class LodyOperationStore {
       deadlineAt: operation.deadlineAt,
       ...(totalItems > 1 ? { progress: { totalItems, terminalItems } } : {}),
       items: operation.items,
+      ...(chainBudget ? { chainBudget } : {}),
     };
   }
 

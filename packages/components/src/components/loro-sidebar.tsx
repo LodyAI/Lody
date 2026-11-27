@@ -664,6 +664,13 @@ export interface LoroSidebarProps {
   /** The filter trigger element rendered in-flow on the first visible section
       header. Caller-owned so its open state survives remounting between slots. */
   desktopFilterAction?: ReactNode;
+  /** Desktop only: the applied filter (Owner is …), held above the scrolling list. */
+  desktopFilterBar?: ReactNode;
+  /**
+   * Desktop only: `F` pressed inside the sidebar outside a text field. The
+   * caller opens its people filter, as Linear's filter shortcut does.
+   */
+  onFilterShortcut?: () => void;
   /**
    * In-flow content rendered after {@link sessionListProps} inside the scroll
    * viewport (workspace mode only). LoroAppSidebar uses this to place the Chats
@@ -688,6 +695,8 @@ export interface LoroSidebarProps {
   organizeMode?: LoroSidebarOrganizeMode;
   /** Current chat scope (My Tasks / All Tasks). Surfaced in the footer filter popover. */
   chatScope?: LoroSidebarChatScope;
+  /** All Tasks narrowed to chosen people; the empty state then offers to show every task. */
+  chatScopeNarrowed?: boolean;
   /** Items rendered when {@link organizeMode} is 'updated' or 'status'. */
   updatedItems?: SidebarUpdatedItem[];
   /** Pinned sessions rendered as a dedicated section above every organize mode. */
@@ -1293,6 +1302,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   activeNav = null,
   topContent,
   desktopFilterAction,
+  desktopFilterBar,
+  onFilterShortcut,
   afterSessionListContent,
   bottomFloatingContent,
   repoSections = defaultRepoSections,
@@ -1300,6 +1311,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   sessionListProps,
   organizeMode = 'workspace',
   chatScope = 'my',
+  chatScopeNarrowed = false,
   updatedItems,
   pinnedItems,
   pinnedSectionCollapsed = false,
@@ -1585,10 +1597,11 @@ export const LoroSidebar = memo(function LoroSidebar({
     !hasPinnedItems &&
     !afterSessionListContent &&
     !sessionListProps?.isLoading;
+  const chatScopeIsFiltered = chatScope === 'my' || chatScopeNarrowed;
   const workspaceEmptyState = isWorkspaceEmpty ? (
     <div {...stylex.props(shellStyles.emptyState)} data-sidebar-empty-state={chatScope}>
       <div {...stylex.props(shellStyles.emptyMark)}>
-        {chatScope === 'my' ? (
+        {chatScopeIsFiltered ? (
           <ListFilter
             {...stylex.props(shellStyles.emptyMarkGlyph)}
             strokeWidth={1.8}
@@ -1603,7 +1616,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         )}
       </div>
       <p className={cn(SIDEBAR_CONTROL_TEXT_CLASS, stylex.props(shellStyles.emptyTitle).className)}>
-        {chatScope === 'my' ? mergedLabels.filter.emptyMyTasks : mergedLabels.filter.emptyAllTasks}
+        {chatScopeIsFiltered ? mergedLabels.filter.emptyMyTasks : mergedLabels.filter.emptyAllTasks}
       </p>
       <p
         className={cn(
@@ -1611,11 +1624,11 @@ export const LoroSidebar = memo(function LoroSidebar({
           stylex.props(shellStyles.emptyDescription).className
         )}
       >
-        {chatScope === 'my'
+        {chatScopeIsFiltered
           ? mergedLabels.filter.emptyMyTasksHint
           : mergedLabels.filter.emptyAllTasksHint}
       </p>
-      {chatScope === 'my' && onChatScopeChange ? (
+      {chatScopeIsFiltered && onChatScopeChange ? (
         <Button
           type="button"
           variant="secondary"
@@ -1957,6 +1970,18 @@ export const LoroSidebar = memo(function LoroSidebar({
       // No overflow-hidden here: the resize sash extends past the right border
       // so its hit area straddles the edge; the inner content div clips instead.
       className={cn(shellProps.className, className)}
+      onKeyDown={
+        !isMobile && onFilterShortcut
+          ? (event) => {
+              if (event.key !== 'f' && event.key !== 'F') return;
+              if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+              const target = event.target as HTMLElement;
+              if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
+              event.preventDefault();
+              onFilterShortcut();
+            }
+          : undefined
+      }
       style={
         canResize
           ? {
@@ -2083,6 +2108,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           />
         </div>
 
+        {!isMobile ? desktopFilterBar : null}
         <ScrollArea
           viewportRef={scrollViewportRef}
           className={cn(

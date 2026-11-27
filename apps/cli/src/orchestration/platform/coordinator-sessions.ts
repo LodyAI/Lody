@@ -54,6 +54,15 @@ export const coordinatorSessionsLayer = (
       try: () => store.inbox.historyReceipts(options.workspaceId),
       catch: (cause) => cause,
     }),
+    depthLimited: Effect.try({
+      try: () => store.inbox.depthLimitedIntents(options.workspaceId),
+      catch: (cause) => cause,
+    }),
+    acknowledgeDepthLimited: (intentId) =>
+      Effect.try({
+        try: () => store.inbox.acknowledgeDepthLimited(intentId),
+        catch: (cause) => cause,
+      }),
     wakeInbox: io(() => inbox.wake()),
     session: (id) =>
       io(async () => {

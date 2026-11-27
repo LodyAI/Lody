@@ -125,7 +125,11 @@ import { initI18n } from '@/i18n';
 import { MachineSharingController } from '@/components/settings/e2ee/machine-sharing-settings';
 import { CloudPlatformProvider as CloudProvider } from '@/providers/cloud-platform-provider';
 import { AuthenticatedConvexContext } from '@/hooks/use-authenticated-convex';
-import { createCloudE2eeWorkspaces } from '@/providers/cloud-e2ee-workspaces';
+import {
+  E2EE_WORKSPACE_ACTION_TIMEOUT_MS,
+  E2eeActionTimeoutError,
+  createCloudE2eeWorkspaces,
+} from '@/providers/cloud-e2ee-workspaces';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { readAuthBootstrapSnapshot, writeStoredAuthToken } from '@/lib/auth-bootstrap';
 
@@ -1456,5 +1460,77 @@ describe('cloud authentication request lifecycle', () => {
     reply = 'allowed';
     await expect(action({})).resolves.toBe('allowed');
     expect(recovery).not.toHaveBeenCalled();
+  });
+});
+
+describe('createCloudE2eeWorkspaces bounded action timeout', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('bounds hung create and deleteWorkspace actions and absorbs late rejections', async () => {
+    vi.useFakeTimers();
+    const hungCreate = Promise.withResolvers<never>();
+    const hungDelete = Promise.withResolvers<never>();
+    const hash = 'ab'.repeat(32);
+    const port = createCloudE2eeWorkspaces({
+      session: () => ({
+        status: 'authenticated',
+        user: { id: 'account-a', email: 'a@example.com', name: 'A', image: null },
+      }),
+      prepareCreation: async (input) => ({
+        ...input,
+        genesisRecordHex: 'aa',
+        genesisHashHex: hash,
+        deviceCredentialHash: 'ee',
+      }),
+      remote: {
+        create: () => hungCreate.promise,
+        deleteWorkspace: () => hungDelete.promise,
+        describe: unexpectedE2eeWorkspaceOperation,
+        history: unexpectedE2eeWorkspaceOperation,
+      },
+      refreshWorkspaces: async () => {},
+    });
+
+    const prepared = await port.prepareCreation!({
+      accountId: 'account-a',
+      requestId: 'req-timeout',
+      name: 'Private',
+      slug: 'private',
+    });
+
+    const createAttempt = port.create({
+      accountId: 'account-a',
+      requestId: 'req-timeout',
+      name: 'Private',
+      slug: 'private',
+      genesisRecordHex: prepared.genesisRecordHex,
+      deviceCredentialHash: prepared.deviceCredentialHash,
+      developerMode: true,
+    });
+    const deleteAttempt = port.deleteWorkspace({ workspaceId: 'ws-timeout' });
+    // Attach catch handlers before advancing fake timers to avoid transient unhandled rejections.
+    const createOutcome = createAttempt.then(
+      () => null,
+      (error) => error
+    );
+    const deleteOutcome = deleteAttempt.then(
+      () => null,
+      (error) => error
+    );
+
+    await vi.advanceTimersByTimeAsync(E2EE_WORKSPACE_ACTION_TIMEOUT_MS);
+
+    const [createError, deleteError] = await Promise.all([createOutcome, deleteOutcome]);
+    expect(createError).toBeInstanceOf(E2eeActionTimeoutError);
+    expect((createError as E2eeActionTimeoutError).code).toBe('e2ee_timeout');
+    expect(deleteError).toBeInstanceOf(E2eeActionTimeoutError);
+    expect((deleteError as E2eeActionTimeoutError).code).toBe('e2ee_timeout');
+
+    // Late rejections from the half-open transport must not surface as unhandled rejections.
+    hungCreate.reject(new Error('late socket close'));
+    hungDelete.reject(new Error('late socket close'));
+    await Promise.resolve();
   });
 });

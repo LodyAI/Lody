@@ -61,7 +61,11 @@ A durable denial converges instead of re-verifying forever. `admit` re-checks ea
 queued input at dispatch; a `no` carrying `terminalState`, a `guard:` verdict, or a
 reason in the durable set (revoked grant or authorization, deleted target, ended or
 mismatched pending work) moves the receipt to `cancelling`, so the engine's cancel
-path removes the queue row and settles it. A queued receipt whose row is still
+path removes the queue row and settles it. An input already promoted to history is
+cancelled there too: `cancelInput` reaches the Session execution owner, which marks
+the unstarted Turn `canceled` (directly, or through the in-flight dispatch that holds
+the turn-start lease) so it is neither redispatched nor handed to the dispatch
+watcher's retry. A queued receipt whose row is still
 live runs the same check inside `reconcile` before re-signalling the queue.
 Stopped and archived targets stay transient — both are user-reversible — and keep
 the retrying `queued`/`blocked` states by design. The alternative, a boolean

@@ -2,6 +2,7 @@ import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Cause, Deferred, Effect, Exit, Fiber, Result } from 'effect';
 import * as P from '@lody/e2ee-core/protocol';
+import { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import * as Crypto from '../src/internal/crypto/content';
 import { copyEpochKeyBytes, disposeEpochKey } from '../src/internal/foundation/epoch-key';
 import { envelopeFixture } from './keys/fixture';
@@ -444,6 +445,66 @@ describe('purpose-specific opaque realtime content', () => {
             )
           ).toBe('invalid-content-key');
           expect(hex(copyEpochKeyBytes(input.epochKey))).toBe(vector.epochKey);
+        })
+      )
+    );
+  });
+
+  it('distinguishes active-device epoch-mismatch from revoked-device unauthorized in realtime binding', async () => {
+    const f = envelopeFixture(1);
+    const epochKeys = new Map<number, Uint8Array>([
+      [0, copyEpochKeyBytes(f.secret)],
+      [1, new Uint8Array(32).fill(0x77)],
+    ]);
+    const makeBinding = (signer: P.DeviceSigner) =>
+      makeRealtimeContentBinding({
+        genesis: f.context.genesis,
+        resource: 'rpc:target',
+        signer,
+        ledger: f.ledger,
+        readEpochKey: (epoch) =>
+          Effect.sync(() => read(P.Bytes.epochKey(new Uint8Array(epochKeys.get(epoch)!)))),
+      });
+
+    const failureCode = (value: Result.Result<unknown, unknown>) =>
+      Result.isFailure(value) && typeof value.failure === 'object' && value.failure !== null
+        ? (value.failure as { readonly code?: unknown }).code
+        : undefined;
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const ownerBinding = yield* makeBinding(f.owner.signer);
+          const phoneBinding = yield* makeBinding(f.phone.signer);
+          const epoch0Req = yield* ownerBinding.sealRequest(new Uint8Array([1, 2, 3]));
+          const epoch0Res = yield* phoneBinding.sealResponse(new Uint8Array([4, 5, 6]), 0);
+
+          f.append([7, 1, new Uint8Array(32).fill(91), new Uint8Array(72).fill(92)]);
+
+          expect(failureCode(yield* Effect.result(phoneBinding.openRequest(epoch0Req)))).toBe(
+            'epoch-mismatch'
+          );
+          expect(
+            failureCode(yield* Effect.result(phoneBinding.sealResponse(new Uint8Array([7]), 0)))
+          ).toBe('epoch-mismatch');
+          expect(
+            failureCode(
+              yield* Effect.result(ownerBinding.openResponse(epoch0Res, hex(f.phone.raw), 1))
+            )
+          ).toBe('epoch-mismatch');
+
+          f.append([5, f.phone.raw]);
+          expect(
+            failureCode(yield* Effect.result(phoneBinding.sealRequest(new Uint8Array([8]))))
+          ).toBe('unauthorized');
+          expect(
+            failureCode(yield* Effect.result(phoneBinding.sealResponse(new Uint8Array([8]), 0)))
+          ).toBe('unauthorized');
+          expect(
+            failureCode(
+              yield* Effect.result(ownerBinding.openResponse(epoch0Res, hex(f.phone.raw), 1))
+            )
+          ).toBe('unauthorized');
         })
       )
     );

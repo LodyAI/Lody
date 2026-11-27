@@ -163,9 +163,10 @@ describe('SessionAccessControl', () => {
         expect([...granted]).toEqual([]);
         await act(async () => panelButton('Add member').click());
         const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-          (item) => item.textContent === 'New Carol'
+          (candidate) => candidate.textContent?.includes('New Carol')
         );
         expect(item).toBeDefined();
+        expect(item!.querySelector('[data-size="mini"]')?.textContent).toBe('NC');
         await act(async () => item!.click());
         expect([...granted]).toEqual(['new']);
         expect(changes).toEqual(['reader', 'new']);
@@ -180,6 +181,137 @@ describe('SessionAccessControl', () => {
       }
     }
   );
+
+  it('renders mini user avatars before candidate names with image and fallback support, preserving keyboard selection', async () => {
+    const validPhoto =
+      'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="16" height="16"%3E%3C/svg%3E';
+    const brokenPhoto = 'data:image/svg+xml,broken';
+    const originalImage = window.Image;
+    class ControlledImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      referrerPolicy = '';
+      crossOrigin: string | null = null;
+      complete = false;
+      naturalWidth = 0;
+      private _src = '';
+      get src() {
+        return this._src;
+      }
+      set src(value: string) {
+        this._src = value;
+        if (value === validPhoto) {
+          this.complete = true;
+          this.naturalWidth = 16;
+          this.onload?.();
+        } else {
+          this.complete = true;
+          this.naturalWidth = 0;
+          this.onerror?.();
+        }
+      }
+    }
+    Object.defineProperty(window, 'Image', {
+      configurable: true,
+      writable: true,
+      value: ControlledImage,
+    });
+    try {
+      const added: string[] = [];
+      await render({
+        state: {
+          ...baseState,
+          visibility: 'team',
+          access: 'edit',
+          canManage: true,
+          ownerUserId: 'owner',
+          memberUserIds: ['existing'],
+          availableMembers: [
+            { userId: 'owner', name: 'Owner Alice', image: validPhoto },
+            { userId: 'existing', name: 'Existing Dave' },
+            { userId: 'grace', name: 'Grace', image: validPhoto },
+            { userId: 'marco', name: 'marco-dev', image: brokenPhoto },
+            { userId: 'zoe', name: 'Zoe Chen', image: null },
+          ],
+          setMemberReadAccess: async (userId, shared) => {
+            if (shared) added.push(userId);
+          },
+        },
+      });
+      await openPanel();
+      await act(async () => panelButton('Add member').click());
+
+      const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+      // Only candidates not already in the owner/member list are shown.
+      expect(items).toHaveLength(3);
+
+      const byName = (name: string) =>
+        items.find((item) => item.lastElementChild?.textContent === name)!;
+
+      // Candidate with loaded photo: mini avatar renders the candidate's image before the name.
+      const grace = byName('Grace');
+      expect(grace).toBeDefined();
+      const graceAvatar = grace.querySelector<HTMLElement>('[data-size="mini"]');
+      expect(graceAvatar).not.toBeNull();
+      expect(graceAvatar!.closest('[aria-hidden="true"]')).not.toBeNull();
+      const graceImg = graceAvatar!.querySelector<HTMLImageElement>('img');
+      expect(graceImg).not.toBeNull();
+      expect(graceImg!.getAttribute('src')).toBe(validPhoto);
+      expect(
+        Boolean(
+          graceAvatar!.compareDocumentPosition(grace.lastElementChild!) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+        )
+      ).toBe(true);
+
+      // Candidate with broken image falls back to existing UserAvatar initials.
+      const marco = byName('marco-dev');
+      expect(marco).toBeDefined();
+      const marcoAvatar = marco.querySelector<HTMLElement>('[data-size="mini"]');
+      expect(marcoAvatar).not.toBeNull();
+      expect(marcoAvatar!.querySelector('img')).toBeNull();
+      expect(marcoAvatar!.textContent).toBe('M');
+
+      // Candidate without image renders existing UserAvatar initials before the name.
+      const zoe = byName('Zoe Chen');
+      expect(zoe).toBeDefined();
+      const zoeAvatar = zoe.querySelector<HTMLElement>('[data-size="mini"]');
+      expect(zoeAvatar).not.toBeNull();
+      expect(zoeAvatar!.querySelector('img')).toBeNull();
+      expect(zoeAvatar!.textContent).toBe('ZC');
+
+      // Keyboard navigation (ArrowDown + typeahead matching member name, not initials prefix) + Enter selects candidate.
+      const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+      expect(menu).not.toBeNull();
+      await act(async () => {
+        (document.activeElement ?? menu).dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+        );
+      });
+      expect(document.activeElement).toBe(marco);
+      await act(async () => {
+        (document.activeElement ?? menu).dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'z', bubbles: true, cancelable: true })
+        );
+        (document.activeElement ?? menu).dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'o', bubbles: true, cancelable: true })
+        );
+      });
+      expect(document.activeElement).toBe(zoe);
+      await act(async () => {
+        zoe.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      });
+      expect(added).toEqual(['zoe']);
+    } finally {
+      Object.defineProperty(window, 'Image', {
+        configurable: true,
+        writable: true,
+        value: originalImage,
+      });
+    }
+  });
 
   it('retains cached candidates and team sharing controls when directory refresh fails, with a local retry', async () => {
     let retried = false;

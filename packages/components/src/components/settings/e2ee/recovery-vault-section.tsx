@@ -23,6 +23,7 @@ import {
   type RecoveryPlan,
   type RecoveryRestoreResult,
   type RecoveryReplacementPort,
+  type RecoveryReplacementStep,
   type RecoverySecurityEvent,
   type RecoveryUnlockMethod,
   type RecoveryUnlockOptions,
@@ -233,6 +234,7 @@ type Result =
         | 'e2ee.recovery.passwordRemoved'
         | 'e2ee.recovery.passwordRemoveIncomplete';
     }
+  | { kind: 'replacePending'; workspace?: string; step?: RecoveryReplacementStep }
   | {
       kind: 'restored';
       results: readonly RecoveryRestoreResult[];
@@ -523,6 +525,15 @@ export function RecoveryVaultSection({
     void run(() => action(chosen), chosen);
   };
 
+  const resolvePendingWorkspace = (workspace?: string): string | undefined => {
+    const trimmed = workspace?.trim();
+    if (!trimmed) return undefined;
+    const matched =
+      plan?.covered.find((row) => row.id === trimmed || row.name === trimmed) ??
+      plan?.uncovered.find((row) => row.id === trimmed || row.name === trimmed);
+    return matched?.name.trim() || trimmed;
+  };
+
   const finishReplacement = async (
     replace: RecoveryReplacementPort,
     compromised: boolean
@@ -533,9 +544,15 @@ export function RecoveryVaultSection({
       markChecked(null);
       return { kind: 'notice', key: 'e2ee.recovery.replaceFinished' };
     }
-    return finished.outcome === 'Pending'
-      ? { kind: 'notice', key: 'e2ee.recovery.replacePending' }
-      : undefined;
+    if (finished.outcome === 'Pending') {
+      const workspace = resolvePendingWorkspace(finished.workspace);
+      return {
+        kind: 'replacePending',
+        ...(workspace ? { workspace } : {}),
+        ...(finished.step ? { step: finished.step } : {}),
+      };
+    }
+    return undefined;
   };
   const short = (vaultId: string) => vaultId.slice(0, 12);
   // Saved but not yet verified still needs its setup finished: a held receipt or an
@@ -1095,6 +1112,13 @@ export function RecoveryVaultSection({
   const resultBanners = (
     <>
       {result?.kind === 'notice' && <p aria-live="polite">{t(result.key)}</p>}
+      {result?.kind === 'replacePending' && (
+        <p aria-live="polite">
+          {result.workspace
+            ? t('e2ee.recovery.replacePendingWorkspace', { workspace: result.workspace })
+            : t('e2ee.recovery.replacePending')}
+        </p>
+      )}
       {result?.kind === 'created' && (
         <p aria-live="polite">
           {result.method === 'passkey'
@@ -1410,12 +1434,17 @@ export function RecoveryVaultSection({
               onClick={() =>
                 void run(async () => {
                   const abandoned = await replacement.abandon();
+                  if (abandoned.outcome === 'Pending') {
+                    const workspace = resolvePendingWorkspace(abandoned.workspace);
+                    return {
+                      kind: 'replacePending',
+                      ...(workspace ? { workspace } : {}),
+                      ...(abandoned.step ? { step: abandoned.step } : {}),
+                    };
+                  }
                   return {
                     kind: 'notice',
-                    key:
-                      abandoned.outcome === 'Pending'
-                        ? 'e2ee.recovery.replacePending'
-                        : 'e2ee.recovery.replaceAbandoned',
+                    key: 'e2ee.recovery.replaceAbandoned',
                   };
                 })
               }

@@ -1541,7 +1541,8 @@ function inboxExecutionFixture(
   prompt: (blocks: ContentBlock[]) => Promise<unknown>,
   build?: (blocks: SessionInputBlock[]) => Promise<ContentBlock[]>,
   automaticFinished?: () => void,
-  sessionId = 'inbox-session' as SessionId
+  sessionId = 'inbox-session' as SessionId,
+  encryptedExecution?: ReturnType<typeof makeEncryptedAgentExecution>
 ) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-inbox-execution-'));
   const now = () => Date.parse('2026-10-12T00:00:00Z');
@@ -1615,6 +1616,7 @@ function inboxExecutionFixture(
   };
   let liveSession: typeof session | undefined = session;
   const deps = createBaseDeps({
+    ...(encryptedExecution ? { encryptedExecution } : {}),
     sessionManager: {
       getSession: () => liveSession,
       detachSession: (old: typeof session) => {
@@ -1709,7 +1711,14 @@ function inboxExecutionFixture(
     userName: 'User',
     userEmail: 'user@example.com',
   };
-  const add = (id: string, depth = 0, origins: string[] = [], finish = true, userId = 'user-1') => {
+  const add = (
+    id: string,
+    depth = 0,
+    origins: string[] = [],
+    finish = true,
+    userId = 'user-1',
+    sourceTurnId = 'older-source'
+  ) => {
     store.accept({
       workspaceId: 'workspace-1' as WorkspaceId,
       ownerMachineId: 'machine-1' as MachineId,
@@ -1720,7 +1729,7 @@ function inboxExecutionFixture(
       canonicalCommand: { id },
       frozenContinuationConfig: {
         inputConfig: { prompt: 'OBSOLETE_REQUEST' },
-        sourceTurnId: 'older-source',
+        sourceTurnId,
         notificationOriginTurnIds: origins,
       },
       initiatorChainDepth: depth,

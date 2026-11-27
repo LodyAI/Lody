@@ -341,6 +341,7 @@ export function DesktopSessionDetailLayout({
               }
               initial={false}
               animate={{ x: splitSidebarOpen ? 0 : '100%' }}
+              inert={!splitSidebarOpen}
               aria-hidden={!splitSidebarOpen}
               transition={{
                 duration: animatesSidebar ? 0.22 : 0,
