@@ -184,6 +184,6 @@ owner 要求手机扫完码就能直接加入、不再有额外步骤（会话 `
 
 owner 已在会话 `911f5684` 批准（经转达）。它取代上文记录的扫码即加入二维码在批准窗口和「设置 → 工作区 → 添加设备」中的呈现方式，以及新设备页上的扫码加入入口。「添加设备」卡片改为说明 6 位码流程，并保留离线配对码入口；平台的 `accountPairingCode` 操作保持不变。每台新设备都直接显示 6 位码，电脑还会把它显示为 `lody://auto-pair?id&code` 二维码。批准窗口只有一个输码框；手机可以扫新设备屏幕代替输入；外部 `auto-pair` 链接会显示携带的码供比对，仍需显式点击批准，并经过本地比对与输错计数。运行时不再提前呈现 preparing 状态的审批，那只是为了提前显示二维码。
 
-窗口列出 `E2eeAutomaticPairingReview.workspaces`，请求所属的排在最前，全部默认勾选，请求所属的那个固定勾选，并且只传出列出的 id。`approveAutomaticPairing(id, code, workspaceIds?)` 先比对验证码；比对一致的那次调用固定所选集合，忽略不在列表里的 id，始终包含请求所属的工作区，之后每次重试都签同一集合，因为原生流程会把改变了的范围拒为 `pairing-used`。请求方仍只列出它打开的那个工作区。owner 已批准另行改为请求全部工作区；这需要改造 `packages/e2ee-client/test/account-pairing.test.ts` 中多窗口测试所保护的按工作区划分的原生请求，并扩大一次约 20 位比对所能准入的范围。默认设备名为 `Lody desktop`、`Lody iOS`、`Lody Android` 和 `Lody Web`。
+窗口列出 `E2eeAutomaticPairingReview.workspaces`，请求所属的排在最前，全部默认勾选，请求所属的那个固定勾选，并且只传出列出的 id。`approveAutomaticPairing(id, code, workspaceIds?)` 先比对验证码；比对一致的那次调用固定所选集合，忽略不在列表里的 id，始终包含请求所属的工作区，之后每次重试都签同一集合，因为原生流程会把改变了的范围拒为 `pairing-used`。后续改动起，请求方会请求宿主列出的全部加密工作区（不带 `workspace` 调用 `requestAccountPairing`，即扫码即加入早已使用的路径）；如果列表里没有它打开的那个工作区，就以 `pairing-unavailable` 结束自己的提交，因为没有批准方能回应它。它只等待自己的工作区加入；同步期间会继续读取该请求，让其他已批准工作区的 claim 完成；取消勾选的工作区是 `omitted` 而不是 pending。原生宿主仍只保留一个请求：第二个窗口（即使是另一个工作区）会得到 `pairing-elsewhere`，而它的工作区现在通常已被第一个窗口的请求覆盖。`packages/e2ee-client/test/account-pairing.test.ts` 中的多窗口测试在这次改动上超时，只是因为测试编排按所请求的工作区识别第二个窗口；现在改为给该窗口独立的宿主，并断言第一个请求覆盖两个工作区。默认设备名为 `Lody desktop`、`Lody iOS`、`Lody Android` 和 `Lody Web`。
 
 系统相机打开的 `lody://pair` 链接不再在新设备页上加入；该页只显示自己的码。

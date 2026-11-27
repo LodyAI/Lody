@@ -293,26 +293,29 @@ describe('portable account pairing workflow', () => {
         },
         requestAccountPairing: async (
           input: Parameters<NonNullable<E2eeWorkspaceRuntime['requestAccountPairing']>>[0]
-        ) => {
-          if (input.workspace?.workspaceId === 'w2') {
-            // Another window expands the shared native catalog while the first
-            // request is suspended in its workspace inventory read.
-            await preparingFirst;
-            available = hints;
-            releaseInventory();
-          }
-          return Effect.runPromise(
+        ) =>
+          Effect.runPromise(
             native.requestAccountPairing({
               pairingString: input.pairingString,
               expiresAt: input.expiresAt,
               preserveExisting: input.preserveExisting,
               workspaceId: input.workspace?.workspaceId,
             })
-          );
-        },
+          ),
         cancelAccountPairing: (input?: { expectedLookupId: string }) =>
           Effect.runPromise(native.cancelAccountPairing(input)),
       } as unknown as E2eeWorkspaceRuntime;
+      const secondHost = {
+        ...host,
+        requestAccountPairing: async (
+          input: Parameters<NonNullable<E2eeWorkspaceRuntime['requestAccountPairing']>>[0]
+        ) => {
+          await preparingFirst;
+          available = hints;
+          releaseInventory();
+          return host.requestAccountPairing!(input);
+        },
+      } as E2eeWorkspaceRuntime;
       const common = {
         relay: discovery,
         account: () => 'synthetic-account',
@@ -327,7 +330,7 @@ describe('portable account pairing workflow', () => {
       // Separate coordinators model separate renderers; a per-renderer request
       // slot cannot protect the shared host from this interleaving.
       const first = makeAutomaticPairingRuntime({ ...common, runtime: host });
-      const second = makeAutomaticPairingRuntime({ ...common, runtime: host });
+      const second = makeAutomaticPairingRuntime({ ...common, runtime: secondHost });
       const desktop = makeAutomaticPairingRuntime({
         ...common,
         runtime: {
@@ -360,6 +363,7 @@ describe('portable account pairing workflow', () => {
         const original = [...submitted.values()][0]!;
         expect(original.workspaces).toEqual([
           { workspaceId: 'w1', genesisHash: hints[0]!.genesisHash },
+          { workspaceId: 'w2', genesisHash: hints[1]!.genesisHash },
         ]);
         const saved = await Effect.runPromise(store.latestRequest());
         expect(saved?.lookupId).toBe(original.lookupId);
@@ -367,7 +371,12 @@ describe('portable account pairing workflow', () => {
         const decoded = decodePairingRequest(saved!.request);
         expect(decoded).toMatchObject({
           _tag: 'Success',
-          success: { rows: [expect.objectContaining({ genesis: new Uint8Array(32).fill(0x11) })] },
+          success: {
+            rows: [
+              expect.objectContaining({ genesis: new Uint8Array(32).fill(0x11) }),
+              expect.objectContaining({ genesis: new Uint8Array(32).fill(0x22) }),
+            ],
+          },
         });
         if (
           cleanup === 'renderer-recovery' ||
@@ -1536,8 +1545,8 @@ describe('approval coverage across workspaces', () => {
     harness: ReturnType<typeof setup>,
     options: {
       loseFirstApprovalReply?: boolean;
-      /** The phone's host asks for every workspace instead of the one it opened. */
-      requestEvery?: boolean;
+      /** A host whose request names only this workspace, whatever the runtime asks. */
+      onlyRequest?: string;
     } = {}
   ) => {
     const rows = new Map<string, E2eeAutomaticPairingRecord>();
@@ -1588,9 +1597,10 @@ describe('approval coverage across workspaces', () => {
         requestAccountPairing: (
           input: Parameters<typeof harness.requester.requestAccountPairing>[0]
         ) => {
-          const { workspace: _named, ...every } = input as typeof input & { workspace?: unknown };
           return Effect.runPromise(
-            harness.requester.requestAccountPairing(options.requestEvery ? every : input)
+            harness.requester.requestAccountPairing(
+              options.onlyRequest ? { ...input, workspaceId: options.onlyRequest } : input
+            )
           );
         },
         accountPairingRequest: () => Effect.runPromise(harness.requester.accountPairingRequest()),
@@ -1645,7 +1655,7 @@ describe('approval coverage across workspaces', () => {
   };
 
   it('offers only the workspace the new device opened when it asks for that one', async () => {
-    const pair = automatic(setup({ approverHas: ['w1', 'w2'] }));
+    const pair = automatic(setup({ approverHas: ['w1', 'w2'] }), { onlyRequest: 'w1' });
     try {
       const { review, shown } = await pair.review();
       expect(review.workspaces).toEqual([{ workspaceId: 'w1', name: 'w1' }]);
@@ -1659,7 +1669,7 @@ describe('approval coverage across workspaces', () => {
 
   it('approves every requested workspace by default once the typed code matches', async () => {
     const harness = setup({ approverHas: ['w1', 'w2'] });
-    const pair = automatic(harness, { requestEvery: true });
+    const pair = automatic(harness);
     try {
       const { review, shown } = await pair.review();
       expect(review.workspaces).toEqual([
@@ -1678,7 +1688,7 @@ describe('approval coverage across workspaces', () => {
 
   it('keeps the request own workspace in a narrowed choice and signs the same set on a retry', async () => {
     const harness = setup({ approverHas: ['w1', 'w2'] });
-    const pair = automatic(harness, { loseFirstApprovalReply: true, requestEvery: true });
+    const pair = automatic(harness, { loseFirstApprovalReply: true });
     try {
       const { review, shown } = await pair.review();
       await expect(pair.desktop.approveAutomaticPairing!(review.id, shown, ['w9'])).rejects.toThrow(
@@ -1688,6 +1698,33 @@ describe('approval coverage across workspaces', () => {
       expect(pair.signed).toEqual([['w1'], ['w1']]);
       expect((await pair.phone.automaticPairingState('w1'))?.phase).toBe('joined');
       expect(harness.installed).toEqual(['w1']);
+      expect(
+        coverageOf(await Effect.runPromise(harness.requester.accountPairingRequest()))
+      ).toEqual({ w1: 'joined/approved', w2: 'pending/omitted' });
+      expect((await pair.phone.automaticPairingState('w1'))?.phase).toBe('joined');
+    } finally {
+      pair.phone.disposeAutomaticPairing();
+      pair.desktop.disposeAutomaticPairing();
+    }
+  });
+
+  it('ends a request that does not name the opened workspace instead of waiting on it', async () => {
+    const harness = setup({ approverHas: ['w1', 'w2'] });
+    const pair = automatic(harness, { onlyRequest: 'w2' });
+    try {
+      await pair.phone.startAutomaticPairing('w1');
+      let refused: unknown;
+      for (let round = 0; round < 8 && !refused; round++) {
+        await pair.desktop.pendingAutomaticPairing();
+        await pair.phone.automaticPairingState('w1').catch((cause: unknown) => {
+          refused = cause;
+        });
+      }
+      expect(refused).toMatchObject({ message: 'e2ee_pairing-unavailable' });
+      expect(await Effect.runPromise(harness.requester.accountPairingRequest())).toMatchObject({
+        status: 'expired',
+      });
+      expect(pair.signed).toEqual([]);
     } finally {
       pair.phone.disposeAutomaticPairing();
       pair.desktop.disposeAutomaticPairing();
@@ -1696,7 +1733,7 @@ describe('approval coverage across workspaces', () => {
 
   it('still ends the request after three wrong codes, signing no workspace', async () => {
     const harness = setup({ approverHas: ['w1', 'w2'] });
-    const pair = automatic(harness, { requestEvery: true });
+    const pair = automatic(harness);
     try {
       const { review, shown } = await pair.review();
       const wrong = String((Number(shown) + 1) % 1_000_000).padStart(6, '0');
