@@ -311,8 +311,7 @@ describe('nested MachineDetailPane desktop tabs', () => {
             onPing={vi.fn(async () => 18)}
             canRevokeCredentials
             onRevokeCredentials={vi.fn(async () => {})}
-            accessContent={<div>Folders Slot</div>}
-            agentsContent={<div>Agents Slot</div>}
+            accessContent={<div>Connected Resources Slot</div>}
           />
         </Tooltip.Provider>
       );
@@ -320,8 +319,7 @@ describe('nested MachineDetailPane desktop tabs', () => {
 
     // All sections are directly visible in one continuous scroll without sub-tabs.
     expect(document.body.querySelectorAll('[role="tab"]').length).toBe(0);
-    expect(document.body.textContent).toContain('Folders Slot');
-    expect(document.body.textContent).toContain('Agents Slot');
+    expect(document.body.textContent).toContain('Connected Resources Slot');
     expect(
       document.body.querySelector('button[aria-label="Revoke machine access"]')
     ).not.toBeNull();

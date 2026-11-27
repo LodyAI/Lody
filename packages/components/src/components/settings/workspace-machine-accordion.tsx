@@ -25,6 +25,9 @@ export type WorkspaceMachineAccordionMeta = {
   agentCount: number;
 };
 
+/** A small `@lody/ui` button's inline padding (`button.paddingXSmall`). */
+const FLEET_STATUS_INSET = '10px';
+
 const onlineHaloBreathe = stylex.keyframes({
   '0%, 100%': { transform: 'scale(0.875)', opacity: 0.12 },
   '50%': { transform: 'scale(1.2)', opacity: 0.28 },
@@ -160,18 +163,41 @@ const styles = stylex.create({
   chevronOpen: { transform: 'rotate(180deg)' },
   detailPending: { minHeight: '96px' },
 
-  /** Fleet list row (Option B): scannable multi-column record row inside a boxed section. */
-  fleetRow: {
+  /**
+   * Fleet list: one records card per group, laid out as a table. The header
+   * line and every row share one grid, so the Owner and Status columns line up
+   * down the card and the name column takes whatever the panel leaves.
+   */
+  fleetGrid: {
     display: 'grid',
-    gridTemplateColumns: '10px minmax(0, 1fr) minmax(96px, 140px) 92px 16px',
+    gridTemplateColumns: '10px minmax(0, 1fr) minmax(96px, 160px) 96px 14px',
     alignItems: 'center',
-    gap: space[3],
+    columnGap: space[3],
     paddingInline: space[4],
-    paddingBlock: space[3],
+  },
+  fleetHead: {
+    paddingBlock: space[2],
+    fontSize: uiText.captionSize,
+    fontWeight: 500,
+    lineHeight: uiText.captionLeading,
+    color: colors.tertiaryLabel,
+    whiteSpace: 'nowrap',
+  },
+  /** The header's first label sits over the name, past the status dot's column. */
+  fleetHeadName: { gridColumn: '2' },
+  fleetHeadEnd: { justifySelf: 'end', paddingInlineEnd: FLEET_STATUS_INSET },
+  fleetRow: {
+    minHeight: '56px',
+    paddingBlock: '10px',
     cursor: 'pointer',
+    outlineStyle: 'none',
     backgroundColor: {
       default: 'transparent',
       ':hover': colors.hoverFill,
+    },
+    boxShadow: {
+      default: 'none',
+      ':focus-visible': `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`,
     },
     transitionProperty: 'background-color',
     transitionDuration: duration.fast,
@@ -186,7 +212,7 @@ const styles = stylex.create({
   fleetNameLine: {
     display: 'flex',
     alignItems: 'center',
-    gap: space[1.5],
+    gap: space[2],
     minWidth: 0,
   },
   fleetName: {
@@ -199,17 +225,19 @@ const styles = stylex.create({
     color: colors.label,
   },
   fleetMeta: {
+    minWidth: 0,
     fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  fleetMono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
+  fleetMetaSep: { paddingInline: space[1], color: colors.tertiaryLabel },
+  fleetMono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)', fontSize: '0.95em' },
   fleetOwner: {
     display: 'flex',
     alignItems: 'center',
-    gap: space[1.5],
+    gap: space[2],
     minWidth: 0,
     fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
@@ -224,25 +252,24 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'flex-end',
+    minWidth: 0,
   },
   fleetPingOk: {
     color: colors.success,
-    backgroundColor: `color-mix(in oklab, ${colors.success} 12%, transparent)`,
     fontVariantNumeric: 'tabular-nums',
   },
+  /** Status text sits where a small button's label does, so the column has one edge. */
   fleetStatusText: {
+    paddingInline: FLEET_STATUS_INSET,
     fontSize: uiText.footnoteSize,
     color: colors.tertiaryLabel,
+    whiteSpace: 'nowrap',
   },
   fleetChevron: {
     flexShrink: 0,
-    width: '15px',
-    height: '15px',
+    width: '14px',
+    height: '14px',
     color: colors.tertiaryLabel,
-  },
-  fleetUpdateBadge: {
-    color: colors.warning,
-    backgroundColor: `color-mix(in oklab, ${colors.warning} 12%, transparent)`,
   },
 });
 
@@ -438,6 +465,25 @@ export function WorkspaceMachineExpandedSection({
   );
 }
 
+/**
+ * The column names over a fleet card's rows, as its first line. Decorative for
+ * assistive tech: every row already names its machine, owner and status.
+ */
+export function WorkspaceMachineFleetHeader() {
+  const { t } = useTranslation();
+  return (
+    <div aria-hidden {...stylex.props(styles.fleetGrid, styles.fleetHead)}>
+      <span {...stylex.props(styles.fleetHeadName)}>
+        {t('settings.machines.columnMachine', 'Machine')}
+      </span>
+      <span>{t('settings.machines.columnOwner', 'Owner')}</span>
+      <span {...stylex.props(styles.fleetHeadEnd)}>
+        {t('settings.machines.columnStatus', 'Status')}
+      </span>
+    </div>
+  );
+}
+
 export function WorkspaceMachineFleetRow({
   meta,
   isOwn,
@@ -460,6 +506,7 @@ export function WorkspaceMachineFleetRow({
   const statusLabel = meta.isOnline
     ? t('workspace.machines.online', 'Online')
     : t('workspace.machines.offline', 'Offline');
+  const sep = <span {...stylex.props(styles.fleetMetaSep)}>·</span>;
 
   return (
     <div
@@ -473,12 +520,13 @@ export function WorkspaceMachineFleetRow({
       })}
       onClick={onOpen}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onOpen();
         }
       }}
-      {...stylex.props(styles.fleetRow)}
+      {...stylex.props(styles.fleetGrid, styles.fleetRow)}
     >
       <span
         role="img"
@@ -495,22 +543,21 @@ export function WorkspaceMachineFleetRow({
             <Badge>{t('workspace.machines.thisDevice', 'This machine')}</Badge>
           ) : null}
           {hasUpdate ? (
-            <Badge className={stylex.props(styles.fleetUpdateBadge).className}>
-              {t('settings.machines.updateBadge', 'Update')}
-            </Badge>
+            <Badge tone="warning">{t('settings.machines.updateBadge', 'Update')}</Badge>
           ) : null}
         </div>
         <div {...stylex.props(styles.fleetMeta)}>
-          {meta.machine.os || '-'} ·{' '}
+          {meta.machine.os || '-'}
+          {sep}
           <span {...stylex.props(styles.fleetMono)}>
             {meta.machine.cliVersion ? `v${meta.machine.cliVersion}` : t('machines.never', 'Never')}
-          </span>{' '}
-          ·{' '}
+          </span>
+          {sep}
           {t('settings.machines.directoryCountSummary', {
             count: meta.directoryCount,
             defaultValue: '{{count}} directories',
-          })}{' '}
-          ·{' '}
+          })}
+          {sep}
           {t('settings.machines.agentCountSummary', {
             count: meta.agentCount,
             defaultValue: '{{count}} Agents',
@@ -531,10 +578,14 @@ export function WorkspaceMachineFleetRow({
         {isOwn && meta.isOnline && onPing ? (
           <Button
             type="button"
-            variant={pingLatencyMs !== null ? 'ghost' : 'ghost'}
+            variant="ghost"
             size="small"
             disabled={pinging}
             xstyle={pingLatencyMs !== null ? styles.fleetPingOk : undefined}
+            aria-label={t('settings.machines.pingMachine', {
+              machine: machineName,
+              defaultValue: 'Ping {{machine}}',
+            })}
             onClick={(event) => {
               event.stopPropagation();
               onPing();

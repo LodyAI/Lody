@@ -287,10 +287,11 @@ const styles = stylex.create({
     backgroundColor: `color-mix(in oklab, ${colors.success} 12%, transparent)`,
     fontVariantNumeric: 'tabular-nums',
   },
+  /** One continuous page: every block is set apart by the same page gap. */
   nestedTabBody: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space[4],
+    gap: space[6],
     minWidth: 0,
   },
   nestedRenameRow: {
@@ -498,9 +499,8 @@ export type MachineDetailPaneProps = {
   footer?: ReactNode;
   /** Desktop nested detail view (Option B): renders ← Machines breadcrumb + 3 sub-tabs. */
   onBack?: () => void;
-  /** Optional split slots used by the nested detail tabs (Access & Folders, Overview agents). */
+  /** The machine's connected folders and agents, under the resource monitor. */
   accessContent?: ReactNode;
-  agentsContent?: ReactNode;
   /** Optional externally tracked Ping latency (shared with the Fleet List row). */
   initialPingLatencyMs?: number | null;
   onPingLatencyChange?: (machineId: MachineId, latencyMs: number) => void;
@@ -549,7 +549,6 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
     footer,
     onBack,
     accessContent,
-    agentsContent,
     initialPingLatencyMs = null,
     onPingLatencyChange,
     accordion,
@@ -928,7 +927,6 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
             />
 
             {accessContent ?? footer}
-            {agentsContent ?? null}
 
             {manageableOwnMachine &&
             ((ordinarySharing && onSharedWithTeamChange) || props.onRestoreIdentity) ? (

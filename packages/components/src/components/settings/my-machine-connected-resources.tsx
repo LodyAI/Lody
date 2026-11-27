@@ -16,7 +16,8 @@ import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { settingsSurface as surface } from './surface';
-import { CompactSection } from './compact-layout';
+import { settingsMaterial } from './material.stylex';
+import { settingsRecordsCard } from './compact-layout';
 import type { ProjectSettingsRow } from './project-settings';
 import { AgentIcon } from '@/components/icons/agent-icon';
 
@@ -220,7 +221,7 @@ function MachineConnectedResourcesContent({
     return (
       <div
         key={project.key}
-        {...stylex.props(styles.row, !flush && index > 0 && surface.lineRuled)}
+        {...stylex.props(styles.row, (flush || index > 0) && surface.lineRuled)}
       >
         <div {...stylex.props(styles.rowText)}>
           <div {...stylex.props(styles.truncate, styles.name)}>{project.name}</div>
@@ -264,40 +265,50 @@ function MachineConnectedResourcesContent({
   });
 
   if (flush) {
+    // One records card for everything this machine connects: each kind is a
+    // titled band of the card, its action on the band's own line, so the two
+    // read as one group instead of two one-line boxes.
     return (
-      <div {...stylex.props(styles.root, styles.rootFlush)}>
+      <section
+        aria-label={t('settings.machines.connectedResources', 'Connected resources')}
+        {...stylex.props(settingsRecordsCard)}
+      >
         {!hideFolders && (
-          <CompactSection
-            title={t('settings.machines.connectedFolders', 'Connected folders')}
-            headerRight={foldersAction}
-            headerRightUnclipped
-            boxed
-          >
+          <>
+            <div {...stylex.props(styles.band)}>
+              <Folder aria-hidden {...stylex.props(styles.headingIcon)} />
+              <h3 {...stylex.props(styles.bandTitle)}>
+                {t('settings.machines.connectedFolders', 'Connected folders')}
+              </h3>
+              {foldersAction}
+            </div>
             {projectsLoading ? (
-              <p {...stylex.props(styles.cardNote)}>{t('common.loading', 'Loading...')}</p>
+              <p {...stylex.props(styles.bandNote)}>{t('common.loading', 'Loading...')}</p>
             ) : projects.length === 0 ? (
-              <p {...stylex.props(styles.cardNote)}>
+              <p {...stylex.props(styles.bandNote)}>
                 {t('settings.machines.noConnectedFoldersShort', 'No folders connected yet.')}
               </p>
             ) : (
               folderRows
             )}
-          </CompactSection>
+          </>
         )}
 
         {!hideAgents && (
-          <CompactSection
-            title={t('settings.machines.connectedAgents', 'Connected agents')}
-            headerRight={agentsAction}
-            headerRightUnclipped
-            boxed
-          >
+          <>
+            <div {...stylex.props(styles.band, !hideFolders && styles.bandAfter)}>
+              <Bot aria-hidden {...stylex.props(styles.headingIcon)} />
+              <h3 {...stylex.props(styles.bandTitle)}>
+                {t('settings.machines.connectedAgents', 'Connected agents')}
+              </h3>
+              {agentsAction}
+            </div>
             {configs.length === 0 ? (
-              <p {...stylex.props(styles.cardNote)}>
+              <p {...stylex.props(styles.bandNote)}>
                 {t('settings.machines.noConnectedAgents', 'No agents configured for this machine.')}
               </p>
             ) : (
-              <div {...stylex.props(styles.cardChips)}>
+              <div {...stylex.props(styles.cardChips, styles.bandBody)}>
                 {configs.map((config) => (
                   <Badge
                     key={config.id}
@@ -316,9 +327,9 @@ function MachineConnectedResourcesContent({
                 ))}
               </div>
             )}
-          </CompactSection>
+          </>
         )}
-      </div>
+      </section>
     );
   }
 
@@ -435,13 +446,34 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   note: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
-  cardNote: {
+  /** A titled band of the connected-resources card: its name, then its action. */
+  band: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minHeight: '44px',
+    paddingInline: space[4],
+    paddingBlock: space[2],
+  },
+  /** A later band starts a new part of the card, ruled from the one above. */
+  bandAfter: { boxShadow: settingsMaterial.rowRule },
+  bandTitle: {
+    flexGrow: 1,
+    minWidth: 0,
+    margin: 0,
+    fontSize: uiText.subheadlineSize,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  bandNote: {
     margin: 0,
     paddingInline: space[4],
-    paddingBlock: space[3],
+    paddingTop: 0,
+    paddingBottom: space[3],
     fontSize: uiText.footnoteSize,
-    color: colors.secondaryLabel,
+    color: colors.tertiaryLabel,
   },
+  bandBody: { paddingTop: 0 },
   cardChips: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -456,7 +488,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[3],
     paddingInline: space[4],
-    paddingBlock: '8px',
+    paddingBlock: '10px',
   },
   rowText: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
   truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },

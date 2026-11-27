@@ -111,6 +111,7 @@ import {
   type AgentConfigSubmitPayload,
 } from './agent-config-dialog';
 import {
+  WorkspaceMachineFleetHeader,
   WorkspaceMachineFleetRow,
   type WorkspaceMachineAccordionMeta,
 } from './workspace-machine-accordion';
@@ -267,7 +268,7 @@ const styles = stylex.create({
     fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
-  stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[6] },
   fleetToolbar: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -276,26 +277,12 @@ const styles = stylex.create({
     gap: space[3],
   },
   fleetSearchWrap: {
-    position: 'relative',
     flexGrow: 1,
     flexShrink: 1,
     minWidth: '180px',
-    maxWidth: '300px',
+    maxWidth: '320px',
   },
-  fleetSearchIcon: {
-    position: 'absolute',
-    insetInlineStart: space[2],
-    top: '50%',
-    transform: 'translateY(-50%)',
-    width: '14px',
-    height: '14px',
-    color: colors.tertiaryLabel,
-    pointerEvents: 'none',
-    zIndex: 1,
-  },
-  fleetSearchInput: {
-    paddingInlineStart: '28px',
-  },
+  fleetSearchIcon: { width: '14px', height: '14px' },
   fleetFilterTray: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -329,11 +316,6 @@ const styles = stylex.create({
     backgroundColor: colors.trayRaised,
     color: colors.label,
     boxShadow: `0 0 0 0.5px ${colors.separator}, 0 1px 2px rgba(0, 0, 0, 0.06)`,
-  },
-  fleetFilterCount: {
-    fontSize: '11px',
-    color: colors.tertiaryLabel,
-    fontVariantNumeric: 'tabular-nums',
   },
   emptyNote: {
     display: 'flex',
@@ -2079,21 +2061,6 @@ export function MachineAgentSettings({
                 }
                 projectsLoading={visibleLocalProjectsLoading}
                 readOnly={!isOwn}
-                section="folders"
-                flush
-                onManageAgents={() => openAgentsForMachine(resolvedSelectedMachine.id)}
-              />
-            }
-            agentsContent={
-              <MachineConnectedResources
-                machineId={resolvedSelectedMachine.id}
-                configs={configsForMachine}
-                preloadedProjects={
-                  connectedProjectsByMachineId.get(resolvedSelectedMachine.id) ?? []
-                }
-                projectsLoading={visibleLocalProjectsLoading}
-                readOnly={!isOwn}
-                section="agents"
                 flush
                 onManageAgents={() => openAgentsForMachine(resolvedSelectedMachine.id)}
               />
@@ -2114,14 +2081,14 @@ export function MachineAgentSettings({
 
         <div {...stylex.props(styles.fleetToolbar)}>
           <div {...stylex.props(styles.fleetSearchWrap)}>
-            <Search aria-hidden {...stylex.props(styles.fleetSearchIcon)} />
             <Input
               size="small"
+              type="search"
+              leading={<Search aria-hidden {...stylex.props(styles.fleetSearchIcon)} />}
               value={fleetQuery}
               onChange={(event) => setFleetQuery(event.target.value)}
               placeholder={t('settings.machines.searchPlaceholder', 'Search name, owner, or OS…')}
               aria-label={t('settings.machines.searchPlaceholder', 'Search name, owner, or OS…')}
-              className={stylex.props(styles.fleetSearchInput).className}
             />
           </div>
           <div
@@ -2181,6 +2148,7 @@ export function MachineAgentSettings({
                 }
                 boxed
               >
+                <WorkspaceMachineFleetHeader />
                 {filteredFleetShared.map(renderFleetRow)}
               </CompactSection>
             ) : null}
@@ -2194,6 +2162,7 @@ export function MachineAgentSettings({
                 )}
                 boxed
               >
+                <WorkspaceMachineFleetHeader />
                 {filteredFleetPrivate.map(renderFleetRow)}
               </CompactSection>
             ) : null}
