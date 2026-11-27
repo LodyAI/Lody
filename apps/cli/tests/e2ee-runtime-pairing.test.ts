@@ -3278,6 +3278,94 @@ describe('remote machine command', () => {
     }
   });
 
+  it('propagates activation abort to underlying cloud-cli-port requests and blocks activation.json after deadline', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-machine-activate-signal-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+    const { createCloudE2eePort } = await import('../src/lib/cloud-cli-port');
+    const originalFetch = globalThis.fetch;
+    try {
+      const { offer } = await admittedBeforeKey(directory);
+      const root = join(
+        getLodyDataDir(),
+        'e2ee',
+        createHash('sha256').update(offer.accountId).digest('hex'),
+        offer.workspaceId
+      );
+      const prepared = await prepareCliE2eeMachineLegacy({
+        ...offer,
+        machineId: 'machine',
+        keyring: noKeyring,
+      });
+      if ('superseded' in prepared) throw new Error('unexpected superseded');
+
+      const fetchStarted = Promise.withResolvers<void>();
+      let observedSignal: AbortSignal | undefined;
+      globalThis.fetch = (async (_url, init) => {
+        observedSignal = init?.signal ?? undefined;
+        fetchStarted.resolve();
+        return await new Promise<Response>((_resolve, reject) => {
+          const onAbort = () => reject(observedSignal?.reason ?? new Error('aborted'));
+          if (observedSignal?.aborted) onAbort();
+          else observedSignal?.addEventListener('abort', onAbort, { once: true });
+        });
+      }) as typeof fetch;
+
+      const controller = new AbortController();
+      const cloud = createCloudE2eePort({
+        authBaseUrl: offer.deploymentUrl,
+        logger: getLogger('test'),
+      });
+      const activationPromise = activateCliE2eeWorkspaceLegacy({
+        accountId: offer.accountId,
+        workspaceId: offer.workspaceId,
+        genesisHash: offer.genesisHash,
+        pairingSessionId: offer.pairingSessionId,
+        frontendSigningPublicKey: offer.frontendSigningPublicKey,
+        expectedSigningPublicKey: prepared.signingPublicKey,
+        cloud,
+        onUnavailable: () => undefined,
+        keyring: noKeyring,
+        signal: controller.signal,
+        timeoutMs: 60_000,
+      });
+
+      await fetchStarted.promise;
+      expect(observedSignal).toBeDefined();
+      expect(observedSignal?.aborted).toBe(false);
+      controller.abort(new Error('ctrl_c'));
+      await expect(activationPromise).rejects.toThrow('ctrl_c');
+      expect(observedSignal?.aborted).toBe(true);
+      await expect(fs.stat(join(root, 'activation.json'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+
+      let clock = 1_000;
+      await expect(
+        activateCliE2eeWorkspaceLegacy({
+          accountId: offer.accountId,
+          workspaceId: offer.workspaceId,
+          genesisHash: offer.genesisHash,
+          pairingSessionId: offer.pairingSessionId,
+          frontendSigningPublicKey: offer.frontendSigningPublicKey,
+          expectedSigningPublicKey: prepared.signingPublicKey,
+          cloud,
+          onUnavailable: () => undefined,
+          keyring: noKeyring,
+          timeoutMs: 0,
+          now: () => clock,
+        })
+      ).rejects.toThrow('e2ee_waiting_for_key');
+      await expect(fs.stat(join(root, 'activation.json'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('stops waiting for the key at its deadline and keeps other activation failures terminal', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'remote-machine-key-deadline-'));
     vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));

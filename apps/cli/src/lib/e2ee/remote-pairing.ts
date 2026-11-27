@@ -175,6 +175,7 @@ export async function pairRemoteMachineLegacy(options: {
             keyring: options.keyring,
             signal: options.signal,
             timeoutMs: remainingMs,
+            now,
           });
           break;
         } catch (error) {

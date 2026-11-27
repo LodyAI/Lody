@@ -677,6 +677,7 @@ type ActivationOptions = CliE2eeWorkspaceOptions & {
   remotePairing?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
+  now?: () => number;
 };
 const pairingIntent = (options: ActivationOptions): PairingIntent => ({
   pairingSessionId: options.pairingSessionId,
@@ -701,8 +702,56 @@ async function verifiedActivation(pending: PairingOwner, options: ActivationOpti
   });
 }
 
+const WITH_CLOUD_E2EE_SIGNAL = Symbol.for('lody.cloudE2ee.withSignal');
+type SignalScopedCloudPort = CloudE2eePort & {
+  [WITH_CLOUD_E2EE_SIGNAL]?: <T>(signal: AbortSignal, fn: () => Promise<T>) => Promise<T>;
+};
+
+function runWithCloudSignal<T>(
+  cloud: CloudE2eePort,
+  signal: AbortSignal | undefined,
+  fn: () => Promise<T>
+): Promise<T> {
+  const scoped = (cloud as SignalScopedCloudPort)[WITH_CLOUD_E2EE_SIGNAL];
+  return signal && scoped ? scoped(signal, fn) : fn();
+}
+
+function makeActivationSignal(
+  signal?: AbortSignal,
+  timeoutMs?: number
+): { signal?: AbortSignal; dispose: () => void } {
+  if (!signal && timeoutMs === undefined) return { signal: undefined, dispose: () => {} };
+  const controller = new AbortController();
+  const onAbort = () =>
+    controller.abort(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+  if (signal) {
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (timeoutMs !== undefined && !controller.signal.aborted) {
+    timer = setTimeout(
+      () => controller.abort(new Error('e2ee_waiting_for_key')),
+      Math.max(0, timeoutMs)
+    );
+    timer.unref?.();
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+    },
+  };
+}
+
 /** The startup hint. Written under the identity lease and only after verification. */
-async function publishActivation(options: ActivationOptions, marker: z.infer<typeof Activation>) {
+async function publishActivation(
+  options: ActivationOptions,
+  marker: z.infer<typeof Activation>,
+  assertCanCommit?: () => void
+) {
+  assertCanCommit?.();
   const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
   const destination = join(directory, 'activation.json');
   const temporary = join(directory, `activation-${randomBytes(16).toString('hex')}.pending`);
@@ -711,6 +760,7 @@ async function publishActivation(options: ActivationOptions, marker: z.infer<typ
     await handle.writeFile(JSON.stringify(marker));
     await handle.sync();
     await handle.close();
+    assertCanCommit?.();
     await link(temporary, destination).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     });
@@ -718,63 +768,68 @@ async function publishActivation(options: ActivationOptions, marker: z.infer<typ
     if (actual.genesisHash !== marker.genesisHash) throw new Error('e2ee_binding_conflict');
     // This startup hint may follow a newly approved device after custody loss.
     // Admission and key installation above, not the old hint, grant authority.
-    if (actual.signingPublicKey !== marker.signingPublicKey) await rename(temporary, destination);
+    if (actual.signingPublicKey !== marker.signingPublicKey) {
+      assertCanCommit?.();
+      await rename(temporary, destination);
+    }
   } finally {
     await handle.close().catch(() => undefined);
     await unlink(temporary).catch(() => undefined);
   }
 }
 
-async function raceActivationCancellation<A>(
-  work: Promise<A>,
-  signal?: AbortSignal,
-  timeoutMs?: number
-): Promise<A> {
+async function raceActivationCancellation<A>(work: Promise<A>, signal?: AbortSignal): Promise<A> {
   signal?.throwIfAborted();
-  if (!signal && timeoutMs === undefined) return work;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (!signal) return work;
   let onAbort: (() => void) | undefined;
   const cancelled = new Promise<never>((_, reject) => {
-    if (signal) {
-      onAbort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-    if (timeoutMs !== undefined) {
-      timer = setTimeout(() => reject(new Error('e2ee_waiting_for_key')), Math.max(0, timeoutMs));
-      timer.unref?.();
-    }
+    onAbort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', onAbort, { once: true });
   });
   try {
     return await Promise.race([work, cancelled]);
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
   }
 }
 
 /** Verify actual admission and install the current key before allowing Fleet to attach rooms.
  * The marker is only a startup hint: subsequent authorization still comes from core's verified ledger. */
 async function activateWorkspace(options: ActivationOptions) {
-  options.signal?.throwIfAborted();
-  const pending = await openWorkspace(options, false, pairingIntent(options));
-  let marker: z.infer<typeof Activation>;
-  try {
-    await raceActivationCancellation(pending.refresh(), options.signal, options.timeoutMs);
+  const now = options.now ?? Date.now;
+  const deadline = options.timeoutMs === undefined ? undefined : now() + options.timeoutMs;
+  const assertNotCancelledOrExpired = () => {
     options.signal?.throwIfAborted();
-    marker = await verifiedActivation(pending, options);
+    if (deadline !== undefined && now() >= deadline) throw new Error('e2ee_waiting_for_key');
+  };
+  assertNotCancelledOrExpired();
+  const activationSignal = makeActivationSignal(options.signal, options.timeoutMs);
+  try {
+    await runWithCloudSignal(options.cloud, activationSignal.signal, async () => {
+      const pending = await openWorkspace(options, false, pairingIntent(options));
+      let marker: z.infer<typeof Activation>;
+      try {
+        await raceActivationCancellation(pending.refresh(), activationSignal.signal);
+        assertNotCancelledOrExpired();
+        marker = await verifiedActivation(pending, options);
+      } finally {
+        // Publish the Fleet startup hint only after the temporary native owner has
+        // actually released its SQLite/custody resources.
+        await pending.close();
+      }
+      assertNotCancelledOrExpired();
+      await publishActivation(options, marker, assertNotCancelledOrExpired);
+      if (options.remotePairing !== false) {
+        assertNotCancelledOrExpired();
+        await raceActivationCancellation(
+          pending.completeRemotePairing(options.pairingSessionId),
+          activationSignal.signal
+        );
+      }
+    });
   } finally {
-    // Publish the Fleet startup hint only after the temporary native owner has
-    // actually released its SQLite/custody resources.
-    await pending.close();
+    activationSignal.dispose();
   }
-  options.signal?.throwIfAborted();
-  await publishActivation(options, marker);
-  if (options.remotePairing !== false)
-    await raceActivationCancellation(
-      pending.completeRemotePairing(options.pairingSessionId),
-      options.signal,
-      options.timeoutMs
-    );
 }
 
 /** Same-machine desktop activation that keeps its native owner. The owner's own Scope
