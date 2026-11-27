@@ -1163,8 +1163,7 @@ export function E2eeAutomaticPairingInbox({
       /* Live discovery is optional; scoped polling still verifies the same originals. */
     }
     void tick();
-    // Hidden windows rely on the subscription and notification; visible ones still poll,
-    // since a post-reveal `e2eeAccountPairing` submission does not fire this subscription.
+    // Visible windows still poll: a post-reveal `e2eeAccountPairing` submission is not pushed.
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void tick();
     }, POLL_MS);
