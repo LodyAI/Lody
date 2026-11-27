@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.117.0](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.116.1...lody-mobile-v0.117.0) (2026-11-27)
+
+
+### Features
+
+* **i18n:** add Traditional Chinese, Japanese, Korean, Spanish, French, and Russian localization ([#3392](https://github.com/LodyAI/Lody/issues/3392)) ([8ed7d10](https://github.com/LodyAI/Lody/commit/8ed7d10899b832fc2931db5bebfe8d86d34dd8b8))
+* **privacy:** minimize telemetry uploads, add regional cookie banner, and unify usage sharing switch ([#3354](https://github.com/LodyAI/Lody/issues/3354)) ([9c7d50a](https://github.com/LodyAI/Lody/commit/9c7d50ac8a21ccc8c0e1bff2d7f97fb4b88e70d2))
+
+
+### Bug Fixes
+
+* **i18n:** clarify E2EE pairing, recovery, and security copy ([#3372](https://github.com/LodyAI/Lody/issues/3372)) ([0d3f0fa](https://github.com/LodyAI/Lody/commit/0d3f0fa9c9bdf4004a8602e658a416e1ca20abc0))
+* **mobile:** disable crossDomainClient on native and prune expired Capacitor tokens ([#3371](https://github.com/LodyAI/Lody/issues/3371)) ([d5e779d](https://github.com/LodyAI/Lody/commit/d5e779dbd50e63ba3023cc3695edd95594abd48e))
+
+
+### Performance
+
+* **release:** [risk:high] move Android release builds to ubuntu-latest and trim mobile Vite build overhead ([#3457](https://github.com/LodyAI/Lody/issues/3457)) ([bb144ef](https://github.com/LodyAI/Lody/commit/bb144ef081a52ac7bf592cbb7ea035c3a45222ea))
+
 ## [0.116.1](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.116.0...lody-mobile-v0.116.1) (2026-11-25)
 
 
