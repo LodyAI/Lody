@@ -274,8 +274,8 @@ function PricingCard({
   const promoBadge =
     activePromoPercent > 0
       ? customPromoName
-        ? `${customPromoName} · ${formatPublicPromoBadge(activePromoPercent, locale)}`
-        : formatPublicPromoBadge(activePromoPercent, locale)
+        ? `${customPromoName} · ${formatPublicPromoBadge(activePromoPercent, locale, { isYearly })}`
+        : formatPublicPromoBadge(activePromoPercent, locale, { isYearly })
       : null;
   const isMailto = plan.href.startsWith('mailto:');
   return (

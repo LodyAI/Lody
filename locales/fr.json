@@ -627,7 +627,9 @@
   "referral.older": "Plus ancien",
   "referral.offerTitle": "Remise de parrainage",
   "referral.offerBadge": "{{discount}} % de remise",
-  "referral.offerYearly": "Première année à {{first}} par siège, puis {{regular}}/an.",
+  "referral.offerYearlyBadge": "−{{discount}} % suppl. annuel",
+  "referral.offerYearly": "−{{discount}} % suppl. sur le tarif annuel (−{{combinedDiscount}} % vs mensuel) : première année à {{first}} par siège, puis {{regular}}/an.",
+  "referral.retainedCheckoutYearly": "Votre paiement en cours conserve −{{discount}} % suppl. annuel ({{first}} la première année par siège).",
   "referral.offerMonthly": "Premier mois à {{first}} par siège, puis {{regular}}/mois.",
   "referral.remove": "Ne pas utiliser",
   "referral.invalid": "Ce lien de parrainage n'est plus valide. Retirez-le pour continuer.",
@@ -7266,8 +7268,15 @@
   "settings.agent.dialog.defaultPermissionLastUsed": "La dernière choisie",
   "e2ee.access.waitingKey.checkFailed": "Impossible de vérifier les clés pour le moment. Vérifiez votre connexion et réessayez.",
   "e2ee.instantQr.retrying": "Connexion interrompue. Nouvelle tentative…",
+  "billing.yearlySaveBadge": "−20 %",
   "billing.promoOfferTitle": "Remise promotionnelle",
-  "billing.switchPromoDiscountWithPercent": "Remise promotionnelle (−{{discount}} %)",
+  "billing.promoYearlyOfferBadge": "−{{discount}} % suppl. annuel",
+  "billing.promoYearlyExtraBadge": "−{{discount}} % suppl.",
+  "billing.promoMonthlyOfferBadge": "−{{discount}} %",
+  "billing.promoOfferYearly": "−{{discount}} % suppl. sur le tarif annuel (−{{combinedDiscount}} % vs mensuel) : première année à {{first}} par siège, puis {{regular}}/an.",
+  "billing.promoRetainedYearly": "Votre paiement en cours conserve −{{discount}} % suppl. annuel ({{first}} la première année par siège).",
+  "billing.switchPromoDiscountWithPercent": "Remise promotionnelle (−{{discount}} % suppl. annuel)",
   "billing.switchRenewalDateStandardYearly": "Prochain renouvellement : {{date}} au tarif standard ({{amount}}/an).",
-  "workspace.invite.seat.promoNoteUntil": "Inclut −{{discount}} % si l’invitation est acceptée d’ici le {{date}}. Renouvellement au tarif standard."
+  "workspace.invite.seat.promoNoteUntil": "Inclut −{{discount}} % si l’invitation est acceptée d’ici le {{date}}. Renouvellement au tarif standard.",
+  "workspace.invite.seat.promoNoteYearlyUntil": "Inclut −{{discount}} % suppl. sur le tarif annuel si l’invitation est acceptée d’ici le {{date}}. Renouvellement au tarif standard."
 }
