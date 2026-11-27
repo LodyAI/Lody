@@ -119,13 +119,14 @@ and [bootstrap](../../../../../.agents/docs/e2ee-workspace-bootstrap.md).
 Fence opens/late D03 registration by identity/generation; pin D03 before signing.
 Workspace custody; reset binds account/generation; recheck after lock/drain before archive.
 No network or proxy lookup under locks; drain before release. Bad keys allow ledger open; core repairs.
-Account turns share the account barrier and lock only their identity directory; account switch, close, identity cleanup and account reset hold it exclusively, draining and fencing turns. Work must never re-enter it.
+Account turns share the barrier and lock only their directory; switch, close, cleanup, and reset hold it exclusively, draining and fencing turns without re-entry.
 Recovery keeps completed anchors; unfinished rebinding needs verified same-device admission and archived originals.
 Isolate verification/storage errors; bad input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
 Compaction failures warn only; retry after 64 records, keeping originals/pins.
 Conflicts refuse fallback. Failed close retains its fence; report restart-required.
-Opens join a closing workspace's drain once, outside the lock; never `closed`.
+Opens join one closing drain outside the lock (`openWithDrain`); `WorkspaceReaderRegistry` tracks refcounts and `senderEpoch`, keeping newer pages across stale teardown and detaching empty workspaces under the lock (`detachWorkspaceIfEmpty`) before draining outside.
+`power-state-broadcast.ts` owns the 2s wake coalescer (`subscribePowerLifecycle`): E2EE binds once at IPC registration, `e2ee-key-delivery.mts` aborts only pre-sleep rounds (`startedAt <= sleptAt`) and retries in-fiber, and `e2ee-runtime.mts` clears `currentRoundMailbox` on exit.
 Fixed cloud refs; auth/bound/abort; fence late disposed calls. Keep uncertain bytes; raw/SDK causes stay in main.
 Verified reads beat lost ACKs; cleanup keeps admission. `e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
 
@@ -140,16 +141,8 @@ denial/I/O cannot gate mailbox receipt. Show file protection; socket timeout sta
 
 Only rotate resumes candidates. Keep errors transport-free.
 
-A content frame the verified ledger has not caught up with (an epoch at most four
-ahead, or an unknown author at the current epoch) opens as retryable `key-pending`; the
-portable session applies the same bound, and frames further ahead keep their original
-failure. The shared content adapter's refresh catches up, at most once per interval.
+Content frames at most four epochs ahead or from an unknown current-epoch author open as retryable `key-pending` (same bound in portable sessions); further-ahead frames keep their original failure, and content-adapter refresh catches up at most once per interval.
 
-The iroh client (`e2ee-iroh.mts`) lives with its workspace entry and follows [these rules](../../../../../packages/iroh-native/AGENTS.md).
+`e2ee-iroh.mts` lives with its workspace entry and follows [these rules](../../../../../packages/iroh-native/AGENTS.md).
 
-Machine sharing uses `packages/e2ee-machine-sharing`.
-Passive inspection uses existing entries only; never call openWorkspace or
-readMachineSharing there. Counts are diagnostic, not authority.
-Policy errors affect dependent execution only. Invalidate sharing before exposing changed
-verified heads/counts; unchanged ingest keeps cache freshness. Narrow read/update methods keep keys
-and credentials in main; see [policy](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
+Machine sharing (`packages/e2ee-machine-sharing`) passive inspection uses existing entries only (never `openWorkspace`/`readMachineSharing`); counts are diagnostic. Policy errors stay scoped; invalidate sharing before exposing changed heads/counts while unchanged ingest keeps freshness; narrow methods keep secrets in main ([policy](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md)).

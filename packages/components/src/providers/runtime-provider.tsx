@@ -916,6 +916,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     };
     retryKeyUpdateRef.current = () => runNativeRefresh(true);
     window.addEventListener('online', refreshNative);
+    let lastPowerWakeAt = 0;
+    const unsubscribePowerState = onIpcEvent('app.powerState', (state) => {
+      if (state !== 'resume' && state !== 'unlock-screen') return;
+      const now = Date.now();
+      if (now - lastPowerWakeAt < 2_000) return;
+      lastPowerWakeAt = now;
+      refreshNative();
+    });
     const unsubscribeLedgerChange = accountId
       ? subscribeE2eeLedgerChanges(accountId, effectiveWorkspaceId, () => {
           const native = encryptedRuntime;
@@ -1495,6 +1503,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       stopFirstKeyReception();
       window.removeEventListener('online', retryContentAdmission);
       window.removeEventListener('online', refreshNative);
+      unsubscribePowerState();
       unsubscribeLedgerChange();
       unsubscribeAccessLost();
       initializationAbort.abort();

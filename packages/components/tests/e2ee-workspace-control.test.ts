@@ -39,6 +39,9 @@ import {
   classifyE2eeControlFailure,
   e2eeControlDiagnostics,
 } from '../src/lib/e2ee-control-failure';
+import { decodeE2eeIpcError, encodeE2eeIpcError } from '@lody/shared/e2ee-ipc-error';
+import { withAccountPairingCode } from '../src/lib/e2ee-account-pairing-ipc';
+import { requestFailureCode } from '../src/lib/e2ee-actionable-failure';
 import { createCloudE2eeWorkspaces } from '../src/providers/cloud-e2ee-workspaces';
 
 class MemoryStorage implements Storage {
@@ -841,3 +844,37 @@ it.each([
     });
   }
 );
+
+it('round-trips structured E2EE IPC errors and classifies desktop storage/custody-locked failures', async () => {
+  expect(classifyE2eeControlFailure(new Error('e2ee_storage'))).toEqual({
+    kind: 'local-identity',
+    code: 'e2ee_storage',
+  });
+  expect(
+    classifyE2eeControlFailure(
+      new Error("Error invoking remote method 'e2ee.open': Error: e2ee_custody_locked")
+    )
+  ).toEqual({ kind: 'custody-locked', code: 'e2ee_custody_locked' });
+  const rateLimited = encodeE2eeIpcError({
+    kind: 'self-service-rate-limited',
+    code: 'self_service_rate_limited',
+    retryAt: 1_800_000_000_000,
+  });
+  expect(requestFailureCode(new Error(`Error invoking remote: Error: ${rateLimited}`))).toBe(
+    'e2ee_self_service_rate_limited'
+  );
+  expect(decodeE2eeIpcError(rateLimited)).toEqual({
+    kind: 'self-service-rate-limited',
+    code: 'self_service_rate_limited',
+    retryAt: 1_800_000_000_000,
+  });
+  const mismatch = encodeE2eeIpcError({
+    kind: 'pairing-code-mismatch',
+    code: 'pairing-code-mismatch',
+    attemptsLeft: 2,
+  });
+  const err = await withAccountPairingCode(
+    Promise.reject(new Error(`Error invoking remote: Error: ${mismatch}`))
+  ).catch((cause: unknown) => cause);
+  expect(err).toMatchObject({ code: 'pairing-code-mismatch', attemptsLeft: 2 });
+});

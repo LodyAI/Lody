@@ -115,7 +115,9 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'rotation_candidate_unavailable'
     | 'management_unauthorized'
     | 'management_operator_required'
+    | 'management_pending'
     | 'management_retry'
+    | 'self_service_rate_limited'
     | 'workspace_transfer_active_subscription'
     | 'workspace_transfer_payment_required'
     | 'machine_not_owned'
@@ -134,8 +136,38 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'device_revoked'
     | 'missing-binding'
     | 'conflict'
+  readonly retryAt?: number
 }> {}
-const fail = (code: DesktopE2eeRuntimeError['code']) => new DesktopE2eeRuntimeError({ code })
+const fail = (code: DesktopE2eeRuntimeError['code'], retryAt?: number) =>
+  new DesktopE2eeRuntimeError(retryAt !== undefined ? { code, retryAt } : { code })
+function selfServiceRateLimit(error: unknown): { retryAt?: number } | null {
+  let node: unknown = error
+  for (let depth = 0; depth < 8 && node && typeof node === 'object'; depth++) {
+    const record = node as {
+      kind?: unknown
+      reason?: unknown
+      code?: unknown
+      retryAt?: unknown
+      cause?: unknown
+    }
+    if (
+      record.kind === 'self-service-rate-limited' ||
+      record.reason === 'self-service-rate-limited' ||
+      record.code === 'self_service_rate_limited' ||
+      record.code === 'e2ee_self_service_rate_limited'
+    ) {
+      const retryAt =
+        typeof record.retryAt === 'number' &&
+        Number.isSafeInteger(record.retryAt) &&
+        record.retryAt >= 0
+          ? record.retryAt
+          : undefined
+      return retryAt !== undefined ? { retryAt } : {}
+    }
+    node = record.cause
+  }
+  return null
+}
 const pinFailure = (error: LocalStoreError) =>
   error.store === 'LedgerPinStore' && error.reason === 'corrupt'
     ? fail('trusted-pin-unavailable')
@@ -189,6 +221,8 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
   work.pipe(
     Effect.mapError((error) => {
       if (error instanceof DesktopE2eeRuntimeError) return error
+      const rateLimited = selfServiceRateLimit(error)
+      if (rateLimited) return fail('self_service_rate_limited', rateLimited.retryAt)
       if (error instanceof MachineSharingError) return fail(error.code)
       if (error instanceof Error && error.message === 'e2ee_device_revoked')
         return fail('device_revoked')
@@ -1083,6 +1117,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               return { id: prepared.id, frameHex: hex(prepared.frame) }
             })
           )
+        let currentRoundMailbox: KeyMailbox['Service'] | undefined
         const keyRound = Effect.fnUntraced(function* (
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
           staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
@@ -1111,16 +1146,27 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           round = done
           roundMode = mode
           roundRecipients = recipients ? new Set(recipients) : undefined
+          currentRoundMailbox = mailbox(networkAbort.signal)
           const result = yield* Effect.exit(
             Effect.uninterruptible(
               Effect.gen(function* () {
-                // Ports are bound once per entry, to the first round's mailbox, as before;
-                // each capability then opens only its own journals on first use.
+                // Delegate mailbox calls to the active round so per-round abort signals
+                // take effect without rebuilding journals across rounds.
                 const ports = Effect.fnUntraced(function* () {
                   if (!maintenancePorts)
                     maintenancePorts = yield* Layer.buildWithScope(
                       Layer.mergeAll(
-                        Layer.succeed(KeyMailbox, mailbox(networkAbort.signal)),
+                        Layer.succeed(KeyMailbox, {
+                          status: (slot) => currentRoundMailbox!.status(slot),
+                          report: (report, publication) =>
+                            currentRoundMailbox!.report(report, publication),
+                          fetch: (epoch, cursor, limit) =>
+                            currentRoundMailbox!.fetch(epoch, cursor, limit),
+                          repair: (slot, id, rejectedDigest) =>
+                            currentRoundMailbox!.repair(slot, id, rejectedDigest),
+                          put: (id, frame) => currentRoundMailbox!.put(id, frame),
+                          read: (id) => currentRoundMailbox!.read(id)
+                        }),
                         Layer.succeed(VerifiedLedger, verified),
                         Layer.succeed(InstalledEpochKeys, keys),
                         publicationSource,
@@ -1276,6 +1322,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           round = undefined
           roundMode = 'full'
           roundRecipients = undefined
+          currentRoundMailbox = undefined
           yield* Deferred.done(done, result)
           return yield* result
         }, Effect.uninterruptible)
@@ -1749,7 +1796,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return yield* Effect.uninterruptibleMask((restore) =>
             Effect.gen(function* () {
               if (closing) return yield* fail('closed')
-              if (managing) return yield* Effect.fail(new Error('e2ee_management_pending'))
+              if (managing) return yield* fail('management_pending')
               const done = Deferred.makeUnsafe<void, unknown>()
               managing = done
               currentManagementRemote = remote(networkAbort.signal, {
@@ -2123,6 +2170,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           Effect.mapError((error) => {
             rememberDesktopE2eeFailure('workspace-management', error)
             if (error instanceof DesktopE2eeRuntimeError) return error
+            const rateLimited = selfServiceRateLimit(error)
+            if (rateLimited) return fail('self_service_rate_limited', rateLimited.retryAt)
             if (error instanceof MachineSharingError) return fail(error.code)
             if (
               error instanceof Error &&
@@ -2602,6 +2651,12 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       beginCloseWorkspace,
       pendingClose,
       closeWorkspace,
+      resetIroh: () =>
+        Effect.forEach(
+          [...entries.values()].filter((entry) => !entry.isClosing() && entry.iroh),
+          (entry) => entry.iroh!.reset(),
+          { discard: true }
+        ),
       close
     }
   }

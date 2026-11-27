@@ -367,7 +367,7 @@ void test(
     f.holdCloud()
     f.ipc.trackKeyDelivery('A', 'team', `account-device-${randomUUID()}`, approvalDevice)
     await f.cloudEntered.promise
-    const inFlight = f.ipc.keyDelivery.slots.get('A\nteam').running
+    const inFlight = f.ipc.keyDelivery.idle('A', 'team')
     await f.ipc
       .resetIdentity({ workspaceId: 'team', resetId: randomUUID(), confirm: true })
       .catch(() => {})
@@ -403,7 +403,7 @@ void test(
     f.holdCloud()
     f.ipc.trackKeyDelivery('A', 'team', `account-device-${randomUUID()}`, approvalDevice)
     await f.cloudEntered.promise
-    const inFlight = f.ipc.keyDelivery.slots.get('A\nteam').running
+    const inFlight = f.ipc.keyDelivery.idle('A', 'team')
     f.identity.userId = 'B'
     f.identity.generation++
     f.cloudGate.resolve()
@@ -1815,4 +1815,279 @@ void test('after workspace creation (length 1, no prior cursor), ingesting inlin
   await f.ipc.refresh('team', { keyMode: 'none' })
   assert.equal(historyCalls.length, 2)
   assert.deepEqual(ingestedPages, [1, 2, 0, 0])
+})
+
+void test('approveMemberJoin surfaces allowlisted errors and masks unallowlisted ones when join is uncommitted', async () => {
+  let appendFailure = new BackendError({ service: 'E2eeCloud', reason: 'conflict' })
+  const f = await memberIpcFixture({
+    client: {
+      memberRead: () =>
+        Effect.succeed({
+          workspaceId: 'team',
+          requestId: approvalRequest,
+          state: 'pending',
+          keyPackageHex: 'aa'
+        }),
+      appendRecord: () => Effect.fail(appendFailure)
+    },
+    host: {
+      prepareMemberAdmission: () =>
+        Effect.succeed({ workspaceId: 'team', requestId: approvalRequest, recordHex: 'bb' })
+    }
+  })
+  await assert.rejects(
+    f.ipc.approveMemberJoin('team', approvalRequest, 'explicit'),
+    /^Error: e2ee_conflict$/
+  )
+  appendFailure = new Error('e2ee_internal_secret_detail')
+  await assert.rejects(
+    f.ipc.approveMemberJoin('team', approvalRequest, 'explicit'),
+    /^Error: e2ee_member_approval_failed$/
+  )
+})
+
+void test('WorkspaceReaderRegistry + senderEpoch prevents stale reload cleanup from dropping a reloaded page', async () => {
+  const { api } = await account()
+  const sender = Object.assign(new EventEmitter(), {
+    id: 43,
+    isDestroyed: () => false,
+    send: () => {}
+  })
+  const readers = new api.WorkspaceReaderRegistry()
+  const queuedReleases = []
+  const owner = {
+    accountId: 'A',
+    readers,
+    bootstrap: { removedReason: () => Effect.succeed(null) },
+    host: {
+      pendingClose: () => Effect.succeed(undefined),
+      open: () => Effect.succeed({ workspaceId: 'team', genesisHash: '11'.repeat(32) }),
+      status: () => Effect.succeed('ready'),
+      beginCloseWorkspace: () => Effect.succeed(Effect.void)
+    }
+  }
+  const { E2eeIpc } = await load(
+    '../ipc/services/e2ee-ipc.ts',
+    e2eeIpcDependencies(
+      {
+        withDesktopE2eeAccount: (work) => Effect.runPromise(work(owner)),
+        releaseDesktopE2eeReader: (senderId, maxEpoch) => {
+          queuedReleases.push(() => readers.releaseSender(senderId, maxEpoch))
+        }
+      },
+      sender
+    )
+  )
+  const ipc = new E2eeIpc()
+  await ipc.open('team')
+  sender.emit('did-start-navigation', {}, 'synthetic-reload', false, true)
+  await ipc.open('team')
+  for (const runRelease of queuedReleases) runRelease()
+  assert.equal(readers.count('team', 43), 1)
+  assert.equal(await ipc.status('team'), 'ready')
+})
+
+void test('navigation during in-flight host.open drains the newly opened entry outside the lock without leaving an orphan', async () => {
+  const sender = Object.assign(new EventEmitter(), {
+    id: 44,
+    isDestroyed: () => false,
+    send: () => {}
+  })
+  let inLock = false
+  let beginInLock = false
+  let drainInLock = null
+  const events = []
+  const openEntered = Promise.withResolvers()
+  const releaseOpen = Promise.withResolvers()
+  const owner = {
+    accountId: 'A',
+    readers: new Map(),
+    bootstrap: { removedReason: () => Effect.succeed(null) },
+    host: {
+      pendingClose: () => Effect.succeed(undefined),
+      open: () =>
+        Effect.promise(async () => {
+          openEntered.resolve()
+          await releaseOpen.promise
+          return { workspaceId: 'team', genesisHash: '11'.repeat(32) }
+        }),
+      beginCloseWorkspace: () =>
+        Effect.sync(() => {
+          beginInLock = inLock
+          events.push('begin')
+          return Effect.sync(() => {
+            drainInLock = inLock
+            events.push('drain')
+          })
+        })
+    }
+  }
+  const { E2eeIpc } = await load(
+    '../ipc/services/e2ee-ipc.ts',
+    e2eeIpcDependencies(
+      {
+        withDesktopE2eeAccount: async (work) => {
+          inLock = true
+          try {
+            return await Effect.runPromise(work(owner))
+          } finally {
+            inLock = false
+          }
+        },
+        releaseDesktopE2eeReader: () => {}
+      },
+      sender
+    )
+  )
+  const ipc = new E2eeIpc()
+  const opening = ipc.open('team')
+  await openEntered.promise
+  sender.emit('did-start-navigation', {}, 'synthetic-reload', false, true)
+  releaseOpen.resolve()
+  await assert.rejects(opening, /^Error: e2ee_closed$/)
+  assert.equal(owner.readers.size, 0)
+  assert.equal(beginInLock, true)
+  assert.equal(drainInLock, false)
+  assert.deepEqual(events, ['begin', 'drain'])
+})
+
+void test('keyDelivery.wake aborts pre-sleep hung round, retries in-fiber, and ignores standalone wake without sleep', async () => {
+  const { makeDesktopKeyDelivery } = await import('./e2ee-key-delivery.mts')
+  let now = 1_000
+  const clock = fakeKeyDeliveryTimers()
+  let attempts = 0
+  let roundInFlight = false
+  let overlappedRound = false
+  const firstHung = Promise.withResolvers()
+  const secondStarted = Promise.withResolvers()
+  const releaseSecond = Promise.withResolvers()
+  const windowReaders = new Map([['team', new Map([[99, 1]])]])
+  const networkAbort = new AbortController()
+  const delivery = makeDesktopKeyDelivery({
+    identity: () => ({ userId: 'A', generation: 1 }),
+    now: () => now,
+    timers: () => clock.timers,
+    remember: () => {},
+    code: () => 'e2ee_network',
+    scope: () => (work) =>
+      Effect.runPromise(
+        work({
+          accountId: 'A',
+          readers: windowReaders,
+          bootstrap: { deviceCredential: () => Effect.succeed('cred') },
+          host: {
+            open: () => Effect.void,
+            beginCloseWorkspace: () => Effect.succeed(Effect.void),
+            status: () => Effect.succeed({ hasCurrentKey: true, position: 'p1' }),
+            keyDeliveryTarget: () => Effect.succeed(true),
+            distributeKeys: (_ws, mailbox) =>
+              Effect.tryPromise({
+                try: async () => {
+                  if (roundInFlight) overlappedRound = true
+                  roundInFlight = true
+                  try {
+                    const attempt = ++attempts
+                    const box = mailbox(networkAbort.signal)
+                    if (attempt === 1) {
+                      firstHung.resolve()
+                      await box.waitForAbort()
+                      throw new Error('AbortError')
+                    }
+                    secondStarted.resolve()
+                    await Promise.race([
+                      releaseSecond.promise,
+                      box.waitForAbort().then(() => {
+                        throw new Error('healthy pass must not be aborted')
+                      })
+                    ])
+                  } finally {
+                    roundInFlight = false
+                  }
+                },
+                catch: (error) => error
+              }),
+            keyDeliveryEvidence: () => Effect.succeed('delivered')
+          }
+        })
+      ),
+    cloud: async () => ({
+      accountId: 'A',
+      client: {
+        mailbox: (_access, signal) => ({
+          waitForAbort: () =>
+            new Promise((resolve) => {
+              if (signal.aborted) resolve()
+              else signal.addEventListener('abort', () => resolve(), { once: true })
+            })
+        }),
+        staging: () => ({}),
+        history: () => Effect.succeed({ recordsHex: [], nextCursor: null })
+      }
+    }),
+    run: (_accountId, effect) => Effect.runPromise(effect)
+  })
+  delivery.track('A', 'team', approvalRequest, approvalDevice)
+  await firstHung.promise
+  // Standalone wake without prior sleep never aborts a healthy in-flight round.
+  delivery.wake(undefined)
+  assert.equal(attempts, 1)
+  // Sleep at t=1_500 then wake aborts pre-sleep pass #1 and retries pass #2 directly in-fiber.
+  const sleptAt = (now = 1_500)
+  now = 31_500
+  delivery.wake(sleptAt)
+  await secondStarted.promise
+  // A second wake with the old sleptAt does not abort pass #2 (started at 31_500 > 1_500).
+  delivery.wake(sleptAt)
+  releaseSecond.resolve()
+  await delivery.idle('A', 'team')
+  assert.equal(overlappedRound, false)
+  assert.equal(attempts, 2)
+  assert.equal(delivery.slots.get('A\nteam')?.requests.get(approvalRequest)?.state, 'delivered')
+})
+
+void test('makeDesktopIrohClient.reset closes stale pre-sleep endpoint so next prepare opens a fresh one', async () => {
+  const { makeDesktopIrohClient } = await import('./e2ee-iroh.mts')
+  let opened = 0
+  let closed = 0
+  const machineKey = 'ab'.repeat(32)
+  const fakeNative = {
+    openEndpoint: async () => {
+      const id = ++opened
+      return {
+        id,
+        online: async () => true,
+        hasConnection: async () => false,
+        warm: async () => {},
+        call: async () => ({ nextReply: async () => null, cancel: () => {} }),
+        close: async () => {
+          closed += 1
+        }
+      }
+    }
+  }
+  const fakeLedger = {
+    inspectState: () => ({
+      devices: new Map([[machineKey, { kind: 'machine', machineId: 'm1' }]])
+    })
+  }
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* makeDesktopIrohClient({
+          native: fakeNative,
+          relays: { urls: ['https://relay.example.invalid'] },
+          withSeed: (open) => Effect.promise(() => open(new Uint8Array(32))),
+          ledger: () => Effect.succeed(fakeLedger)
+        })
+        yield* client.prepare('m1')
+        assert.equal(opened, 1)
+        assert.ok(yield* client.peek('m1'))
+        yield* client.reset()
+        assert.equal(yield* client.peek('m1'), undefined)
+        yield* client.prepare('m1')
+        assert.equal(opened, 2)
+      })
+    )
+  )
+  assert.equal(closed, 2)
 })

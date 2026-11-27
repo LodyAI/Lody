@@ -77,8 +77,8 @@ or reopen an account-bound local pending request and workspace runtime; they exp
 before authentication/native access and checks the main-process account session.
 The encrypted adapter enables Meta, Loro documents and the owning workspace/machine/Code Collab index and signal Flocks; unsupported rooms and plaintext side channels stay closed.
 `e2ee-custody-electron.ts` is the readiness-gated native composition factory.
-Reject unavailable native encryption and Linux `basic_text`/unknown backends;
-never reuse auth cookie plaintext overrides or fall back to plaintext files.
+Reject unavailable encryption and Linux `basic_text`/unknown backends; never use plaintext overrides or fallbacks.
+`safe-storage-classification.ts` classifies `auth-storage.ts` and `e2ee-custody.mts`: temporary keychain locks (including `"Decryption is not available."`) keep auth cookies and throw `DesktopSafeStorageLockedError` (`e2ee_custody_locked`) without touching `kek.safe-storage`; `EACCES`/`EPERM` stay `permissions`, text-only `permission denied` stays `storage`.
 
 New content seals prefer installed current keys inside core, never renderer hints.
 Only genuine absence permits retained published keys within the durable fifteen-minute
@@ -106,13 +106,9 @@ replacement keys or deletion. SQLite owns the cross-process creation mutex; scop
 await admitted native work before releasing it. No network or plaintext data-plane
 activation belongs in this host workflow.
 
-The owning test uses synthetic authenticated safeStorage plus real crypto,
-filesystem and another OS process. It does not prove an OS keychain or all-platform
-packaging result; native safeStorage assurance needs an isolated platform run.
+The owning test uses synthetic safeStorage with real crypto, filesystem, and subprocesses; native keychain assurance requires an isolated platform run.
 
-`e2ee.readIdentity` is an expected-account-bound local read of retained verified identity.
-It grants no renderer reader/status/content capability. Preserve existing readers;
-release a cold temporary host before replying. `status` still requires a window reader.
+`e2ee.readIdentity` is an account-bound local read granting no renderer capability; preserve existing readers, release cold hosts before replying, and require a reader for `status`.
 
 The recovery vault (`services/e2ee-recovery-vault.mts`) is enabled by default unless
 main starts with `LODY_E2EE_RECOVERY_VAULT=off`. Main owns recovery file dialogs/bytes,
