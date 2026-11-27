@@ -27,7 +27,7 @@
 <a href="https://lody.ai" alt="lody-site">Lody</a>
 </h1>
 <p align="center">
-  <b>English</b> | <a href="./README.zh-CN.md">简体中文</a>
+  <b>English</b> | <a href="./README.zh-CN.md">简体中文</a> | <a href="./README.tr.md">Türkçe</a>
 </p>
 <p align="center">
   <b>A shared workspace for the coding agents your team already uses.</b>
