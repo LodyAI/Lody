@@ -2,6 +2,7 @@ import { App } from '@capacitor/app';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
 import type { NativePushBridge } from '@lody/components/lib/push-notifications';
+import { authClient } from './auth';
 
 const activity = registerPlugin<{
   configurePushTokens(input: {
@@ -65,16 +66,28 @@ async function report() {
       });
     }).catch(() => console.error('Activity push configuration failed'));
 }
+type SessionAtom = {
+  get(): { data?: { user?: { id?: unknown } } | null } | undefined;
+  listen(listener: () => void): () => void;
+};
+const session = (authClient as { $store?: { atoms?: { session?: SessionAtom } } }).$store?.atoms
+  ?.session;
 let tapped: { route: string; recipient: unknown } | undefined;
+/** Opens a tap for the signed-in recipient. Workspace admission stays the route's own check,
+ * so a blocked startup workspace that never registers push cannot strand the tap. */
 function openTapped() {
   const tap = tapped;
-  if (!tap || !notify) return;
+  const user = session?.get()?.data?.user?.id;
+  if (!tap || typeof user !== 'string') return;
   tapped = undefined;
-  if (tap.recipient !== localStorage.getItem('lody:push-user')) return;
+  if (tap.recipient !== user) return;
+  if (`${window.location.pathname}${window.location.search}${window.location.hash}` === tap.route)
+    return;
   window.history.pushState(null, '', tap.route);
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 export function initPushBridge() {
+  session?.listen(openTapped);
   void PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
     const route = event.notification.data?.route;
     if (typeof route !== 'string' || !route.startsWith('/') || route.startsWith('//')) return;
@@ -106,7 +119,6 @@ export function initPushBridge() {
       })();
       await listeners;
       if (current !== epoch) return;
-      openTapped();
       const ready = waitForToken();
       try {
         await nativeCommand(async () => {

@@ -20,8 +20,21 @@ function deferred() {
 async function setup(platform, { channel, configure, autoToken = true, storage = {} } = {}) {
   const events = [];
   const visited = [];
+  let signedIn = null;
+  const sessionListeners = new Set();
+  const session = {
+    get: () => ({ data: signedIn ? { user: { id: signedIn } } : null }),
+    listen: (fn) => {
+      sessionListeners.add(fn);
+      return () => sessionListeners.delete(fn);
+    },
+  };
+  const signIn = (id) => {
+    signedIn = id;
+    for (const fn of sessionListeners) fn(session.get());
+  };
   const window = {
-    location: { origin: 'https://localhost' },
+    location: { origin: 'https://localhost', pathname: '/', search: '', hash: '' },
     history: { pushState: (_state, _title, route) => visited.push(route) },
     dispatchEvent: (event) => events.push(event.type),
   };
@@ -44,6 +57,7 @@ async function setup(platform, { channel, configure, autoToken = true, storage =
     localStorage: { getItem: (key) => storage[key] ?? 'installation' },
   });
   const exports = {
+    './auth': { authClient: { $store: { atoms: { session } } } },
     '@capacitor/app': { App: { getInfo: async () => ({ id: 'app.test' }) } },
     '@capacitor/core': {
       Capacitor: { getPlatform: () => platform },
@@ -82,7 +96,7 @@ async function setup(platform, { channel, configure, autoToken = true, storage =
   );
   await entry.evaluate();
   entry.namespace.initPushBridge();
-  return { bridge: context.window.__LODY_PUSH__, events, listeners, timers, visited };
+  return { bridge: context.window.__LODY_PUSH__, events, listeners, timers, visited, signIn };
 }
 await test('logout while Android channel creation is pending cannot register afterward', async () => {
   const entered = deferred();
@@ -217,8 +231,8 @@ await test('encrypted Live Activity keeps session navigation while removing HTTP
   await bridge.syncConversationSummary({ ...input, contentMode: 'plaintext' });
   assert.equal(payloads[1].items[0].permissionRequestId, 'request');
 });
-await test('a cold-start notification tap opens only after its recipient registers', async () => {
-  const t = await setup('ios', { storage: { 'lody:push-user': 'alice' } });
+await test('a cold-start tap opens once its recipient is signed in, even if push never registers', async () => {
+  const t = await setup('ios');
   const tap = (route, recipientUserId = 'alice') =>
     t.listeners.get('pushNotificationActionPerformed')({
       notification: { data: { route, recipientUserId } },
@@ -227,20 +241,28 @@ await test('a cold-start notification tap opens only after its recipient registe
   tap('//evil.test/path');
   tap('/workspace/w1/session/s1');
   assert.deepEqual(t.visited, []);
-  await t.bridge.register(async () => {});
+  // The startup workspace is blocked, so `register()` is never called.
+  t.signIn('alice');
   assert.deepEqual(t.visited, ['/workspace/w1/session/s1']);
   assert.equal(t.events.filter((event) => event === 'popstate').length, 1);
   tap('/workspace/w1/session/s2', 'bob');
   tap('/workspace/w1/session/s3');
   assert.deepEqual(t.visited, ['/workspace/w1/session/s1', '/workspace/w1/session/s3']);
 });
-await test('a parked notification tap does not survive logout into the next registration', async () => {
-  const t = await setup('ios', { storage: { 'lody:push-user': 'alice' } });
+await test('logout drops a parked notification tap, and another account never opens it', async () => {
+  const t = await setup('ios');
   await Promise.resolve();
-  t.listeners.get('pushNotificationActionPerformed')({
-    notification: { data: { route: '/workspace/w1', recipientUserId: 'alice' } },
-  });
+  const tap = (route) =>
+    t.listeners.get('pushNotificationActionPerformed')({
+      notification: { data: { route, recipientUserId: 'alice' } },
+    });
+  tap('/workspace/w1');
   await t.bridge.unregister();
-  await t.bridge.register(async () => {});
+  t.signIn('alice');
+  assert.deepEqual(t.visited, []);
+  t.signIn(null);
+  tap('/workspace/w2');
+  t.signIn('bob');
+  t.signIn('alice');
   assert.deepEqual(t.visited, []);
 });

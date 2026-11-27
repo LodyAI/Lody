@@ -77,11 +77,12 @@ vault-command permit, so unavailable activity cannot block file/passkey use.
 
 Vault commands serialize until actual native/network/IDB completion. UI dismissal
 never releases raw work early. Saved-file verification runs inside the command, and
-WKWebView can close its file picker without `cancel`, so `chooseRecoveryFile` also
-settles as dismissed when its login's port is disposed (abort signal), when the next file
-action opens a chooser, or one second after the page regains focus without `change`;
-a never-answered picker therefore cannot hold the permit. A file picked after focus is
-kept however long its read takes. Public Scopes wipe V/PRF; the private operation
+WKWebView can close its file picker without `cancel` or deliver `change` long after
+focus returns, so focus is never treated as dismissal. Instead the verification prompt
+stays open while its chooser runs: Cancel aborts the chooser and answers the command,
+Choose again replaces it, and logout or unmount aborts both. `chooseRecoveryFile` also
+settles when a newer chooser opens or its signal aborts, and it never reads a late
+`change` after settling, so a never-answered picker cannot hold the permit. Public Scopes wipe V/PRF; the private operation
 also retains final cleanup ownership of every native PRF result, including early
 public validation failures. Private file copies are wiped on every exit, including
 file-picker/read races. Nothing logs native detail

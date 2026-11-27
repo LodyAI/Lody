@@ -143,8 +143,8 @@ before disposal. Reset clears caches; expiry stays 15m (usage: source end).
   preserve its Cordova plugin, iOS service extension and SDK logout at native reset.
   Self-hosted mode explicitly opts in and uses the Capacitor bridge.
 - `src/push-notifications.ts` owns the Capacitor PushNotifications bridge. It takes the
-  natively retained tap at boot and opens the newest one once the recipient's
-  registration is live; logout drops it. The
+  retained tap at boot and opens the newest once its recipient signs in, even unregistered;
+  logout drops it. The
   shared `packages/components/src/lib/push-notifications.ts` owns settings
   and subscription lifecycle. Native paths never use browser permission APIs.
 - OneSignal login and ActivityKit use original user/activity IDs, matching existing clients.

@@ -14,7 +14,11 @@ import {
   mobileRecoverySite,
   visibleSecurityEvents,
 } from '../../src/e2ee/recovery';
-import { mobileRecoveryPort } from '../../src/recovery/recovery-port';
+import {
+  mobileRecoveryPort,
+  savedFilePrompt,
+  type SavedFilePromptState,
+} from '../../src/recovery/recovery-port';
 
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory());
@@ -813,6 +817,7 @@ it('a staging build binds the origin of its VITE_SITE_URL instead of Lody Cloud'
 });
 
 function silentChooserPage() {
+  let reads = 0;
   class Input extends EventTarget {
     type = '';
     hidden = false;
@@ -827,7 +832,15 @@ function silentChooserPage() {
     }
     choose(bytes: Uint8Array | null) {
       this.files = bytes
-        ? [{ size: bytes.length, arrayBuffer: async () => bytes.slice().buffer }]
+        ? [
+            {
+              size: bytes.length,
+              arrayBuffer: async () => {
+                reads++;
+                return bytes.slice().buffer;
+              },
+            },
+          ]
         : [];
       this.dispatchEvent(new Event('change'));
     }
@@ -848,13 +861,37 @@ function silentChooserPage() {
         opened.length >= count ? resolve(opened[count - 1]!) : waiting.push(check);
       check();
     });
-  return { opened, nth, view };
+  return { opened, nth, view, reads: () => reads };
 }
 
-it('a verification chooser WebKit never answers cannot hold the recovery command permit', async () => {
+function promptStates() {
+  const states: SavedFilePromptState[] = [];
+  const waiters: (() => void)[] = [];
+  let seen = 0;
+  return {
+    states,
+    record: (state: SavedFilePromptState) => {
+      states.push(state);
+      if (state === 'waiting') for (const wake of waiters.splice(0)) wake();
+    },
+    waiting: () =>
+      new Promise<void>((resolve) => {
+        const target = ++seen;
+        const check = () =>
+          states.filter((state) => state === 'waiting').length >= target
+            ? resolve()
+            : waiters.push(check);
+        check();
+      }),
+  };
+}
+
+async function verifiedCreation() {
   const f = await fixture();
   f.empty();
   const page = silentChooserPage();
+  const watched = promptStates();
+  const prompt = savedFilePrompt(watched.record);
   let saved = new Uint8Array();
   const owned = mobileRecoveryPort({
     config: {
@@ -870,62 +907,96 @@ it('a verification chooser WebKit never answers cannot hold the recovery command
       saved = bytes.slice();
       return true;
     },
+    confirmSavedFile: prompt.request,
   });
+  return { f, page, watched, prompt, owned, saved: () => saved };
+}
+
+it('Cancel on the verification prompt releases a creation whose picker WebKit never answers', async () => {
+  const t = await verifiedCreation();
   try {
-    const stuck = owned.port.create!();
-    const silent = await page.nth(1);
-    const next = owned.port.checkFile!();
+    const stuck = t.owned.port.create!();
+    await t.watched.waiting();
+    t.prompt.pick();
+    const silent = await t.page.nth(1);
+    t.page.view.dispatchEvent(new Event('blur'));
+    t.page.view.dispatchEvent(new Event('focus'));
+    expect(t.watched.states.at(-1)).toBe('choosing');
+    t.prompt.cancel();
     expect(await stuck).toEqual({ outcome: 'cancelled' });
     expect(silent.removed).toBe(true);
-    expect(f.paths).not.toContain('e2eeRecoveryVault:putImmutable');
-    (await page.nth(2)).dispatchEvent(new Event('cancel'));
-    expect(await next).toEqual({ outcome: 'cancelled' });
-    const retry = owned.port.create!();
-    (await page.nth(3)).choose(saved);
+    expect(t.f.paths).not.toContain('e2eeRecoveryVault:putImmutable');
+    const retry = t.owned.port.create!();
+    await t.watched.waiting();
+    t.prompt.pick();
+    const slow = await t.page.nth(2);
+    t.page.view.dispatchEvent(new Event('blur'));
+    t.page.view.dispatchEvent(new Event('focus'));
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+    slow.choose(t.saved());
     expect(await retry).toEqual({ outcome: 'created', vaultId: expect.any(String) });
-    const orphan = owned.port.checkFile!();
-    const open = await page.nth(4);
-    owned.dispose();
-    expect(await orphan).toEqual({ outcome: 'cancelled' });
-    expect(open.removed).toBe(true);
+    expect(t.watched.states.at(-1)).toBe('closed');
   } finally {
-    saved.fill(0);
-    owned.dispose();
+    t.saved().fill(0);
+    t.prompt.dispose();
+    t.owned.dispose();
   }
 }, 30_000);
 
-it('a chooser counts as dismissed when the page regains focus without a file, but not once one is picked', async () => {
-  const page = silentChooserPage();
-  const { chooseRecoveryFile, RECOVERY_CHOOSER_FOCUS_GRACE_MS } =
-    await import('@lody/client-e2ee/recovery-port');
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+it('Choose again replaces a silent picker, and its late change is never read', async () => {
+  const t = await verifiedCreation();
   try {
-    const dismissed = chooseRecoveryFile();
-    page.view.dispatchEvent(new Event('focus'));
-    vi.advanceTimersByTime(RECOVERY_CHOOSER_FOCUS_GRACE_MS * 2);
-    let settled = false;
-    void dismissed.then(() => (settled = true));
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    page.view.dispatchEvent(new Event('blur'));
-    page.view.dispatchEvent(new Event('focus'));
-    vi.advanceTimersByTime(RECOVERY_CHOOSER_FOCUS_GRACE_MS - 1);
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    vi.advanceTimersByTime(1);
-    expect(await dismissed).toBeNull();
-
-    const picked = chooseRecoveryFile();
-    page.view.dispatchEvent(new Event('blur'));
-    page.view.dispatchEvent(new Event('focus'));
-    page.opened[1]!.choose(new Uint8Array([7, 8, 9]));
-    vi.advanceTimersByTime(RECOVERY_CHOOSER_FOCUS_GRACE_MS * 2);
-    expect(await picked).toEqual(new Uint8Array([7, 8, 9]));
-
-    const aborted = new AbortController();
-    aborted.abort();
-    expect(await chooseRecoveryFile({ signal: aborted.signal })).toBeNull();
+    const created = t.owned.port.create!();
+    await t.watched.waiting();
+    t.prompt.pick();
+    const silent = await t.page.nth(1);
+    t.prompt.pick();
+    const again = await t.page.nth(2);
+    expect(silent.removed).toBe(true);
+    silent.choose(new Uint8Array([1, 2, 3]));
+    expect(t.page.reads()).toBe(0);
+    again.dispatchEvent(new Event('cancel'));
+    await t.watched.waiting();
+    t.prompt.pick();
+    (await t.page.nth(3)).choose(t.saved());
+    expect(await created).toEqual({ outcome: 'created', vaultId: expect.any(String) });
+    expect(t.page.reads()).toBe(1);
   } finally {
-    vi.useRealTimers();
+    t.saved().fill(0);
+    t.prompt.dispose();
+    t.owned.dispose();
   }
-});
+}, 30_000);
+
+it('logout settles an open verification prompt and every chooser the port opened', async () => {
+  const t = await verifiedCreation();
+  try {
+    const pending = t.owned.port.create!();
+    await t.watched.waiting();
+    t.prompt.pick();
+    const open = await t.page.nth(1);
+    t.prompt.dispose();
+    t.owned.dispose();
+    await expect(pending).rejects.toThrow();
+    expect(t.f.paths).not.toContain('e2eeRecoveryVault:putImmutable');
+    expect(open.removed).toBe(true);
+    const next = mobileRecoveryPort({
+      config: {
+        ...t.f.options,
+        run: Effect.runPromise,
+        defaultLabel: async () => 'iPhone',
+        runtime: () => undefined,
+      },
+      accountId: 'account-a',
+      sessionId: 'login-a',
+      currentSession: t.f.options.currentSession,
+    });
+    const orphan = next.port.checkFile!();
+    const chooser = await t.page.nth(2);
+    next.dispose();
+    expect(await orphan).toEqual({ outcome: 'cancelled' });
+    expect(chooser.removed).toBe(true);
+  } finally {
+    t.saved().fill(0);
+  }
+}, 30_000);

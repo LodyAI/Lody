@@ -88,3 +88,64 @@ export function mobileRecoveryPort(options: {
     },
   };
 }
+
+export type SavedFilePromptState = 'closed' | 'waiting' | 'choosing';
+
+/**
+ * The fresh-tap prompt that re-reads a just-exported file inside the creation command. The
+ * prompt stays open while its chooser runs: WKWebView may close the picker without any
+ * event, so Cancel must still release the command and Choose again replaces the chooser.
+ * A dismissed chooser returns to `waiting`; only a file, an error or Cancel answers.
+ */
+export function savedFilePrompt(
+  onState: (state: SavedFilePromptState) => void,
+  choose: typeof chooseRecoveryFile = chooseRecoveryFile
+) {
+  let answer:
+    | { resolve: (file: Uint8Array | null) => void; reject: (error: unknown) => void }
+    | undefined;
+  let picking: AbortController | undefined;
+  let disposed = false;
+  const settle = (reply: (to: NonNullable<typeof answer>) => void) => {
+    const to = answer;
+    answer = undefined;
+    picking?.abort();
+    picking = undefined;
+    onState('closed');
+    if (to) reply(to);
+  };
+  return {
+    request: () =>
+      new Promise<Uint8Array | null>((resolve, reject) => {
+        settle((to) => to.resolve(null));
+        if (disposed) return resolve(null);
+        answer = { resolve, reject };
+        onState('waiting');
+      }),
+    pick: () => {
+      if (!answer) return;
+      picking?.abort();
+      const controller = new AbortController();
+      picking = controller;
+      onState('choosing');
+      choose({ signal: controller.signal }).then(
+        (file) => {
+          if (picking !== controller) return file?.fill(0);
+          picking = undefined;
+          if (file) settle((to) => to.resolve(file));
+          else onState('waiting');
+        },
+        (error: unknown) => {
+          if (picking !== controller) return;
+          picking = undefined;
+          settle((to) => to.reject(error));
+        }
+      );
+    },
+    cancel: () => settle((to) => to.resolve(null)),
+    dispose: () => {
+      disposed = true;
+      settle((to) => to.resolve(null));
+    },
+  };
+}
