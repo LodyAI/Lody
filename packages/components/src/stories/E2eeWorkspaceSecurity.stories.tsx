@@ -1,5 +1,6 @@
 import { E2eeSettingsGlyph } from '@/components/settings/e2ee/security-state';
 import type { Meta, StoryObj } from '@storybook/react';
+import { expect, userEvent, within } from 'storybook/test';
 import { E2eeDevicesPanel, E2eeSecurityPanel } from '@/components/settings/e2ee/security-panel';
 const ownerAvatar = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#e5dccf"/><path d="M5 64c0-21 54-21 54 0" fill="#526b6b"/><ellipse cx="32" cy="27" rx="16" ry="20" fill="#e8ba94"/><path d="M16 27C9 0 55 0 48 29L40 15c-4 9-14 5-24 12" fill="#4a352b"/><circle cx="26" cy="28" r="1.5"/><circle cx="38" cy="28" r="1.5"/><path d="M27 37q5 5 10 0" fill="none" stroke="#8c4d42" stroke-width="2"/></svg>')}`;
 const state = {
@@ -54,6 +55,15 @@ export const IdentityLostError: Story = {
 export const RestartRequired: Story = {
   args: { state: { ...state, updatePending: true }, error: 'e2ee_restart-required' },
 };
+export const LocalSecurityStorageUnavailable: Story = {
+  args: { error: { _tag: 'PersonalHostError', code: 'storage' } },
+};
+export const DeviceRevoked: Story = {
+  args: { state: undefined, error: 'e2ee_device_revoked' },
+};
+export const ServiceUnreachable: Story = {
+  args: { error: { _tag: 'PersonalHostError', code: 'network' } },
+};
 export const CandidateRecovery: Story = {
   args: {
     error: 'e2ee_rotation_candidate_unavailable',
@@ -100,6 +110,15 @@ export const LastPersonalDevice: Story = {
         { key: 'c3'.repeat(32), kind: 'recovery', machineId: null, self: false, mayRevoke: false },
       ],
     },
+  },
+};
+export const LastPersonalDeviceConfirm: Story = {
+  ...LastPersonalDevice,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByTestId('e2ee-device-revoke'));
+    const body = within(document.body);
+    await expect(await body.findByTestId('e2ee-last-personal-confirm')).toBeVisible();
   },
 };
 

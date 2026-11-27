@@ -69,3 +69,14 @@ export const RequestRejected: Story = {
     },
   },
 };
+
+/** Lody's cloud was unavailable for the status read; each failed row keeps retrying. */
+export const CloudUnavailable: Story = {
+  args: {
+    probe: async (machineId: string) => {
+      if (machineId === 'studio-mac' || machineId === 'build-box')
+        throw new Error('HTTP 503 cluster_not_ready');
+      return { lifecycle: capabilities[machineId] ?? null };
+    },
+  },
+};

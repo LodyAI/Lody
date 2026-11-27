@@ -446,3 +446,140 @@ it.each(['partial', 'adopt-failure', 'blocked-peer'] as const)(
     );
   }
 );
+
+describe('vault replacement resilience under per-workspace access loss', () => {
+  it('skips revoked/removed workspaces in replaceAccountVault and abandonVaultReplacement while keeping transient 503 pending', async () => {
+    const { replaceAccountVault, abandonVaultReplacement } =
+      await import('../src/vault-replacement');
+    const { PersonalAccessLoss } = await import('../src/errors');
+
+    // (a) replaceAccountVault skips revoked workspace A and completes replacement for B
+    let bSetup = 0,
+      bRevoke = 0,
+      finished = 0;
+    const replaced = await Effect.runPromise(
+      replaceAccountVault({
+        workspaces: [
+          {
+            name: 'A',
+            setup: () => Effect.fail(new PersonalAccessLoss({ code: 'e2ee_device_revoked' })),
+            revokeOtherRecoveryDevices: () =>
+              Effect.die('revoked workspace A must not be retried in revoke phase'),
+          },
+          {
+            name: 'B',
+            setup: () =>
+              Effect.sync(() => {
+                bSetup++;
+                return { outcome: 'Committed', status: { recoverable: true } };
+              }),
+            revokeOtherRecoveryDevices: () =>
+              Effect.sync(() => {
+                bRevoke++;
+                return { outcome: 'Committed' };
+              }),
+          },
+        ],
+        finish: () =>
+          Effect.sync(() => {
+            finished++;
+          }),
+      })
+    );
+    expect(replaced).toEqual({ outcome: 'Committed' });
+    expect({ bSetup, bRevoke, finished }).toEqual({ bSetup: 1, bRevoke: 1, finished: 1 });
+
+    // (b) abandonVaultReplacement skips revoked/unauthorized workspace A and exits replacing
+    let bAbandoned = 0,
+      abandoned = 0;
+    const abandonedResult = await Effect.runPromise(
+      abandonVaultReplacement({
+        workspaces: [
+          {
+            name: 'A',
+            revokeOwnRecoveryDevice: () => Effect.fail(new Error('e2ee_device_revoked')),
+          },
+          {
+            name: 'B',
+            revokeOwnRecoveryDevice: () =>
+              Effect.sync(() => {
+                bAbandoned++;
+                return { outcome: 'Committed' };
+              }),
+          },
+        ],
+        abandon: () =>
+          Effect.sync(() => {
+            abandoned++;
+          }),
+      })
+    );
+    expect(abandonedResult).toEqual({ outcome: 'Committed' });
+    expect({ bAbandoned, abandoned }).toEqual({ bAbandoned: 1, abandoned: 1 });
+
+    // (c) transient 503 fails without skipping or finishing/abandoning; Pending stays Pending
+    let finishCalledOn503 = 0,
+      abandonCalledOn503 = 0;
+    const replaceFailed = await Effect.runPromise(
+      Effect.result(
+        replaceAccountVault({
+          workspaces: [
+            {
+              name: 'A',
+              setup: () => Effect.fail(new Error('503 Service Unavailable')),
+              revokeOtherRecoveryDevices: () => Effect.succeed({ outcome: 'Committed' }),
+            },
+            {
+              name: 'B',
+              setup: () => Effect.succeed({ outcome: 'Committed', status: { recoverable: true } }),
+              revokeOtherRecoveryDevices: () => Effect.succeed({ outcome: 'Committed' }),
+            },
+          ],
+          finish: () =>
+            Effect.sync(() => {
+              finishCalledOn503++;
+            }),
+        })
+      )
+    );
+    expect(Result.isFailure(replaceFailed)).toBe(true);
+    expect(finishCalledOn503).toBe(0);
+
+    const replacePending = await Effect.runPromise(
+      replaceAccountVault({
+        workspaces: [
+          {
+            name: 'A',
+            setup: () => Effect.succeed({ outcome: 'Pending', status: { recoverable: false } }),
+            revokeOtherRecoveryDevices: () => Effect.succeed({ outcome: 'Committed' }),
+          },
+        ],
+        finish: () =>
+          Effect.sync(() => {
+            finishCalledOn503++;
+          }),
+      })
+    );
+    expect(replacePending).toEqual({ outcome: 'Pending', step: 'setup', workspace: 'A' });
+    expect(finishCalledOn503).toBe(0);
+
+    const abandonFailed = await Effect.runPromise(
+      Effect.result(
+        abandonVaultReplacement({
+          workspaces: [
+            {
+              name: 'A',
+              revokeOwnRecoveryDevice: () => Effect.fail(new Error('503 Service Unavailable')),
+            },
+          ],
+          abandon: () =>
+            Effect.sync(() => {
+              abandonCalledOn503++;
+            }),
+        })
+      )
+    );
+    expect(Result.isFailure(abandonFailed)).toBe(true);
+    expect(abandonCalledOn503).toBe(0);
+  });
+});

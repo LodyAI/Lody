@@ -216,10 +216,11 @@ const signRequest = Effect.fnUntraced(function* (
 });
 
 /** Explicit installation only. Allocation through native settlement is one same-fiber writer operation; no network runs here. */
-export const preparePersonalIdentity = Effect.fnUntraced(function* (
+export const preparePersonalIdentityWithOpened = Effect.fnUntraced(function* (
   source: PersonalPairingOffer,
   replacement = false,
-  existingOnly = false
+  existingOnly = false,
+  verifiedLost = false
 ) {
   const platform = yield* PersonalHostPlatform,
     store = yield* ClientInstallationStore,
@@ -311,9 +312,9 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
               retained = { ...retained, wrapped };
               yield* saveWrappers(pairings, current.binding, retained);
             }
-            yield* openPreparedIdentity(retained, custody);
+            const opened = yield* openPreparedIdentity(retained, custody);
             if (!retained.replacing) yield* advanceReady(store, current, retained);
-            return retained;
+            return { prepared: retained, opened };
           }
           if (existingOnly) return yield* fail('identity-lost');
           // Never fork a second candidate while an earlier request has an unknown result.
@@ -379,7 +380,8 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
               if (!sameBinding(binding, current.binding) && !settled)
                 return yield* fail('conflict');
               if (sameBinding(binding, current.binding)) {
-                if (!settled && !approved) return yield* fail('conflict');
+                if (!settled && !approved && !(replacement && verifiedLost))
+                  return yield* fail('conflict');
                 // The current identity's credential stays pinned to its own offer. A
                 // replacement gets a new device and credential bound to its own offer
                 // (a new approver, or a new membership after removal); scope and genesis
@@ -441,7 +443,7 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
               receipt: null,
             });
             yield* saveWrappers(pairings, current.binding, nextSession);
-            return nextSession;
+            return { prepared: nextSession, opened: undefined };
           }
           if (!platform.drainOld) return yield* fail('unsupported');
         } else if (replacement) return yield* fail('conflict');
@@ -517,15 +519,25 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
             wrapped.push({ purpose, blob: yield* custody.wrap(purpose, body) });
           const complete = { ...prepared, wrapped };
           yield* saveWrappers(pairings, current?.binding ?? binding, complete);
-          yield* openPreparedIdentity(complete, custody);
+          const opened = yield* openPreparedIdentity(complete, custody);
           if (!current) yield* advanceReady(store, (yield* store.read())!, complete);
           signing.fill(0);
           encryption.fill(0);
           credential.fill(0);
           packet.fill(0);
-          return complete;
+          return { prepared: complete, opened };
         }
       })
     )
   );
+});
+
+export const preparePersonalIdentity = Effect.fnUntraced(function* (
+  offer: PersonalPairingOffer,
+  replacement = false,
+  existingOnly = false,
+  verifiedLost = false
+) {
+  return (yield* preparePersonalIdentityWithOpened(offer, replacement, existingOnly, verifiedLost))
+    .prepared;
 });

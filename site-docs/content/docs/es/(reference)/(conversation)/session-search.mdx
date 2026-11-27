@@ -1,0 +1,45 @@
+---
+title: "Búsqueda dentro de la conversación"
+description: "Busca en el texto de la conversación dentro de una sesión de Lody."
+---
+
+# Búsqueda dentro de la conversación
+
+La búsqueda dentro de la conversación te ayuda a recuperar contexto de sesiones largas. Busca en el
+texto de la conversación: tus mensajes, las respuestas del agente, su pensamiento y los planes
+propuestos — incluidos el texto de progreso y el pensamiento plegados dentro del grupo de trabajo
+contraído de un turno finalizado.
+
+Las llamadas a herramientas no se pueden buscar: sus títulos, rutas de archivos, entrada/salida JSON,
+comandos/salidas de terminal y diffs quedan fuera del índice. Las listas de verificación de planes
+estructurados, los objetivos y la salida de scripts de worktree también quedan excluidos. Una ruta de
+archivo o un fragmento de código escrito en un mensaje o en un plan propuesto sí se puede seguir
+buscando como texto de la conversación.
+
+Esto se diferencia de la [búsqueda global de navegación entre sesiones](/es/docs/keyboard-shortcuts#abrir-la-paleta-de-comandos):
+la entrada **Search** de la barra lateral y `Cmd/Ctrl+K` abren la paleta de comandos, que busca
+sesiones por título, etiqueta de proyecto o repositorio, o nombre de rama. Permite cambiar entre
+sesiones sin buscar en el texto de sus conversaciones.
+
+## Abrir la búsqueda
+
+- Abre el menú de la sesión y elige **Find in session**.
+- En escritorio, presiona `Ctrl+F`; en macOS, presiona `Cmd+F`.
+
+El cuadro de búsqueda aparece sobre la conversación sin reemplazar el compositor.
+
+## Recorrer los resultados
+
+- El texto que coincide se resalta a medida que escribes.
+- El contador muestra el resultado actual y el total de coincidencias.
+- Presiona `Enter` para saltar a la siguiente coincidencia.
+- Presiona `Shift+Enter` o la flecha arriba para saltar a la coincidencia anterior.
+- Si no hay coincidencias, el contador muestra `0 / 0`.
+
+El resultado activo se desplaza hasta quedar visible, expandiendo un grupo de trabajo contraído o
+una tarjeta de pensamiento cuando la coincidencia se encuentra dentro de uno de ellos.
+
+## Borrar o cerrar
+
+Presiona `Escape` una vez para borrar la consulta actual. Presiona `Escape` de nuevo para cerrar la
+búsqueda.

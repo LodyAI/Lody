@@ -1,0 +1,9 @@
+{
+  "title": "Настройки и CLI",
+  "pages": [
+    "cli",
+    "keyboard-shortcuts",
+    "notification",
+    "terminal"
+  ]
+}

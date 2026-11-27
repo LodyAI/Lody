@@ -3,6 +3,7 @@ import { Cause, Effect, Exit, Result, Scope, Semaphore, type Layer } from 'effec
 import {
   makePersonalWorkspaceRuntime,
   personalRuntimeAccountRequester,
+  personalRuntimeReceiveKeys,
   personalRuntimeRecovery,
   type PersonalRuntimeRecovery,
   accountPairingOffer,
@@ -254,6 +255,22 @@ export function personalEntry(options: PersonalEntryOptions) {
       string,
       { cancelled: boolean; accountId: string | null; started: boolean; entry?: RecordEntry }
     >();
+    const admittedJoins = new Map<
+      string,
+      {
+        accountId: string;
+        requestId: string;
+        reader: string;
+        entry: RecordEntry;
+        runtime: E2eeWorkspaceRuntime;
+      }
+    >();
+    const releaseAdmittedJoin = async (workspaceId: string) => {
+      const held = admittedJoins.get(workspaceId);
+      if (!held) return;
+      admittedJoins.delete(workspaceId);
+      await held.runtime.close(workspaceId, held.accountId, held.reader).catch(() => {});
+    };
     let lastAccount: string | null = null;
     const identity = () => {
       const state = session.get();
@@ -275,6 +292,8 @@ export function personalEntry(options: PersonalEntryOptions) {
         if (state.status === 'loading' || (state.status === 'unauthenticated' && state.uncertain))
           return;
         lastAccount = state.status === 'authenticated' ? state.user.id : null;
+        for (const [workspaceId, held] of [...admittedJoins.entries()])
+          if (held.accountId !== lastAccount) void releaseAdmittedJoin(workspaceId);
         for (const entry of all)
           if (entry.accountId !== lastAccount) void retire(entry).catch(() => {});
       });
@@ -326,7 +345,7 @@ export function personalEntry(options: PersonalEntryOptions) {
      * never opens, so it has no status, ledger verdict or credential. Retirement drains in
      * the background; the next acquisition waits for it.
      */
-    const lose = async (entry: RecordEntry, accountId: string) => {
+    const lose = async (entry: RecordEntry, accountId: string, allowPending = false) => {
       const definite = () => {
         const state = session.get();
         return !closed && state.status === 'authenticated' && state.user.id === accountId;
@@ -334,18 +353,28 @@ export function personalEntry(options: PersonalEntryOptions) {
       if (!definite()) return false;
       try {
         const pin = await execute(options.pins.read(accountId, entry.workspaceId));
-        if (!pin || pin.phase === 'pending' || !sameOffer(pin.offer, entry.offer) || !definite())
+        if (
+          !pin ||
+          (!allowPending && pin.phase === 'pending') ||
+          !sameOffer(pin.offer, entry.offer) ||
+          !definite()
+        )
           return false;
-        await execute(options.pins.retire(accountId, entry.offer));
+        await execute(options.pins.retire(accountId, entry.offer, allowPending));
       } catch {
         return false;
       }
       void retire(entry).catch(() => {});
       return true;
     };
-    const project = async (entry: RecordEntry, accountId: string, error: unknown) => {
+    const project = async (
+      entry: RecordEntry,
+      accountId: string,
+      error: unknown,
+      allowPending = false
+    ) => {
       const loss = failureLoss(error);
-      if (loss && (await lose(entry, accountId))) throw new Error(loss);
+      if (loss && (await lose(entry, accountId, allowPending))) throw new Error(loss);
       throw error;
     };
     const get = async (
@@ -562,11 +591,7 @@ export function personalEntry(options: PersonalEntryOptions) {
         ...(approval.checkpoint ? { checkpoint: () => guarded(() => approval.checkpoint!()) } : {}),
         ...(approval.ingest
           ? {
-              ingest: (page: E2eeWorkspaceHistoryPage) =>
-                guarded(async () => {
-                  await approval.ingest!(page);
-                  await verifiedAccess();
-                }),
+              ingest: (page: E2eeWorkspaceHistoryPage) => guarded(() => approval.ingest!(page)),
             }
           : {}),
         ...(approval.prepareDelivery
@@ -598,9 +623,12 @@ export function personalEntry(options: PersonalEntryOptions) {
       },
       recordCreated: async (input) => {
         if (!options.recordCreated) throw fail('unsupported');
-        const accountId = identity();
+        const creation = { ...input };
+        observe();
+        const accountId = await execute(resolveAccount());
         if (!accountId) throw fail('scope-mismatch');
-        await options.recordCreated({ ...input, accountId });
+        check(accountId);
+        await options.recordCreated({ ...creation, accountId });
         check(accountId);
       },
       open: async (id, observed, expected, owner) => {
@@ -760,7 +788,8 @@ export function personalEntry(options: PersonalEntryOptions) {
         call(id, 'acceptFeatureRpcResponse', [id, ...args]),
       managementState: (id) => call(id, 'managementState', [id]),
       updateKeys: (id) => call(id, 'updateKeys', [id]),
-      revokeDevice: (id, device) => call(id, 'revokeDevice', [id, device]),
+      revokeDevice: (id, device, confirmation) =>
+        call(id, 'revokeDevice', [id, device, confirmation]),
       removeMember: (id, member) => call(id, 'removeMember', [id, member]),
       setMemberRole: (id, member, role) => call(id, 'setMemberRole', [id, member, role]),
       // Team management on the portable runtime (admin side). The member relay port is
@@ -839,6 +868,32 @@ export function personalEntry(options: PersonalEntryOptions) {
         return value;
       },
       claimMemberJoin: async (id, requestId) => {
+        const currentAccount = identity();
+        const held = admittedJoins.get(id);
+        if (
+          held &&
+          currentAccount !== null &&
+          held.accountId === currentAccount &&
+          held.requestId === requestId &&
+          !held.entry.retired
+        ) {
+          try {
+            const receive = personalRuntimeReceiveKeys(held.runtime);
+            const status = receive
+              ? await receive(id)
+              : await held.runtime.refresh(id, { keyMode: 'receive' });
+            check(held.accountId);
+            if (held.entry.retired) throw fail('closed');
+            if (status.hasCurrentKey) {
+              await releaseAdmittedJoin(id);
+            }
+            return { ready: status.hasCurrentKey, state: 'committed' };
+          } catch (error) {
+            await releaseAdmittedJoin(id);
+            throw error;
+          }
+        }
+        if (held) await releaseAdmittedJoin(id);
         const { runtime, accountId, entry } = await get(id);
         const value = await runtime.claimMemberJoin!(id, requestId);
         check(accountId);
@@ -862,15 +917,22 @@ export function personalEntry(options: PersonalEntryOptions) {
           const status = await runtime.open(id, undefined, accountId, reader);
           opened = true;
           check(accountId);
-          // A device that already installed the current key is joined as it reopens,
-          // without waiting on another key round.
-          ready =
-            status.hasCurrentKey ||
-            (await runtime.refresh(id, { keyMode: 'receive' })).hasCurrentKey;
-        } catch {
-          ready = false;
-        } finally {
+          if (status.hasCurrentKey) {
+            ready = true;
+          } else {
+            const receive = personalRuntimeReceiveKeys(runtime);
+            ready = receive
+              ? (await receive(id)).hasCurrentKey
+              : (await runtime.refresh(id, { keyMode: 'receive' })).hasCurrentKey;
+          }
+        } catch (error) {
+          if (opened) await runtime.close(id, accountId, reader).catch(() => {});
+          throw error;
+        }
+        if (ready || entry.retired || identity() !== accountId) {
           if (opened) await runtime.close(id, accountId, reader);
+        } else {
+          admittedJoins.set(id, { accountId, requestId, reader, entry, runtime });
         }
         check(accountId);
         if (entry.retired) throw fail('closed');
@@ -1221,11 +1283,11 @@ export function personalEntry(options: PersonalEntryOptions) {
         const commands = personalRuntimeRecovery(opened.runtime);
         if (!commands) throw fail('unsupported');
         const result = await execute(commands.restore(input)).catch((error: unknown) =>
-          project(opened.entry, opened.accountId, error)
+          project(opened.entry, opened.accountId, error, true)
         );
         check(opened.accountId);
         if (opened.entry.retired) throw fail('closed');
-        if (result.outcome === 'Committed' && result.partialEpochKey !== true) {
+        if (result.outcome === 'Committed') {
           await execute(options.pins.finish(opened.accountId, result.offer, 'ready'));
           check(opened.accountId);
           if (opened.entry.retired) throw fail('closed');
@@ -1241,7 +1303,7 @@ export function personalEntry(options: PersonalEntryOptions) {
           await opened.runtime.open(workspaceId, undefined, opened.accountId, reader);
           check(opened.accountId);
           if (opened.entry.retired) throw fail('closed');
-          const result = await execute(commands.setup(input));
+          const result = await execute(commands.setup({ ...input, skipInitialRefresh: true }));
           check(opened.accountId);
           if (opened.entry.retired) throw fail('closed');
           return result;

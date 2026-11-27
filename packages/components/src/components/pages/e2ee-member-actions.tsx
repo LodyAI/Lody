@@ -1,5 +1,6 @@
+import { managementFailureKind } from '@/lib/e2ee-actionable-failure';
 import { workspaceTransferErrorKey } from '../settings/workspace-transfer-errors';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MoreHorizontal } from 'lucide-react';
 import { Button } from '@lody/ui/button';
@@ -42,30 +43,46 @@ export function E2eeMemberActions(props: {
   /** Reports the key update that followed a confirmed removal. The removal reloads the
    * list and drops this row, so the caller owns what a failed update leaves on screen. */
   onRotationSettled: (replaced: boolean) => void;
+  /** Lifts row-level errors (e.g. role change failures) above the list to avoid breaking row flex. */
+  onError?: (message: string | undefined) => void;
 }) {
   const { t } = useTranslation();
   const [confirming, setConfirming] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const [pending, setPending] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [transferError, setTransferError] = useState<string>();
+  const [failure, setFailure] = useState<string>();
   const [rotateAfter, setRotateAfter] = useState(true);
+  const mountedRef = useRef(true);
+  const managementRef = useRef(props.management);
+  managementRef.current = props.management;
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const { member, management } = props;
   if (member.role === 'owner') return null;
   const mayRemove = management.actorRole === 'owner' || member.role !== 'admin';
   const role = member.role === 'admin' ? 'member' : 'admin';
-  const run = async (work: () => Promise<void>) => {
+  const run = async (work: () => Promise<void>, inDialog = false) => {
     setPending(true);
-    setFailed(false);
-    setTransferError(undefined);
+    setFailure(undefined);
+    props.onError?.(undefined);
     try {
       await work();
-      setConfirming(false);
+      if (mountedRef.current) setConfirming(false);
     } catch (error) {
-      setTransferError(transferring ? workspaceTransferErrorKey(error) : undefined);
-      setFailed(true);
+      const kind = managementFailureKind(error);
+      const message = transferring
+        ? workspaceTransferErrorKey(error)
+        : kind === 'generic'
+          ? 'e2ee.members.failed'
+          : `e2ee.members.error.${kind}`;
+      if (mountedRef.current) setFailure(message);
+      if (!inDialog) props.onError?.(message);
     } finally {
-      setPending(false);
+      if (mountedRef.current) setPending(false);
     }
   };
   if (!mayRemove && management.actorRole !== 'owner') return null;
@@ -104,7 +121,7 @@ export function E2eeMemberActions(props: {
               data-testid="e2ee-member-transfer"
               data-membership-id={member.membershipId}
               onClick={() => {
-                setFailed(false);
+                setFailure(undefined);
                 setTransferring(true);
               }}
             >
@@ -116,7 +133,7 @@ export function E2eeMemberActions(props: {
               data-testid="e2ee-member-remove"
               tone="destructive"
               onClick={() => {
-                setFailed(false);
+                setFailure(undefined);
                 // Each removal starts from the recommended choice.
                 setRotateAfter(true);
                 setConfirming(true);
@@ -127,9 +144,9 @@ export function E2eeMemberActions(props: {
           )}
         </Menu.Content>
       </Menu.Root>
-      {failed && !confirming && (
+      {failure && !confirming && !transferring && !props.onError && (
         <Alert.Root tone="warning">
-          <Alert.Description>{t(transferError ?? 'e2ee.members.failed')}</Alert.Description>
+          <Alert.Description>{t(failure)}</Alert.Description>
         </Alert.Root>
       )}
       <Dialog.Root
@@ -158,9 +175,9 @@ export function E2eeMemberActions(props: {
             <li>{t('e2ee.members.transferEffectYou')}</li>
             <li>{t('e2ee.members.transferEffectRecord')}</li>
           </ul>
-          {failed && (
+          {failure && (
             <Alert.Root tone="warning">
-              <Alert.Description>{t(transferError ?? 'e2ee.members.failed')}</Alert.Description>
+              <Alert.Description>{t(failure)}</Alert.Description>
             </Alert.Root>
           )}
           <Dialog.Footer>
@@ -173,8 +190,8 @@ export function E2eeMemberActions(props: {
               onClick={() => {
                 void run(async () => {
                   await management.transfer!(member.membershipId);
-                  setTransferring(false);
-                });
+                  if (mountedRef.current) setTransferring(false);
+                }, true);
               }}
             >
               {t('e2ee.members.transfer')}
@@ -213,9 +230,9 @@ export function E2eeMemberActions(props: {
               {t('e2ee.members.rotateWithRemoval')}
             </label>
           )}
-          {failed && (
+          {failure && (
             <Alert.Root tone="warning">
-              <Alert.Description>{t(transferError ?? 'e2ee.members.failed')}</Alert.Description>
+              <Alert.Description>{t(failure)}</Alert.Description>
             </Alert.Root>
           )}
           <Dialog.Footer>
@@ -227,19 +244,26 @@ export function E2eeMemberActions(props: {
               tone="destructive"
               disabled={pending}
               onClick={() => {
+                const activeManagement = management;
                 void run(async () => {
-                  await management.remove(member.membershipId);
-                  if (!rotateAfter || !management.rotate) return;
+                  await activeManagement.remove(member.membershipId);
+                  if (
+                    !rotateAfter ||
+                    !activeManagement.rotate ||
+                    managementRef.current !== activeManagement
+                  )
+                    return;
                   // The removal already committed; a failed key update must not
                   // read as a failed removal. It stays a retryable key update.
                   let replaced = true;
                   try {
-                    await management.rotate();
-                  } catch {
+                    await activeManagement.rotate();
+                  } catch (error) {
+                    if (error instanceof Error && error.message === 'e2ee_not_open') return;
                     replaced = false;
                   }
-                  props.onRotationSettled(replaced);
-                });
+                  if (managementRef.current === activeManagement) props.onRotationSettled(replaced);
+                }, true);
               }}
             >
               {t('e2ee.members.remove')}

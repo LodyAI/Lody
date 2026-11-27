@@ -25,6 +25,7 @@ import {
   getSessionRoomId,
   resolveProjectGitHubRepo,
   resolveSessionHistoryBackendKind,
+  type RoostHistorySyncState,
   type SessionId,
   type SessionMeta,
   type WorkspaceId,
@@ -46,6 +47,7 @@ import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { RoostHistorySyncIndicator } from './session-syncing-indicator';
 
 const styles = stylex.create({
   page: {
@@ -142,6 +144,8 @@ export function SessionHistoryView({
   nativeApp = false,
   reserveMacTrafficLightInset = false,
   requiresMachine = false,
+  historyOpenFailed = false,
+  historySync,
   machineName,
   onReference,
   onTogglePin,
@@ -162,6 +166,8 @@ export function SessionHistoryView({
   nativeApp?: boolean;
   reserveMacTrafficLightInset?: boolean;
   requiresMachine?: boolean;
+  historyOpenFailed?: boolean;
+  historySync?: RoostHistorySyncState;
   machineName?: string;
   onReference?: () => void;
   onTogglePin?: () => void;
@@ -241,6 +247,7 @@ export function SessionHistoryView({
           </Menu.Content>
         </Menu.Root>
       </header>
+      {historySync && <RoostHistorySyncIndicator state={historySync} />}
       {ready && (
         <span
           hidden
@@ -248,9 +255,11 @@ export function SessionHistoryView({
           data-window-requires-stream={history?.turnCount ? 'true' : undefined}
         />
       )}
-      {requiresMachine ? (
+      {requiresMachine || historyOpenFailed ? (
         <p role="status" {...stylex.props(styles.notice)}>
-          {t('sessions.historyRequiresMachine')}
+          {historyOpenFailed
+            ? t('sessions.historySync.openFailed')
+            : t('sessions.historyRequiresMachine')}
         </p>
       ) : (
         <SessionReadonlyContext.Provider value={attachments}>
@@ -324,8 +333,13 @@ export function SessionHistoryReader({
   const children = useAtomValue(childSessionsAtomFamily(rootSessionId));
   const backend = meta ? resolveSessionHistoryBackendKind(meta) : null;
   const onlineStatus = useMachineOnlineStatus(meta?.machineId);
-  const machineUnavailable = backend === 'roost' && onlineStatus === 'offline';
-  const { history, ready, synced, loadError } = useSessionDoc(sessionId, {
+  const canReadThroughStreams =
+    backend === 'roost' &&
+    runtime?.cloudStreamsEnabled &&
+    runtime.contentMode === 'plaintext';
+  const machineUnavailable =
+    backend === 'roost' && onlineStatus === 'offline' && !canReadThroughStreams;
+  const { history, historySync, ready, synced, loadError } = useSessionDoc(sessionId, {
     enabled: !!backend && !machineUnavailable,
   });
   const ownedHistory = runtime?.peekSessionStore?.(sessionId)?.history === history ? history : null;
@@ -495,9 +509,11 @@ export function SessionHistoryReader({
         }
         title={meta?.title || t('sessions.untitled')}
         history={ownedHistory}
+        historySync={ownedHistory ? historySync : undefined}
         ready={historyReady}
         onCopy={exportAllowed && historyReady && ownedHistory?.turnCount ? copy : undefined}
-        requiresMachine={machineUnavailable || !!loadError}
+        requiresMachine={machineUnavailable || (!!loadError && !canReadThroughStreams)}
+        historyOpenFailed={!!loadError && !!canReadThroughStreams}
         onBack={onMobileBack}
         nativeApp={nativeApp}
         reserveMacTrafficLightInset={!nativeApp && isMacOSElectronRenderer() && !fullscreen}

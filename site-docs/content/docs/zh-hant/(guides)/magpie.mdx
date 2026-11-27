@@ -1,0 +1,97 @@
+---
+title: "連接 Magpie"
+description: "在伺服器上透過單一指令匯入 Magpie 供應商設定，供 Claude、Codex、Pi 等 Agent 使用。"
+---
+
+# 連接 Magpie
+
+Magpie 負責連接模型供應商，Lody 負責建立 Agent 設定。上游 API 金鑰保留在 Magpie 中即可，無需複製到 Lody。
+
+## 開始之前
+
+- 在**同一台伺服器**上執行 Magpie 與 Lody daemon，並在 Magpie 中啟用至少一個模型。
+- 登入 Lody 並將該伺服器連接至你的工作區。登入方式請參閱 [CLI 登入](/zh-hant/docs/cli#核心指令)。
+- 使用支援 `import-magpie` 的 Lody CLI。這些指令適用於雲端工作區，不適用於 OSS 純本機模式。
+
+在伺服器上檢查指令支援情況、啟動 daemon，並查詢你的工作區：
+
+```bash
+lody agent-config import-magpie --help
+lody daemon start
+lody workspace list
+```
+
+若 daemon 已在執行中，可略過啟動步驟。請將下方的 `my-team` 替換為你的工作區 ID、名稱或 slug。
+
+## 匯入所有供應商
+
+```bash
+lody agent-config import-magpie --workspace my-team --json
+```
+
+預設會連接至 `http://127.0.0.1:3425`，並匯入以下七個供應商設定：
+
+| `--targets` 值 | 設定名稱 |
+| --- | --- |
+| `claude` | Claude-magpie |
+| `codex` | Codex-magpie |
+| `pi` | Pi-magpie |
+| `dsh` | DSH-magpie |
+| `kimi` | Kimi Code-magpie |
+| `grok` | Grok-magpie |
+| `bub` | Bub-magpie |
+
+此指令只會匯入至**執行指令的機器**，且沒有 `--machine` 選項。`127.0.0.1` 指的是該台伺服器，而非你的本機電腦。
+Bub 需要預先安裝 `bub acp` 指令及其 ACP 外掛程式。
+
+### 選擇特定 Agent
+
+使用逗號分隔目標。例如，僅匯入 Pi 與 Codex：
+
+```bash
+lody agent-config import-magpie --workspace my-team --targets pi,codex --json
+```
+
+### 使用其他連接埠或匯入連結
+
+若 Magpie 使用其他連接埠，請傳入閘道根網址，不要加上 `/v1`：
+
+```bash
+lody agent-config import-magpie --workspace my-team --gateway http://127.0.0.1:4000 --json
+```
+
+若你已有 Magpie 匯入連結，請直接傳入完整連結：
+
+```bash
+lody agent-config import-magpie --workspace my-team --link 'lody://provider/import?v=1&data=…' --json
+```
+
+`--link` 與 `--gateway` 只能擇一使用，不可同時傳入。使用匯入連結時，預設會匯入該連結提供的所有目標；`--targets` 僅能從這些目標中篩選。
+閘道必須使用本機 HTTP 迴環位址：`127.0.0.1`、`localhost` 或 `[::1]`。
+
+## 解讀執行結果
+
+JSON 中的 `providers` 陣列包含每個目標的 `agentConfigId` 與 `status`：
+
+| 狀態 | 說明 |
+| --- | --- |
+| `queued` | 設定已儲存；daemon 將安裝或驗證執行環境 |
+| `preparing-runtime` / `verifying` | 既有的設定正在準備或驗證中 |
+| `awaiting-auth` | 既有的設定需要進行驗證授權 |
+| `created` | 設定已儲存；尚未驗證模型請求 |
+| `existing` | 此閘道與 Agent 類型的設定已存在，將保留原設定 |
+
+可在 Lody 的 **Providers** 頁面查看設定進度。準備就緒後，於建立工作階段時在該伺服器上選擇該供應商即可。
+匯入成功並不代表上游推論一定能正常運作，請實際發送一則訊息進行驗證。
+
+`synced: false` 表示設定已儲存於本機，但尚未確認是否已同步至工作區。請在恢復連線後重新執行匯入指令。
+
+重複匯入會保留既有設定，並以原始設定重試先前失敗的項目。
+若系統提示不支援 Pi，請更新伺服器上的 Lody 並重啟 daemon，或使用 `--targets` 排除 `pi`。
+
+## 更新模型與設定
+
+請在 Magpie 中管理模型。Lody 會在後續啟動時讀取最新的模型目錄；執行中的工作階段不會自動更新。
+產生的原生設定由 Lody 負責管理，手動修改的內容可能會在下次啟動時被覆蓋。
+
+在桌面端開啟既有的 Magpie 匯入連結時，會顯示確認對話方塊並將設定匯入至該桌面機器。若要匯入至伺服器，請在伺服器上執行上述指令。

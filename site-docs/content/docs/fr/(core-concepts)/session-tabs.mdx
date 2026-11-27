@@ -1,0 +1,39 @@
+---
+title: "Onglets de session"
+description: "Permettez à différents agents de partager un même espace de travail de session Lody tout en gardant la discussion principale, les discussions enfants, les fichiers et les diffs ouverts."
+---
+
+# Onglets de session
+
+Les onglets de session permettent de diviser une tâche en plusieurs surfaces de travail sans perdre le contexte partagé. L'objectif n'est pas seulement d'avoir plus de fenêtres de discussion : cela permet à **différents agents de réutiliser le même espace de travail**, afin qu'ils voient les mêmes fichiers, la même branche et les mêmes modifications non validées tout en conservant l'historique propre à chaque conversation. Vous pouvez ouvrir et fermer la discussion principale et les discussions enfants, et utiliser parallèlement les aperçus de fichiers et les vues de diff.
+
+## Quand utiliser les onglets
+
+- Laissez l'implémentation se poursuivre dans l'onglet principal pendant qu'un onglet enfant passe en revue les modifications en cours.
+- Ouvrez un fichier ou un diff à côté de la discussion pour poser des questions complémentaires tout en lisant le code.
+- Découpez une même branche sous plusieurs angles, comme « résumer cette modification », « identifier les risques » et « corriger les commentaires de la PR ».
+
+## Créer une discussion enfant
+
+1. Ouvrez une session et cliquez sur `+` dans la barre d'onglets.
+2. Le nouvel onglet hérite de la machine, du projet ou du dépôt, de la branche, de la configuration d'agent, du modèle et des permissions par défaut de la session parente. Avant l'envoi, vous pouvez choisir n'importe quel rôle d'agent (Agent Role) lié à cette machine ; ce rôle peut basculer le brouillon vers un autre type d'agent.
+3. Envoyez le premier message dans le nouvel onglet. Lody crée une session enfant avec la configuration d'exécution et les instructions du rôle sélectionné. Le titre reprend la première ligne de votre prompt, et vous pouvez le renommer par la suite en double-cliquant sur l'onglet.
+
+Les onglets enfants partagent le même contexte de répertoire de travail que le parent, mais chaque onglet conserve son propre historique de conversation. Ils sont ainsi particulièrement adaptés à la revue en parallèle et aux tâches de suivi autour d'une même tâche.
+
+## Onglets de fichiers et de diffs
+
+- Cliquez sur un chemin de fichier dans la conversation pour ouvrir un onglet d'aperçu de fichier.
+- Cliquez sur un fichier dans un diff au niveau d'un tour pour ouvrir un onglet de diff.
+- Cliquez sur des fichiers depuis la barre latérale `Files` ou `Changes` pour les ouvrir sous forme d'onglets de visualisation.
+
+Sur ordinateur, les onglets de visualisation créent un espace de travail scindé : la discussion reste à gauche, tandis que le fichier ou le diff actif s'affiche à droite. Sur mobile, le fichier ou le diff s'ouvre au premier plan afin d'être plus lisible sur un petit écran.
+
+## Gérer les onglets
+
+- Faites glisser les onglets pour les réorganiser. L'ordre est mémorisé dans le navigateur actuel.
+- Double-cliquez sur un onglet de discussion pour le renommer.
+- Les onglets de conversation principale et enfants peuvent être fermés. La fermeture est partagée dans tout l'espace de travail ; elle n'arrête pas l'agent, n'archive pas la conversation et ne supprime pas son worktree.
+- La fermeture de la conversation active sélectionne un onglet voisin. Lorsqu'il n'en reste plus aucun, un brouillon local de nouvelle conversation s'ouvre dans le même espace de travail ; les brouillons existants conservent leur saisie. Une véritable session n'est créée qu'au moment où vous envoyez un message. Les conversations fermées restent disponibles pour être rouvertes.
+- Le bouton d'historique répertorie les conversations fermées, y compris les onglets précédemment archivés. Rouvrir une conversation archivée la restaure également depuis l'archive.
+- La réouverture rend l'onglet visible pour tout le monde, mais ne le sélectionne que pour vous. Les onglets de fichiers et de diffs conservent leur comportement local existant.

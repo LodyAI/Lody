@@ -21,7 +21,24 @@ const browser = await chromium.launch({
 });
 const results = [];
 const baselines = new Map();
-const pagePaths = collectSitePaths(packageRoot).filter((p) => !['/404', '/zh/404'].includes(p));
+const LOCALE_HTML_LANG = [
+  ['/zh-hant', 'zh-Hant'],
+  ['/zh', 'zh-CN'],
+  ['/ja', 'ja'],
+  ['/ko', 'ko'],
+  ['/es', 'es'],
+  ['/fr', 'fr'],
+  ['/ru', 'ru'],
+];
+const expectedHtmlLang = (urlPath) => {
+  for (const [prefix, lang] of LOCALE_HTML_LANG) {
+    if (urlPath === prefix || urlPath.startsWith(`${prefix}/`)) return lang;
+  }
+  return 'en';
+};
+const pagePaths = collectSitePaths(packageRoot).filter(
+  (p) => !/^\/(?:(?:zh-hant|zh|ja|ko|es|fr|ru)\/)?404$/u.test(p)
+);
 const normalize = (p) => p.replace(/\/$/u, '') || '/';
 const directoryPath = (p) => (p === '/' ? '/' : `${normalize(p)}/`);
 const pagePathSet = new Set(pagePaths);
@@ -66,11 +83,13 @@ function snapshot(page) {
   return page.evaluate(() => ({
     title: document.title,
     description: document.querySelector('meta[name=description]')?.content,
+    robots: document.querySelector('meta[name=robots]')?.content ?? null,
     canonical: document.querySelector('link[rel=canonical]')?.href,
     ogUrl: document.querySelector('meta[property="og:url"]')?.content,
     alternates: [...document.querySelectorAll('link[hreflang]')].map((el) => el.href),
     lang: document.documentElement.lang,
     headings: [...document.querySelectorAll('h1')].map((el) => el.textContent.trim()),
+    ids: [...document.querySelectorAll('[id]')].map((el) => el.id),
     missingFragmentTargets: [...document.querySelectorAll('a[href^="#"]')]
       .map((el) => el.getAttribute('href'))
       .filter(
@@ -82,6 +101,10 @@ function snapshot(page) {
     articleText: document.querySelector('#nd-page .prose, .blog-prose')?.innerText,
     text: (document.querySelector('main, #nd-page') ?? document.body).innerText,
     links: [...document.querySelectorAll('a[href]')].map((el) => el.getAttribute('href')),
+    linkDetails: [...document.querySelectorAll('a[href]')].map((el) => ({
+      href: el.getAttribute('href'),
+      rel: el.getAttribute('rel'),
+    })),
     jsonLd: [...document.querySelectorAll('script[type="application/ld+json"]')].map((el) =>
       JSON.parse(el.textContent)
     ),
@@ -121,6 +144,8 @@ async function scan() {
   const context = await newContext({ js: false });
   const queue = [...pagePaths];
   const targets = new Set();
+  const idsByPath = new Map();
+  const hashLinks = [];
   try {
     await Promise.all(
       Array.from({ length: 3 }, async () => {
@@ -132,10 +157,31 @@ async function scan() {
             const data = await snapshot(page);
             assert.ok(data.title.trim().length > 0);
             assert.ok(data.description?.length > 5);
-            const canonicalPath =
-              urlPath === '/home' ? '/' : urlPath === '/zh/home' ? '/zh' : urlPath;
-            assert.equal(data.canonical, `https://lody.ai${directoryPath(canonicalPath)}`);
-            assert.equal(data.ogUrl, data.canonical);
+            const isHomeCompat =
+              urlPath === '/home' || /^\/(?:zh-hant|zh|ja|ko|es|fr|ru)\/home$/u.test(urlPath);
+            if (isHomeCompat) {
+              assert.match(
+                data.robots ?? '',
+                /noindex/u,
+                'Compatibility /home route must be noindex'
+              );
+              assert.equal(
+                data.canonical,
+                undefined,
+                'Compatibility /home route must omit canonical'
+              );
+              assert.equal(data.ogUrl, undefined, 'Compatibility /home route must omit og:url');
+              assert.deepEqual(data.alternates, [], 'Compatibility /home route must omit hreflang');
+              assert.deepEqual(data.jsonLd, [], 'Compatibility /home route must omit JSON-LD');
+            } else {
+              assert.doesNotMatch(
+                data.robots ?? '',
+                /noindex/u,
+                `Indexable page ${urlPath} must not carry noindex`
+              );
+              assert.equal(data.canonical, `https://lody.ai${directoryPath(urlPath)}`);
+              assert.equal(data.ogUrl, data.canonical);
+            }
             for (const alternate of data.alternates) {
               const url = new URL(alternate);
               assert.equal(
@@ -148,21 +194,41 @@ async function scan() {
                 `Unknown alternate: ${alternate}`
               );
             }
-            assert.equal(data.lang, urlPath.startsWith('/zh') ? 'zh-CN' : 'en');
+            assert.equal(data.lang, expectedHtmlLang(urlPath));
             assert.ok(data.headings.length > 0);
-            if (/^\/(zh\/)?docs(\/|$)/u.test(urlPath)) {
+            if (/^\/(?:(?:zh-hant|zh|ja|ko|es|fr|ru)\/)?docs(?:\/|$)/u.test(urlPath)) {
               assert.equal(data.headings.length, 1);
               assert.deepEqual(data.missingFragmentTargets, [], 'Docs anchors must resolve');
             }
             assert.ok(await page.locator('h1').first().isVisible());
             assert.ok(data.text.length > 80);
-            if (/^\/(zh\/)?docs(\/|$)/u.test(urlPath) || /^\/(zh\/)?blog\//u.test(urlPath)) {
+            if (
+              /^\/(?:(?:zh-hant|zh|ja|ko|es|fr|ru)\/)?docs(?:\/|$)/u.test(urlPath) ||
+              /^\/(?:(?:zh-hant|zh|ja|ko|es|fr|ru)\/)?blog\//u.test(urlPath)
+            ) {
               assert.ok(data.articleText?.length > 40, 'Prerendered article body must be present');
             }
             assert.ok(!data.text.includes('Something went wrong!'));
             assert.ok(data.links.length > 0);
-            for (const href of data.links) {
+            idsByPath.set(normalize(urlPath), new Set(data.ids));
+            for (const { href, rel } of data.linkDetails) {
               const url = new URL(href, page.url());
+              if ([origin, 'https://lody.ai'].includes(url.origin)) {
+                if (!href.startsWith('#')) {
+                  assert.doesNotMatch(
+                    normalize(url.pathname),
+                    /^(?:\/(?:zh-hant|zh|ja|ko|es|fr|ru))?\/home$/u,
+                    `Internal link on ${urlPath} must not target noindex /home: ${href}`
+                  );
+                }
+                if (/^\/login(\/|$)/u.test(url.pathname)) {
+                  const relTokens = (rel ?? '').toLowerCase().split(/\s+/u).filter(Boolean);
+                  assert.ok(
+                    relTokens.includes('nofollow'),
+                    `App-owned /login link on ${urlPath} must carry rel="nofollow": ${href}`
+                  );
+                }
+              }
               // Hosted app/auth and third-party destinations are outside this static build.
               if (
                 [origin, 'https://lody.ai'].includes(url.origin) &&
@@ -176,6 +242,15 @@ async function scan() {
                   );
                 }
                 targets.add(url.pathname);
+                if (url.hash.length > 1) {
+                  hashLinks.push({
+                    from: urlPath,
+                    href,
+                    targetPath: normalize(url.pathname),
+                    id: decodeURIComponent(url.hash.slice(1)),
+                    rawId: url.hash.slice(1),
+                  });
+                }
               }
             }
             baselines.set(urlPath, data);
@@ -194,6 +269,17 @@ async function scan() {
       }
       assert.deepEqual(broken, []);
       return { targets: targets.size };
+    });
+    await run('all internal #fragment targets resolve', async () => {
+      const broken = [];
+      for (const item of hashLinks) {
+        const ids = idsByPath.get(item.targetPath);
+        if (!ids || (!ids.has(item.id) && !ids.has(item.rawId))) {
+          broken.push(item);
+        }
+      }
+      assert.deepEqual(broken, []);
+      return { checkedFragments: hashLinks.length };
     });
     await run('unknown URL is a static noindex 404', async () => {
       const page = await context.newPage();
@@ -216,6 +302,8 @@ async function faults() {
     '/zh/docs',
     '/docs/quickstart',
     '/zh/docs/quickstart',
+    '/docs/compare/share-link-vs-live-handoff',
+    '/zh/docs/compare/share-link-vs-live-handoff',
     '/blog',
     '/zh/blog',
     '/blog/introducing-lody',
@@ -237,7 +325,9 @@ async function faults() {
         await settled(page);
         const theme = await page.locator('html').getAttribute('class');
         await page
-          .getByRole('button', { name: /Toggle color theme|Switch to (light|dark) theme/u })
+          .getByRole('button', {
+            name: /Toggle color theme|切换配色主题|Switch to (light|dark) theme/u,
+          })
           .first()
           .click();
         await page.waitForFunction(
@@ -253,6 +343,18 @@ async function faults() {
         assert.equal(after.title, before.title);
         assert.equal(after.canonical, before.canonical);
         assert.deepEqual(after.headings, before.headings);
+        assert.deepEqual(
+          after.jsonLd,
+          before.jsonLd,
+          'Hydration must preserve single non-duplicated JSON-LD payload'
+        );
+        if (
+          /^(?:\/|\/zh|\/blog(?:\/.+)?|\/zh\/blog(?:\/.+)?|\/(?:zh\/)?docs\/compare\/.+)$/u.test(
+            urlPath
+          )
+        ) {
+          assert.equal(after.jsonLd.length, 1, `Expected 1 JSON-LD script on ${urlPath}`);
+        }
         for (const paragraph of before.paragraphs) assert.ok(after.paragraphs.includes(paragraph));
         assert.deepEqual(
           pageErrors,
@@ -285,8 +387,11 @@ async function faults() {
       }
     }
     assert.ok(routeScript, `No route chunk found for ${urlPath}`);
-    const articleScript = scripts.find((s) => /\/(quickstart|introducing-lody)-/u.test(s));
-    if (/quickstart|introducing-lody/u.test(urlPath)) assert.ok(articleScript);
+    const articleScript = scripts.find((s) =>
+      /\/(quickstart|introducing-lody|share-link-vs-live-handoff)-/u.test(s)
+    );
+    if (/quickstart|introducing-lody|share-link-vs-live-handoff/u.test(urlPath))
+      assert.ok(articleScript);
     const cases = [['route', (url) => url.pathname === routeScript]];
     if (articleScript) cases.push(['article', (url) => url.pathname === articleScript]);
     if (urlPath.includes('/docs') || urlPath.includes('/blog/'))
@@ -328,12 +433,55 @@ async function faults() {
       }
     }
   }
+  for (const urlPath of ['/', '/docs/compare/share-link-vs-live-handoff']) {
+    const before = await baseline(urlPath);
+    const edgeContext = await newContext();
+    await edgeContext.route('**/*', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.origin !== origin) return route.abort('failed');
+      if (route.request().resourceType() !== 'document') return route.continue();
+      const response = await route.fetch();
+      const html = (await response.text())
+        .replace(
+          '<head>',
+          '<head><script data-edge-probe="prepend">window.__edgePrepend=1;</script>'
+        )
+        .replace(
+          '</head>',
+          '<script data-edge-probe="append">window.__edgeAppend=1;</script></head>'
+        );
+      await route.fulfill({ response, body: html });
+    });
+    try {
+      await run(`edge head script injection ${urlPath}`, async () => {
+        const page = await edgeContext.newPage();
+        const pageErrors = [];
+        page.on('pageerror', (error) => pageErrors.push(error.message));
+        await page.goto(origin + directoryPath(urlPath));
+        await settled(page);
+        assert.ok(
+          await page.evaluate(
+            () =>
+              window.__edgePrepend === 1 &&
+              window.__edgeAppend === 1 &&
+              Object.keys(document).some((key) => key.startsWith('__reactContainer$'))
+          )
+        );
+        const after = await snapshot(page);
+        assert.deepEqual(after.jsonLd, before.jsonLd);
+        assert.equal(after.jsonLd.length, 1);
+        assert.deepEqual(pageErrors, []);
+      });
+    } finally {
+      await edgeContext.close();
+    }
+  }
 }
 
 async function clickTo(page, link, destination) {
   await link.click();
   await page.waitForURL((url) => normalize(url.pathname) === destination);
-  const expectedCanonical = destination.replace(/\/home$/u, '') || '/';
+  const expectedCanonical = destination || '/';
   await page.waitForFunction((expected) => {
     const canonical = document.querySelector('link[rel=canonical]')?.href;
     return canonical && (new URL(canonical).pathname.replace(/\/$/u, '') || '/') === expected;
@@ -342,9 +490,18 @@ async function clickTo(page, link, destination) {
   assert.equal(new URL(page.url()).pathname, directoryPath(destination));
   assert.equal(
     new URL((await snapshot(page)).canonical).pathname.replace(/\/$/u, '') || '/',
-    destination.replace(/\/home$/u, '') || '/'
+    destination || '/'
   );
 }
+
+const navName = (prefix, mobile) =>
+  mobile
+    ? prefix === '/zh'
+      ? '移动端主导航'
+      : 'Primary mobile'
+    : prefix === '/zh'
+      ? '主导航'
+      : 'Primary';
 
 async function navigation() {
   for (const prefix of ['', '/zh']) {
@@ -358,7 +515,7 @@ async function navigation() {
             await page.goto(origin + (prefix || '/'));
             if (mobile) await page.locator('summary.site-nav__toggle').click();
             const nav = page.getByRole('navigation', {
-              name: mobile ? 'Primary mobile' : 'Primary',
+              name: navName(prefix, mobile),
               exact: true,
             });
             await clickTo(page, nav.locator(`a[href="${prefix}/docs/"]`), `${prefix}/docs`);
@@ -368,7 +525,9 @@ async function navigation() {
               `${prefix}/docs/session-handoff`
             );
             await page.goto(origin + prefix + '/blog');
-            const article = page.locator(`main a[href^="${prefix}/blog/"]`).first();
+            const article = page
+              .locator(`main a[href^="${prefix}/blog/"]:not([href="${prefix}/blog/"])`)
+              .first();
             const target = normalize(new URL(await article.getAttribute('href'), origin).pathname);
             await clickTo(page, article, target);
             await page.screenshot({
@@ -377,6 +536,7 @@ async function navigation() {
                 `${prefix ? 'zh' : 'en'}-${mobile ? 'mobile' : 'desktop'}-no-js.png`
               ),
             });
+            await clickTo(page, page.locator('a.site-nav__brand'), prefix || '/');
           }
         );
       } finally {
@@ -407,7 +567,7 @@ async function navigation() {
         await clickTo(
           page,
           page
-            .getByRole('navigation', { name: 'Primary mobile' })
+            .getByRole('navigation', { name: navName(prefix, true), exact: true })
             .locator(`a[href="${prefix}/blog/"]`),
           `${prefix}/blog`
         );
@@ -438,7 +598,7 @@ async function navigation() {
         await clickTo(
           page,
           page
-            .getByRole('navigation', { name: 'Primary mobile' })
+            .getByRole('navigation', { name: navName(prefix, true), exact: true })
             .locator(`a[href="${prefix}/docs/"]`),
           `${prefix}/docs`
         );
@@ -516,6 +676,12 @@ async function anchors() {
         for (const [source, label, destination, id] of [
           ['/docs/', 'Daemon Mode', '/docs/cli', 'daemon-mode'],
           ['/zh/docs/local-project/', 'CLI 命令', '/zh/docs/cli', 'project-命令'],
+          [
+            '/es/docs/compare/share-link-vs-live-handoff/',
+            'Bifurcar una sesión',
+            '/es/docs/session',
+            'bifurcar-una-sesión',
+          ],
         ]) {
           await run(
             `docs anchor ${source} ${mobile ? 'mobile' : 'desktop'} ${js ? 'hydrated' : 'no-js'}`,
@@ -540,16 +706,18 @@ async function anchors() {
               await page.reload();
               if (js) await settled(page);
               await anchorPosition(page, id);
-              // Exercise the existing fragment-only table link on the destination too.
-              await page.evaluate(() => window.scrollTo(0, 0));
-              await page
-                .locator('#nd-page table')
-                .getByRole('link', {
-                  name: source === '/docs/' ? 'Daemon mode' : 'Project 命令',
-                  exact: true,
-                })
-                .click();
-              await anchorPosition(page, id);
+              if (destination.endsWith('/docs/cli')) {
+                // Exercise the existing fragment-only table link on the destination too.
+                await page.evaluate(() => window.scrollTo(0, 0));
+                await page
+                  .locator('#nd-page table')
+                  .getByRole('link', {
+                    name: source === '/docs/' ? 'Daemon mode' : 'Project 命令',
+                    exact: true,
+                  })
+                  .click();
+                await anchorPosition(page, id);
+              }
               assert.deepEqual(errors, []);
               await page.close();
             }

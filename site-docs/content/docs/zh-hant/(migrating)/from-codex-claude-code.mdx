@@ -1,0 +1,144 @@
+---
+title: "從 Codex 或 Claude Code 銜接"
+description: "Lody 與 Codex 及 Claude Code CLI 的關係——哪些維持不變、Lody 新增了什麼、概念對照，以及遷移檢查清單。"
+---
+
+# 從 Codex 或 Claude Code 銜接
+
+你不必停止使用 `codex` 或 `claude` CLI。Lody 會透過 [Agent Config](/zh-hant/docs/quickstart) 執行相同的執行環境，並在它們外層加上工作區功能：隔離的 Worktree、同時執行多個工作階段、即時 Diff 審查、團隊交接，以及行動裝置存取。
+
+<Callout title="簡短摘要">
+- 你的訂閱方案、API 金鑰以及本機端登入狀態都會保留在原處。
+- 在 Lody 中，一個工作階段（Session）相當於一次 CLI 對話；Agent Config 則是其背後的執行環境。
+- Lody 新增的是工作區層級的能力：平行 Worktree、審查流程、共享與編排。
+</Callout>
+
+## 哪些維持不變
+
+- **執行環境。** Lody 啟動的是同一個 Agent 處理程序，不會替換模型，也不會改變 CLI 本身的行為。
+- **你的驗證方式。** Lody 會沿用機器上既有的訂閱登入或環境設定。請參閱 [Agent Config](/zh-hant/docs/quickstart)。
+- **你的儲存庫規範。** `AGENTS.md`、`CLAUDE.md` 以及其餘專案指示都會繼續生效，因為 Agent 依然在該專案中執行。
+- **你的終端機。** 若只是快速處理單次任務，直接執行 CLI 依然是不錯的選擇。
+
+## 概念對照
+
+| 你習慣的方式 | 在 Lody 中 | 說明 |
+| --- | --- | --- |
+| 在終端機執行 `claude` 或 `codex` | 搭配 [Agent Config](/zh-hant/docs/quickstart) 的[工作階段](/zh-hant/docs/session) | 相同的執行環境，再加上 GUI、行動端與團隊層 |
+| 單一儲存庫簽出目錄 | 每個工作階段一個 [Worktree](/zh-hant/docs/worktrees) | 各個工作階段不再搶占同一份檔案 |
+| 一次提示詞與對應的編輯 | 一個[輪次](/zh-hant/docs/diff-viewer) | Lody 會在每個輪次結束後顯示 Diff |
+| `--resume` 或 `resume` | 從側邊欄重新開啟工作階段 | 對話、分支與 Worktree 會保持在一起 |
+| 手動透過 `git diff` 審查 | [差異檢視器](/zh-hant/docs/diff-viewer)與[差異註解](/zh-hant/docs/diff-comments) | 可直接在程式碼行留言，並同步至 GitHub PR |
+| 一次開啟一個終端機 | 多個[平行工作階段](/zh-hant/docs/parallel-agents) | 每個任務都有各自的分支與 Worktree |
+| 斜線指令與各種模式 | 執行環境提供的[斜線指令](/zh-hant/docs/slash-commands) | Lody 會自動探索執行環境支援的能力 |
+| 團隊間傳送截圖或對話紀錄 | [工作階段交接](/zh-hant/docs/session-handoff) | 直接邀請隊友進入即時工作階段 |
+
+各內建 Provider 支援哪些可選的 ACP 與 Lody 擴充能力，請參閱[ACP 與擴充功能支援矩陣](/zh-hant/docs/acp-feature-support)。
+
+## Lody 額外帶來的功能
+
+<Cards>
+  <Card href="/zh-hant/docs/parallel-agents" title="平行工作">
+    同時針對不同任務執行多個工作階段，檔案彼此不會發生衝突。
+  </Card>
+  <Card href="/zh-hant/docs/agent-collaboration" title="多 Agent 協作">
+    讓 Claude Code、Codex、Kimi 或 Grok 互相委派並審查彼此的工作成果。
+  </Card>
+  <Card href="/zh-hant/docs/diff-comments" title="審查迴圈">
+    在變更的程式碼行上留言評論，並將討論串送回給 Agent 處理。
+  </Card>
+  <Card href="/zh-hant/docs/session-handoff" title="團隊交接">
+    直接讓隊友加入同一個即時工作階段，而不必另外傳送對話紀錄。
+  </Card>
+  <Card href="/zh-hant/docs/mobile" title="行動裝置與遠端控制">
+    直接透過手機引導在共享機器上執行的工作階段。
+  </Card>
+  <Card href="/zh-hant/docs/scheduled-tasks" title="排程任務">
+    在保持上線的機器上執行週期性的 Agent 工作。
+  </Card>
+</Cards>
+
+## 遷移檢查清單
+
+<Steps>
+<Step>
+
+### 1. 安裝 Lody 並登入
+
+請依照[快速入門](/zh-hant/docs/quickstart)進行。你可以從桌面應用程式、行動應用程式，或遠端機器上的 CLI 開始使用。
+
+</Step>
+<Step>
+
+### 2. 保留既有的登入狀態
+
+開啟 **Settings** -> **Agent Config**，為你使用的每個執行環境新增一組設定。在大多數情況下，你不需要新的憑證：Lody 會直接使用機器上既有的訂閱登入或環境設定。
+
+</Step>
+<Step>
+
+### 3. 新增你的專案
+
+為你已經在使用的目錄新增一個[本機專案](/zh-hant/docs/local-project)，或是連結一個 [GitHub 儲存庫](/zh-hant/docs/github)以使用 Pull Request 與 CI 功能。如果你先前已在該本機專案上執行過 Codex 或 Claude Code，Lody 可以匯入並接續既有的對話紀錄。請參閱[同步程式碼 Agent 紀錄](/zh-hant/docs/local-project#同步程式碼-agent-紀錄codexclaude-code-等)。
+
+</Step>
+<Step>
+
+### 4. 執行一個小型工作階段
+
+參考[你的第一個工作階段](/zh-hant/docs/first-session)，挑選一個在 CLI 中單次就能完成的任務。確認專案、Agent Config 與模型是否都符合你的預期。
+
+</Step>
+<Step>
+
+### 5. 儲存經常重複使用的設定
+
+如果你總是固定使用同一台機器、設定、模型與指示來啟動某類任務，請將它儲存為 [Agent Role](/zh-hant/docs/agent-roles)，就不必每次都重新選擇。
+
+</Step>
+<Step>
+
+### 6. 視需求逐步加入工作區能力
+
+連結 GitHub 以使用 PR 與 CI 功能、在兩個小任務上試用[平行工作階段](/zh-hant/docs/parallel-agents)，或是透過[工作階段交接](/zh-hant/docs/session-handoff)邀請隊友。你可以一次採用一項功能。
+
+</Step>
+</Steps>
+
+## 什麼時候 CLI 仍是更好的工具
+
+<Callout type="info" title="把終端機留給合適的工作">
+當你只需要快速進行單次修改且不需要留下審查紀錄、正在除錯 Agent 本身，或是在不想執行 Lody daemon 的機器上作業時，直接使用 CLI 即可。當任務能受惠於 Worktree、可審查的 Diff、隊友協作或第二台裝置時，Lody 就能發揮最大價值。
+</Callout>
+
+## 常見問題
+
+### Lody 會取代 Codex 或 Claude Code CLI 嗎？
+
+不會。Lody 會啟動這些執行環境（以及其他執行環境），並在它們外層加上工作區功能。CLI 依然是受支援的工作方式，而且同一台機器上可以同時併用兩者。
+
+### 我必須搬移我的 API 金鑰或訂閱方案嗎？
+
+不需要。在常見情況下，Lody 會沿用機器上既有的訂閱登入或環境設定。你新增 [Agent Config](/zh-hant/docs/quickstart) 只是為了讓 Lody 知道要啟動哪個執行環境，並不需要將憑證遷移進 Lody。
+
+### 我可以繼續使用儲存庫中的 AGENTS.md 或 CLAUDE.md 嗎？
+
+可以。Agent 依然會在你的儲存庫內執行，因此它原本就會讀取的指示檔案都會繼續生效。
+
+### 如何像 `codex resume` 或 `claude --resume` 一樣接續之前的對話？
+
+從側邊欄開啟該工作階段即可。Lody 會將對話、分支與 Worktree 保持在一起。當執行環境支援原生分叉（Fork）功能時，你也可以建立一個 [Fork](/zh-hant/docs/session#fork-工作階段)，在不更動原始工作階段的情況下朝新方向繼續對話。請參閱[工作階段](/zh-hant/docs/session)。
+
+### 我可以在手機上使用 Lody 存取同一個工作階段嗎？
+
+可以。執行該任務的機器必須保持上線，且登入至同一個 Lody 工作區。請參閱[行動裝置存取](/zh-hant/docs/mobile)。
+
+## 下一步
+
+<Cards>
+  <Card href="/zh-hant/docs/first-session" title="你的第一個工作階段" />
+  <Card href="/zh-hant/docs/concepts" title="概念與術語表" />
+  <Card href="/zh-hant/docs/workflow" title="推薦工作流程" />
+  <Card href="/zh-hant/docs/parallel-agents" title="平行編碼 Agent" />
+  <Card href="/zh-hant/docs/acp-feature-support" title="ACP 與擴充功能支援矩陣" />
+</Cards>

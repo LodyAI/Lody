@@ -3,36 +3,41 @@ import path from 'node:path';
 
 export { SITE_URL, absoluteSiteUrl } from '../lib/site-url.mjs';
 
-const STATIC_PATHS = [
+export const SITE_LOCALES = ['en', 'zh', 'zh-hant', 'ja', 'ko', 'es', 'fr', 'ru'];
+
+export function localePrefix(locale) {
+  return locale === 'en' ? '' : `/${locale}`;
+}
+
+const BASE_STATIC_PATHS = [
   '/',
   '/home',
-  '/zh',
-  '/zh/home',
   '/docs',
-  '/zh/docs',
   '/price',
-  '/zh/price',
   '/blog',
-  '/zh/blog',
   '/changelog',
-  '/zh/changelog',
   '/download',
-  '/zh/download',
   '/download/nightly',
-  '/zh/download/nightly',
   '/privacy',
-  '/zh/privacy',
   '/terms',
-  '/zh/terms',
   '/support',
-  '/zh/support',
   '/account-deletion',
-  '/zh/account-deletion',
   '/404',
-  '/zh/404',
 ];
 
-const SITEMAP_EXCLUDED_PATHS = new Set(['/home', '/zh/home', '/404', '/zh/404']);
+function localizePath(enPath, locale) {
+  const prefix = localePrefix(locale);
+  if (!prefix) return enPath;
+  return enPath === '/' ? prefix : `${prefix}${enPath}`;
+}
+
+const STATIC_PATHS = SITE_LOCALES.flatMap((locale) =>
+  BASE_STATIC_PATHS.map((enPath) => localizePath(enPath, locale))
+);
+
+const SITEMAP_EXCLUDED_PATHS = new Set(
+  SITE_LOCALES.flatMap((locale) => [localizePath('/home', locale), localizePath('/404', locale)])
+);
 
 export function isSitemapPath(sitePath) {
   return !SITEMAP_EXCLUDED_PATHS.has(sitePath);
@@ -85,7 +90,7 @@ export function slugFromMdxFile(file, rootDir) {
 
 function docsPaths(packageRoot, locale) {
   const dir = path.join(packageRoot, 'content', 'docs', locale);
-  const base = locale === 'zh' ? '/zh/docs' : '/docs';
+  const base = localizePath('/docs', locale);
 
   return listMdxFiles(dir)
     .filter((file) => !hasDraftFrontmatter(file))
@@ -97,7 +102,7 @@ function docsPaths(packageRoot, locale) {
 
 function collectionPaths(packageRoot, collection, locale) {
   const dir = path.join(packageRoot, 'content', collection, locale);
-  const base = locale === 'zh' ? `/zh/${collection}` : `/${collection}`;
+  const base = localizePath(`/${collection}`, locale);
 
   return listMdxFiles(dir)
     .filter((file) => !hasDraftFrontmatter(file))
@@ -110,12 +115,9 @@ function collectionPaths(packageRoot, collection, locale) {
 export function collectSitePaths(packageRoot) {
   const paths = [
     ...STATIC_PATHS,
-    ...docsPaths(packageRoot, 'en'),
-    ...docsPaths(packageRoot, 'zh'),
-    ...collectionPaths(packageRoot, 'blog', 'en'),
-    ...collectionPaths(packageRoot, 'blog', 'zh'),
-    ...collectionPaths(packageRoot, 'changelog', 'en'),
-    ...collectionPaths(packageRoot, 'changelog', 'zh'),
+    ...SITE_LOCALES.flatMap((locale) => docsPaths(packageRoot, locale)),
+    ...SITE_LOCALES.flatMap((locale) => collectionPaths(packageRoot, 'blog', locale)),
+    ...SITE_LOCALES.flatMap((locale) => collectionPaths(packageRoot, 'changelog', locale)),
   ];
 
   return Array.from(new Set(paths)).sort((a, b) => a.localeCompare(b));

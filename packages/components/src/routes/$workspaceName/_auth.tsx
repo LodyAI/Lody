@@ -14,7 +14,7 @@ import { runtimeInitializingAtom, userAtom } from '@/atoms';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { usePostHog } from '@/lib/posthog-context';
-import { normalizeCurrentUserFromSessionUser } from '@/lib/current-user';
+import { safeNormalizeCurrentUserFromSessionUser } from '@/lib/current-user';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { deriveConvexSiteUrl } from '@lody/shared';
 import {
@@ -24,7 +24,6 @@ import {
   getAppLaunchPerformanceProperties,
   getDurationSinceMs,
   getPerformanceNowMs,
-  identifyPostHogWorkspace,
 } from '@/lib/posthog-analytics';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
 import { installPushPort, schedulePushTask } from '@/lib/push-notifications';
@@ -122,7 +121,7 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     if (!session?.user) {
       return null;
     }
-    return normalizeCurrentUserFromSessionUser(session.user);
+    return safeNormalizeCurrentUserFromSessionUser(session.user);
   }, [session?.user]);
   const analyticsUserWorkspaceKey = useMemo(() => {
     if (!currentUser || !currentWorkspaceId) {
@@ -152,7 +151,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     }
 
     identifyPostHogUser(postHog, currentUser);
-    identifyPostHogWorkspace(postHog, currentWorkspaceId);
   }, [currentUser, currentWorkspaceId, postHog]);
 
   useEffect(() => {
@@ -163,7 +161,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
       return;
     }
 
-    identifyPostHogWorkspace(postHog, currentWorkspaceId);
     const authReadyProperties = {
       user_id: currentUser.id,
       workspace_id: currentWorkspaceId ?? null,

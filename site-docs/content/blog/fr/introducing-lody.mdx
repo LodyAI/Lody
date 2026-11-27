@@ -1,0 +1,69 @@
+---
+title: "Présentation de Lody"
+date: 2026-01-09
+author: Lody Team
+authorLink: https://lody.ai
+description: "Aujourd'hui, nous lançons Lody, une nouvelle façon d'exécuter des agents de développement IA dans des worktrees isolés, avec synchronisation en temps réel et accès mobile."
+image: /lody-intro-en.png
+tag: "Annonce"
+sidebar: false
+aside: false
+---
+
+Aujourd'hui, nous sommes ravis d'annoncer le lancement de Lody — une nouvelle plateforme conçue pour aider les développeurs à exécuter des agents de développement IA partout, en parallèle et avec leurs équipes.
+
+## Le problème
+
+À mesure que les assistants de développement IA gagnent en puissance, les développeurs font face à de nouveaux défis :
+
+- **Collisions de contexte** — Exécuter plusieurs agents sur une même base de code entraîne des conflits et de la confusion.
+- **Manque de visibilité** — Il est difficile de suivre en temps réel les modifications apportées par les agents.
+- **Limité au poste de travail** — Vous ne pouvez ni relire ni approuver les modifications depuis votre téléphone.
+- **Expérience en solo** — Partager le contexte d'un agent avec vos coéquipiers reste fastidieux.
+
+## Notre solution
+
+Lody répond à ces défis avec une approche simple mais puissante :
+
+### Isolation par worktree
+
+Chaque tâche dispose de son propre worktree Git isolé. Vous pouvez ainsi exécuter plusieurs agents en parallèle — chacun travaillant sur une fonctionnalité ou un correctif différent — sans aucune collision.
+
+```bash
+npx lody start
+```
+
+C'est tout ce qu'il faut pour démarrer. Lody gère automatiquement la création du worktree, l'orchestration des agents et la synchronisation.
+
+### Synchronisation en temps réel
+
+Visualisez chaque modification dès qu'elle se produit. Chaque réponse d'agent inclut un diff en contexte, afin que vous puissiez relire les changements sans avoir à revenir dans votre IDE. L'arborescence des fichiers reste synchronisée en temps réel, vous offrant une visibilité complète sur ce qui se passe.
+
+### Pensé pour le mobile
+
+Lody propose des applications natives iOS et Android, conçues pour le mobile. Recevez des notifications push lorsque les tâches se terminent, relisez les diffs sur votre téléphone et approuvez les modifications où que vous soyez. Le vibe coding n'a pas à s'arrêter lorsque vous quittez votre bureau.
+
+### Espaces de travail d'équipe
+
+Partagez des agents, des skills et le contexte de conversation avec votre équipe. Tout le monde reste aligné, et les connaissances s'enrichissent à l'échelle de l'organisation.
+
+## La suite
+
+Ce n'est qu'un début. Voici ce qui figure sur notre feuille de route :
+
+- **Prise en charge de plus d'agents** — Nous ajoutons la prise en charge d'autres agents de développement IA au-delà de Claude Code, Codex et Gemini CLI.
+- **Skills personnalisés** — Définissez des skills réutilisables que les agents peuvent apprendre et appliquer.
+- **Intégration CI/CD** — Connectez Lody à vos workflows existants.
+
+## Commencer
+
+Prêt à essayer Lody ? Rejoignez notre communauté Discord et lancez-vous dès aujourd'hui :
+
+- [Rejoindre Discord](https://discord.gg/E8mZtMu38s)
+- [Ouvrir l'application](/login)
+
+Nous avons hâte de voir ce que vous allez construire.
+
+---
+
+*L'équipe Lody*

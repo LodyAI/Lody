@@ -1,6 +1,6 @@
 import { notifyE2eeLedgerChanged } from '../../../providers/e2ee-runtime-notifications';
 import { useEffect, useRef, useState } from 'react';
-import { atom, useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { usePlatformSession, usePlatform } from '@lody/platform/react';
 import type { E2eeManagementState, E2eeWorkspaceRuntime } from '@lody/platform';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,9 @@ import { LODY_APP_INFO_UPDATED_EVENT } from '@/lib/native-app-info';
 import { recordClientError } from '@/lib/client-log';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 const refreshAtom = atom(0);
+const snapshotAtom = atom<{ key: string; data?: E2eeManagementState; error?: unknown } | undefined>(
+  undefined
+);
 const styles = stylex.create({
   icon: { position: 'relative', display: 'inline-flex', width: '100%', height: '100%' },
   dot: {
@@ -46,13 +49,13 @@ export function useSecurityState() {
       : session.status !== 'unauthenticated' || session.uncertain;
   const workspaceId = encrypted && matchesAccount ? mode!.workspaceId : null;
   const key = JSON.stringify([mode?.accountId, workspaceId]);
-  const [snapshot, setSnapshot] = useState<{
-    key: string;
-    data?: E2eeManagementState;
-    isError: boolean;
-  }>();
+  const [snapshot, setSnapshot] = useAtom(snapshotAtom);
   useEffect(() => {
-    if (!workspaceId || !mode?.accountId || !native?.managementState) {
+    if (!encrypted || !matchesAccount) setSnapshot(undefined);
+  }, [encrypted, matchesAccount, setSnapshot]);
+  useEffect(() => {
+    const accountId = mode?.accountId;
+    if (!workspaceId || !accountId || !native?.managementState) {
       loadRef.current = undefined;
       return undefined;
     }
@@ -74,30 +77,33 @@ export function useSecurityState() {
             const shouldRefresh = nextForceRefresh;
             nextForceRefresh = false;
             // Offline refresh cannot erase verified local facts or pause the workspace.
+            let refreshError: unknown;
             if (shouldRefresh) {
               try {
                 await native.refresh(workspaceId, { keyMode: 'none' });
-              } catch {
-                /* Retry on the next probe. */
+              } catch (cause) {
+                refreshError = cause ?? 'e2ee_management_retry';
               }
             }
             if (!active) return;
-            const data = await native.managementState!(workspaceId);
-            if (shouldRefresh && active && mode.accountId)
-              notifyE2eeLedgerChanged(mode.accountId, workspaceId);
-            if (active) setSnapshot({ key, data, isError: false });
+            try {
+              const data = await native.managementState!(workspaceId);
+              if (active) setSnapshot({ key, data, error: refreshError });
+              if (shouldRefresh && refreshError === undefined && active)
+                notifyE2eeLedgerChanged(accountId, workspaceId);
+            } catch (cause) {
+              if (active)
+                setSnapshot((previous) => ({
+                  key,
+                  data: previous?.key === key ? previous.data : undefined,
+                  error: refreshError ?? cause ?? 'e2ee_management_retry',
+                }));
+            }
             if (queued) {
               nextForceRefresh = queuedForceRefresh;
               queuedForceRefresh = false;
             }
           } while (queued && active);
-        } catch {
-          if (active)
-            setSnapshot((previous) => ({
-              key,
-              data: previous?.key === key ? previous.data : undefined,
-              isError: true,
-            }));
         } finally {
           inFlight = undefined;
         }
@@ -121,9 +127,10 @@ export function useSecurityState() {
     handledRevisionRef.current = revision;
     void loadRef.current?.(false);
   }, [revision]);
+  const matchesSnapshot = encrypted && snapshot?.key === key;
   const state = {
-    data: encrypted && snapshot?.key === key ? snapshot.data : undefined,
-    isError: encrypted && snapshot?.key === key ? snapshot.isError : false,
+    data: matchesSnapshot ? snapshot.data : undefined,
+    error: matchesSnapshot ? snapshot.error : undefined,
     refetch: async () => {
       bump((n) => {
         const next = n + 1;
@@ -162,7 +169,7 @@ export function E2eeSettingsIcon() {
   return <E2eeSettingsGlyph attention={attention} />;
 }
 
-/** True while a link join request waits for this manager; polled every 15 s. */
+/** True while a link join request waits for this manager; woken by push hints with 15 s fallback. */
 export function useMemberJoinAttention(
   native: E2eeWorkspaceRuntime | undefined,
   workspaceId: string | null,
@@ -175,27 +182,50 @@ export function useMemberJoinAttention(
     if (!workspaceId || !accountId || !mayManage || !native?.memberJoinRequests) return undefined;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false;
+    let queued = false;
+    const schedule = () => {
+      clearTimeout(timer);
+      if (active) timer = setTimeout(() => void load(), 15_000);
+    };
     const load = async () => {
+      if (!active) return;
+      if (inFlight) {
+        queued = true;
+        return;
+      }
+      inFlight = true;
+      clearTimeout(timer);
       try {
-        const requests = await native.memberJoinRequests!(workspaceId);
-        if (active)
-          setSnapshot({
-            key,
-            attention: requests.items.some(
-              (request) =>
-                request.source === 'link' && ['pending', 'admitting'].includes(request.state)
-            ),
-          });
-      } catch {
-        // An unavailable invitation queue does not hide key-update attention or pause work.
+        do {
+          queued = false;
+          try {
+            const requests = await native.memberJoinRequests!(workspaceId);
+            if (active)
+              setSnapshot({
+                key,
+                attention: requests.items.some(
+                  (request) =>
+                    request.source === 'link' && ['pending', 'admitting'].includes(request.state)
+                ),
+              });
+          } catch {
+            // An unavailable invitation queue does not hide key-update attention or pause work.
+          }
+        } while (queued && active);
       } finally {
-        if (active) timer = setTimeout(() => void load(), 15_000);
+        inFlight = false;
+        schedule();
       }
     };
+    const unsubscribe = native.subscribePendingMemberRequests?.(workspaceId, () => {
+      if (active) void load();
+    });
     void load();
     return () => {
       active = false;
       clearTimeout(timer);
+      unsubscribe?.();
     };
   }, [native, workspaceId, accountId, mayManage, key]);
   return mayManage && snapshot?.key === key && snapshot.attention;

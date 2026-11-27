@@ -153,11 +153,13 @@ export function TodaySessionPicker(props: { items: readonly SessionMentionItem[]
   useLayoutEffect(() => {
     const menu = menuRef.current;
     if (!menu || anchorBottom === null) return;
-    setAbove(anchorBottom + 4 + menu.offsetHeight > window.innerHeight);
-  }, [anchorBottom, rows.length, tab]);
+    setAbove(
+      anchorBottom + 4 + menu.offsetHeight > (root?.ownerDocument.defaultView?.innerHeight ?? 0)
+    );
+  }, [anchorBottom, root, rows.length, tab]);
   if (!controller || !picker || !root) return null;
   // Under the `@`: the caret's line when the browser can measure it, else the node.
-  const selection = window.getSelection();
+  const selection = root.ownerDocument.getSelection();
   const caret =
     selection?.rangeCount && root.contains(selection.anchorNode)
       ? selection.getRangeAt(0).getBoundingClientRect()
@@ -174,7 +176,10 @@ export function TodaySessionPicker(props: { items: readonly SessionMentionItem[]
       {...stylex.props(pickerStyles.menu)}
       style={
         above
-          ? { left: rect.left, bottom: window.innerHeight - rect.top + 4 }
+          ? {
+              left: rect.left,
+              bottom: (root?.ownerDocument.defaultView?.innerHeight ?? 0) - rect.top + 4,
+            }
           : { left: rect.left, top: rect.bottom + 4 }
       }
       onMouseDown={(event) => event.preventDefault()}

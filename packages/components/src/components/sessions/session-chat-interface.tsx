@@ -29,6 +29,7 @@ import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
 import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
+  ownDisplayName,
   type SessionAttachmentDraft,
 } from '@/lib/session-attachment-draft';
 import { useSchedules } from '@/hooks/use-schedules';
@@ -252,8 +253,7 @@ import { GenuiCapabilitiesContext } from '../ai-gui/genui/genui-capabilities-con
 import { MessageSendStatusContext } from '../ai-gui/message-send-status-context';
 import { format, formatDistanceToNow } from 'date-fns';
 import type { Locale } from 'date-fns';
-import { enUS } from 'date-fns/locale/en-US';
-import { zhCN } from 'date-fns/locale/zh-CN';
+import { getDateFnsLocale } from '@/lib/date-fns-locale';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { buildAppSessionUrl } from '@/lib/session-app-url';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
@@ -1231,7 +1231,7 @@ export function SessionHistoryButton({
   const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
-  const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const localeObj = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
   const defaultSessionTitle = t('sessions.untitled', 'Untitled session');
 
   const historySessions = useMemo(() => {
@@ -2690,7 +2690,7 @@ export const SessionChatInterface = memo(
     const resolvedTheme = useResolvedTheme();
     const isDark = resolvedTheme === 'dark';
     const postHog = usePostHog();
-    const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
+    const localeObj = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
     const rpcReason = useMachineRpcFeatureReason(session.machineId);
     const sharingAllowed = useWorkspaceFeature('sharing');
@@ -2850,6 +2850,7 @@ export const SessionChatInterface = memo(
       ready: sessionDocReady,
       synced: sessionDocSynced,
       syncState: sessionDocSyncState,
+      historySync,
     } = useSessionDoc(session.id, {
       enabled: !hideMessageArea,
       syncEnabled: !hideMessageArea && syncEnabled,
@@ -4889,6 +4890,7 @@ export const SessionChatInterface = memo(
             const pendingHistoryEntry = buildDraftUserHistoryEntry(
               {
                 userId: derivedUserId,
+                userName: ownDisplayName(currentUser, derivedUserId),
                 inputBlocks,
                 timestamp: new Date().toISOString(),
                 inputConfig,
@@ -5074,6 +5076,7 @@ export const SessionChatInterface = memo(
               task: queueTask(inputBlocks, options?.attachments),
               project: sessionProject,
               userId: derivedUserId,
+              userName: ownDisplayName(currentUser, derivedUserId),
               userTurnId,
               acpSessionConfig: queuedInputConfig,
               attachments: options?.attachments,
@@ -6797,12 +6800,14 @@ export const SessionChatInterface = memo(
             inputConfig.inputBlocks,
             inputConfig.prompt ?? item.task
           );
+          const promotedUserId = item.paused
+            ? ((runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+              currentUser?.id ??
+              session.userId)
+            : item.userId;
           const pendingHistoryEntry = buildDraftUserHistoryEntry({
-            userId: item.paused
-              ? ((runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
-                currentUser?.id ??
-                session.userId)
-              : item.userId,
+            userId: promotedUserId,
+            userName: item.paused ? ownDisplayName(currentUser, promotedUserId) : item.userName,
             inputBlocks,
             timestamp: item.paused ? new Date().toISOString() : item.timestamp,
             inputConfig,
@@ -7856,121 +7861,130 @@ export const SessionChatInterface = memo(
                                 <SessionChatStream
                                   key={session.id}
                                   ref={chatStreamRef}
-                                sessionId={session?.id}
-                                workspaceId={workspaceId}
-                                showSenderIdentity={isMultiMember}
-                                view={conversationView}
-                                isVisible={isVisible}
-                                sessionCreatedAt={session?.createdAt}
-                                dividerLabel={sessionDividerLabel}
-                                {...stylex.props(styles.stream)}
-                                leadingContent={openedByConversationStart}
-                                emptyState={chatStreamEmptyState}
-                                trailingContent={
-                                  unsentFirstMessage ? undefined : (
-                                    <>
-                                      {pendingMessages.trailingContent}
-                                      {autoDeliveryStatus || continuation.views.length > 0 ? (
-                                        // The stream's trailing row is full-bleed, so the
-                                        // automation notes mount one shared conversation column.
-                                        <ConversationColumn
-                                          {...stylex.props(styles.continuationNotesColumn)}
-                                        >
-                                          {autoDeliveryStatus ? (
-                                            <SessionAutoDeliveryNote
-                                              status={autoDeliveryStatus}
-                                              now={continuationNow}
-                                              compact={isMobile}
-                                              busy={continuation.busy}
-                                              options={continuation.autoDeliverOptions}
-                                              onOptionsChange={
-                                                continuation.supported
-                                                  ? (next) => void continuation.setAutoDeliver(next)
-                                                  : undefined
-                                              }
-                                              onTurnOff={
-                                                continuation.supported
-                                                  ? () => void continuation.setAutoDeliver(false)
-                                                  : undefined
-                                              }
-                                              onDismiss={
-                                                continuation.supported
-                                                  ? () => void continuation.setAutoDeliver(false)
-                                                  : undefined
-                                              }
-                                              onResume={() => {
-                                                void setTreeCollaborationStopped(session.id, false)
-                                                  .then(continuation.refresh)
-                                                  .catch(() =>
-                                                    toast.error(
-                                                      t('sessions.relations.controlFailed')
-                                                    )
-                                                  );
-                                              }}
-                                            />
-                                          ) : null}
-                                          {continuation.views.map((view) => (
-                                            <SessionContinuationNote
-                                              key={view.id}
-                                              view={
-                                                continuation.error
-                                                  ? { ...view, block: 'unavailable' }
-                                                  : view
-                                              }
-                                              now={continuationNow}
-                                              compact={isMobile}
-                                              statusUnavailable={continuation.error}
-                                              onCancel={continuation.cancel}
-                                              onResume={() => {
-                                                void setTreeCollaborationStopped(session.id, false)
-                                                  .then(continuation.refresh)
-                                                  .catch(() =>
-                                                    toast.error(
-                                                      t('sessions.relations.controlFailed')
-                                                    )
-                                                  );
-                                              }}
-                                            />
-                                          ))}
-                                        </ConversationColumn>
-                                      ) : null}
-                                    </>
-                                  )
-                                }
-                                localUserMessages={pendingMessages.localUserMessages}
-                                agentActivityLabel={agentActivityLabel}
-                                agentActivityTone={agentActivityTone}
-                                agentActivityShimmer={agentActivityShimmer}
-                                liveTurnActivity={liveTurnActivity}
-                                historyLive={historyLive}
-                                onFileDiffClick={onFileDiffClick}
-                                onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
-                                onOpenHtmlFile={handleOpenHtmlAttachment}
-                                onOpenFileAttachment={onOpenFileAttachment}
-                                onAnnotateImage={
-                                  isArchivedSession ? undefined : handleAnnotateImage
-                                }
-                                messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
-                                assistantActions={assistantQuickActions}
-                                assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
-                                onCopyContext={(messageId) => {
-                                  void handleCopyConversationHistory(messageId);
-                                }}
-                                onForkLastAssistant={onForkLastAssistant}
-                                forkWorktreeAvailability={forkWorktreeAvailability}
-                                onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                                onEditLastUser={
-                                  editableLastUserMessageId ? handleEditLastUser : undefined
-                                }
-                                editMentionContext={editMentionContext}
-                                onResendUndelivered={handleResendUndelivered}
-                                capacityRetry={capacityRetry ?? undefined}
-                                forkingAssistantMessageId={forkingAssistantMessageId}
-                                onNavigateSession={onNavigateSession}
-                                conversationFontSize={conversationFontSize}
-                                suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
-                                outlineOverlayRoot={outlineOverlayRoot}
-                              />
+                                  sessionId={session?.id}
+                                  workspaceId={workspaceId}
+                                  showSenderIdentity={isMultiMember}
+                                  view={conversationView}
+                                  isVisible={isVisible}
+                                  sessionCreatedAt={session?.createdAt}
+                                  dividerLabel={sessionDividerLabel}
+                                  {...stylex.props(styles.stream)}
+                                  leadingContent={openedByConversationStart}
+                                  emptyState={chatStreamEmptyState}
+                                  trailingContent={
+                                    unsentFirstMessage ? undefined : (
+                                      <>
+                                        {pendingMessages.trailingContent}
+                                        {autoDeliveryStatus || continuation.views.length > 0 ? (
+                                          // The stream's trailing row is full-bleed, so the
+                                          // automation notes mount one shared conversation column.
+                                          <ConversationColumn
+                                            {...stylex.props(styles.continuationNotesColumn)}
+                                          >
+                                            {autoDeliveryStatus ? (
+                                              <SessionAutoDeliveryNote
+                                                status={autoDeliveryStatus}
+                                                now={continuationNow}
+                                                compact={isMobile}
+                                                busy={continuation.busy}
+                                                options={continuation.autoDeliverOptions}
+                                                onOptionsChange={
+                                                  continuation.supported
+                                                    ? (next) =>
+                                                        void continuation.setAutoDeliver(next)
+                                                    : undefined
+                                                }
+                                                onTurnOff={
+                                                  continuation.supported
+                                                    ? () => void continuation.setAutoDeliver(false)
+                                                    : undefined
+                                                }
+                                                onDismiss={
+                                                  continuation.supported
+                                                    ? () => void continuation.setAutoDeliver(false)
+                                                    : undefined
+                                                }
+                                                onResume={() => {
+                                                  void setTreeCollaborationStopped(
+                                                    session.id,
+                                                    false
+                                                  )
+                                                    .then(continuation.refresh)
+                                                    .catch(() =>
+                                                      toast.error(
+                                                        t('sessions.relations.controlFailed')
+                                                      )
+                                                    );
+                                                }}
+                                              />
+                                            ) : null}
+                                            {continuation.views.map((view) => (
+                                              <SessionContinuationNote
+                                                key={view.id}
+                                                view={
+                                                  continuation.error
+                                                    ? { ...view, block: 'unavailable' }
+                                                    : view
+                                                }
+                                                now={continuationNow}
+                                                compact={isMobile}
+                                                statusUnavailable={continuation.error}
+                                                onCancel={continuation.cancel}
+                                                onResume={() => {
+                                                  void setTreeCollaborationStopped(
+                                                    session.id,
+                                                    false
+                                                  )
+                                                    .then(continuation.refresh)
+                                                    .catch(() =>
+                                                      toast.error(
+                                                        t('sessions.relations.controlFailed')
+                                                      )
+                                                    );
+                                                }}
+                                              />
+                                            ))}
+                                          </ConversationColumn>
+                                        ) : null}
+                                      </>
+                                    )
+                                  }
+                                  localUserMessages={pendingMessages.localUserMessages}
+                                  agentActivityLabel={agentActivityLabel}
+                                  agentActivityTone={agentActivityTone}
+                                  agentActivityShimmer={agentActivityShimmer}
+                                  liveTurnActivity={liveTurnActivity}
+                                  historyLive={historyLive}
+                                  onFileDiffClick={onFileDiffClick}
+                                  onFilePathClick={
+                                    onFilePathClick ? handleFilePathClick : undefined
+                                  }
+                                  onOpenHtmlFile={handleOpenHtmlAttachment}
+                                  onOpenFileAttachment={onOpenFileAttachment}
+                                  onAnnotateImage={
+                                    isArchivedSession ? undefined : handleAnnotateImage
+                                  }
+                                  messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
+                                  assistantActions={assistantQuickActions}
+                                  assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
+                                  onCopyContext={(messageId) => {
+                                    void handleCopyConversationHistory(messageId);
+                                  }}
+                                  onForkLastAssistant={onForkLastAssistant}
+                                  forkWorktreeAvailability={forkWorktreeAvailability}
+                                  onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+                                  onEditLastUser={
+                                    editableLastUserMessageId ? handleEditLastUser : undefined
+                                  }
+                                  editMentionContext={editMentionContext}
+                                  onResendUndelivered={handleResendUndelivered}
+                                  capacityRetry={capacityRetry ?? undefined}
+                                  forkingAssistantMessageId={forkingAssistantMessageId}
+                                  onNavigateSession={onNavigateSession}
+                                  conversationFontSize={conversationFontSize}
+                                  suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
+                                  outlineOverlayRoot={outlineOverlayRoot}
+                                />
                               </GenuiCapabilitiesContext.Provider>
                             </SessionAgentFileLinkMenuProvider>
                           </MessageSelectionContext.Provider>
@@ -8143,6 +8157,7 @@ export const SessionChatInterface = memo(
                             : undefined
                         }
                         diffStat={infoBarDiffStat}
+                        historySync={historySync}
                         // Desktop only: mobile already shows catch-up in its header.
                         syncStatus={
                           isMobile

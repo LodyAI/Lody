@@ -225,6 +225,11 @@ import type {
   LoroStreamsLiveTransport,
 } from './live-mode-policy';
 import { LoroStreamsLiveModePolicy } from './live-mode-policy';
+import {
+  isTransientGatewayStatus,
+  TRANSIENT_GATEWAY_RETRY_DELAYS_MS,
+  transientGatewayRetryDelayMs,
+} from '@lody/shared/transient-gateway';
 
 const JSON_RPC_VERSION = '2.0';
 export const LORO_STREAMS_RPC_VERSION = '1';
@@ -1223,6 +1228,16 @@ const toLoroGatewayError = (
 
   return new Error(`Failed to ${action} ${streamId}${contextSuffix}: ${error.message}`);
 };
+
+/**
+ * Pure reads whose request append is repeated after a gateway 502/503/504. Any
+ * other method may already have been delivered when a 502/504 is returned, and
+ * the plaintext server does not deduplicate it, so it fails at once instead.
+ */
+const TRANSIENT_APPEND_RETRY_METHODS: ReadonlySet<string> = new Set([
+  'machine/status',
+  'machine/ping',
+]);
 
 const unwrapStreamResult = <T>(
   action: string,
@@ -4966,8 +4981,30 @@ export class LoroStreamsMachineRpcClient {
               ...outcome,
             });
         } else {
-          if (!this.options.streamClient) throw new Error('RPC transport unavailable');
-          await this.options.streamClient?.appendJson(this.requestStreamId, request);
+          const streamClient = this.options.streamClient;
+          if (!streamClient) throw new Error('RPC transport unavailable');
+          const retryDelays = TRANSIENT_APPEND_RETRY_METHODS.has(request.method)
+            ? TRANSIENT_GATEWAY_RETRY_DELAYS_MS
+            : [];
+          for (let attempt = 0; ; attempt += 1) {
+            try {
+              await streamClient.appendJson(this.requestStreamId, request);
+              break;
+            } catch (error) {
+              const baseDelay = retryDelays[attempt];
+              const delay =
+                baseDelay === undefined ? undefined : transientGatewayRetryDelayMs(baseDelay);
+              if (
+                delay === undefined ||
+                this.stopped ||
+                !(error instanceof LoroStreamsGatewayError) ||
+                !isTransientGatewayStatus(error.status) ||
+                Date.now() + delay >= startedAtMs + timeoutMs
+              )
+                throw error;
+              await new Promise((resolve) => setTimeout(resolve, delay));
+            }
+          }
         }
         requestAppended = true;
         this.responseDispatcher.markAppendFinished(requestId);

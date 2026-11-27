@@ -9,8 +9,10 @@ import { terminalNotificationSchema, type TerminalNotification } from '@lody/sha
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
 import { WorkspaceCatalogSyncLegacy } from './workspace-catalog-sync-legacy';
 import { createSessionBackend, disposeSessionBackend } from '@/session/session-backend';
+import { RoostCloudHistoryPublisher } from '@/session/roost-cloud-history-publisher';
 import type { SessionBackend, SessionBackendFactory } from '@/session/session-backend';
 import { readLatestTurn } from '@lody/shared/session-data';
+import type { CloudAccessPort } from '@lody/platform';
 import { isContainer, type LoroDoc, type LoroList, type LoroMap } from 'loro-crdt';
 import {
   ACPSessionId,
@@ -25,6 +27,7 @@ import {
   WorkspaceId,
   getSessionRoomId,
   getSessionIdFromRoomId,
+  SESSION_DOC_PREFIX,
   AgentConfigId,
   MachineId,
   ManagedBuiltinAgentType,
@@ -56,6 +59,7 @@ import {
   getServerNow,
   shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
+  type RoostCloudHistoryBinding,
   NEW_SESSION_HISTORY_BACKEND,
   LEGACY_SESSION_HISTORY_BACKEND,
   getMachineFlockAcpCapabilities,
@@ -157,6 +161,7 @@ import {
 } from '@/lib/agent-config-machine-flock';
 import { installCliHttpGlobalDispatcher } from '@/utils/http-transport';
 import { createCliStreamsTransport } from './streams-transport';
+import { resolveCliLoroStreamsWebSocketEnabled } from '@/platform/presence';
 
 // Cleanup failures can reach MCP and synced history. Project known causes instead
 // of copying arbitrary SDK messages, URLs, credentials, or Effect owner state.
@@ -532,6 +537,201 @@ export class LoroDocumentManager {
   private readonly sessionHistoryFactory?: SessionBackendFactory;
   private readonly ownerHistoryRouter?: SessionBackendFactory;
   private catalogSync?: WorkspaceCatalogSyncLegacy;
+  private roostCloudHistoryMachineId?: MachineId;
+  private roostCloudHistoryCloud?: NonNullable<CloudAccessPort['roostHistory']>;
+  private roostCloudHistoryMetaWrite?: Promise<void>;
+  private roostCloudHistory?: {
+    publisher?: RoostCloudHistoryPublisher;
+    draining?: Promise<void>;
+    createPublisher: () => RoostCloudHistoryPublisher;
+    pending: Map<SessionId, boolean>;
+    unsubscribe: () => void;
+  };
+
+  enableRoostCloudHistory(
+    machineId: MachineId,
+    cloud: NonNullable<CloudAccessPort['roostHistory']>
+  ): void {
+    if (!this.streamsTokens || this.encryptedWorkspace) return;
+    this.roostCloudHistoryMachineId = machineId;
+    this.roostCloudHistoryCloud = cloud;
+    try {
+      this.startRoostCloudHistory();
+    } catch (error) {
+      this.logger.warn('Roost cloud history could not start', formatErrorMessage(error));
+    }
+  }
+
+  private startRoostCloudHistory(): void {
+    const machineId = this.roostCloudHistoryMachineId;
+    const cloud = this.roostCloudHistoryCloud;
+    if (this.cleaningUp || !machineId || !cloud || !this.remoteStreamsAttached) return;
+    if (this.roostCloudHistory) {
+      const state = this.roostCloudHistory;
+      if (state.publisher || state.draining) return;
+      state.publisher = state.createPublisher();
+      for (const [sessionId, removed] of state.pending)
+        this.enqueueRoostCloudHistory(sessionId, removed);
+      state.pending.clear();
+      return;
+    }
+    const target = (sessionId: SessionId) => ({
+      workspaceId: this.workspaceId,
+      machineId,
+      sessionId,
+    });
+    const metadata = async (sessionId: SessionId, signal: AbortSignal) => {
+      signal.throwIfAborted();
+      const doc = await this.repo.getDocMeta(getSessionRoomId(sessionId));
+      signal.throwIfAborted();
+      return isLoroRepoDocDeleted(doc) ? undefined : (doc?.meta as SessionMeta | undefined);
+    };
+    const owns = (meta: SessionMeta | undefined): meta is SessionMeta =>
+      meta?.machineId === machineId && meta.historyBackend === 'roost';
+    const indexed = new Set<SessionId>();
+    const published = new Map<SessionId, RoostCloudHistoryBinding>();
+    const createPublisher = () =>
+      new RoostCloudHistoryPublisher({
+        workspaceId: this.workspaceId,
+        machineId,
+        grant: async (sessionId, binding, signal) => {
+          if (!owns(await metadata(sessionId, signal)))
+            throw new Error('Roost history owner changed');
+          return await cloud.uploadGrant({ ...target(sessionId), binding }, signal);
+        },
+        isOwned: async (sessionId, signal) => {
+          const meta = await metadata(sessionId, signal);
+          if (!owns(meta)) return false;
+          indexed.add(sessionId);
+          return true;
+        },
+        publish: async (sessionId, binding, signal) => {
+          if (!owns(await metadata(sessionId, signal))) return;
+          if (!isDeepStrictEqual(published.get(sessionId), binding)) {
+            await cloud.publish({ ...target(sessionId), binding }, signal);
+            published.set(sessionId, binding);
+          }
+          const roostCloudGeneration = binding.generation;
+          const roostCloudAuthor = binding.ownerPublicKey;
+          const meta = await metadata(sessionId, signal);
+          if (
+            !owns(meta) ||
+            (meta.roostCloudGeneration === roostCloudGeneration &&
+              meta.roostCloudAuthor === roostCloudAuthor)
+          )
+            return;
+          signal.throwIfAborted();
+          const write = this.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+            roostCloudGeneration,
+            roostCloudAuthor,
+          });
+          this.roostCloudHistoryMetaWrite = write;
+          try {
+            await write;
+          } finally {
+            this.roostCloudHistoryMetaWrite = undefined;
+          }
+        },
+        unpublish: async (sessionId, signal) => {
+          await cloud.unpublish(target(sessionId), signal);
+          published.delete(sessionId);
+        },
+        logger: this.logger,
+      });
+    const observation = this.repo.observeDocs(
+      (event) => {
+        if (event.kind !== 'doc-metadata' && event.kind !== 'doc-existence-changed') return;
+        const sessionId = getSessionIdFromRoomId(event.docId);
+        if (!sessionId) return;
+        if (event.kind === 'doc-existence-changed' && event.to === 'deleted') {
+          if (indexed.delete(sessionId)) this.enqueueRoostCloudHistory(sessionId, true);
+        } else if (event.kind === 'doc-metadata') {
+          if (event.patch.machineId === machineId && event.patch.historyBackend === 'roost')
+            indexed.add(sessionId);
+          if (
+            indexed.has(sessionId) ||
+            event.patch.historyBackend === 'roost' ||
+            event.patch.machineId === machineId
+          )
+            this.enqueueRoostCloudHistory(sessionId);
+        }
+      },
+      {
+        query: { prefix: SESSION_DOC_PREFIX },
+        filter: {
+          kinds: ['doc-metadata', 'doc-existence-changed'],
+          metadataFields: ['historyBackend', 'machineId'],
+        },
+      }
+    );
+    this.roostCloudHistory = {
+      publisher: createPublisher(),
+      createPublisher,
+      pending: new Map(),
+      unsubscribe: observation.unsubscribe,
+    };
+    for (const row of observation.snapshot) {
+      const sessionId = getSessionIdFromRoomId(row.docId);
+      const meta = row.meta as SessionMeta | undefined;
+      if (!sessionId || !owns(meta)) continue;
+      if (row.deleted) this.enqueueRoostCloudHistory(sessionId, true);
+      else {
+        indexed.add(sessionId);
+        this.enqueueRoostCloudHistory(sessionId);
+      }
+    }
+  }
+
+  private enqueueRoostCloudHistory(sessionId: SessionId, removed = false): void {
+    const state = this.roostCloudHistory;
+    if (!state) return;
+    if (state.publisher) {
+      if (removed) state.publisher.remove(sessionId);
+      else state.publisher.enqueue(sessionId);
+    } else {
+      state.pending.set(sessionId, removed || state.pending.get(sessionId) === true);
+    }
+  }
+
+  private drainRoostCloudHistory(publisher: RoostCloudHistoryPublisher): Promise<void> {
+    return publisher.close().catch((error) => {
+      const reasons = cleanupFailureReasons(error).join(', ') || 'underlying reason unavailable';
+      this.logger.warn(`[${this.workspaceId}] Roost cloud history release failed: ${reasons}`);
+    });
+  }
+
+  private pauseRoostCloudHistory(): void {
+    const state = this.roostCloudHistory;
+    const publisher = state?.publisher;
+    if (!state || !publisher) return;
+    state.publisher = undefined;
+    for (const [sessionId, removed] of publisher.pendingWork())
+      this.enqueueRoostCloudHistory(sessionId, removed);
+    state.draining = this.drainRoostCloudHistory(publisher);
+    void state.draining
+      .then(() => {
+        state.draining = undefined;
+        if (this.roostCloudHistory === state) this.startRoostCloudHistory();
+      })
+      .catch((error) => {
+        this.logger.warn('Roost cloud history could not resume', formatErrorMessage(error));
+      });
+  }
+
+  private async closeRoostCloudHistory(): Promise<void> {
+    const state = this.roostCloudHistory;
+    this.roostCloudHistory = undefined;
+    try {
+      state?.unsubscribe();
+    } finally {
+      if (state?.publisher) void this.drainRoostCloudHistory(state.publisher);
+      await this.roostCloudHistoryMetaWrite;
+    }
+  }
+
+  prioritizeRoostCloudHistory(sessionId: SessionId): void {
+    this.roostCloudHistory?.publisher?.prioritize(sessionId);
+  }
 
   /** Reader interest belongs to the daemon, never to a discovery request. */
   isEncryptedWorkspace(): boolean {
@@ -1009,6 +1209,10 @@ export class LoroDocumentManager {
       content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
       bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,
+      webSocketEnabled: resolveCliLoroStreamsWebSocketEnabled(
+        undefined,
+        process.env.LODY_LORO_STREAMS_WS_ENABLED
+      ),
       tokenProvider: streamsTokens.legacy,
       repo: this.repo,
       documentRemoteCursorStore: this.documentRemoteCursorStore,
@@ -1086,6 +1290,7 @@ export class LoroDocumentManager {
       // here from running the rollback below, which would detach the transport
       // while the flag stays set and leave the workspace cloud-dead.
       try {
+        this.startRoostCloudHistory();
         const failedRooms = this.repo
           .transportRooms('streams')
           .filter((entry) => entry.subscription.status === 'error');
@@ -1145,6 +1350,7 @@ export class LoroDocumentManager {
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
     // Keep local production alive, but revoke both cloud sinks before their shared token owner.
+    this.pauseRoostCloudHistory();
     const failures: unknown[] = [];
     const detached = await Promise.allSettled([
       this.presenceRuntime?.detachStreams(),
@@ -1834,7 +2040,8 @@ export class LoroDocumentManager {
         (sessionDocId) => this.unloadDocRoom(sessionDocId),
         this.logger,
         this.sessionHistoryFactory ?? this.ownerHistoryRouter,
-        this.encryptedWorkspace?.repositoryDirectory
+        this.encryptedWorkspace?.repositoryDirectory,
+        () => this.enqueueRoostCloudHistory(sessionId)
       );
       const meta = options.historyBackend ? undefined : await this.repo.getDocMeta(docId);
       const historyBackend =
@@ -2427,6 +2634,9 @@ export class LoroDocumentManager {
         )
       );
     };
+    const stopRoostHistory = this.closeRoostCloudHistory().catch((error) => {
+      recordFailure('Roost cloud history', error);
+    });
     try {
       await this.catalogSync?.close();
     } catch (error) {
@@ -2500,6 +2710,7 @@ export class LoroDocumentManager {
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
+    await stopRoostHistory;
     let cleanupFailure: AggregateError | undefined;
     if (failures.length) {
       const details = failures.slice(0, 16).map((error) => error.message);
@@ -2716,7 +2927,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     private unloadDocRoom: (docId: string) => Promise<void>,
     private logger: Logger = getLogger('loro'),
     readonly historyBackendFactory?: SessionBackendFactory,
-    readonly encryptedRepositoryDirectory?: string
+    readonly encryptedRepositoryDirectory?: string,
+    readonly onRoostHistoryCommit?: () => void
   ) {
     this.roomId = getSessionRoomId(this.sessionId);
   }

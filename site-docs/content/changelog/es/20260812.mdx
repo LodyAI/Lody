@@ -1,0 +1,22 @@
+---
+title: "20260812"
+version: 0.78.0
+date: 2026-08-12
+description: "Se agregó el entorno de ejecución oficial de Grok y un menú @ unificado de dos niveles, junto con mejoras en las comprobaciones de memoria, la instalación de la CLI y la experiencia de escritorio."
+---
+
+Versión 0.78.0
+
+### ✨ Novedades
+
+- Se agregó compatibilidad con el entorno de ejecución oficial de Grok, incluidos los controles de interacción y permisos, el uso de contexto y los límites de tasa en Lody.
+- Un nuevo menú `@` de dos niveles reúne archivos, issues, pull requests, habilidades, sesiones y comandos en un solo lugar, incluidas las referencias directas a otras sesiones.
+
+### 🐛 Correcciones y mejoras
+
+- Se mejoraron las comprobaciones de presión de memoria en macOS y Linux, reduciendo los casos en los que el inicio de sesiones se bloqueaba incorrectamente cuando el sistema aún disponía de recursos utilizables.
+- Se restauró el atajo para alejar el zoom en la aplicación de escritorio Electron.
+- Las descripciones de los pull requests ahora se pueden expandir y las respuestas del Agente utilizan una alineación más coherente.
+- Se corrigió la corrupción de texto multibyte, incluidos caracteres chinos, cuando cruzaba fragmentos de datos de conexión local.
+- Se corrigió un problema por el que la instalación de la CLI de Lody mediante npm o npx fallaba cuando las versiones de las dependencias no se resolvían correctamente.
+- Se mejoraron la velocidad de carga, el tamaño de los recursos y la accesibilidad de la página de inicio del sitio web.

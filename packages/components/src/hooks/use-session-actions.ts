@@ -1,3 +1,4 @@
+import { usageSharingAllowed } from '@/lib/usage-sharing';
 import { useSessionOwnerAccess } from './use-session-owner-access';
 import { useSessionManagementGuard } from './use-session-management-guard';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
@@ -452,6 +453,7 @@ export function useSessionActions(): SessionActions {
     (workspaceId: string | undefined) => {
       if (!workspaceId || !isConvexAuthenticated) return;
       // Best-effort DAU recording: never block the chat/session flow.
+      if (!usageSharingAllowed()) return;
       void recordMyWorkspaceDailyActiveUser({ workspaceId }).catch((error: unknown) => {
         if (isConvexUnauthenticatedError(error)) {
           requestAuthRecovery();

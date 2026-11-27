@@ -163,3 +163,25 @@ export const NativeWorkInterrupted: Story = {
     sessionId,
   },
 };
+
+/** Delegated results past the chain cap wait for the human's next message. */
+export const DelegationChainResultsHeld: Story = {
+  args: {
+    message: warningMessage(
+      'The delegation chain reached its limit of 16 hops, so 2 delegated results were not handed to the agent automatically. They will be included with your next message.',
+      'delegationChainResultsHeld'
+    ),
+    sessionId,
+  },
+};
+
+/** A Turn at the chain cap tried to create a Session or send a chat. */
+export const DelegationChainDispatchRejected: Story = {
+  args: {
+    message: warningMessage(
+      'This turn reached the delegation chain limit of 16 hops, so the agent could not create Sessions or send chats from it. A new message from you starts a fresh chain.',
+      'delegationChainDispatchRejected'
+    ),
+    sessionId,
+  },
+};

@@ -6,6 +6,7 @@ import zhCN from '../../../locales/zh_CN.json';
 import { ClientCustodyError } from '@lody/e2ee-core/services';
 import { classifyE2eeControlFailure } from '../src/lib/e2ee-control-failure';
 import { E2eeMemberActions } from '../src/components/pages/e2ee-member-actions';
+import { E2eeLostAccess } from '../src/components/pages/e2ee-lost-access';
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -151,11 +152,21 @@ describe('encrypted workspace control page recovery', () => {
       value: { writeText: () => Promise.reject(new Error('denied')) },
     });
     render({ failure: { kind: 'server', code: 'bad-signature' } });
+    const code = container!.querySelector('details code');
+    expect(code?.textContent).toBe('bad-signature');
+    expect(code?.closest('details')?.open).toBe(false);
+    const paragraphs = container!.querySelectorAll('[data-failure-kind="server"] p');
+    expect(
+      [...paragraphs].find(
+        (p) => !p.closest('details') && p.textContent === 'e2ee.control.failure.server'
+      )
+    ).toBeDefined();
     await act(async () => {
       button('e2ee.control.copyDiagnostics')!.click();
       await Promise.resolve();
     });
-    expect(container!.querySelector('details')?.open).toBe(true);
+    const report = container!.querySelector('pre')?.closest('details');
+    expect(report?.open).toBe(true);
     expect(container!.textContent).toContain('lody-e2ee-workspace-diagnostics');
   });
 });
@@ -332,6 +343,10 @@ describe('encrypted workspace control page reading', () => {
     const workspace = { removed: [] as string[], keyReplaced: 0, keyFailures: 0 };
     // Like the encryption console: a management result reloads the verified ledger, and
     // no member controls are offered while it reloads.
+    let failRetry!: (code: string) => void;
+    const retryFailure = new Promise<string>((resolve) => {
+      failRetry = resolve;
+    });
     function Console() {
       const [state, setState] = useState<{ history: VerifiedLedgerHistory; loading: boolean }>({
         history: before,
@@ -351,6 +366,10 @@ describe('encrypted workspace control page reading', () => {
             rotate: async () => {
               if (workspace.keyFailures > 0) {
                 workspace.keyFailures -= 1;
+                if (workspace.keyFailures === 0) {
+                  const code = await retryFailure;
+                  throw Object.assign(new Error('Connection interrupted'), { code });
+                }
                 throw new Error('e2ee_restart-required');
               }
               workspace.keyReplaced += 1;
@@ -419,7 +438,10 @@ describe('encrypted workspace control page reading', () => {
     const retry = () =>
       document.querySelector('[data-testid="e2ee-member-rotate-retry"]') as HTMLButtonElement;
     await act(async () => retry().click());
-    expect(notice()?.textContent).toContain('e2ee.members.rotateRetryFailed');
+    expect(notice()?.textContent).toContain('e2ee.members.rotateRetrying');
+    expect(retry().disabled).toBe(true);
+    await act(async () => failRetry('network'));
+    expect(notice()?.textContent).toContain('e2ee.members.rotateError.network');
     await act(async () => retry().click());
     expect(workspace.keyReplaced).toBe(2);
     expect(notice()).toBeNull();
@@ -436,7 +458,11 @@ describe('encrypted workspace control page reading', () => {
 
 it('requires confirmation, carries the member incarnation, and hides forbidden member controls', async () => {
   const remove = vi.fn(async () => {}),
-    setRole = vi.fn(async () => {});
+    setRole = async () => {
+      throw new Error(
+        "Error invoking remote method 'e2ee:setMemberRole': Error: e2ee_member_management_conflict"
+      );
+    };
   const member = {
     ordinal: 2,
     membershipId: '12'.repeat(16),
@@ -475,6 +501,9 @@ it('requires confirmation, carries the member incarnation, and hides forbidden m
   expect(
     document.querySelector('[data-testid="e2ee-member-role"]')?.getAttribute('data-membership-id')
   ).toBe(member.membershipId);
+  await act(async () => action('e2ee.members.promote').click());
+  expect(container.textContent).toContain('e2ee.members.error.conflict');
+  await act(async () => container!.querySelector('button')!.click());
   await act(async () => action('e2ee.members.remove').click());
   expect(remove).not.toHaveBeenCalled();
   expect(
@@ -707,7 +736,7 @@ describe('QR camera', () => {
       facingMode: { ideal: 'environment' },
       width: { ideal: 720 },
     });
-    expect(probe.states.at(-1)).toBe('unavailable');
+    expect(probe.states.at(-1)).toBe('denied');
     await probe.unmount();
   });
 
@@ -723,5 +752,127 @@ describe('QR camera', () => {
     ]);
     expect(probe.states.at(-1)).toBe('unavailable');
     await probe.unmount();
+  });
+});
+
+describe('E2eeLostAccess delete confirmation guardrail', () => {
+  it('never enables delete confirmation when workspaceName is empty or whitespace', () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const submit = vi.fn().mockResolvedValue(undefined);
+    act(() =>
+      root!.render(
+        withTestI18n(
+          <E2eeLostAccess
+            workspaceId="ws-empty"
+            workspaceName=""
+            accountRole="owner"
+            removal={{
+              submit,
+              listed: async () => true,
+              refresh: () => {},
+            }}
+            onBackToWorkspaces={() => {}}
+            onRemoved={() => {}}
+          />,
+          testI18n
+        )
+      )
+    );
+    const deleteBtn = container.querySelector<HTMLButtonElement>(
+      '[data-testid="e2ee-lost-access-delete"]'
+    );
+    expect(deleteBtn).not.toBeNull();
+    act(() => deleteBtn!.click());
+    const confirmSubmit = container.querySelector<HTMLButtonElement>(
+      '[data-testid="e2ee-lost-access-submit"]'
+    );
+    expect(confirmSubmit).not.toBeNull();
+    expect(confirmSubmit!.disabled).toBe(true);
+    act(() => confirmSubmit!.click());
+    expect(submit).not.toHaveBeenCalled();
+  });
+});
+
+describe('E2eeWorkspaceControlPage mobile drill-down navigation', () => {
+  it('shows the grouped category menu on narrow viewports and drills into section details', () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: query.includes('max-width: 720px'),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    });
+    try {
+      const props = render({ workspaceName: 'Cipher Lab', onOpen: vi.fn() });
+      expect(container!.querySelector('[data-testid="e2ee-mobile-menu"]')).not.toBeNull();
+      expect(container!.querySelector('[data-testid="e2ee-workspace-control"]')?.textContent).toBe(
+        'e2ee.control.title'
+      );
+      expect(
+        container!.querySelector('[data-testid="e2ee-mobile-identity"]')?.textContent
+      ).toContain('Cipher Lab');
+      expect(container!.querySelectorAll('[data-testid="e2ee-mobile-menu"] button')).toHaveLength(
+        5
+      );
+      const menu = container!.querySelector('[data-testid="e2ee-mobile-menu"]')!;
+      const open = button('e2ee.control.openWorkspace')!;
+      expect(open).toBeDefined();
+      expect(menu.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      act(() => open.click());
+      expect(props.onOpen).toHaveBeenCalledTimes(1);
+      act(() =>
+        (container!.querySelector('[data-console-tab="members"]') as HTMLButtonElement).click()
+      );
+      expect(container!.querySelector('[data-testid="e2ee-mobile-menu"]')).toBeNull();
+      expect(container!.querySelector('[data-testid="e2ee-workspace-control"]')?.textContent).toBe(
+        'e2ee.console.tabs.members'
+      );
+      act(() =>
+        (container!.querySelector('button[aria-label="common.back"]') as HTMLButtonElement).click()
+      );
+      expect(container!.querySelector('[data-testid="e2ee-mobile-menu"]')).not.toBeNull();
+      expect(props.onBack).not.toHaveBeenCalled();
+      act(() =>
+        (
+          container!.querySelector('button[aria-label="e2ee.control.back"]') as HTMLButtonElement
+        ).click()
+      );
+      expect(props.onBack).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        value: originalMatchMedia,
+      });
+    }
+  });
+
+  it('opens directly in detail view on narrow viewports when initialTab is set', () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: query.includes('max-width: 720px'),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    });
+    try {
+      render({ workspaceName: 'Cipher Lab', initialTab: 'members' });
+      expect(container!.querySelector('[data-testid="e2ee-mobile-menu"]')).toBeNull();
+      expect(container!.querySelector('[data-testid="e2ee-workspace-control"]')?.textContent).toBe(
+        'e2ee.console.tabs.members'
+      );
+    } finally {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        value: originalMatchMedia,
+      });
+    }
   });
 });

@@ -1,0 +1,53 @@
+---
+title: "20261024"
+version: 0.108.1
+date: 2026-10-24
+description: "Un nouvel accueil des conversations, des paramètres MCP par défaut par projet, une vue des modifications non validées, des récompenses de parrainage et des aperçus de réponse, ainsi que des améliorations des performances de session, de la reprise de synchronisation et de l'expérience bureau."
+---
+
+Version 0.108.1
+
+### ✨ Nouveautés
+
+- Un accueil des conversations repensé avec les vues « Maintenant » et « Cette semaine » : consultez les conversations en attente d'attention, en cours ou récemment terminées, ainsi que vos travaux récents et l'utilisation de votre forfait Agent.
+- Définissez des outils MCP par défaut pour chaque projet. Les nouvelles conversations utilisent la configuration du projet, que vous pouvez ajuster avant l'envoi.
+- « Toutes les modifications » propose désormais une vue « Non validées » en plus des modifications cumulées de la branche et affiche la base de comparaison.
+- Récompenses de parrainage d'espace de travail : partagez des liens de parrainage, consultez votre solde et votre historique de récompenses, et appliquez les crédits éligibles à vos abonnements. Les campagnes de parrainage à durée limitée sont également prises en charge.
+- Les notifications de fin de tâche d'Agent incluent désormais un extrait de la réponse, vous permettant de prévisualiser les résultats sans ouvrir la conversation.
+- Ajout d'OpenCode V2 et mise à jour de plusieurs Agents ACP.
+- Les champs de prompt des tâches planifiées s'étendent désormais avec leur contenu jusqu'à environ la moitié de la hauteur de la fenêtre, facilitant la modification des instructions longues.
+- Lors de l'archivage d'une conversation ayant des conversations enfants actives, consultez leur nombre et leur état d'exécution, puis choisissez de les archiver également ou de n'archiver que la conversation actuelle.
+- Refonte du thème clair, de la barre latérale et de la page de connexion ; unification de la mise en page des invitations, de l'autorisation d'appareils et des pages associées ; amélioration du démarrage et des transitions de page ; et ajout d'un indicateur pour la dernière méthode de connexion réussie sur cet appareil.
+
+### 🐛 Correctifs et améliorations
+
+- Amélioration du changement de conversation et d'onglet, réduisant les blocages lors des longues conversations, de l'affichage en streaming et du chargement de l'historique.
+- Amélioration du chargement des conversations contenant un volume important de sorties d'outils de sous-agents. Les détails des tâches sont lus à la demande afin d'éviter tout traitement inutile.
+- Amélioration de la synchronisation de l'historique pour réduire les transferts et le stockage redondants, et correction de la duplication du contenu de certains messages dans certains scénarios.
+- Correction d'un problème pouvant entraîner la perte de certaines mises à jour de synchronisation reçues après un redémarrage, améliorant la persistance et la récupération des données locales.
+- Amélioration de la reprise de synchronisation après des erreurs de stockage, réduisant les téléchargements répétés et le trafic excessif, et correction des cas où les connexions à la base de données locale ne parvenaient pas à se rétablir.
+- Amélioration de la reconnexion après des coupures réseau et correction des conversations qui cessaient de se synchroniser jusqu'à une actualisation manuelle.
+- Correction de la perte de l'état de session sur l'application de bureau lors de pannes réseau.
+- Lorsque les écritures sur l'application de bureau échouent par manque d'espace disque, un message clair bloque toute nouvelle interaction avec l'interface et vous invite à libérer de l'espace avant de redémarrer ou de quitter.
+- Correction d'erreurs répétées, d'une croissance excessive des journaux et de l'échec de fermeture lors d'un arrêt anormal de la CLI.
+- Correction du blocage des Agents locaux sous Windows sur « Connexion en cours » après une erreur d'autorisation, avec ajout d'indications de récupération.
+- Correction de la création de conversations en double par Lody MCP lorsque des réponses lentes déclenchaient de nouvelles tentatives.
+- Correction des conversations restant bloquées en phase de finalisation et des opérations d'arrêt trop longues lorsque l'actualisation des modifications de fichiers se poursuivait après la réponse de l'Agent.
+- Correction de la disparition occasionnelle des cartes de questions de l'Agent pendant le chargement de l'historique. La durée de travail n'augmente plus pendant l'attente d'une réponse.
+- Le plan initial de Claude reste visible après que vous avez refusé de l'exécuter.
+- Ajout de messages d'erreur plus clairs et d'une procédure de récupération manuelle via la CLI pour les conversations ne pouvant pas accepter de saisie en raison d'un état d'exécution anormal, tout en préservant les saisies en file d'attente.
+- Correction du rejet de la synchronisation, de l'importation et de la gestion des conflits d'historique pour les Agents ACP personnalisés.
+- La fusion ou la fermeture d'une PR n'archive plus automatiquement sa conversation, évitant ainsi d'interrompre le travail de suivi.
+- Les titres de conversation utilisent désormais la saisie réelle de l'utilisateur sans la configuration de l'Agent ni les instructions du Rôle. Les titres des conversations forkées ne reçoivent plus de préfixe automatique.
+- Lors de la création de conversations avec un Rôle d'Agent via la CLI ou Lody MCP, les instructions du Rôle n'apparaissent plus dans le message utilisateur visible ni dans le titre de la conversation.
+- Le texte DSH et les appels d'outils s'affichent indépendamment, de sorte que le repli des outils ne masque plus le texte qui les accompagne. Typographie des réflexions améliorée et suppression d'un avertissement obsolète concernant le modèle de délégation.
+- Les liens vers des conversations dans les aperçus de fichiers Markdown s'ouvrent désormais correctement.
+- Correction des liens relatifs vers des fichiers dans les worktrees Git imbriqués. Lorsque plusieurs fichiers correspondent, vous pouvez choisir celui à ouvrir.
+- Amélioration de la coloration syntaxique et des barres de défilement, ainsi que de la mise en page de l'accueil, des commandes de repli et des transitions dans les fenêtres de faible hauteur.
+- Amélioration des commandes de partage de conversation, regroupant la portée d'accès, la publication de liens et la gestion des liens dans un seul panneau.
+- Amélioration des avatars de membres, des détails de Skill et des vues d'utilisation ; correction du clignotement des avatars, des problèmes de focus dans les menus et des commandes de tâches planifiées masquées par les boutons de barre de titre Windows.
+- Affinement des bordures de l'espace de travail et amélioration de l'alignement de la barre de titre et des boutons de fenêtre sur macOS.
+- Correction des erreurs de démarrage Web et des couleurs de thème de la vue des diffs sur iOS 16.4.
+- Mise à jour de l'icône DimCode et masquage des accusés de réussite d'opération sans contenu significatif.
+
+Merci à Lampese, liyown, samzong, eric8810, vuuihc et UniversePeak pour leur contribution à cette version !

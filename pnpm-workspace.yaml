@@ -30,9 +30,9 @@ catalog:
   '@effect/vitest': 4.0.2
   '@loro-dev/flock-wasm': ^0.5.0
   '@loro-dev/loro-cli': 0.6.0
-  '@loro-dev/roost': 0.3.1
+  '@loro-dev/roost': 0.3.2
   '@loro-dev/streams-client': 0.16.0
-  '@loro-dev/streams-crdt': 0.24.0
+  '@loro-dev/streams-crdt': 0.25.0
   '@tanstack/react-router': ^1.127.9
   '@tanstack/react-router-devtools': ^1.127.9
   '@tanstack/router-plugin': ^1.127.9
@@ -49,7 +49,7 @@ catalog:
   effect: 4.0.2
   jotai: ^2.16.0
   loro-adaptors: ^0.6.1
-  loro-crdt: 1.17.0
+  loro-crdt: 1.19.1
   loro-mirror: 2.3.2
   loro-mirror-jotai: 2.3.2
   loro-mirror-react: 2.3.2
@@ -133,14 +133,14 @@ minimumReleaseAgeExclude:
   - effect@4.0.2
   - '@effect/vitest@4.0.2'
   - '@effect/platform-node-shared@4.0.2'
-  - '@loro-dev/roost-node@0.3.1'
-  - '@loro-dev/roost-node-darwin-arm64@0.3.1'
-  - '@loro-dev/roost-node-darwin-x64@0.3.1'
-  - '@loro-dev/roost-node-linux-arm64-gnu@0.3.1'
-  - '@loro-dev/roost-node-linux-x64-gnu@0.3.1'
-  - '@loro-dev/roost-node-win32-arm64-msvc@0.3.1'
-  - '@loro-dev/roost-node-win32-x64-msvc@0.3.1'
-  - '@loro-dev/roost@0.3.1'
+  - '@loro-dev/roost-node@0.3.2'
+  - '@loro-dev/roost-node-darwin-arm64@0.3.2'
+  - '@loro-dev/roost-node-darwin-x64@0.3.2'
+  - '@loro-dev/roost-node-linux-arm64-gnu@0.3.2'
+  - '@loro-dev/roost-node-linux-x64-gnu@0.3.2'
+  - '@loro-dev/roost-node-win32-arm64-msvc@0.3.2'
+  - '@loro-dev/roost-node-win32-x64-msvc@0.3.2'
+  - '@loro-dev/roost@0.3.2'
   - '@openai/codex@0.172.0 || 0.172.0-darwin-arm64 || 0.172.0-darwin-x64 || 0.172.0-linux-arm64 || 0.172.0-linux-x64 || 0.172.0-win32-arm64 || 0.172.0-win32-x64 || 0.169.1 || 0.169.1-darwin-arm64 || 0.169.1-darwin-x64 || 0.169.1-linux-arm64 || 0.169.1-linux-x64 || 0.169.1-win32-arm64 || 0.169.1-win32-x64'
   - '@peculiar/asn1-x509@2.10.0'
   - '@peculiar/asn1-x509-attr@2.10.0'
@@ -180,8 +180,8 @@ minimumReleaseAgeExclude:
   - vitest@5.0.2 || 5.1.0
   - '@vitest/mocker@5.0.2 || 5.1.0'
   - '@vitest/spy@5.0.2 || 5.1.0'
-  - loro-crdt@1.17.0
-  - '@loro-dev/streams-crdt@0.22.1 || 0.23.0 || 0.24.0'
+  - loro-crdt@1.19.1
+  - '@loro-dev/streams-crdt@0.22.1 || 0.23.0 || 0.24.0 || 0.25.0'
   - '@loro-dev/streams-client@0.14.0 || 0.15.0 || 0.16.0'
   - loro-repo@0.26.0 || 0.28.0 || 0.29.0
   - '@loro-dev/flock-wasm@0.5.0'
@@ -232,7 +232,7 @@ overrides:
   '@loro-dev/streams-crdt>@loro-dev/flock-wasm': ^0.5.0
   '@loro-dev/streams-crdt>@loro-dev/streams-client': 0.16.0
   'loro-repo>@loro-dev/flock-wasm': ^0.5.0
-  'loro-repo>@loro-dev/streams-crdt': 0.24.0
+  'loro-repo>@loro-dev/streams-crdt': 0.25.0
   '@loro-dev/sqlite-riverrun>better-sqlite3': 13.0.3
   '@opencode/codemode>effect': 4.0.2
   '@peculiar/x509>@peculiar/asn1-schema': 2.10.0
@@ -265,6 +265,7 @@ patchedDependencies:
   '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch
   '@xterm/xterm@5.5.0': patches/@xterm__xterm@5.5.0.patch
   app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
+  electron-sparkle-updater@0.5.1: patches/electron-sparkle-updater@0.5.1.patch
   glob@13.0.1: patches/glob@13.0.1.patch
   mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
   pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch

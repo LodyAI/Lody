@@ -1,0 +1,33 @@
+---
+title: "Recherche dans la conversation"
+description: "Recherchez dans le texte de la conversation au sein d'une session Lody."
+---
+
+# Recherche dans la conversation
+
+La recherche dans la conversation vous aide à retrouver le contexte dans les longues sessions. Elle porte sur le texte de la conversation : vos messages, les réponses de l'agent, sa réflexion et les plans proposés — y compris le texte de progression et la réflexion repliés dans le groupe de travail réduit d'un tour terminé.
+
+Les appels d'outils ne sont pas recherchables : leurs titres, chemins de fichiers, entrées/sorties JSON, commandes et sorties de terminal ainsi que les diffs restent hors de l'index. Les listes de contrôle structurées des plans, les objectifs et la sortie des scripts de worktree sont également exclus. Un chemin de fichier ou un extrait de code écrit dans un message ou un plan proposé reste en revanche recherchable en tant que texte de conversation.
+
+Cela diffère de la [recherche globale de navigation entre sessions](/fr/docs/keyboard-shortcuts#ouvrir-la-palette-de-commandes) : l'entrée **Search** de la barre latérale et `Cmd/Ctrl+K` ouvrent la palette de commandes, qui recherche les sessions par titre, libellé de projet/dépôt ou nom de branche. Elle permet de passer d'une session à l'autre sans rechercher dans le texte de leur conversation.
+
+## Ouvrir la recherche
+
+- Ouvrez le menu de session et sélectionnez **Find in session**.
+- Sur ordinateur, appuyez sur `Ctrl+F` ; sur macOS, appuyez sur `Cmd+F`.
+
+Le champ de recherche s'affiche par-dessus la conversation sans remplacer la zone de saisie.
+
+## Parcourir les résultats
+
+- Le texte correspondant est mis en surbrillance au fur et à mesure de votre saisie.
+- Le compteur affiche le résultat actuel et le nombre total de correspondances.
+- Appuyez sur `Enter` pour passer à la correspondance suivante.
+- Appuyez sur `Shift+Enter` ou sur la flèche vers le haut pour revenir à la correspondance précédente.
+- Si rien ne correspond, le compteur affiche `0 / 0`.
+
+Le résultat actif défile jusqu'à être visible, en dépliant un groupe de travail réduit ou une carte de réflexion lorsque la correspondance s'y trouve.
+
+## Effacer ou fermer
+
+Appuyez une fois sur `Escape` pour effacer la requête en cours. Appuyez de nouveau sur `Escape` pour fermer la recherche.

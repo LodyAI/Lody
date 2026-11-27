@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { AlertCircle, AlertTriangle, Share2 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { useCloudMutation, useCloudQueryState } from '@lody/platform/react';
 import type { SessionShareRequest } from '@lody/cloud-api';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
 import { userAtom } from '@/atoms';
@@ -139,10 +139,17 @@ function RequestCards({
   workspaceId: WorkspaceId;
   session: SessionMeta;
 }) {
-  const requests = useCloudQuery(cloudOperations.sessionSharing.listRequests, {
+  const {
+    data: requests,
+    error,
+    retry,
+  } = useCloudQueryState(cloudOperations.sessionSharing.listRequests, {
     workspaceId,
     sourceSessionId: session.id,
   });
+  if (error) {
+    return <RequestsUnavailable onRetry={retry} />;
+  }
   return (
     <>
       {requests

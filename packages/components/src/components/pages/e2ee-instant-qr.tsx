@@ -36,7 +36,10 @@ export function PrivatePairingSurface({ children }: { children: ReactNode }) {
 
 export type InstantQrRuntime = Pick<
   E2eeWorkspaceRuntime,
-  'accountPairingCode' | 'inspectAccountPairing' | 'approveAccountPairing'
+  | 'accountPairingCode'
+  | 'inspectAccountPairing'
+  | 'approveAccountPairing'
+  | 'subscribeAccountPairingApproval'
 >;
 export const supportsInstantQr = (runtime: InstantQrRuntime | undefined) =>
   Boolean(
@@ -46,7 +49,7 @@ export const supportsInstantQr = (runtime: InstantQrRuntime | undefined) =>
 export type InstantQrPhase =
   | { kind: 'loading' }
   | { kind: 'showing'; pairingString: string; expiresAt: number }
-  | { kind: 'joining'; deviceName: string; unavailable: string[] }
+  | { kind: 'joining'; deviceName: string; unavailable: string[]; retrying?: boolean }
   | {
       kind: 'joined';
       deviceName: string;
@@ -58,6 +61,21 @@ export type InstantQrPhase =
   | { kind: 'failed'; error: string };
 
 const INSTANT_QR_POLL_MS = 900;
+/** Slow fallback interval when live approval subscription is active. */
+const INSTANT_QR_FALLBACK_POLL_MS = 8_000;
+const formatCountdown = (seconds: number) =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+function useInstantQrSecondsLeft(expiresAt: number | undefined) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (expiresAt === undefined) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [expiresAt]);
+  return expiresAt === undefined ? null : Math.max(0, Math.ceil((expiresAt - now) / 1000));
+}
 
 /**
  * One fresh approver-shows offer. The person showing this code on their own device is
@@ -77,6 +95,7 @@ export function useInstantQrOffer(
     let alive = true;
     let running = false;
     let settled = false;
+    let signedAwaitingDelivery = false;
     let offer: { pairingString: string; expiresAt: number } | null = null;
     /** The verified request this offer approves, latched once: every later tick
      * resumes the same approval with the same code, which never signs twice. */
@@ -87,17 +106,24 @@ export function useInstantQrOffer(
       unavailable: string[];
     } | null = null;
     let timer: ReturnType<typeof setInterval> | undefined;
+    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribe: (() => void) | undefined;
     const finish = (next: InstantQrPhase) => {
       settled = true;
       if (timer !== undefined) clearInterval(timer);
+      if (expiryTimer !== undefined) clearTimeout(expiryTimer);
       timer = undefined;
+      expiryTimer = undefined;
+      unsubscribe?.();
+      unsubscribe = undefined;
       setPhase(next);
     };
     const poll = async () => {
       if (!alive || running || settled || !offer) return;
       // A hidden window does not sign; it resumes as soon as it is shown again.
       if (document.visibilityState !== 'visible') return;
-      if (Date.now() >= offer.expiresAt) return finish({ kind: 'expired' });
+      if (Date.now() >= offer.expiresAt && !signedAwaitingDelivery)
+        return finish({ kind: 'expired' });
       running = true;
       try {
         if (!target) {
@@ -111,7 +137,11 @@ export function useInstantQrOffer(
             workspaceIds: preview.workspaces.map((workspace) => workspace.workspaceId),
             unavailable: preview.unavailable.map((workspace) => workspace.name),
           };
-          setPhase({ kind: 'joining', deviceName: target.deviceName, unavailable: target.unavailable });
+          setPhase({
+            kind: 'joining',
+            deviceName: target.deviceName,
+            unavailable: target.unavailable,
+          });
         }
         const result = await runtime.approveAccountPairing!({
           pairingString: offer.pairingString,
@@ -121,22 +151,44 @@ export function useInstantQrOffer(
         if (!alive) return;
         const outcomes = result.workspaces.map((workspace) => workspace.outcome);
         // Signed but not yet delivered: the next tick publishes the journaled original.
-        if (outcomes.includes('awaiting-delivery')) return;
+        if (outcomes.includes('awaiting-delivery')) {
+          signedAwaitingDelivery = true;
+          setPhase({
+            kind: 'joining',
+            deviceName: target.deviceName,
+            unavailable: target.unavailable,
+          });
+          return;
+        }
         finish(
           outcomes.includes('admitted')
-            ? { kind: 'joined', deviceName: target.deviceName, result, unavailable: target.unavailable }
+            ? {
+                kind: 'joined',
+                deviceName: target.deviceName,
+                result,
+                unavailable: target.unavailable,
+              }
             : { kind: 'failed', error: 'e2ee.accountPair.error.failed' }
         );
       } catch (failure) {
         if (!alive) return;
         // A typed refusal is final; anything else retries the same code next tick.
-        if (accountPairingErrorCode(failure)) finish({ kind: 'failed', error: failureKey(failure) });
+        if (accountPairingErrorCode(failure))
+          finish({ kind: 'failed', error: failureKey(failure) });
+        else if (target)
+          setPhase({
+            kind: 'joining',
+            deviceName: target.deviceName,
+            unavailable: target.unavailable,
+            retrying: true,
+          });
       } finally {
         running = false;
       }
     };
     const wake = () => void poll();
     document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
     setPhase({ kind: 'loading' });
     void (async () => {
       try {
@@ -144,17 +196,31 @@ export function useInstantQrOffer(
         if (!alive) return;
         offer = next;
         setPhase({ kind: 'showing', ...next });
-        timer = setInterval(() => void poll(), pollMs);
+        let subscribed = false;
+        if (next.lookupId && runtime.subscribeAccountPairingApproval) {
+          try {
+            unsubscribe = runtime.subscribeAccountPairingApproval(next.lookupId, wake);
+            subscribed = true;
+          } catch {}
+        }
+        const effectivePollMs =
+          options.pollMs ?? (subscribed ? INSTANT_QR_FALLBACK_POLL_MS : pollMs);
+        timer = setInterval(() => void poll(), effectivePollMs);
+        const msUntilExpiry = Math.max(0, next.expiresAt - Date.now());
+        expiryTimer = setTimeout(() => void poll(), msUntilExpiry);
       } catch (failure) {
         if (alive) finish({ kind: 'failed', error: failureKey(failure) });
       }
     })();
     return () => {
       alive = false;
+      unsubscribe?.();
       if (timer !== undefined) clearInterval(timer);
+      if (expiryTimer !== undefined) clearTimeout(expiryTimer);
       document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('online', wake);
     };
-  }, [runtime, enabled, generation, pollMs]);
+  }, [runtime, enabled, generation, pollMs, options.pollMs]);
   return { phase, refresh: () => setGeneration((value) => value + 1) };
 }
 
@@ -166,17 +232,32 @@ const styles = stylex.create({
     gap: space[3],
     textAlign: 'center',
   },
+  rootCompact: {
+    gap: space[2],
+  },
   qr: {
     backgroundColor: '#ffffff',
     padding: space[2],
     borderRadius: radius.medium,
+    boxShadow: '0 0 0 1px oklch(0 0 0 / 0.08)',
     lineHeight: 0,
   },
   qrFaded: { opacity: 0.15, width: 212, height: 212 },
+  qrFadedCompact: { width: 180, height: 180 },
   frame: { position: 'relative', display: 'grid', placeItems: 'center' },
   overlay: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' },
   lead: { margin: 0, fontWeight: 600 },
-  quiet: { margin: 0, color: colors.secondaryLabel, fontSize: type.footnoteSize },
+  leadCompact: {
+    fontSize: type.subheadlineSize,
+    lineHeight: type.subheadlineLeading,
+    fontWeight: 500,
+  },
+  quiet: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: type.footnoteSize,
+    lineHeight: type.footnoteLeading,
+  },
   status: {
     margin: 0,
     display: 'inline-flex',
@@ -206,6 +287,10 @@ export function E2eeInstantQrApprove(props: {
   /** Called once a device joined through this code. */
   onJoined?: (deviceName: string) => void;
   pollMs?: number;
+  /** Compact density for dialogs where space is constrained. */
+  compact?: boolean;
+  /** Omit the inline expiry line when the parent header already displays it. */
+  hideExpiry?: boolean;
 }) {
   const { t } = useTranslation();
   const { phase, refresh } = useInstantQrOffer(props.runtime, {
@@ -224,8 +309,10 @@ export function E2eeInstantQrApprove(props: {
   useEffect(() => {
     if (joinedDevice !== null) joinedRef.current();
   }, [joinedDevice]);
-  const unavailable =
-    phase.kind === 'joining' || phase.kind === 'joined' ? phase.unavailable : [];
+  const unavailable = phase.kind === 'joining' || phase.kind === 'joined' ? phase.unavailable : [];
+  const secondsLeft = useInstantQrSecondsLeft(
+    phase.kind === 'showing' ? phase.expiresAt : undefined
+  );
   if (!supportsInstantQr(props.runtime)) return null;
   const pairingString = phase.kind === 'showing' ? phase.pairingString : null;
   return (
@@ -234,22 +321,24 @@ export function E2eeInstantQrApprove(props: {
         data-testid="e2ee-instant-qr"
         data-e2ee-pairing-surface=""
         data-phase={phase.kind}
-        {...stylex.props(styles.root)}
+        {...stylex.props(styles.root, props.compact && styles.rootCompact)}
       >
-        <p {...stylex.props(styles.lead)}>{t('e2ee.instantQr.lead')}</p>
+        <p {...stylex.props(styles.lead, props.compact && styles.leadCompact)}>
+          {t('e2ee.instantQr.lead')}
+        </p>
         <div {...stylex.props(styles.frame)}>
           {pairingString ? (
             <div {...stylex.props(styles.qr)}>
               <LedgerQrCode
                 payload={qrPayload(pairingString)}
-                size={196}
+                size={props.compact ? 164 : 196}
                 label={t('e2ee.accountPair.code.label')}
               />
             </div>
           ) : (
             <div
               aria-hidden="true"
-              {...stylex.props(styles.qr, styles.qrFaded)}
+              {...stylex.props(styles.qr, styles.qrFaded, props.compact && styles.qrFadedCompact)}
             />
           )}
           {phase.kind === 'loading' && (
@@ -260,13 +349,38 @@ export function E2eeInstantQrApprove(props: {
         </div>
         <div aria-live="polite">
           {phase.kind === 'showing' && (
-            <p {...stylex.props(styles.quiet)}>{t('e2ee.instantQr.help')}</p>
+            <>
+              <p {...stylex.props(styles.quiet)}>{t('e2ee.instantQr.help')}</p>
+              {!props.hideExpiry && secondsLeft !== null && secondsLeft < 60 * 60 && (
+                <p data-testid="e2ee-instant-qr-expiry" {...stylex.props(styles.quiet)}>
+                  {secondsLeft === 0
+                    ? t('e2ee.auto.expired.short')
+                    : t('e2ee.auto.expiresIn', { time: formatCountdown(secondsLeft) })}
+                </p>
+              )}
+            </>
           )}
           {phase.kind === 'joining' && (
-            <p role="status" {...stylex.props(styles.status)}>
-              <Spinner size="small" />
-              {t('e2ee.instantQr.joining', { device: phase.deviceName })}
-            </p>
+            <>
+              <p role="status" {...stylex.props(styles.status)}>
+                <Spinner size="small" />
+                {t('e2ee.instantQr.joining', { device: phase.deviceName })}
+              </p>
+              {phase.retrying && (
+                <p
+                  role="status"
+                  data-testid="e2ee-instant-qr-retrying"
+                  {...stylex.props(styles.quiet)}
+                >
+                  {t('e2ee.instantQr.retrying')}
+                </p>
+              )}
+              <div {...stylex.props(styles.actions)}>
+                <Button variant="ghost" size="small" onClick={refresh}>
+                  {t('common.cancel')}
+                </Button>
+              </div>
+            </>
           )}
           {phase.kind === 'joined' && (
             <p role="status" {...stylex.props(styles.status, styles.success)}>
@@ -304,8 +418,7 @@ export function E2eeInstantQrApprove(props: {
   );
 }
 
-type AddDeviceRuntime = InstantQrRuntime &
-  Pick<E2eeWorkspaceRuntime, 'declineAccountPairing'>;
+type AddDeviceRuntime = InstantQrRuntime & Pick<E2eeWorkspaceRuntime, 'declineAccountPairing'>;
 
 /** The console's one way to add a personal device: a QR code a phone scans to join,
  * with manual code entry for a device that has no camera. */
@@ -318,7 +431,8 @@ export function E2eeAddDeviceCard(props: {
   const [showing, setShowing] = useState(props.defaultShowQr === true);
   const requests = useE2eeDeviceRequests();
   const [manual, setManual] = useState(false);
-  if (!supportsInstantQr(props.runtime)) return <E2eeAccountPairingApprove runtime={props.runtime} />;
+  if (!supportsInstantQr(props.runtime))
+    return <E2eeAccountPairingApprove runtime={props.runtime} />;
   return (
     <>
       <Card.Root data-testid="e2ee-add-device">
@@ -337,7 +451,13 @@ export function E2eeAddDeviceCard(props: {
             </>
           ) : (
             <div {...stylex.props(styles.actions)}>
-              <Button data-testid="e2ee-add-device-show-qr" onClick={() => setShowing(true)}>
+              <Button
+                data-testid="e2ee-add-device-show-qr"
+                onClick={() => {
+                  setManual(false);
+                  setShowing(true);
+                }}
+              >
                 <QrCode size={16} aria-hidden="true" />
                 {t('e2ee.addDevice.showQr')}
               </Button>
@@ -345,7 +465,13 @@ export function E2eeAddDeviceCard(props: {
           )}
         </div>
       </Card.Root>
-      <Collapsible.Root open={manual} onOpenChange={setManual}>
+      <Collapsible.Root
+        open={manual}
+        onOpenChange={(next) => {
+          setManual(next);
+          if (next) setShowing(false);
+        }}
+      >
         <div {...stylex.props(styles.disclosure)}>
           <Collapsible.Trigger
             render={<Button variant="ghost" size="small" data-testid="e2ee-add-device-manual" />}

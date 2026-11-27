@@ -1,0 +1,111 @@
+---
+title: "Rôles d'agent"
+description: "Enregistrez une configuration d'agent, un modèle, un niveau de raisonnement, une permission et une instruction par défaut sous forme d'un rôle nommé que vous pouvez choisir en un clic ou mentionner avec @."
+---
+
+# Rôles d'agent
+
+Un **Rôle d'agent** regroupe *la façon* dont vous utilisez un agent : la machine et la
+[configuration d'agent](/fr/docs/quickstart) sur lesquelles il s'exécute, le modèle et le niveau de raisonnement, le mode de permission et une
+instruction par défaut facultative. Attribuez-lui un emoji et un nom, et tous ces choix deviennent accessibles en un seul clic.
+
+Un rôle n'est ni un nouveau fournisseur ni un agent en cours d'exécution. Il ne stocke aucune clé API ni aucune sélection MCP :
+celles-ci restent associées à la configuration d'agent.
+
+## Créer un rôle
+
+Deux points d'entrée, un seul éditeur :
+
+- **Paramètres** → **Rôles d'agent** → le bouton `+`.
+- La ligne **Rôle** dans la configuration d'exécution de la zone de rédaction → **Nouveau rôle avec ces paramètres**. Celui-ci s'ouvre
+  prérempli avec les paramètres que vous êtes sur le point d'exécuter, ce qui constitue le moyen le plus rapide de conserver une configuration que vous venez
+  d'ajuster.
+
+Sélectionnez la machine et la configuration d'agent, puis le modèle, le niveau de raisonnement et la permission que cet agent propose,
+et éventuellement une instruction par défaut. Un nouveau rôle reste privé tant que vous n'activez pas
+**Partager avec l'espace de travail**.
+
+## Demander à un agent de créer ou de mettre à jour un rôle
+
+Dans une conversation Lody active, demandez à l'agent de créer un rôle ou de mettre à jour le nom,
+la description ou l'instruction par défaut d'un rôle qui vous appartient. L'agent utilise
+`lody_agent_role` avec l'action `create` ou `update` pour afficher une carte de vérification.
+Passez en revue les champs proposés et cliquez sur **Enregistrer** pour les appliquer, ou ignorez la carte.
+
+Les nouveaux rôles créés de cette façon sont privés, lient la machine et la configuration d'agent spécifiées,
+et utilisent la configuration d'exécution par défaut de cet agent. Les mises à jour conservent les champs que vous n'avez pas
+demandé à modifier. Le modèle, la permission, le partage et les autres réglages restent modifiables dans les Paramètres.
+Vous pouvez également soumettre les mêmes propositions via la [CLI](/fr/docs/cli#créer-et-mettre-à-jour-des-rôles-dagent),
+à l'aide de paramètres directs ou d'un fichier JSON.
+
+## Utiliser un rôle au démarrage d'une conversation
+
+La configuration d'exécution de la zone de rédaction comporte une ligne **Rôle** au-dessus d'**Agent**, car un rôle renseigne d'un seul coup toutes les
+lignes situées en dessous.
+
+- Sur ordinateur, ouvrez le bouton de configuration d'exécution en bas de la zone de rédaction et survolez **Rôle** : la liste s'affiche
+  à côté d'un panneau qui indique exactement ce que le rôle mis en surbrillance exécute.
+- Sur mobile, ouvrez le panneau de configuration d'exécution ; **Rôle** est la première ligne.
+
+Choisissez-en un et les lignes situées en dessous se mettent à jour en conséquence. Le pied de la zone de rédaction affiche alors l'emoji et le
+nom du rôle, avec ses valeurs à côté en texte plus petit. Les rôles avec lesquels vous avez effectivement démarré une discussion apparaissent également
+sous **Récemment utilisés**.
+
+**Aucun** efface le nom, pas la configuration : les valeurs définies par un rôle sont désormais les vôtres, donc quitter le
+rôle les conserve.
+
+Le pied de page ne nomme un rôle que tant que la configuration reste identique à celle de ce rôle. Modifiez le modèle manuellement
+et le nom disparaît : le pied de page n'affiche jamais un rôle qui ne correspond pas à ce qui sera exécuté.
+
+Un onglet enfant vierge à l'intérieur d'une autre conversation suit ces mêmes règles de nouvelle conversation. Sa machine
+et son répertoire de travail restent attachés à la session parente, mais sa liste de rôles inclut tous les rôles de
+cette machine, quel que soit le type d'agent. En choisir un bascule le brouillon sur la configuration d'agent du rôle et
+fige sa configuration d'exécution, son instruction et sa provenance lorsque vous envoyez le premier message.
+
+## Utiliser un rôle dans une conversation
+
+Une fois qu'une conversation a été créée, elle exécute déjà un agent sur une machine et un rôle ne peut pas la déplacer
+ailleurs. Ainsi, la ligne **Rôle** à l'intérieur d'une conversation :
+
+- propose uniquement les rôles liés à un agent du **même type**, dont cet agent comprend les valeurs de modèle, de raisonnement et de permission,
+  et
+- applique uniquement cette configuration d'exécution — l'instruction par défaut du rôle n'est pas ajoutée à une
+  conversation déjà en cours.
+
+Chaque ligne reste modifiable par la suite.
+
+## Mentionner un rôle
+
+Tapez `@` et sélectionnez un rôle sous **Rôles d'agent** pour demander à l'agent actuel de démarrer une *nouvelle* conversation
+avec celui-ci :
+
+```text
+@code-reviewer check the diff on this branch and report anything that breaks
+```
+
+La nouvelle conversation démarre sur la machine et la configuration d'agent du rôle, avec son modèle, son niveau de raisonnement,
+sa permission et son instruction par défaut déjà appliqués. Ce que le rôle contenait au moment où vous avez envoyé le
+message est figé dans cette requête : modifier ou supprimer le rôle par la suite ne peut donc pas affecter un travail
+déjà accepté.
+
+Les rôles que vous pouvez mentionner dépendent de l'endroit où vous vous trouvez : un projet local ou une discussion simple propose les rôles sur
+cette même machine, tandis qu'un projet GitHub peut aussi accéder aux rôles sur vos autres machines autorisées,
+car la nouvelle conversation clone elle-même le dépôt. Consultez [Mentions](/fr/docs/mention) pour les
+autres types de mentions.
+
+## Partage
+
+Un rôle est privé jusqu'à ce que vous le partagiez. **Partager avec l'espace de travail** le rend visible, mentionnable et
+exécutable pour chaque membre. Il s'exécute toujours sur sa propre machine, les membres doivent donc avoir accès à cette machine.
+
+Privé signifie que les autres membres ne peuvent ni le découvrir, ni le mentionner, ni l'exécuter via Lody. Il ne s'agit pas d'un chiffrement,
+ce qui explique pourquoi un rôle ne stocke aucun secret.
+
+## Quand un rôle ne peut pas s'exécuter
+
+Un rôle lie exactement une machine et une configuration d'agent, et n'en substitue jamais une autre silencieusement. Si sa
+machine passe hors ligne ou si sa configuration d'agent est supprimée, le rôle reste affiché — dans les Paramètres et dans le
+sélecteur — marqué de la raison exacte, et ne peut pas être sélectionné tant que vous ne l'avez pas corrigé.
+
+La modification d'un rôle n'affecte que son utilisation ultérieure. Les conversations déjà démarrées à partir de celui-ci continuent de fonctionner telles
+qu'elles étaient.

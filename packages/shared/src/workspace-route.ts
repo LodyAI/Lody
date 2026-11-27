@@ -1,7 +1,13 @@
 import { isReservedWorkspaceSlug } from './workspace-slugs';
 
 const WORKSPACE_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const WORKSPACE_ROUTE_CHILD_SEGMENTS = new Set(['archive', 'chat', 'local', 'sessions', 'settings']);
+const WORKSPACE_ROUTE_CHILD_SEGMENTS = new Set([
+  'archive',
+  'chat',
+  'local',
+  'sessions',
+  'settings',
+]);
 
 function getRouteUrl(routePath: string): URL | null {
   try {

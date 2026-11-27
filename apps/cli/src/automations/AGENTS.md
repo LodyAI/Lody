@@ -34,6 +34,12 @@
   auth for observations stay with resource owners.
 - Capture source evidence on the Host, freeze it with the receipt, and recheck at
   admission. Active continuations retain source demand; results cannot forge provenance.
+- `_lodyAutomation` identifies only the input an Automation queued. Delegated-result
+  continuations of that Turn are ordinary system input, so Inbox storage and launch
+  strip the origin: re-running its admission refuses every relaunch. A refused Automation input
+  in history stays dispatchable under the dispatch watcher's bounded retry owner, at
+  most 30 seconds apart because Automation conditions recover without a Session
+  document change, and is never redispatched on every Session check.
 - Session actions use normal admission/queue/Stop/permission owners. Idle maintenance
   expires on new input. Settled groups include unfinished automation and native work.
   Stop blocks continuation admission, not authorized condition reads; only explicit
@@ -56,7 +62,9 @@
   earliest durable deadline, capped at 15 seconds for staged-outcome reconciliation
   and auto delivery — no polling probe and no work-remaining rescan. A durable
   denial — revoked grant or authorization, superseded or deleted work — cancels the
-  queued input end to end; only transient denials re-verify. Guard predicates share
+  queued input end to end; only transient denials re-verify. An input already promoted
+  to history is cancelled there by the Session execution owner while no runtime has
+  started it; a running Turn follows Stop. Guard predicates share
   one `guard:` reason namespace at engine check and resource admission, so the same
   durable classifier converges both; cancellation preserves that reason. Capacity
   wake scans resolve candidates by the observed binding/model through normalized
@@ -65,8 +73,16 @@
 - Auto delivery requests only the existing quick-action text and facts the agent
   cannot discover, admitted under Session group settlement and a current-head guard.
   The daemon never mutates GitHub. Keep its per-kind repair limit and one merge
-  request per head; exhausted limits stop with a reason, never retry.
-  [Spec](../../../../specs/session-auto-delivery.md).
+  request per head; exhausted limits stop with a reason, never retry. Non-busy
+  receipt blocks surface as `stalled` (`request_blocked` + `blockReason`) without
+  ending the enablement (with a 60-second grace window for transient/unconfirmed
+  blocks), while agents without Core `sessionActivity` v1 follow the shared
+  `lateActivity` presence contract rather than stalling as unobserved. Idle wakes
+  target only `state = 'blocked'` session-busy receipts so quota and `not_before`
+  timers are never perturbed. Keep `DeliveryCoordinator.statusLock` separate from
+  the engine `gate`, and release `statusLock` before cancelling receipts to avoid
+  lock-order deadlocks. [Spec](../../../../specs/session-auto-delivery.md);
+  [Decision](../../../../.agents/notes/implemented/bug-fix/2026-11-25-automation-native-activity-and-blocked-delivery.md).
 - PR poller: active CI waits and undelivered continuations retain current-PR demand,
   including terminal PRs, under existing quota/fairness gates. Actions denial cools
   only Actions reads. Source data belongs in this ledger, not poller scheduling state.

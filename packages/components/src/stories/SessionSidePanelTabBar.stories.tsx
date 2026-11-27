@@ -168,10 +168,7 @@ function SidePanelTabBarStory({ pending = false }: { pending?: boolean }) {
 
   return (
     <div {...stylex.props(storyLayout.frame)}>
-      <div
-        data-testid="side-panel-story-frame"
-        {...stylex.props(storyLayoutStylesStyles.stack)}
-      >
+      <div data-testid="side-panel-story-frame" {...stylex.props(storyLayoutStylesStyles.stack)}>
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}

@@ -1,0 +1,67 @@
+---
+title: "20260413"
+version: 0.42.0
+date: 2026-04-13
+description: "Se presentaron el nuevo motor de sincronización, sesiones con múltiples pestañas, comentarios en diffs, temas de VS Code, búsqueda en conversaciones y notas de migración."
+---
+
+### Cambios incompatibles y migración
+
+- Después de actualizar, es posible que debas volver a iniciar sesión.
+- Si utilizas GitHub Worktree, la máquina que ejecuta el agente debe estar configurada con tu identidad de GitHub (mediante `gh auth`); de lo contrario, usaremos de forma predeterminada la identidad `lody` para crear el Pull Request.
+- Lody ha cambiado a un nuevo motor de sincronización y estructura de datos. Los espacios de trabajo anteriores dejarán de estar disponibles, por lo que deberás crear un nuevo espacio de trabajo para usar Lody.
+- Lody ya no solicita permisos de identidad personal de GitHub a los usuarios. Como resultado, ya no ofrecemos la posibilidad de autorizar un mismo repositorio de GitHub una sola vez para compartirlo entre varios espacios de trabajo. Ahora un repositorio solo se asocia con un único espacio de trabajo.
+
+### ✨ Sesiones con múltiples pestañas
+
+Ahora puedes abrir múltiples pestañas de conversación y visores de archivos dentro de una misma sesión. Al igual que la barra de pestañas de VSCode, puedes chatear con el agente a la izquierda mientras ves archivos y diffs a la derecha sin interrumpir ninguno de los lados. Las pestañas secundarias heredan el directorio de trabajo de la pestaña principal y admiten reordenamiento mediante arrastrar y soltar, así como cambio de nombre.
+
+<img src="/_docs-assets/20260413-multi-tab.png" alt="" />
+
+### 💬 Comentarios en diffs a nivel de línea
+
+Ahora puedes añadir comentarios directamente en el visor de diffs. Admite Markdown, respuestas en hilo, marcado de hilos como resueltos, sincronización con GitHub y envío en un clic a la ventana de conversación.
+
+<img src="/_docs-assets/20260413-diff-comment.png" alt="" />
+
+### 🎨 Mejoras de interfaz y compatibilidad con temas de VSCode
+
+- Se añadió compatibilidad con temas de VSCode, con varios temas de código abierto excelentes integrados de serie (Vitesse, Gruvbox Material, Tokyo Night, One Dark Pro y más). ¡Muchas gracias a los autores de código abierto por su increíble trabajo!
+  <img src="/_docs-assets/20260413-theme.png" alt="" />
+
+- Se mejoraron el renderizado de Markdown y la experiencia de carga de diffs
+- Búsqueda dentro de la conversación
+  <img src="/_docs-assets/20260413-session-find.png" alt="" />
+
+### 🖥️ Modo daemon
+
+La CLI ahora admite el modo daemon, manteniendo Lody en ejecución en segundo plano con reinicio automático:
+
+```bash
+lody daemon start     # Iniciar el daemon en segundo plano
+lody daemon status    # Comprobar el estado
+lody daemon logs      # Ver los registros
+lody daemon stop      # Detener el daemon
+```
+
+### 🔗 Mejoras en la integración con GitHub
+
+- El estado de las comprobaciones de CI de los PR se sincroniza en tiempo real con la interfaz de la sesión, de modo que no necesitas cambiar a GitHub para ver los resultados de compilación
+- Las sesiones vinculadas a un PR admiten commit y push automáticos
+
+### 🌐 Sincronización y estabilidad
+
+- Se reemplazó el motor de sincronización para mejorar la fiabilidad
+- Límites de recursos de la CLI adaptados a cgroups para evitar bloqueos en entornos de contenedores Linux
+- El tiempo de espera por inactividad de ACP se redujo a 30 minutos para ahorrar recursos
+- Liberación automática de sesiones ante presión de memoria
+
+### 🛠️ Correcciones y mejoras
+
+- Se añadió el inicio de sesión de terceros con Google, Apple y Discord.
+- Se corrigieron problemas de carga y sincronización de diffs
+- Se corrigió el momento de renovación del token de autenticación de GitHub
+- Se corrigió el fallo de arranque en Safari < 16.4
+- Se corrigieron varios problemas de diseño de la interfaz móvil
+- Se redujeron el ruido en los registros y el uso de disco de la CLI
+- Las sesiones usan el prefijo del prompt como título inicial en lugar de «Sin título»

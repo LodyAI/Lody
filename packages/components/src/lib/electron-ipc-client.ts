@@ -1,13 +1,20 @@
-import type {
-  ElectronPublicBrowserBounds,
-  ElectronPublicBrowserState,
-  ElectronPublicBrowserInteraction,
-  IpcPushMap,
-  IpcSendMap,
-  SendLocalSessionControlResult,
+import { z } from 'zod';
+import {
+  ElectronLoginStateSchema,
+  type ElectronPublicBrowserBounds,
+  type ElectronPublicBrowserState,
+  type ElectronPublicBrowserInteraction,
+  type IpcPushMap,
+  type IpcSendMap,
+  type SendLocalSessionControlResult,
 } from '@lody/shared/electron-ipc';
+import {
+  decodeExternalObject,
+  formatBoundaryDecodeDiagnostic,
+} from '@lody/shared/boundary-decode';
 import type { LocalSessionControlRequest, LocalSessionControlResponse } from '@lody/shared';
 import { LocalSessionControlResponseSchema } from '@lody/shared/message-schemas';
+import { recordClientLog } from './client-log';
 // This deliberately crosses from the shared renderer package into the Electron app at
 // type level only. The import is erased from every browser bundle; see both packages'
 // AGENTS.md files before changing it into a runtime dependency or duplicating the API.
@@ -52,12 +59,63 @@ export function getIpcServices(): IpcServices | null {
   return createLodyIpcProxy<IpcServices>(readIpcBridge());
 }
 
+const ElectronWindowTargetSchema = z
+  .object({
+    workspace: z.string().min(1),
+    sessionId: z.string().min(1).optional(),
+  })
+  .passthrough();
+
+const PreparedWindowTargetSchema = ElectronWindowTargetSchema.extend({
+  preparationId: z.string().min(1),
+});
+
+const IPC_PUSH_SCHEMAS: Partial<{ [K in keyof IpcPushMap]: z.ZodType<IpcPushMap[K]> }> = {
+  'auth.loginState': ElectronLoginStateSchema,
+  'app.deepLink': z.string(),
+  'app.menuAction': z.string(),
+  'app.fullscreen': z.boolean(),
+  'loro.status': z.boolean(),
+  'app.nativeTheme': z.enum(['light', 'dark']),
+  'app.windowTarget': ElectronWindowTargetSchema,
+  'app.prepareWindowTarget': PreparedWindowTargetSchema,
+  'app.activatePreparedWindow': PreparedWindowTargetSchema,
+  'e2ee.accessLost': z.object({ workspaceId: z.string().min(1) }).passthrough(),
+};
+
+function decodeIpcPushPayload<K extends keyof IpcPushMap>(
+  channel: K,
+  payload: unknown
+): { ok: true; data: IpcPushMap[K] } | { ok: false } {
+  const schema = IPC_PUSH_SCHEMAS[channel] as z.ZodType<IpcPushMap[K]> | undefined;
+  if (!schema) {
+    return { ok: true, data: payload as IpcPushMap[K] };
+  }
+  const decoded = decodeExternalObject(`electron.ipc.push.${channel}`, schema, payload, {
+    onDiagnostic: (diagnostic) => {
+      const summary = formatBoundaryDecodeDiagnostic(diagnostic);
+      console.warn(`[IPC] ${summary}`);
+      recordClientLog('warn', 'boundary.decode', summary, {
+        boundary: diagnostic.boundary,
+        kind: diagnostic.kind,
+        issueCount: diagnostic.issueCount,
+      });
+    },
+  });
+  return decoded.ok ? { ok: true, data: decoded.data } : { ok: false };
+}
+
 export function onIpcEvent<K extends keyof IpcPushMap>(
   channel: K,
   handler: (payload: IpcPushMap[K]) => void
 ): () => void {
   if (typeof window === 'undefined' || !window.ipc) return () => {};
-  return window.ipc.on(channel, (payload) => handler(payload as IpcPushMap[K]));
+  return window.ipc.on(channel, (payload) => {
+    const decoded = decodeIpcPushPayload(channel, payload);
+    if (decoded.ok) {
+      handler(decoded.data);
+    }
+  });
 }
 
 export function sendIpc<K extends keyof IpcSendMap>(channel: K, payload: IpcSendMap[K]): void {

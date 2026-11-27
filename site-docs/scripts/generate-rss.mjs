@@ -26,6 +26,60 @@ const FEEDS = [
     title: 'Lody 博客',
     description: '来自 Lody 团队的产品发布、工程实践与故事。',
   },
+  {
+    locale: 'zh-hant',
+    file: 'rss-zh-hant.xml',
+    dir: path.join(packageRoot, 'content', 'blog', 'zh-hant'),
+    base: '/zh-hant/blog',
+    language: 'zh-Hant',
+    title: 'Lody 部落格',
+    description: '來自 Lody 團隊的產品發布、工程實踐與故事。',
+  },
+  {
+    locale: 'ja',
+    file: 'rss-ja.xml',
+    dir: path.join(packageRoot, 'content', 'blog', 'ja'),
+    base: '/ja/blog',
+    language: 'ja',
+    title: 'Lody ブログ',
+    description: 'Lody チームからの製品発表、エンジニアリングノート、ストーリー。',
+  },
+  {
+    locale: 'ko',
+    file: 'rss-ko.xml',
+    dir: path.join(packageRoot, 'content', 'blog', 'ko'),
+    base: '/ko/blog',
+    language: 'ko',
+    title: 'Lody 블로그',
+    description: 'Lody 팀의 제품 소식, 엔지니어링 노트 및 이야기.',
+  },
+  {
+    locale: 'es',
+    file: 'rss-es.xml',
+    dir: path.join(packageRoot, 'content', 'blog', 'es'),
+    base: '/es/blog',
+    language: 'es',
+    title: 'Blog de Lody',
+    description: 'Anuncios de producto, notas de ingeniería e historias del equipo de Lody.',
+  },
+  {
+    locale: 'fr',
+    file: 'rss-fr.xml',
+    dir: path.join(packageRoot, 'content', 'blog', 'fr'),
+    base: '/fr/blog',
+    language: 'fr',
+    title: 'Blog Lody',
+    description: 'Annonces produit, notes d’ingénierie et récits de l’équipe Lody.',
+  },
+  {
+    locale: 'ru',
+    file: 'rss-ru.xml',
+    dir: path.join(packageRoot, 'content', 'blog', 'ru'),
+    base: '/ru/blog',
+    language: 'ru',
+    title: 'Блог Lody',
+    description: 'Анонсы продуктов, инженерные заметки и истории команды Lody.',
+  },
 ];
 
 function escapeXml(value) {
@@ -119,5 +173,5 @@ ${posts.map((post) => renderItem(feed, post)).join('\n')}
 }
 
 process.stdout.write(
-  `Generated ${FEEDS.map((feed) => `public/${feed.file}`).join(' and ')} from ${total} blog posts\n`
+  `Generated ${FEEDS.map((feed) => `public/${feed.file}`).join(', ')} from ${total} blog posts\n`
 );

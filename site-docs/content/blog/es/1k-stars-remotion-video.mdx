@@ -1,0 +1,96 @@
+---
+title: "Mil estrellas, renderizadas en un video: cómo hicimos el corto de celebración 1K de Lody"
+date: 2026-09-09
+author: Lody Team
+authorLink: https://lody.ai
+description: "Lody acaba de superar las 1000 estrellas en GitHub. En lugar de abrir un editor de video, escribimos el video de celebración en código con Remotion."
+image: /_docs-assets/1k-video/cover.png
+tag: "Ingeniería"
+sidebar: false
+aside: false
+---
+
+Lody alcanzó recientemente las 1000 estrellas en GitHub. ¡Gracias a todos los que hicieron clic en esa estrella!
+
+Un hito así merece un buen video de celebración, y este —cada fotograma y cada sonido— fue renderizado a partir de código. Por eso queremos repasar cómo se hizo y compartir las ideas detrás del proyecto.
+
+## Por qué hacer un video con código
+
+Usamos [Remotion](https://remotion.dev), porque cada fotograma del video es un componente de React renderizado en un instante de tiempo. Esto significa que el video obtiene todas las ventajas del código: control de versiones, parametrización, reutilización de componentes y control exacto fotograma a fotograma a 60fps.
+
+¿El movimiento de cámara no convence? Cambias un número, vuelves a renderizar y en unas decenas de segundos tienes un nuevo corte —en lugar de estar media hora arrastrando elementos por una línea de tiempo. También es compatible con la IA: una IA puede generar componentes de React directamente o emitir datos JSON que React renderiza.
+
+La estructura de la pieza es sencilla:
+
+<img src="/_docs-assets/1k-video/timeline.png" alt="Línea de tiempo de la estructura del video" />
+
+Los primeros 7 segundos muestran un movimiento de cámara en 3D sobre la página del repositorio en GitHub: la cámara se acerca, un cursor hace clic en Star y el contador sube hasta 1000. Los últimos 6 segundos aterrizan en el mundo de acuarela propio de Lody.
+
+Estas son las historias de ingeniería que nos parecieron más interesantes.
+
+## 1. Redibujar GitHub en lugar de usar capturas de pantalla
+
+Desde el principio tuvimos claro que no debíamos usar capturas de pantalla reales.
+
+Cuando la cámara se acerca, un mapa de bits tiene una resolución limitada: pídele a una IA que tome una captura de la página y te toparás con el caso extremo en que todo se emborrona en cuanto haces zoom. Además, nada en una captura de pantalla puede moverse.
+
+Así que redibujamos toda la página en el DOM —la barra de pestañas, los botones, la lista de archivos, la barra lateral About— con íconos tomados de los octicons oficiales de GitHub.
+
+Redibujar tiene una ventaja adicional: los elementos pueden actuar. En la apertura, cada sección de la página cae desde arriba y se "acopla" en su sitio con un ligero rebote, como si la interfaz se estuviera ensamblando frente a ti.
+
+El núcleo de todo es una función de menos de diez líneas:
+
+```tsx
+const dock = (delay: number): React.CSSProperties => {
+  const s = spring({frame: frame - delay, fps, config: {damping: 14, mass: 0.9, stiffness: 160}});
+  return {
+    opacity: interpolate(s, [0, 0.45], [0, 1], {extrapolateRight: 'clamp'}),
+    transform: `translateY(${interpolate(s, [0, 1], [-80, 0])}px)`,
+  };
+};
+```
+
+Aplica `...dock(n)` en cada sección, escalona `n` unos cuantos fotogramas de arriba abajo y la página respira.
+
+Respecto al cursor que hace clic en el botón Star: el botón está inclinado en el espacio 3D, así que pasamos las coordenadas de la página por la misma matriz de rotación y proyección para recuperar las coordenadas de pantalla; así, el cursor siempre aterriza exactamente en el centro del botón.
+
+## 2. La sensación de cámara
+
+La diferencia entre algo "grabado con una cámara" y "un PowerPoint en movimiento" radica sobre todo en la profundidad de campo y en la continuidad del movimiento.
+
+La forma más simple de abordar la profundidad de campo es aplicar un gran desenfoque con una ventana nítida, pero eso deja un borde duro. Así que apilamos tres capas: una capa de fotograma completo muy desenfocada abajo, una capa ligeramente desenfocada que cubre una amplia región difuminada en el medio y un núcleo nítido arriba que solo vive cerca del plano focal. Las tres usan máscaras amplias y suaves, de modo que la intensidad del desenfoque disminuye de forma gradual con la distancia de desenfoque:
+
+<img src="/_docs-assets/1k-video/dof.png" alt="Tres capas de profundidad de campo" />
+
+> Estrictamente hablando, la profundidad de campo graduada es un efecto óptico: debería ser un kernel de convolución, no un simple degradado lineal. Pero dada la resolución y la tasa de bits del video en redes sociales, un degradado simple es más que suficiente.
+
+En cuanto a la continuidad: cuando termina el movimiento de cámara, la página tiene un sutil vaivén de "respiración". La primera versión iniciaba ese vaivén en el fotograma exacto en que se detenía la cámara, pero la función seno no estaba en cero en ese instante, así que el plano daba un pequeño "salto" apenas perceptible, como si faltara un fotograma.
+
+La solución consiste en iniciar el seno en un cruce por cero y multiplicarlo por una envolvente de entrada y salida progresivas (*fade-in*/*fade-out*):
+
+```tsx
+const breathe =
+  Math.sin((frame - 92) / 55) * 0.9 *
+  interpolate(frame, [92, 122, 266, 296], [0, 1, 1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+```
+
+El vaivén nace de la quietud y se apaga suavemente antes del alejamiento de cámara.
+
+## 3. El sonido también se renderiza
+
+La banda sonora no es una pista genérica cualquiera puesta de fondo. Usamos una pieza libre de regalías como base; el tema que elegimos está en la mayor, así que todos los efectos de sonido se sintetizaron en código dentro de la tonalidad de la mayor: el *riser* que acompaña el conteo sube por la escala pentatónica, el momento de las 1000 estrellas es una campana en la mayor y el brillo del confeti son unos cuantos parciales de arpa en la misma tonalidad.
+
+<img src="/_docs-assets/1k-video/audio.png" alt="Sistema de audio" />
+
+
+## Para cerrar
+
+¡Gracias de nuevo por las mil estrellas, y a todos los que reportaron un *issue*, abrieron un PR o recomendaron Lody a un amigo!
+
+Si te gustaría probar a hacer videos con código, ¡Remotion es un excelente punto de partida!
+
+- GitHub: [github.com/LodyAI/lody](https://github.com/LodyAI/lody)
+- Sitio web: [lody.ai](/es/)

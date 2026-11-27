@@ -1,0 +1,113 @@
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index cc2445c..0eced61 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -21,6 +21,7 @@ export interface SparkleBridge {
+     checkForUpdates(): void;
+     installUpdateNow(): void;
+     installUpdateOnQuit(): void;
++    getFeedUrl?(): string | null;
+     setAutomaticChecks(enabled: boolean): void;
+     setEventHandler(handler: (event: SparkleBridgeEvent) => void): void;
+ }
+diff --git a/native/src/sparkle_bridge.mm b/native/src/sparkle_bridge.mm
+index 650c6b8..8a60777 100644
+--- a/native/src/sparkle_bridge.mm
++++ b/native/src/sparkle_bridge.mm
+@@ -41,6 +41,7 @@ static NSString *ISO8601String(NSDate *date) {
+ }
+ 
+ @interface SparkleBridgeLogDelegate : NSObject <SPUUpdaterDelegate>
++@property(nonatomic, assign) BOOL recheckAfterCycle;
+ @end
+ 
+ @implementation SparkleBridgeLogDelegate
+@@ -53,6 +54,14 @@ static NSString *ISO8601String(NSDate *date) {
+   } else {
+     NSLog(@"[sparkle-bridge] update cycle finished with no error (no update found or update path taken)");
+   }
++  if (self.recheckAfterCycle) {
++    self.recheckAfterCycle = NO;
++    dispatch_async(dispatch_get_main_queue(), ^{
++      if (!updater.sessionInProgress) {
++        [updater checkForUpdates];
++      }
++    });
++  }
+ }
+ 
+ - (void)updater:(SPUUpdater *)updater didAbortWithError:(NSError *)error {
+@@ -346,9 +355,26 @@ Napi::Value CheckForUpdates(const Napi::CallbackInfo &info) {
+     @try {
+       NSLog(@"[sparkle-bridge] checkForUpdates: canCheckForUpdates=%d sessionInProgress=%d",
+             g_updater.canCheckForUpdates, g_updater.sessionInProgress);
++      if (g_userDriver != nil && g_userDriver.readyToInstallReply != nil) {
++        void (^reply)(SPUUserUpdateChoice) = g_userDriver.readyToInstallReply;
++        g_userDriver.readyToInstallReply = nil;
++        g_userDriver.installWhenReady = NO;
++        g_userDriver.installOnQuitWhenReady = NO;
++        if (g_logDelegate != nil) {
++          g_logDelegate.recheckAfterCycle = YES;
++        }
++        // SPUUserUpdateChoiceSkip at showReadyToInstallAndRelaunch cancels the
++        // staged installer without marking the version as skipped, ending the
++        // parked session so didFinishUpdateCycleForUpdateCheck can re-check.
++        reply(SPUUserUpdateChoiceSkip);
++        return;
++      }
+       [g_updater checkForUpdates];
+     } @catch (NSException *exception) {
+       NSLog(@"[sparkle-bridge] checkForUpdates threw: %@", exception.reason);
++      if (g_logDelegate != nil) {
++        g_logDelegate.recheckAfterCycle = NO;
++      }
+     }
+   });
+   return env.Undefined();
+@@ -363,6 +389,9 @@ Napi::Value InstallUpdateNow(const Napi::CallbackInfo &info) {
+       if (reply != nil) {
+         g_userDriver.readyToInstallReply = nil;
+         g_userDriver.installWhenReady = NO;
++        if (g_logDelegate != nil) {
++          g_logDelegate.recheckAfterCycle = NO;
++        }
+         reply(SPUUserUpdateChoiceInstall);
+         return;
+       }
+@@ -398,6 +427,28 @@ Napi::Value InstallUpdateOnQuit(const Napi::CallbackInfo &info) {
+   return env.Undefined();
+ }
+ 
++Napi::Value GetFeedUrl(const Napi::CallbackInfo &info) {
++  Napi::Env env = info.Env();
++  __block NSString *feedUrl = nil;
++  void (^work)(void) = ^{
++    if (g_updater != nil && g_updater.feedURL != nil) {
++      feedUrl = g_updater.feedURL.absoluteString;
++    } else {
++      NSString *plistFeedUrl = [NSBundle mainBundle].infoDictionary[@"SUFeedURL"];
++      if ([plistFeedUrl isKindOfClass:[NSString class]] && plistFeedUrl.length > 0) {
++        feedUrl = plistFeedUrl;
++      }
++    }
++  };
++  if ([NSThread isMainThread]) {
++    work();
++  } else {
++    dispatch_sync(dispatch_get_main_queue(), work);
++  }
++  if (feedUrl == nil) return env.Null();
++  return Napi::String::New(env, feedUrl.UTF8String);
++}
++
+ Napi::Value SetAutomaticChecks(const Napi::CallbackInfo &info) {
+   Napi::Env env = info.Env();
+ 
+@@ -443,6 +494,7 @@ Napi::Object InitModule(Napi::Env env, Napi::Object exports) {
+   exports.Set(Napi::String::New(env, "checkForUpdates"), Napi::Function::New(env, CheckForUpdates));
+   exports.Set(Napi::String::New(env, "installUpdateNow"), Napi::Function::New(env, InstallUpdateNow));
+   exports.Set(Napi::String::New(env, "installUpdateOnQuit"), Napi::Function::New(env, InstallUpdateOnQuit));
++  exports.Set(Napi::String::New(env, "getFeedUrl"), Napi::Function::New(env, GetFeedUrl));
+   exports.Set(Napi::String::New(env, "setAutomaticChecks"), Napi::Function::New(env, SetAutomaticChecks));
+   exports.Set(Napi::String::New(env, "setEventHandler"), Napi::Function::New(env, SetEventHandler));
+   return exports;

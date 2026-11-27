@@ -206,6 +206,18 @@ export const PinnedSidebarHidden: StoryObj<typeof DayStream> = {
 };
 
 const themeStyles = stylex.create({
-  row: { display: 'flex', height: '100dvh', width: '100%', overflow: 'hidden', backgroundColor: uiColors.secondaryBackground, color: uiColors.label },
-  hint: { padding: 'calc(var(--spacing) * 6)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  row: {
+    display: 'flex',
+    height: '100dvh',
+    width: '100%',
+    overflow: 'hidden',
+    backgroundColor: uiColors.secondaryBackground,
+    color: uiColors.label,
+  },
+  hint: {
+    padding: 'calc(var(--spacing) * 6)',
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
 });

@@ -3286,20 +3286,28 @@ export class E2eeIpc extends ProductWindowIpcService {
   private async recoveryTargets(
     accountId: string,
     client: Awaited<ReturnType<typeof desktopE2eeCloudClient>>['client'],
-    workspaces: readonly { readonly id: string; readonly name: string }[]
+    workspaces: readonly { readonly id: string; readonly name: string }[],
+    skipAccessLoss = false
   ) {
     const targets: RecoveryWorkspaceTarget[] = []
     for (const { id, name } of workspaces) {
       if (!(await desktopE2eeHasWorkspaceIdentity(accountId, id))) continue
-      const { host, credential } = await withDesktopE2eeAccount(
-        (owner) =>
-          Effect.map(owner.bootstrap.deviceCredential(id), (credential) => ({
-            host: owner.host,
-            credential
-          })),
-        id,
-        false
-      )
+      let opened: { host: Owner['host']; credential: string }
+      try {
+        opened = await withDesktopE2eeAccount(
+          (owner) =>
+            Effect.map(owner.bootstrap.deviceCredential(id), (credential) => ({
+              host: owner.host,
+              credential
+            })),
+          id,
+          false
+        )
+      } catch (error) {
+        if (skipAccessLoss && accessLoss(error) !== null) continue
+        throw error
+      }
+      const { host, credential } = opened
       targets.push({
         id,
         name,
@@ -3336,7 +3344,7 @@ export class E2eeIpc extends ProductWindowIpcService {
         ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
           Effect.flatMap(accountWorkspaces, (rows) =>
             Effect.flatMap(
-              Effect.promise(() => this.recoveryTargets(accountId, client, rows)),
+              Effect.promise(() => this.recoveryTargets(accountId, client, rows, true)),
               (workspaces) =>
                 continueAccountVaultReplacement({
                   store,
@@ -3664,7 +3672,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       ({ accountId, client, store, journalPath, replacement, accountWorkspaces }) =>
         Effect.flatMap(accountWorkspaces, (rows) =>
           Effect.flatMap(
-            Effect.promise(() => this.recoveryTargets(accountId, client, rows)),
+            Effect.promise(() => this.recoveryTargets(accountId, client, rows, true)),
             (workspaces) =>
               abandonAccountVaultReplacement({ store, journalPath, replacement, workspaces })
           )

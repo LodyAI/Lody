@@ -1,5 +1,11 @@
+import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-failure';
+import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
 import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
-import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import {
+  corner as uiCorner,
+  radius as uiRadius,
+  text as uiText,
+} from '@lody/ui/tokens/scales.stylex';
 import { themeSpace as appSpace } from '../../style/theme-scale.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -13,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import { Camera, ChevronDown, ChevronLeft, CircleCheck, QrCode, Smartphone } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
+import { Tabs } from '@lody/ui/tabs';
 import { accountPairingErrorCode } from '@lody/platform';
 import type {
   E2eeAutomaticPairingReview,
@@ -43,6 +50,7 @@ import {
 } from './e2ee-device-requests';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
+import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
 /** Seconds left until `expiresAt`, ticking once a second; null without a deadline. */
 function useSecondsLeft(expiresAt: number | undefined) {
@@ -60,6 +68,12 @@ const clock = (seconds: number) =>
 const POLL_MS = 2000;
 /** The new device's poll for its QR join; the approving device signs within a second. */
 const QR_JOIN_POLL_MS = 800;
+/** Slower fallback for QR join when live claim subscription is active (covers mailbox delivery). */
+const QR_JOIN_FALLBACK_POLL_MS = 4_000;
+/** After 5s of syncing, guide the person to keep Lody open on the approving device. */
+const SYNC_SLOW_HINT_MS = 5_000;
+/** After 15s of syncing without key failure, surface explicit retry and cancel exits. */
+const SYNC_TIMEOUT_MS = 15_000;
 /** A scanned join that verified approvals settled without this workspace: it was left
  * out, and every workspace that was approved finished installing, so ending the
  * request (and its secret) can no longer cost another workspace its join. */
@@ -106,23 +120,22 @@ function carriedCode(cause: unknown, depth = 0): string | null {
 /** Only an outage retries quietly; a refusal says what went wrong instead of blaming the
  * connection. */
 export function automaticPairingErrorKey(cause: unknown): string {
-  const known = accountPairingErrorCode(cause);
+  const known =
+    accountPairingErrorCode(cause) ?? accountPairingErrorCode({ code: requestFailureCode(cause) });
   if (known) return `e2ee.accountPair.error.${known}`;
   const code = carriedCode(cause)?.replace(/^e2ee_/, '') ?? null;
-  if (code === null || /^(?:network|closed|offline|timeout|unavailable)$/.test(code))
-    return 'e2ee.auto.connectionRetry';
-  if (/pairing-unavailable|account_pairing_disabled/.test(code))
+  if (/^(?:pairing-unavailable|account_pairing_disabled)$/.test(code ?? ''))
     return 'e2ee.accountPair.error.pairing-unavailable';
+  const custody = custodyFailureMessage(classifyE2eeControlFailure(cause).kind);
+  if (custody) return custody;
+  if (code === 'closed' || isRequestUnavailable(cause)) return 'e2ee.auto.connectionRetry';
   return 'e2ee.accountPair.error.failed';
 }
 const ComparisonCode = ({ code, hint }: { code: string; hint: string }) => {
   const { t } = useTranslation();
   return (
     <div {...stylex.props(themeStyles.hint)}>
-      <p
-        {...stylex.props(pairingStyles.code)}
-        aria-live="polite"
-      >
+      <p {...stylex.props(pairingStyles.code)} aria-live="polite">
         {`${code.slice(0, 3)} ${code.slice(3)}`}
       </p>
       <p {...stylex.props(themeStyles.hint2)}>{t(hint)}</p>
@@ -221,6 +234,24 @@ export function E2eeAutomaticPairingPage({
   const lost = state?.phase === 'revoked' || state?.phase === 'removed';
   const receiving =
     !lost && (state?.phase === 'syncing' || state?.phase === 'joined' || qr === 'joined');
+  const [syncSlowHint, setSyncSlowHint] = useState(false);
+  const [syncTimedOut, setSyncTimedOut] = useState(false);
+  const [syncAttempt, setSyncAttempt] = useState(0);
+  useEffect(() => {
+    if (!receiving || keyFailure) {
+      setSyncSlowHint(false);
+      setSyncTimedOut(false);
+      return undefined;
+    }
+    setSyncSlowHint(false);
+    setSyncTimedOut(false);
+    const slowTimer = setTimeout(() => setSyncSlowHint(true), SYNC_SLOW_HINT_MS);
+    const timer = setTimeout(() => setSyncTimedOut(true), SYNC_TIMEOUT_MS);
+    return () => {
+      clearTimeout(slowTimer);
+      clearTimeout(timer);
+    };
+  }, [receiving, keyFailure, syncAttempt]);
   const linkGuardRef = useRef({ busy, canStart, lostAllOpen, receiving });
   linkGuardRef.current = { busy, canStart, lostAllOpen, receiving };
   useEffect(() => {
@@ -343,10 +374,13 @@ export function E2eeAutomaticPairingPage({
     }
     void tick();
     const timer = setInterval(() => void tick(), POLL_MS);
+    const onOnline = () => void tick();
+    window.addEventListener('online', onOnline);
     return () => {
       alive = false;
       unsubscribe?.();
       clearInterval(timer);
+      window.removeEventListener('online', onOnline);
     };
   }, [runtime, workspaceId, generation, canStart]);
   const ownerRef = useRef({ runtime, workspaceId });
@@ -449,9 +483,14 @@ export function E2eeAutomaticPairingPage({
   useEffect(() => {
     if (qr !== 'joining' || !runtime.accountPairingRequest) return undefined;
     let alive = true,
-      running = false;
-    const timer = setInterval(() => {
-      if (running) return;
+      running = false,
+      queued = false;
+    const poll = () => {
+      if (!alive || qrSubmitted.current === null) return;
+      if (running) {
+        queued = true;
+        return;
+      }
       running = true;
       void runtime.accountPairingRequest!()
         .then((next) => {
@@ -470,11 +509,29 @@ export function E2eeAutomaticPairingPage({
         })
         .finally(() => {
           running = false;
+          if (queued && alive && qrSubmitted.current !== null) {
+            queued = false;
+            poll();
+          }
         });
-    }, QR_JOIN_POLL_MS);
+    };
+    let unsubscribe: (() => void) | undefined;
+    const lookupId = qrSubmitted.current;
+    if (lookupId && runtime.subscribeAccountPairingRequest) {
+      try {
+        unsubscribe = runtime.subscribeAccountPairingRequest(lookupId, poll);
+      } catch {
+        /* Live subscription is optional; interval polling verifies the same request. */
+      }
+    }
+    poll();
+    const timer = setInterval(poll, unsubscribe ? QR_JOIN_FALLBACK_POLL_MS : QR_JOIN_POLL_MS);
+    window.addEventListener('online', poll);
     return () => {
       alive = false;
+      unsubscribe?.();
       clearInterval(timer);
+      window.removeEventListener('online', poll);
     };
     // The join belongs to this page's runtime and workspace; callbacks read refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -542,13 +599,22 @@ export function E2eeAutomaticPairingPage({
     }
   };
   const cancel = (manual = false) => {
-    if (busy) return;
+    ownerRef.current = { runtime, workspaceId };
+    setBusy(false);
     abandonQr(null);
     // The relay may queue the cancellation while offline: leaving never waits for it.
     // A request it misses still expires, and a new request replaces it.
     void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
     if (manual) onManual?.();
     else onBack();
+  };
+  const recovery = lostAccess?.recovery;
+  const recovered = () => {
+    setLostAllOpen(false);
+    // Reached only when this workspace's own restore committed: its pending request is
+    // no longer needed. Another workspace's success keeps this request.
+    void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
+    recovery?.onRecovered();
   };
   if (!canStart)
     return (
@@ -571,6 +637,26 @@ export function E2eeAutomaticPairingPage({
           onJoined={onJoined}
           onRequestApproval={() => setApprovalChoice({ runtime, workspaceId })}
         />
+        {lostAccess && (
+          <div {...stylex.props(themeStyles.spaced3)} data-testid="e2ee-lost-all-entry">
+            <E2eeLostAccessEntry
+              {...lostAccess}
+              workspaceId={workspaceId}
+              workspaceName={lostAccess.workspaceName ?? state?.workspaceName}
+              {...(runtime.openBrowserRecovery
+                ? {
+                    recovery: undefined,
+                    entryVariant: 'link' as const,
+                    entryLabel: t('e2ee.lostAccess.entrySecondary'),
+                  }
+                : recovery
+                  ? { recovery: { ...recovery, onRecovered: recovered } }
+                  : {})}
+              disabled={busy}
+              onOpenChange={setLostAllOpen}
+            />
+          </div>
+        )}
       </PairingPage>
     );
   const formatTime = (value: number) =>
@@ -578,14 +664,6 @@ export function E2eeAutomaticPairingPage({
       hour: '2-digit',
       minute: '2-digit',
     }).format(new Date(value));
-  const recovery = lostAccess?.recovery;
-  const recovered = () => {
-    setLostAllOpen(false);
-    // Reached only when this workspace's own restore committed: its pending request is
-    // no longer needed. Another workspace's success keeps this request.
-    void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
-    recovery?.onRecovered();
-  };
   const terminal =
     !receiving &&
     !activeQr &&
@@ -618,7 +696,12 @@ export function E2eeAutomaticPairingPage({
         <ChevronLeft size={16} />
         {t('e2ee.control.back')}
       </Button>
-      <section {...stylex.props(themeStyles.column)}>
+      <section {...stylex.props(themeStyles.column, receiving && themeStyles.receivingColumn)}>
+        {receiving && (
+          <div {...stylex.props(themeStyles.receivingArt)}>
+            <E2eeDevicePairArt width={196} transferring={!keyFailure} />
+          </div>
+        )}
         <h1 {...stylex.props(themeStyles.copy)}>
           {t(
             terminal
@@ -630,9 +713,7 @@ export function E2eeAutomaticPairingPage({
         </h1>
         {terminal ? (
           <>
-            <p {...stylex.props(themeStyles.hint3)}>
-              {t(`e2ee.auto.${state.phase}.help`)}
-            </p>
+            <p {...stylex.props(themeStyles.hint3)}>{t(`e2ee.auto.${state.phase}.help`)}</p>
             {/* A removed member needs a new invitation; this device cannot ask for one. */}
             {state.phase !== 'removed' && (
               <Button
@@ -647,7 +728,36 @@ export function E2eeAutomaticPairingPage({
           </>
         ) : receiving ? (
           <>
-            <p {...stylex.props(themeStyles.hint4)}>{t('e2ee.auto.syncing.help')}</p>
+            <p role="status" {...stylex.props(themeStyles.hint3)}>
+              {t(
+                syncSlowHint && !syncTimedOut
+                  ? 'e2ee.auto.syncing.keepOpen'
+                  : 'e2ee.auto.syncing.help'
+              )}
+            </p>
+            {!keyFailure && syncTimedOut && (
+              <div {...stylex.props(themeStyles.spaced2)} data-testid="e2ee-sync-timeout">
+                <p role="status" {...stylex.props(themeStyles.hint5)}>
+                  {t('e2ee.auto.syncing.slow')}
+                </p>
+                <div {...stylex.props(themeStyles.row)}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setSyncTimedOut(false);
+                      setSyncAttempt((attempt) => attempt + 1);
+                      if (onRetryKeys) onRetryKeys();
+                      else setGeneration((g) => g + 1);
+                    }}
+                  >
+                    {t('e2ee.auto.syncing.retry')}
+                  </Button>
+                  <Button variant="ghost" onClick={() => cancel()}>
+                    {t('common.cancel')}
+                  </Button>
+                </div>
+              </div>
+            )}
             {keyFailure && (
               <div {...stylex.props(themeStyles.spaced2)}>
                 <p role="alert" {...stylex.props(themeStyles.hint5)}>
@@ -665,22 +775,19 @@ export function E2eeAutomaticPairingPage({
             <p {...stylex.props(themeStyles.layout)}>{state?.workspaceName}</p>
             {qr === 'joining' ? (
               <div {...stylex.props(themeStyles.layout2)}>
-                <p
-                  role="status"
-                  data-testid="e2ee-qr-joining"
-                  {...stylex.props(themeStyles.hint5)}
-                >
+                <p role="status" data-testid="e2ee-qr-joining" {...stylex.props(themeStyles.hint5)}>
                   {t('e2ee.instantQr.scannedJoining')}
                 </p>
-                <Button xstyle={themeStyles.spaced3} variant="ghost" onClick={() => abandonQr(null)}>
+                <Button
+                  xstyle={themeStyles.spaced3}
+                  variant="ghost"
+                  onClick={() => abandonQr(null)}
+                >
                   {t('common.cancel')}
                 </Button>
               </div>
             ) : pendingLink ? (
-              <div
-                data-testid="e2ee-link-join"
-                {...stylex.props(themeStyles.hint)}
-              >
+              <div data-testid="e2ee-link-join" {...stylex.props(themeStyles.hint)}>
                 <p {...stylex.props(themeStyles.copy2)}>{t('e2ee.accountPair.request.title')}</p>
                 <div {...stylex.props(themeStyles.row)}>
                   <Button
@@ -708,15 +815,14 @@ export function E2eeAutomaticPairingPage({
               </div>
             ) : qr === 'scanning' ? (
               <div {...stylex.props(themeStyles.layout3)} data-testid="e2ee-qr-viewfinder">
-                <video
-                  ref={qrVideo}
-                  muted
-                  playsInline
-                  {...stylex.props(themeStyles.panel)}
-                />
-                {cameraState === 'unavailable' && (
+                <video ref={qrVideo} muted playsInline {...stylex.props(themeStyles.panel)} />
+                {(cameraState === 'denied' || cameraState === 'unavailable') && (
                   <p role="alert" {...stylex.props(themeStyles.hint7)}>
-                    {t('e2ee.verify.cameraUnavailable')}
+                    {t(
+                      cameraState === 'denied'
+                        ? 'e2ee.verify.cameraDenied'
+                        : 'e2ee.verify.cameraUnavailable'
+                    )}
                   </p>
                 )}
                 <Button xstyle={themeStyles.spaced3} variant="ghost" onClick={() => setQr('idle')}>
@@ -725,19 +831,13 @@ export function E2eeAutomaticPairingPage({
               </div>
             ) : state?.comparisonCode ? (
               <>
-                <p
-                  role="status"
-                  {...stylex.props(themeStyles.row2)}
-                >
+                <p role="status" {...stylex.props(themeStyles.row2)}>
                   <CircleCheck size={15} aria-hidden="true" />
                   {t('e2ee.auto.prompted')}
                 </p>
                 {scanButton('e2ee.auto.scanPrompt')}
                 {!mobile && (
-                  <div
-                    data-testid="e2ee-auto-pair-qr"
-                    {...stylex.props(themeStyles.column2)}
-                  >
+                  <div data-testid="e2ee-auto-pair-qr" {...stylex.props(themeStyles.column2)}>
                     <div {...stylex.props(themeStyles.panel2)}>
                       <LedgerQrCode
                         payload={autoPairQrPayload(state.id, state.comparisonCode)}
@@ -752,15 +852,13 @@ export function E2eeAutomaticPairingPage({
                   code={state.comparisonCode}
                   hint={mobile ? 'e2ee.auto.showCode' : 'e2ee.auto.showCode.desktop'}
                 />
-                <p {...stylex.props(themeStyles.hint9)}>
-                  {t('e2ee.auto.waiting.help')}
-                </p>
+                <p {...stylex.props(themeStyles.hint9)}>{t('e2ee.auto.waiting.help')}</p>
               </>
             ) : (
-              <div
-                data-testid="e2ee-awaiting-device"
-                {...stylex.props(themeStyles.hint10)}
-              >
+              <div data-testid="e2ee-awaiting-device" {...stylex.props(themeStyles.hint10)}>
+                <div {...stylex.props(themeStyles.cardArt)}>
+                  <E2eeDevicePairArt width={152} />
+                </div>
                 <p role="status" {...stylex.props(themeStyles.copy2)}>
                   {t('e2ee.auto.awaiting.title')}
                 </p>
@@ -772,7 +870,6 @@ export function E2eeAutomaticPairingPage({
                   <Button
                     xstyle={themeStyles.spaced3}
                     variant="secondary"
-                    disabled={busy}
                     onClick={() => cancel(true)}
                   >
                     {t('e2ee.auto.offline')}
@@ -801,14 +898,14 @@ export function E2eeAutomaticPairingPage({
                 {t('e2ee.auto.changeDevice')}
               </Button>
               {onManual && (
-                <Button variant="link" disabled={busy} onClick={() => cancel(true)}>
+                <Button variant="link" onClick={() => cancel(true)}>
                   {t('e2ee.auto.manual')}
                 </Button>
               )}
             </details>
           </>
         )}
-        {!receiving && (
+        {!receiving && state?.phase !== 'removed' && (
           <>
             {lostAccess ? (
               <div {...stylex.props(themeStyles.spaced3)} data-testid="e2ee-lost-all-entry">
@@ -822,17 +919,12 @@ export function E2eeAutomaticPairingPage({
                 />
               </div>
             ) : (
-              <details
-                {...stylex.props(themeStyles.hint14)}
-                data-testid="e2ee-lost-all-entry"
-              >
+              <details {...stylex.props(themeStyles.hint14)} data-testid="e2ee-lost-all-entry">
                 <summary {...stylex.props(themeStyles.row3)}>
                   {t('e2ee.auto.noOtherDevice')}
                   <ChevronDown size={14} />
                 </summary>
-                <p {...stylex.props(themeStyles.copy3)}>
-                  {t('e2ee.auto.noOtherDevice.elsewhere')}
-                </p>
+                <p {...stylex.props(themeStyles.copy3)}>{t('e2ee.auto.noOtherDevice.elsewhere')}</p>
               </details>
             )}
           </>
@@ -880,7 +972,7 @@ export function E2eeAutomaticPairingPage({
                   : t('e2ee.auto.expiry', { time: formatTime(state.expiresAt) })}
               </p>
             )}
-            <Button variant="ghost" disabled={busy} onClick={() => cancel()}>
+            <Button variant="ghost" onClick={() => cancel()}>
               {t('e2ee.auto.cancel')}
             </Button>
           </div>
@@ -890,15 +982,24 @@ export function E2eeAutomaticPairingPage({
   );
 }
 
-function ApprovalExpiry({ expiresAt }: { expiresAt: number }) {
+function ApprovalExpiry({ expiresAt, inline = false }: { expiresAt: number; inline?: boolean }) {
   const { t } = useTranslation();
   const seconds = useSecondsLeft(expiresAt);
   if (seconds === null || seconds >= 60 * 60) return null;
+  const label =
+    seconds === 0
+      ? t('e2ee.auto.expired.short')
+      : t('e2ee.auto.expiresIn', { time: clock(seconds) });
+  if (inline) {
+    return (
+      <span data-testid="e2ee-approval-expiry" {...stylex.props(themeStyles.expiryInline)}>
+        {label}
+      </span>
+    );
+  }
   return (
     <p data-testid="e2ee-approval-expiry" {...stylex.props(themeStyles.hint8)}>
-      {seconds === 0
-        ? t('e2ee.auto.expired.short')
-        : t('e2ee.auto.expiresIn', { time: clock(seconds) })}
+      {label}
     </p>
   );
 }
@@ -935,7 +1036,7 @@ export function E2eeAutomaticPairingInbox({
   const [inbox, setInbox] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<
-    { kind: 'retry' } | { kind: 'mismatch'; attemptsLeft: number } | null
+    { kind: 'retry' | 'refused'; key: string } | { kind: 'mismatch'; attemptsLeft: number } | null
   >(null);
   const [code, setCode] = useState('');
   // The typed code belongs to one request. A poll that briefly omits it closes the dialog,
@@ -958,6 +1059,8 @@ export function E2eeAutomaticPairingInbox({
   /** The request whose dialog revealed a one-time QR code. The code stays until it is
    * used or dismissed, even if that request leaves the list mid-scan. */
   const [qrFor, setQrFor] = useState<string | null>(null);
+  /** True when the requesting device ended its request while this approval dialog was open. */
+  const [peerCancelled, setPeerCancelled] = useState(false);
   const qrSupported = supportsInstantQr(runtime);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -975,6 +1078,7 @@ export function E2eeAutomaticPairingInbox({
   const mobile = handheld;
   const [scanning, setScanning] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const [approvalTab, setApprovalTab] = useState<'qr' | 'code'>('qr');
   const requestsRef = useRef(requests);
   requestsRef.current = requests;
   useEffect(() => {
@@ -1013,6 +1117,7 @@ export function E2eeAutomaticPairingInbox({
           setRequests(rows);
           const ids = new Set(rows.map((row) => row.id));
           if (selectedRef.current && !ids.has(selectedRef.current)) {
+            if (!settled.current.has(selectedRef.current)) setPeerCancelled(true);
             selectedRef.current = null;
             setSelected(null);
           }
@@ -1058,8 +1163,7 @@ export function E2eeAutomaticPairingInbox({
       /* Live discovery is optional; scoped polling still verifies the same originals. */
     }
     void tick();
-    // A hidden window does not poll; the subscription and the system notification
-    // still run, and showing the window again checks at once.
+    // Visible windows still poll: a post-reveal `e2eeAccountPairing` submission is not pushed.
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void tick();
     }, POLL_MS);
@@ -1068,14 +1172,17 @@ export function E2eeAutomaticPairingInbox({
       if (document.visibilityState === 'visible') void tick();
     };
     document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
     return () => {
       alive = false;
       unsubscribe?.();
       clearInterval(timer);
       document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('online', wake);
     };
   }, [runtime]);
   const current = requests.find((row) => row.id === selected);
+  const currentSecondsLeft = useSecondsLeft(current?.expiresAt);
   // A computer shows its one-time code with the request at once (owner decision
   // 2026-11-12); a phone scans the new screen and shows its own code only on request.
   const shownQr = qrFor ?? (!handheld && qrSupported && current ? current.id : null);
@@ -1101,7 +1208,12 @@ export function E2eeAutomaticPairingInbox({
     codeOwner.current = selected;
     setCode('');
     setError(null);
+    setPeerCancelled(false);
+    setApprovalTab('qr');
   }, [selected]);
+  useEffect(() => {
+    if (code || error) setApprovalTab('code');
+  }, [code, error]);
   const { video: scanVideo, state: scanState } = useQrCamera(
     scanning && Boolean(current),
     (scanned) => {
@@ -1128,13 +1240,14 @@ export function E2eeAutomaticPairingInbox({
     if (selected) deferred.current.add(selected);
     clearTimeout(dismissTimer.current);
     setQrFor(null);
+    setPeerCancelled(false);
     setSelected(null);
     setEnded(null);
     setError(null);
   };
   const act = async (approve: boolean, entered = code) => {
     const target = current;
-    if (!target || busy || !runtime) return;
+    if (!target || busy || !runtime || error?.kind === 'refused') return;
     if (approve && (target.phase !== 'waiting' || !/^\d{6}$/.test(entered))) return;
     const owner = actionOwner.current;
     setBusy(target.id);
@@ -1152,7 +1265,9 @@ export function E2eeAutomaticPairingInbox({
       }
     } catch (cause) {
       if (owner !== actionOwner.current) return;
-      const refusal = accountPairingErrorCode(cause);
+      const refusal =
+        accountPairingErrorCode(cause) ??
+        accountPairingErrorCode({ code: requestFailureCode(cause) });
       if (refusal === 'pairing-code-locked') {
         settled.current.add(target.id);
         deferred.current.add(target.id);
@@ -1164,7 +1279,19 @@ export function E2eeAutomaticPairingInbox({
         const left = (cause as { attemptsLeft?: unknown }).attemptsLeft;
         setCode('');
         setError({ kind: 'mismatch', attemptsLeft: typeof left === 'number' ? left : 1 });
-      } else setError({ kind: 'retry' });
+      } else {
+        const key = automaticPairingErrorKey(cause);
+        const terminal =
+          refusal === 'pairing-expired' ||
+          refusal === 'pairing-used' ||
+          refusal === 'pairing-tampered' ||
+          refusal === 'pairing-elsewhere' ||
+          refusal === 'pairing-update-required';
+        setError({
+          kind: terminal ? 'refused' : 'retry',
+          key: key === 'e2ee.auto.connectionRetry' ? 'e2ee.accountPair.error.unavailable' : key,
+        });
+      }
     } finally {
       if (owner === actionOwner.current) setBusy(null);
     }
@@ -1174,7 +1301,13 @@ export function E2eeAutomaticPairingInbox({
   const qrSlot = qrSupported && runtime && (shownQr || current) && (
     <div {...stylex.props(themeStyles.panel3)} data-testid="e2ee-approval-qr">
       {shownQr ? (
-        <E2eeInstantQrApprove key={shownQr} runtime={runtime} onJoined={() => qrJoined(shownQr)} />
+        <E2eeInstantQrApprove
+          key={shownQr}
+          runtime={runtime}
+          compact
+          hideExpiry={Boolean(current)}
+          onJoined={() => qrJoined(shownQr)}
+        />
       ) : (
         <div {...stylex.props(themeStyles.column3)}>
           <Button
@@ -1310,151 +1443,205 @@ export function E2eeAutomaticPairingInbox({
           initialFocus={dialog}
         >
           <PrivatePairingSurface>
-            {ended && !current && !qrFor && (
-              <>
-                <Dialog.Title>
-                  {t('e2ee.auto.codeLocked.title')}
-                </Dialog.Title>
-                <Dialog.Description>
-                  {t('e2ee.auto.codeLocked.help', { workspace: ended.workspaceName })}
-                </Dialog.Description>
-                <Button xstyle={themeStyles.spaced5} onClick={() => setEnded(null)}>
-                  {t('e2ee.auto.codeLocked.ok')}
-                </Button>
-              </>
-            )}
-            {current && (
-              <div {...stylex.props(themeStyles.row4)}>
-                <span>{t('e2ee.auto.newRequest')}</span>
-                <Button variant="ghost" onClick={later}>
-                  {t('e2ee.auto.later')}
-                </Button>
-              </div>
-            )}
-            {current ? (
-              <>
-                <Dialog.Title>
-                  {t('e2ee.auto.approve.title')}
-                </Dialog.Title>
-                <Dialog.Description>{t('e2ee.auto.approve.help')}</Dialog.Description>
-                <p {...stylex.props(themeStyles.copy5)}>{current.deviceName}</p>
-                <p {...stylex.props(themeStyles.hint8)}>
-                  {t('e2ee.auto.deviceNameUnverified')}
-                </p>
-              </>
-            ) : (
-              qrFor && (
+            <div {...stylex.props(themeStyles.dialogBody)}>
+              {ended && !current && !qrFor && (
                 <>
-                  <Dialog.Title>
-                    {t('e2ee.instantQr.title')}
-                  </Dialog.Title>
-                  <Button xstyle={themeStyles.spaced6} variant="ghost" onClick={later}>
-                    {t('common.close')}
+                  <Dialog.Title>{t('e2ee.auto.codeLocked.title')}</Dialog.Title>
+                  <Dialog.Description>
+                    {t('e2ee.auto.codeLocked.help', { workspace: ended.workspaceName })}
+                  </Dialog.Description>
+                  <Button xstyle={themeStyles.spaced5} onClick={() => setEnded(null)}>
+                    {t('e2ee.auto.codeLocked.ok')}
                   </Button>
                 </>
-              )
-            )}
-            {/* Fixed slots, so the code survives its request leaving the list. */}
-            {!mobile && qrSlot}
-            {mobile && current && cameraSupported() && (
-              <div {...stylex.props(themeStyles.layout5)} data-testid="e2ee-approval-scan">
-                {scanning ? (
+              )}
+              {current && (
+                <div {...stylex.props(themeStyles.row4)}>
+                  <span>{t('e2ee.auto.newRequest')}</span>
+                  <div {...stylex.props(themeStyles.headerRight)}>
+                    <ApprovalExpiry expiresAt={current.expiresAt} inline />
+                    <Button variant="ghost" size="small" onClick={later}>
+                      {t('e2ee.auto.later')}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {current ? (
+                <>
+                  <div {...stylex.props(themeStyles.dialogHeader)}>
+                    <Dialog.Title>{t('e2ee.auto.approve.title')}</Dialog.Title>
+                    <Dialog.Description>{t('e2ee.auto.approve.help')}</Dialog.Description>
+                  </div>
+                  <div {...stylex.props(themeStyles.infoStrip)}>
+                    <div {...stylex.props(themeStyles.infoRow)}>
+                      <Smartphone
+                        size={14}
+                        aria-hidden="true"
+                        {...stylex.props(themeStyles.infoIcon)}
+                      />
+                      <div {...stylex.props(themeStyles.infoMeta)}>
+                        <span {...stylex.props(themeStyles.infoPrimary)}>{current.deviceName}</span>
+                        <span {...stylex.props(themeStyles.infoSecondary)}>
+                          {t('e2ee.auto.deviceNameUnverified')}
+                        </span>
+                      </div>
+                    </div>
+                    <div {...stylex.props(themeStyles.infoDivider)} />
+                    <div {...stylex.props(themeStyles.infoScope)}>
+                      <span {...stylex.props(themeStyles.infoWorkspace)}>
+                        {current.workspaceName}
+                      </span>
+                      <span {...stylex.props(themeStyles.infoSecondary)}>
+                        {t('e2ee.auto.scope')}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                qrFor && (
                   <>
-                    <video
-                      ref={scanVideo}
-                      muted
-                      playsInline
-                      {...stylex.props(themeStyles.panel6)}
-                    />
-                    {scanState === 'unavailable' && (
-                      <p role="alert" {...stylex.props(themeStyles.hint14)}>
-                        {t('e2ee.verify.cameraUnavailable')}
+                    <Dialog.Title>{t('e2ee.instantQr.title')}</Dialog.Title>
+                    {peerCancelled && (
+                      <p role="status" {...stylex.props(themeStyles.hint5)}>
+                        {t('e2ee.auto.peerCancelled')}
                       </p>
                     )}
-                    <Button xstyle={themeStyles.spaced6} variant="ghost" onClick={() => setScanning(false)}>
-                      {t('common.cancel')}
+                    <Button xstyle={themeStyles.spaced6} variant="ghost" onClick={later}>
+                      {t('common.close')}
                     </Button>
                   </>
-                ) : (
-                  <Button
-                    xstyle={themeStyles.glyph5}
-                    size="large"
-                    data-testid="e2ee-approval-scan-start"
-                    disabled={Boolean(busy)}
-                    onClick={() => {
-                      setScanNotice(null);
-                      setScanning(true);
-                    }}
-                  >
-                    <Camera size={18} aria-hidden="true" />
-                    {t('e2ee.auto.scanApprove')}
-                  </Button>
-                )}
-                {scanNotice && (
-                  <p role="status" {...stylex.props(themeStyles.hint14)}>
-                    {t(scanNotice)}
-                  </p>
-                )}
-              </div>
-            )}
-            {current && (
-              <>
-                {(mobile ? cameraSupported() : qrSupported) && (
-                  <p {...stylex.props(pairingStyles.alternative)}>
-                    {t(mobile ? 'e2ee.auto.orCode.mobile' : 'e2ee.auto.orCode')}
-                  </p>
-                )}
-                <form
-                  {...stylex.props(themeStyles.layout5)}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void act(true);
-                  }}
+                )
+              )}
+              {!mobile && qrSupported && current && (
+                <Tabs.Root
+                  value={approvalTab}
+                  onValueChange={(value) => setApprovalTab(value as 'qr' | 'code')}
                 >
-                  <label htmlFor="e2ee-approval-code" {...stylex.props(themeStyles.copy6)}>
-                    {t('e2ee.auto.enterCode')}
-                  </label>
-                  <Input
-                    id="e2ee-approval-code"
-                    data-testid="e2ee-approval-code"
-                    size="large"
-                    value={code}
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    placeholder="000000"
-                    aria-invalid={error?.kind === 'mismatch' || undefined}
-                    aria-describedby={error ? 'e2ee-approval-code-error' : undefined}
-                    disabled={Boolean(busy) || current.phase !== 'waiting'}
-                    onChange={(event) => {
-                      // Full-width IME digits (１２３) become ASCII before filtering.
-                      setCode(event.target.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6));
-                      if (error?.kind === 'retry') setError(null);
-                    }}
-                  />
-                  {error?.kind === 'mismatch' && (
-                    <p
-                      id="e2ee-approval-code-error"
-                      role="alert"
-                      {...stylex.props(themeStyles.copy7)}
+                  <Tabs.List stretch size="small">
+                    <Tabs.Tab value="qr">{t('e2ee.auto.tab.qr')}</Tabs.Tab>
+                    <Tabs.Tab value="code">{t('e2ee.auto.tab.code')}</Tabs.Tab>
+                  </Tabs.List>
+                </Tabs.Root>
+              )}
+              {/* Fixed slot, so the QR code survives its request leaving the list. */}
+              {!mobile && qrSlot && (
+                <div hidden={Boolean(current && qrSupported && approvalTab !== 'qr')}>{qrSlot}</div>
+              )}
+              {mobile && current && cameraSupported() && (
+                <div {...stylex.props(themeStyles.layout5)} data-testid="e2ee-approval-scan">
+                  {scanning ? (
+                    <>
+                      <video
+                        ref={scanVideo}
+                        muted
+                        playsInline
+                        {...stylex.props(themeStyles.panel6)}
+                      />
+                      {(scanState === 'denied' || scanState === 'unavailable') && (
+                        <p role="alert" {...stylex.props(themeStyles.hint14)}>
+                          {t(
+                            scanState === 'denied'
+                              ? 'e2ee.verify.cameraDenied'
+                              : 'e2ee.verify.cameraUnavailable'
+                          )}
+                        </p>
+                      )}
+                      <Button
+                        xstyle={themeStyles.spaced6}
+                        variant="ghost"
+                        onClick={() => setScanning(false)}
+                      >
+                        {t('common.cancel')}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      xstyle={themeStyles.glyph5}
+                      size="large"
+                      data-testid="e2ee-approval-scan-start"
+                      disabled={Boolean(busy) || error?.kind === 'refused'}
+                      onClick={() => {
+                        setScanNotice(null);
+                        setScanning(true);
+                      }}
                     >
-                      {t('e2ee.auto.codeMismatch', { count: error.attemptsLeft })}
+                      <Camera size={18} aria-hidden="true" />
+                      {t('e2ee.auto.scanApprove')}
+                    </Button>
+                  )}
+                  {scanNotice && (
+                    <p role="status" {...stylex.props(themeStyles.hint14)}>
+                      {t(scanNotice)}
                     </p>
                   )}
-                </form>
-                <div {...stylex.props(themeStyles.panel7)}>
-                  <p {...stylex.props(themeStyles.layout)}>{current.workspaceName}</p>
-                  <p {...stylex.props(themeStyles.hint18)}>{t('e2ee.auto.scope')}</p>
                 </div>
-                <p {...stylex.props(themeStyles.hint8)}>
-                  {/* The scanned code admits the phone to this device's encrypted
-                      workspaces; the typed code approves this request only. */}
-                  {t(qrSupported ? 'e2ee.auto.scopeWithQr' : 'e2ee.auto.currentWorkspaceOnly')}
-                </p>
-                <ApprovalExpiry expiresAt={current.expiresAt} />
+              )}
+              {current && (
+                <>
+                  <div hidden={Boolean(!mobile && qrSupported && approvalTab !== 'code')}>
+                    {mobile && cameraSupported() && (
+                      <p {...stylex.props(pairingStyles.alternative)}>
+                        {t('e2ee.auto.orCode.mobile')}
+                      </p>
+                    )}
+                    <form
+                      {...stylex.props(themeStyles.codeForm)}
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void act(true);
+                      }}
+                    >
+                      <label htmlFor="e2ee-approval-code" {...stylex.props(themeStyles.copy6)}>
+                        {t('e2ee.auto.enterCode')}
+                      </label>
+                      <Input
+                        id="e2ee-approval-code"
+                        data-testid="e2ee-approval-code"
+                        size="large"
+                        value={code}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        placeholder="000000"
+                        aria-invalid={error?.kind === 'mismatch' || undefined}
+                        aria-describedby={error ? 'e2ee-approval-code-error' : undefined}
+                        disabled={
+                          Boolean(busy) || current.phase !== 'waiting' || error?.kind === 'refused'
+                        }
+                        onChange={(event) => {
+                          // Full-width IME digits (１２３) become ASCII before filtering.
+                          setCode(
+                            event.target.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6)
+                          );
+                          if (error?.kind === 'retry') setError(null);
+                        }}
+                      />
+                      {error?.kind === 'mismatch' && (
+                        <p
+                          id="e2ee-approval-code-error"
+                          role="alert"
+                          {...stylex.props(themeStyles.copy7)}
+                        >
+                          {t('e2ee.auto.codeMismatch', { count: error.attemptsLeft })}
+                        </p>
+                      )}
+                    </form>
+                  </div>
+                  <p {...stylex.props(themeStyles.scopeFootnote)}>
+                    {/* The scanned code admits the phone to this device's encrypted
+                        workspaces; the typed code approves this request only. */}
+                    {t(qrSupported ? 'e2ee.auto.scopeWithQr' : 'e2ee.auto.currentWorkspaceOnly')}
+                  </p>
+                </>
+              )}
+              {mobile && qrSlot}
+            </div>
+            {current && (
+              <div {...stylex.props(themeStyles.dialogFooter)}>
                 <div {...stylex.props(themeStyles.column4)}>
                   <Button
-                    variant="destructive"
-                    disabled={Boolean(busy)}
+                    variant="secondary"
+                    tone="destructive"
+                    disabled={Boolean(busy) || error?.kind === 'refused'}
                     onClick={() => void act(false)}
                   >
                     {t('e2ee.auto.notMine')}
@@ -1467,29 +1654,31 @@ export function E2eeAutomaticPairingInbox({
                     disabled={
                       Boolean(busy) ||
                       current.phase !== 'waiting' ||
+                      error?.kind === 'refused' ||
                       !/^\d{6}$/.test(code) ||
-                      current.expiresAt <= Date.now()
+                      currentSecondsLeft === 0
                     }
                     onClick={() => void act(true)}
                   >
                     {t(busy ? 'e2ee.auto.confirming' : 'e2ee.auto.authorize')}
                   </Button>
                 </div>
-                {error?.kind === 'retry' && (
+                {(error?.kind === 'retry' || error?.kind === 'refused') && (
                   <p
                     id="e2ee-approval-code-error"
                     role="alert"
-                    {...stylex.props(themeStyles.hint5)}
+                    {...stylex.props(themeStyles.footerError)}
                   >
-                    {t('e2ee.auto.approvalRetry')}
+                    {t(error.key)}
                   </p>
                 )}
-                <p {...stylex.props(themeStyles.hint19)}>
-                  {t('e2ee.auto.laterHint')}
-                </p>
-              </>
+                {error?.kind === 'refused' && (
+                  <Button variant="secondary" onClick={later}>
+                    {t('common.close')}
+                  </Button>
+                )}
+              </div>
             )}
-            {mobile && qrSlot}
           </PrivatePairingSurface>
         </Dialog.Content>
       </Dialog.Root>
@@ -1498,67 +1687,450 @@ export function E2eeAutomaticPairingInbox({
 }
 
 const themeStyles = stylex.create({
-  hint: { marginBlock: appSpace[6], borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: appSpace[4], paddingBlock: appSpace[5], textAlign: 'center' },
-  hint2: { marginTop: appSpace[2], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  glyph: { position: 'relative', height: '100dvh', overflowY: 'auto', backgroundColor: uiColors.background, paddingInline: appSpace[6], paddingBottom: 'max(2rem,env(safe-area-inset-bottom))' },
+  hint: {
+    marginBlock: appSpace[6],
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    paddingInline: appSpace[4],
+    paddingBlock: appSpace[5],
+    textAlign: 'center',
+  },
+  hint2: {
+    marginTop: appSpace[2],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  glyph: {
+    position: 'relative',
+    height: '100dvh',
+    overflowY: 'auto',
+    backgroundColor: uiColors.background,
+    paddingInline: appSpace[6],
+    paddingBottom: 'max(2rem,env(safe-area-inset-bottom))',
+  },
   glyph2: { marginTop: appSpace[5], width: '100%' },
-  column: { marginInline: 'auto', display: 'flex', minHeight: '75dvh', maxWidth: '24rem', flexDirection: 'column', paddingTop: appSpace[10], textAlign: 'center' },
+  column: {
+    marginInline: 'auto',
+    display: 'flex',
+    minHeight: '75dvh',
+    maxWidth: '24rem',
+    flexDirection: 'column',
+    paddingTop: appSpace[10],
+    textAlign: 'center',
+  },
   copy: { fontSize: uiText.titleSize, lineHeight: 1.375, fontWeight: 600 },
-  hint3: { marginTop: appSpace[4], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint3: {
+    marginTop: appSpace[4],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   spaced: { marginTop: appSpace[6] },
-  hint4: { marginTop: appSpace[5], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint4: {
+    marginTop: appSpace[5],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   spaced2: { marginTop: appSpace[5] },
-  hint5: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint5: {
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   spaced3: { marginTop: appSpace[3] },
-  hint6: { marginBottom: appSpace[1], marginTop: appSpace[4], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint6: {
+    marginBottom: appSpace[1],
+    marginTop: appSpace[4],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   layout: { fontWeight: 500 },
   layout2: { marginBlock: appSpace[8] },
-  copy2: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500 },
-  row: { marginTop: appSpace[4], display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: appSpace[2] },
+  copy2: {
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    fontWeight: 500,
+  },
+  row: {
+    marginTop: appSpace[4],
+    display: 'flex',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: appSpace[2],
+  },
   layout3: { marginBlock: appSpace[6] },
-  panel: { aspectRatio: '1', width: '100%', borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: uiColors.secondaryBackground, objectFit: 'cover' },
-  hint7: { marginTop: appSpace[3], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
-  row2: { marginInline: 'auto', marginTop: appSpace[6], display: 'inline-flex', alignItems: 'center', gap: appSpace[1.5], borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: appSpace[3], paddingBlock: appSpace[1], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading },
-  column2: { marginInline: 'auto', marginTop: appSpace[6], display: 'flex', flexDirection: 'column', alignItems: 'center', gap: appSpace[2] },
-  panel2: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: '#fff', padding: appSpace[2], lineHeight: 1 },
-  hint8: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  hint9: { marginTop: appSpace[1], fontSize: uiText.subheadlineSize, lineHeight: 1.625, color: uiColors.secondaryLabel },
-  hint10: { marginBlock: appSpace[6], borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: appSpace[4], paddingBlock: appSpace[5], textAlign: 'start' },
-  hint11: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: 1.625, color: uiColors.secondaryLabel },
-  hint12: { marginTop: appSpace[2], fontSize: uiText.footnoteSize, lineHeight: 1.625, color: uiColors.secondaryLabel },
+  panel: {
+    aspectRatio: '1',
+    width: '100%',
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    backgroundColor: uiColors.secondaryBackground,
+    objectFit: 'cover',
+  },
+  hint7: {
+    marginTop: appSpace[3],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
+  row2: {
+    marginInline: 'auto',
+    marginTop: appSpace[6],
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: appSpace[1.5],
+    borderRadius: uiRadius.full,
+    cornerShape: uiCorner.round,
+    backgroundColor: uiColors.secondaryBackground,
+    paddingInline: appSpace[2.5],
+    paddingBlock: appSpace[1],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    textAlign: 'start',
+  },
+  /** Receiving keys is a wait with nothing to do: the column centres on the transfer. */
+  receivingColumn: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 0,
+    paddingBottom: appSpace[10],
+  },
+  receivingArt: { display: 'flex', justifyContent: 'center', marginBottom: appSpace[8] },
+  cardArt: { display: 'flex', justifyContent: 'center', marginBottom: appSpace[4] },
+  dialogBody: {
+    flex: '1 1 auto',
+    minHeight: 0,
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appSpace[3],
+    paddingTop: '18px',
+    paddingInline: '20px',
+    paddingBottom: '14px',
+  },
+  dialogHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appSpace[1],
+  },
+  headerRight: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: appSpace[2],
+  },
+  expiryInline: {
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  infoStrip: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appSpace[2],
+    paddingBlock: '10px',
+    paddingInline: '12px',
+    borderRadius: uiRadius.medium,
+    cornerShape: uiCorner.shape,
+    backgroundColor: uiColors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: uiColors.separator,
+  },
+  infoRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: appSpace[2],
+  },
+  infoIcon: {
+    flexShrink: 0,
+    marginTop: '2px',
+    color: uiColors.secondaryLabel,
+  },
+  infoMeta: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0,
+  },
+  infoPrimary: {
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    fontWeight: 600,
+    color: uiColors.label,
+  },
+  infoWorkspace: {
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    fontWeight: 600,
+    color: uiColors.label,
+  },
+  infoSecondary: {
+    fontSize: uiText.captionSize,
+    lineHeight: uiText.captionLeading,
+    color: uiColors.secondaryLabel,
+  },
+  infoDivider: {
+    height: '1px',
+    backgroundColor: uiColors.separator,
+  },
+  infoScope: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  tabPanel: {
+    paddingTop: appSpace[2],
+  },
+  codeForm: {
+    marginBlock: appSpace[1],
+  },
+  scopeFootnote: {
+    margin: 0,
+    fontSize: uiText.captionSize,
+    lineHeight: uiText.captionLeading,
+    color: uiColors.secondaryLabel,
+  },
+  dialogFooter: {
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appSpace[2],
+    paddingBlock: '14px',
+    paddingInline: '20px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: uiColors.separator,
+    backgroundColor: uiColors.elevatedBackground,
+  },
+  footerError: {
+    margin: 0,
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.destructive,
+  },
+  column2: {
+    marginInline: 'auto',
+    marginTop: appSpace[6],
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: appSpace[2],
+  },
+  panel2: {
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    backgroundColor: '#fff',
+    padding: appSpace[2],
+    lineHeight: 1,
+  },
+  hint8: {
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  hint9: {
+    marginTop: appSpace[1],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: 1.625,
+    color: uiColors.secondaryLabel,
+  },
+  hint10: {
+    marginBlock: appSpace[6],
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    paddingInline: appSpace[4],
+    paddingBlock: appSpace[5],
+    textAlign: 'start',
+  },
+  hint11: {
+    marginTop: appSpace[2],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: 1.625,
+    color: uiColors.secondaryLabel,
+  },
+  hint12: {
+    marginTop: appSpace[2],
+    fontSize: uiText.footnoteSize,
+    lineHeight: 1.625,
+    color: uiColors.secondaryLabel,
+  },
   layout4: { marginRight: appSpace[1], display: 'inline' },
-  hint13: { marginBottom: appSpace[3], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
-  row3: { display: { 'default': 'inline-flex', '::-webkit-details-marker': 'none' }, cursor: 'pointer', listStyleType: 'none', alignItems: 'center', justifyContent: 'center', gap: appSpace[1.5] },
+  hint13: {
+    marginBottom: appSpace[3],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
+  row3: {
+    display: { default: 'inline-flex', '::-webkit-details-marker': 'none' },
+    cursor: 'pointer',
+    listStyleType: 'none',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: appSpace[1.5],
+  },
   copy3: { marginTop: appSpace[3], textAlign: 'start', lineHeight: 1.625 },
-  hint14: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
-  hint15: { marginTop: 'auto', paddingTop: appSpace[10], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  hint16: { borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: appSpace[1.5], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, fontVariantNumeric: 'tabular-nums' },
-  panel3: { marginBlock: appSpace[5], borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: appSpace[4] },
-  column3: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: appSpace[2], textAlign: 'center' },
+  hint14: {
+    marginTop: appSpace[2],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
+  hint15: {
+    marginTop: 'auto',
+    paddingTop: appSpace[10],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  hint16: {
+    borderRadius: uiRadius.full,
+    cornerShape: uiCorner.round,
+    backgroundColor: uiColors.secondaryBackground,
+    paddingInline: appSpace[1.5],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  panel3: {
+    marginBlock: appSpace[1],
+    borderRadius: uiRadius.medium,
+    cornerShape: uiCorner.shape,
+    backgroundColor: uiColors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: uiColors.separator,
+    paddingBlock: appSpace[3],
+    paddingInline: appSpace[4],
+  },
+  column3: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: appSpace[2],
+    textAlign: 'center',
+  },
   glyph3: { width: '100%', maxWidth: { default: null, '@media (min-width: 640px)': '24rem' } },
-  spaced4: { marginTop: appSpace[6], display: 'flex', flexDirection: 'column', rowGap: appSpace[3] },
-  panel4: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: appSpace[4] },
-  hint17: { marginTop: appSpace[1], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  spaced4: {
+    marginTop: appSpace[6],
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: appSpace[3],
+  },
+  panel4: {
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    padding: appSpace[4],
+  },
+  hint17: {
+    marginTop: appSpace[1],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
   glyph4: { marginTop: appSpace[4], width: '100%' },
-  panel5: { maxHeight: '90dvh', maxWidth: { 'default': 'calc(100vw-2rem)', '@media (min-width: 640px)': '28rem' }, overflowY: 'auto', borderRadius: uiRadius.large, cornerShape: uiCorner.shape },
+  panel5: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 0,
+    padding: 0,
+    maxHeight: '90dvh',
+    width: '100%',
+    maxWidth: { default: 'calc(100vw - 2rem)', '@media (min-width: 640px)': '28rem' },
+    overflow: 'hidden',
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+  },
   copy4: { fontSize: uiText.titleSize, lineHeight: 1.375 },
   spaced5: { marginTop: appSpace[4] },
-  row4: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  copy5: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500 },
+  row4: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  copy5: {
+    marginTop: appSpace[2],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    fontWeight: 500,
+  },
   spaced6: { marginTop: appSpace[2] },
   layout5: { marginBlock: appSpace[5] },
-  panel6: { aspectRatio: '1', width: '100%', borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: uiColors.secondaryBackground, objectFit: 'cover' },
+  panel6: {
+    aspectRatio: '1',
+    width: '100%',
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    backgroundColor: uiColors.secondaryBackground,
+    objectFit: 'cover',
+  },
   glyph5: { width: '100%' },
-  copy6: { marginBottom: appSpace[2], display: 'block', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading },
-  copy7: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.destructive },
-  panel7: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: appSpace[4] },
-  hint18: { marginTop: appSpace[1], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  column4: { marginTop: appSpace[3], display: 'flex', flexDirection: { 'default': 'column', '@media (min-width: 640px)': 'row' }, gap: appSpace[2] },
+  copy6: {
+    marginBottom: appSpace[2],
+    display: 'block',
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+  },
+  copy7: {
+    marginTop: appSpace[2],
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.destructive,
+  },
+  panel7: {
+    borderRadius: uiRadius.large,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    padding: appSpace[4],
+  },
+  hint18: {
+    marginTop: appSpace[1],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  column4: {
+    display: 'flex',
+    flexDirection: { default: 'column-reverse', '@media (min-width: 640px)': 'row' },
+    gap: appSpace[2],
+  },
   row5: { flex: { default: null, '@media (min-width: 640px)': '1 1 0%' } },
-  hint19: { textAlign: 'center', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  hint19: {
+    textAlign: 'center',
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
 });
 
 const pairingStyles = stylex.create({
- code: { fontFamily: 'var(--font-mono)', fontSize: '2.25rem', lineHeight: '2.5rem', fontWeight: 600, letterSpacing: '0.15em', fontVariantNumeric: 'tabular-nums' },
- alternative: { textAlign: 'center', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  code: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '2.25rem',
+    lineHeight: '2.5rem',
+    fontWeight: 600,
+    letterSpacing: '0.15em',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  alternative: {
+    textAlign: 'center',
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
 });

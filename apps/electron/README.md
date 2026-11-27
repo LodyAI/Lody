@@ -86,7 +86,8 @@ it checks the embedded profile against the certificate that signed each archived
 app. A mismatch stops publication of the desktop update.
 
 Set `LODY_LORO_STREAMS_WS_ENABLED=1` (or `true`) when building Cloud Electron
-to opt the renderer and bundled daemon presence into Streams WebSocket. An unset
+to opt the renderer and the bundled daemon's presence and durable rooms into
+Streams WebSocket. An unset
 flag defaults to off. For compatibility, the Cloud build still accepts
 `VITE_LORO_STREAMS_WS_ENABLED` when the primary flag is absent. For a standalone
 daemon, set `LODY_LORO_STREAMS_WS_ENABLED=1` when starting it.
@@ -179,6 +180,14 @@ discovers the runtime-selected port and connects as a local non-browser caller,
 which the Hub trusts without an Origin header. In Lody, review and
 select the resulting MCP catalog entry in trusted UI/CLI before starting a later
 agent session.
+
+### Loro WASM memory
+
+The renderer and its background session sync worker each configure their own
+Loro WASM instance. Each starts reclaiming memory at 200 MiB of live allocations
+and targets 160 MiB. Loro applies its 512 MiB hard budget to live allocations and
+linear memory at its admission checks. WASM pages stay allocated until their
+instance exits.
 
 ### Build
 

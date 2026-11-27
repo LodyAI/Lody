@@ -1,0 +1,28 @@
+---
+title: "20261019"
+version: 0.107.0
+date: 2026-10-19
+description: "Notifications natives de résultat, estimations des coûts par tour, Rôles multi-machines, diagrammes Mermaid et Linux ARM64, ainsi que des correctifs de stabilité des sessions et du moteur de synchronisation."
+---
+
+Version 0.107.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Notifications natives de résultat lorsqu'un Agent termine sa tâche, avec un libellé plus proche du contexte de travail actuel.
+- Estimations des coûts par tour.
+- Exécutez un même Rôle d'Agent sur plusieurs machines ; proposez la création ou la mise à jour de Rôles via MCP / CLI.
+- Rendu des diagrammes Mermaid dans le chat avec Pele ; les aperçus Markdown peuvent afficher des images intégrées.
+- Lanceur « Ouvrir avec Delta » ; icônes des Agents connectés dans les paramètres de la machine.
+- Navigation dans les modifications sur mobile alignée sur celle du bureau.
+- Installeurs Linux ARM64 pour les versions stable et Nightly.
+- Les rapports de bogues incluent les diagnostics client et les détails d'environnement pour faciliter le tri.
+
+### 🐛 Correctifs et améliorations
+
+- Sessions et Daemon plus fiables : le ramasse-miettes d'inactivité ne supprime plus les sessions dont l'agent travaille encore, les échecs de démarrage temporaires peuvent être relancés et la discussion peut se poursuivre après un arrêt.
+- Diverses optimisations et corrections du moteur de synchronisation.
+- Prévisualisation des fichiers locaux sans Daemon actif ; les citations Codex s'affichent sous forme de cartes de fichier et l'importation de l'historique Codex intégré est rétablie.
+- Compatibilité d'exécution avec iOS 16.4+ ; les boutons de barre de titre Windows ne recouvrent plus les fenêtres superposées.
+
+Merci à Astro-Han, scbizu et timonwong pour leur contribution à cette version !

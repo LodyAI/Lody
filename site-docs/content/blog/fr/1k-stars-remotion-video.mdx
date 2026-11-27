@@ -1,0 +1,95 @@
+---
+title: "Mille étoiles rendues en vidéo : les coulisses du court-métrage des 1K de Lody"
+date: 2026-09-09
+author: Lody Team
+authorLink: https://lody.ai
+description: "Lody vient de dépasser les 1 000 étoiles sur GitHub. Plutôt que d'ouvrir un éditeur vidéo, nous avons écrit la vidéo de célébration en code avec Remotion."
+image: /_docs-assets/1k-video/cover.png
+tag: "Ingénierie"
+sidebar: false
+aside: false
+---
+
+Lody a récemment atteint les 1 000 étoiles sur GitHub. Merci à toutes celles et ceux qui ont cliqué sur cette étoile !
+
+Un tel cap mérite une vraie vidéo de célébration, et celle-ci — chaque image et chaque son — a été entièrement générée par du code. Nous souhaitons donc vous présenter ses coulisses et partager les choix qui ont guidé sa conception.
+
+## Pourquoi créer une vidéo avec du code
+
+Nous avons utilisé [Remotion](https://remotion.dev), car chaque image de la vidéo est un composant React rendu à un instant donné. La vidéo bénéficie ainsi de tous les avantages du code : gestion de versions, paramétrage, réutilisation de composants et contrôle à l'image près à 60 fps.
+
+Un mouvement de caméra vous semble bancal ? Modifiez une valeur, relancez le rendu, et quelques dizaines de secondes plus tard vous avez une nouvelle version — au lieu de passer une demi-heure à ajuster des éléments sur une timeline. C'est également adapté à l'IA : une IA peut générer directement des composants React, ou produire des données JSON que React se charge d'afficher.
+
+La structure de la vidéo est simple :
+
+<img src="/_docs-assets/1k-video/timeline.png" alt="Chronologie de la structure de la vidéo" />
+
+Les 7 premières secondes consistent en un mouvement de caméra 3D sur la page du dépôt GitHub : la caméra zoome, un curseur clique sur Star, et le compteur grimpe jusqu'à 1 000. Les 6 dernières secondes plongent dans l'univers aquarelle propre à Lody.
+
+Voici les aspects techniques qui nous ont semblé les plus intéressants.
+
+## 1. Redessiner GitHub plutôt qu'utiliser des captures d'écran
+
+Dès le départ, nous avons senti qu'il ne fallait pas utiliser de vraies captures d'écran.
+
+Sous une caméra qui avance, une image matricielle a une résolution limitée : demandez à une IA de capturer la page et vous tomberez vite sur le cas limite où tout devient flou dès que vous zoomez. De plus, rien ne peut bouger dans une capture d'écran.
+
+Nous avons donc entièrement redessiné la page dans le DOM — la barre d'onglets, les boutons, la liste des fichiers, le panneau latéral « About » — avec des icônes issues des octicons officiels de GitHub.
+
+Redessiner offre un avantage supplémentaire : les éléments peuvent s'animer. À l'ouverture, chaque section de la page descend par le haut et vient « s'arrimer » à sa place avec un léger dépassement, comme si l'interface s'assemblait d'elle-même sous vos yeux.
+
+Tout repose sur une fonction de moins de dix lignes :
+
+```tsx
+const dock = (delay: number): React.CSSProperties => {
+  const s = spring({frame: frame - delay, fps, config: {damping: 14, mass: 0.9, stiffness: 160}});
+  return {
+    opacity: interpolate(s, [0, 0.45], [0, 1], {extrapolateRight: 'clamp'}),
+    transform: `translateY(${interpolate(s, [0, 1], [-80, 0])}px)`,
+  };
+};
+```
+
+Appliquez `...dock(n)` sur chaque section, décalez `n` de quelques images de haut en bas, et la page prend vie.
+
+Pour le curseur qui clique sur le bouton Star : le bouton est incliné dans l'espace 3D, nous faisons donc passer les coordonnées de la page par la même matrice de rotation-projection afin de retrouver les coordonnées à l'écran — le curseur atterrit ainsi toujours exactement au centre du bouton.
+
+## 2. Le ressenti caméra
+
+La différence entre une « prise de vue à la caméra » et « un PowerPoint animé » tient surtout à la profondeur de champ et à la continuité du mouvement.
+
+L'approche la plus simple de la profondeur de champ consiste à appliquer un grand flou avec une fenêtre nette, mais cela laisse une démarcation brutale. Nous avons donc empilé trois couches : une couche plein cadre fortement floutée tout en bas, une couche légèrement floutée couvrant une large zone adoucie au milieu, et un cœur net limité au voisinage du plan focal tout en haut. Les trois utilisent de larges masques progressifs, de sorte que l'intensité du flou décroît graduellement avec la distance de défocalisation :
+
+<img src="/_docs-assets/1k-video/dof.png" alt="Trois couches de profondeur de champ" />
+
+> À strictement parler, une profondeur de champ graduée est un phénomène optique — elle devrait reposer sur un noyau de convolution, et non sur un simple dégradé linéaire. Mais compte tenu de la résolution et du débit des vidéos sur les réseaux sociaux, un simple dégradé est largement suffisant.
+
+Pour la continuité : une fois le mouvement de caméra terminé, la page conserve une subtile oscillation de « respiration ». La première version déclenchait cette oscillation à l'image exacte où la caméra s'arrêtait — mais le sinus ne passait pas par zéro à cet instant, ce qui provoquait un léger à-coup à peine perceptible dans le plan, comme une image sautée.
+
+La solution consiste à faire démarrer le sinus à un passage par zéro et à le multiplier par une enveloppe d'apparition et de disparition en fondu :
+
+```tsx
+const breathe =
+  Math.sin((frame - 92) / 55) * 0.9 *
+  interpolate(frame, [92, 122, 266, 296], [0, 1, 1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+```
+
+L'oscillation naît de l'immobilité et s'éteint en douceur avant le mouvement de recul.
+
+## 3. Le son est lui aussi généré par le code
+
+La bande-son n'est pas un morceau libre de droits choisi au hasard et posé par-dessus. Nous avons utilisé une piste libre de droits comme base — le morceau sélectionné est en la majeur, si bien que chaque effet sonore a ensuite été synthétisé par le code dans cette même tonalité de la majeur : la montée sous le compteur gravit la gamme pentatonique, le passage à 1 000 déclenche une cloche en la majeur, et le scintillement des confettis repose sur quelques harmoniques de harpe dans la même tonalité.
+
+<img src="/_docs-assets/1k-video/audio.png" alt="Système audio" />
+
+## Pour conclure
+
+Merci encore pour ces mille étoiles — ainsi qu'à toutes celles et ceux qui ont signalé un problème, ouvert une PR ou recommandé Lody autour d'eux !
+
+Si vous souhaitez essayer de créer des vidéos avec du code, Remotion est un excellent point de départ !
+
+- GitHub : [github.com/LodyAI/lody](https://github.com/LodyAI/lody)
+- Site web : [lody.ai](/fr/)

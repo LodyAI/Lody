@@ -1,0 +1,35 @@
+---
+title: "20260206"
+version: 0.31.0
+date: 2026-02-06
+description: "新增新模型支援、對話提及功能、本機工作區整合，以及更新的 CLI 驗證流程。"
+---
+
+### Opus 4.6 與 gpt-5.3-code
+
+<img src="/_docs-assets/20260206-new-model.png" style={{ maxHeight: '400px' }} />
+
+### 對話內提及功能
+
+- 使用 `@` 提及檔案並支援模糊搜尋
+- 使用 `#` 提及 GitHub Issue 與 PR
+
+<img src="/_docs-assets/20260206-mention.png" alt="mention" />
+
+### 本機工作區整合
+
+- 若與 CLI 在同一台機器上工作，現在可直接從對話無縫開啟 IDE
+
+<img src="/_docs-assets/20260206-open-in.png" style={{ maxHeight: '300px' }} />
+
+### 全新 CLI 驗證方案
+
+- CLI 現已支援使用者所有工作區的對話請求
+
+## 修復
+
+- 使用 API Key 模式還原工作階段時，現可正確載入環境變數
+- 修復多項編輯器與輸入框問題
+- 修復工作區與工作階段介面的邊緣情況問題
+- 修復行動裝置對話失敗詳情的顯示方式，便於排查問題
+- 提升後端與執行階段穩定性

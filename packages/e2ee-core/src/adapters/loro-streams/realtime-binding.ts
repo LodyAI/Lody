@@ -29,7 +29,8 @@ export const makeRealtimeContentBinding = Effect.fnUntraced(function* (input: {
 }) {
   const active = new Set<Deferred.Deferred<void>>();
   let closed = false;
-  const fail = () => new ContentError({ code: closed ? 'closed' : 'unauthorized' });
+  const fail = (code: 'unauthorized' | 'epoch-mismatch' = 'unauthorized') =>
+    new ContentError({ code: closed ? 'closed' : code });
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       closed = true;
@@ -83,7 +84,7 @@ export const makeRealtimeContentBinding = Effect.fnUntraced(function* (input: {
             const view = yield* current();
             yield* permitted(view, input.signer.publicKey);
             const selected = epoch ?? view.inspectState().epoch.number;
-            if (selected !== view.inspectState().epoch.number) yield* fail();
+            if (selected !== view.inspectState().epoch.number) yield* fail('epoch-mismatch');
             const frame = yield* withKey(selected, (epochKey) =>
               (purpose === 'request' ? sealRpcRequestContent : sealRpcResponseContent)({
                 scope: {
@@ -99,7 +100,7 @@ export const makeRealtimeContentBinding = Effect.fnUntraced(function* (input: {
             const latest = yield* current();
             yield* Effect.fromResult(requireLedgerContinuation(view, latest));
             yield* permitted(latest, input.signer.publicKey);
-            if (latest.inspectState().epoch.number !== selected) yield* fail();
+            if (latest.inspectState().epoch.number !== selected) yield* fail('epoch-mismatch');
             return frame;
           }),
         (owned) => Effect.sync(() => owned.fill(0))
@@ -116,15 +117,15 @@ export const makeRealtimeContentBinding = Effect.fnUntraced(function* (input: {
         const view = yield* current();
         const contentPurpose = purpose === 'request' ? 'rpc-request' : 'rpc-response';
         const metadata = yield* Effect.fromResult(inspectContentFrame(frame, contentPurpose));
-        const selected = epoch ?? view.inspectState().epoch.number;
-        if (metadata.epoch !== selected || (expected !== undefined && metadata.device !== expected))
-          yield* fail();
+        if (expected !== undefined && metadata.device !== expected) yield* fail();
         const signer = yield* Effect.fromResult(
           Bytes.signingPublicKey(
             Uint8Array.from(metadata.device.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16))
           )
         );
         yield* permitted(view, signer);
+        const selected = epoch ?? view.inspectState().epoch.number;
+        if (metadata.epoch !== selected) yield* fail('epoch-mismatch');
         const scope = {
           genesis: hex(input.genesis.toBytes()),
           resource: input.resource,
@@ -149,7 +150,7 @@ export const makeRealtimeContentBinding = Effect.fnUntraced(function* (input: {
           yield* Effect.fromResult(requireLedgerContinuation(view, latest));
           yield* permitted(latest, signer);
           if (purpose === 'request' && latest.inspectState().epoch.number !== selected)
-            yield* fail();
+            yield* fail('epoch-mismatch');
         }).pipe(Effect.onError(() => Effect.sync(() => plaintext.fill(0))));
         return { plaintext, signer: metadata.device, epoch: selected };
       })

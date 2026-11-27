@@ -1,0 +1,32 @@
+---
+title: "Entrada de imágenes"
+description: "Envía capturas de pantalla, maquetas de UI, capturas de errores y otras imágenes a una sesión de Lody como contexto visual del prompt."
+---
+
+# Entrada de imágenes
+
+Lody admite la entrada de imágenes en el chat de la sesión. Puedes enviar capturas de pantalla, maquetas de UI, capturas de errores y otros elementos visuales como parte del contexto del prompt.
+
+<ImageInputPreview locale="es" />
+
+## Casos de uso
+
+- Explicar errores visuales con capturas de pantalla directas.
+- Pedir a la IA que lea detalles de la UI a partir de imágenes.
+- Combinar evidencia en imágenes con contexto de código en un solo turno.
+
+## Cómo usarlo
+
+1. Abre un chat de sesión.
+2. Abre el menú de archivos adjuntos `+` y elige **Subir imagen**, pega una imagen desde el portapapeles o
+   arrastra archivos de imagen a cualquier lugar sobre la interfaz de la sesión.
+3. Escribe tu instrucción y envía.
+
+Puedes adjuntar hasta 8 imágenes a un mensaje, con un tamaño máximo de 5 MiB por imagen. Las imágenes más grandes
+se pueden enviar como archivos normales mediante [Archivos adjuntos](/es/docs/file-attachments).
+
+<Callout type="warn">
+
+La compatibilidad con imágenes depende del modelo actual. Asegúrate de que el modelo seleccionado admita entrada de visión.
+
+</Callout>

@@ -1,0 +1,130 @@
+---
+title: "快速開始"
+description: "透過桌面應用程式或 CLI 安裝並完成 Lody 設定，接著連結 GitHub 並設定您的 Agent。"
+---
+
+import { MonitorDown, TabletSmartphone, Compass, SquareTerminal } from 'lucide-react';
+
+# 快速開始
+
+無論您在何處工作，Lody 都能流暢運作：提供 macOS、Windows 與 Linux 原生桌面應用程式、iOS 與 Android 行動應用程式、任何網頁瀏覽器，以及可在遠端伺服器上執行的 CLI。
+
+<Cards>
+  <Card href="/zh-hant/download" title="下載桌面應用程式" icon={<MonitorDown />}>
+    macOS、Windows、Linux
+  </Card>
+  <Card href="/zh-hant/download" title="下載行動應用程式" icon={<TabletSmartphone />}>
+    iOS、Android
+  </Card>
+  <Card href="/login" icon={<Compass />} title="登入 Lody">
+    在瀏覽器中開啟 Lody
+  </Card>
+  <Card href="#從-cli-啟動" icon={<SquareTerminal />} title="啟動 CLI">
+    從伺服器使用 Lody
+  </Card>
+</Cards>
+
+在伺服器上執行以下指令：
+
+```bash
+npx lody daemon start
+```
+
+## 從桌面應用程式啟動
+
+- 從[下載頁面](/zh-hant/download)下載對應作業系統平台的安裝程式並進行安裝。
+- 在 macOS 或 Linux 上，您也可以使用 [Homebrew](https://formulae.brew.sh/cask/lody) 安裝：
+  ```bash
+  brew install --cask lody
+  ```
+- 首次啟動時，Lody 會自動開啟瀏覽器，引導您註冊或登入帳號。
+- 桌面應用程式也會在您的電腦上啟動 Lody 的本機 [CLI daemon](/zh-hant/docs/cli#daemon-模式)。CLI 才是實際執行 Agent 的處理程序。
+
+## 從 CLI 啟動
+
+### 前置需求
+
+- Node.js 22.23.4+（22.x）、24.22.1+（24.x）或 26.12.1+（26.x），且須支援 Node-API 10+
+
+### 啟動
+
+```bash tab="Daemon 模式（建議）"
+npx lody daemon start
+```
+
+```bash tab="前景執行"
+npx lody login
+npx lody start
+```
+
+`npx lody daemon start` 會先檢查是否能連線至 Lody，以及這台機器是否已登入。若尚未登入，它會直接啟動 device code 驗證流程：在瀏覽器中開啟登入頁面（若為無螢幕的 headless 主機，則會改為在終端機印出連結）並等待您完成登入，之後便會轉入背景執行。這同時也是連接遠端機器的方式——透過 SSH 在伺服器、雲端虛擬機或另一台工作站上執行此指令，該機器就會出現在您的工作區中。
+
+若 CLI 異常結束，daemon 會自動將其重新啟動。如果您完全無法開啟瀏覽器，可直接執行 `npx lody daemon start --auth <cli_token>` 來啟動。您可以在桌面應用程式的 **設定** -> **帳戶** -> **CLI Token** 中檢視與產生 `cli_token`。如果您希望將登入作為獨立步驟，仍可使用 `npx lody login`。
+
+<Callout title="僅將桌面應用程式作為遠端控制台使用">
+桌面應用程式預設會啟動內建的本機 CLI，以便在這台電腦上執行 Agent。如果您只想控制其他機器上的 Agent，請前往 **設定** -> **一般** -> **啟動**，並關閉 **執行本機 Agent**。
+
+關閉後，桌面應用程式將停止管理該本機 CLI，並在下次啟動時維持關閉狀態；其他機器上執行的 Agent 不受影響。
+
+</Callout>
+
+## 新增專案
+
+### 新增本機專案
+
+<Tabs items={['桌面應用程式', '行動應用程式', 'CLI']}>
+<Tab value="桌面應用程式">
+請使用 **設定** -> **專案** 右上角的按鈕。選擇目標機器後，Lody 會列出其目錄清單，讓您選擇其中一個目錄作為專案根目錄。
+</Tab>
+<Tab value="行動應用程式">
+請使用 **專案** 右上角的按鈕。選擇目標機器後，Lody 會列出其目錄清單，讓您選擇其中一個目錄作為專案根目錄。
+</Tab>
+<Tab value="CLI">
+執行 `npx lody project add <path>`，其中 `<path>` 為專案的根目錄。
+</Tab>
+</Tabs>
+
+### 連結您的 GitHub 儲存庫
+
+在網頁版應用程式中，點擊左下角的 **設定**，接著前往 **GitHub 整合** -> **管理**，以授權存取您的 GitHub 儲存庫。授權完成後，Lody 會將您重新導向回來，讓您挑選要加入工作區的儲存庫。[了解更多](/zh-hant/docs/github)
+
+## 設定 Agent
+
+Lody 內建多種 ACP Provider，包括 Claude Code、Codex、Grok、Kimi Code、Devin、Pi、DeepSeek Harness、Bub 與 Dimcode。您也可以自行匯入自訂的 ACP Agent，以及任何列於 [ACP Registry](https://agentclientprotocol.com/get-started/registry) 的 CLI。請在桌面或行動應用程式的 **設定** -> **Agent** 中進行新增與設定。
+
+[Claude Code 與 Codex](/zh-hant/docs/claude-codex-capabilities) 由 Lody 團隊直接維護，因此支援超越 ACP 協定範圍的進階功能。
+
+若要使用內建的 Dimcode，請先在目標機器上安裝支援 ACP 的 CLI，並確保 PATH 中可執行 `dimcode acp`。其版本由您自行管理，Lody 不會代為下載或升級。升級完成後，請在設定中重新整理該 Provider。請參閱 [Dimcode 安裝指南](https://www.dimcode.dev/en/docs/getting-started/)。
+
+### 常見問題
+
+<Accordions>
+  <Accordion title="清單中沒有我想要的 Agent">
+     您可以自行加入自訂的 ACP Agent。請前往桌面或行動應用程式中的 **設定** -> **Agent**，選擇 **自訂 Agent**，然後填入啟動指令與參數即可。
+  </Accordion>
+  <Accordion title="已選擇 Agent，但找不到最新的模型">
+      Lody 會在應用程式啟動時及對話開始時，自動重新整理各個 Agent 的設定清單。若清單中缺少您預期的模型，請嘗試點擊該 Agent 設定中的重新整理按鈕。若是剛發布的新模型，則可能需要等待 Lody 更新支援。
+  </Accordion>
+</Accordions>
+
+## 檔案位置
+
+| 項目   | 路徑            |
+| ------ | --------------- |
+| 儲存庫 | `~/.lody/repos` |
+| 紀錄檔 | `~/.lody/logs`  |
+
+## 仍然無法連線？重設本機快取
+
+如果應用程式在版本更新後顯示過時資料或無法載入，請開啟 **設定** -> **快取與儲存空間**，並點選 **清除本機快取**。這會刪除 Lody 在所有工作區的本機快取（包含離線複本、同步資料快取與圖片快取）並重新載入應用程式。您的帳號與已同步的資料均安全無虞，系統會自動重新下載，且您仍會保持登入狀態。行動應用程式的設定頁面中也提供相同選項。
+
+## 下一步
+
+🎉 以上已完成基本設定。接下來您可以進一步探索 Lody 的各項功能：
+
+- [執行您的第一次對話](/zh-hant/docs/first-session) - 透過一個小任務，完整走過從下達提示到審查結果的流程
+- [閱讀核心概念與詞彙表](/zh-hant/docs/concepts) - 了解每個畫面背後的運作物件
+- [CLI 指令](/zh-hant/docs/cli) - 查看所有 `lody` 指令與參數選項
+- [認識 Worktree](/zh-hant/docs/worktrees) - 了解 Lody 如何隔離不同任務
+- [CLI 執行階段類型](/zh-hant/docs/cli-runtimes) - 新增 ACP Registry 執行階段或自訂 ACP Agent
+- [行動端存取](/zh-hant/docs/mobile) - 直接在手機上審查並核准變更

@@ -215,6 +215,21 @@ export const PersonalReadOnly: Story = {
     await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
   },
 };
+export const AddMemberMenuOpen: Story = {
+  args: {
+    state: {
+      ...memberState,
+      visibility: 'team',
+      access: 'edit',
+      memberUserIds: [],
+      openMachineSettings: fn(),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getAllByRole('button')[0]);
+    await userEvent.click(await within(document.body).findByRole('button', { name: 'Add member' }));
+  },
+};
 export const PersonalReadOnlyChinese: Story = {
   ...PersonalReadOnly,
   globals: { locale: 'zh_CN' },

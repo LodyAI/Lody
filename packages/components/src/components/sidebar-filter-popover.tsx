@@ -1,6 +1,8 @@
 import { type ReactElement, type ReactNode, useId, useState } from 'react';
 import {
   Check,
+  ChevronRight,
+  UserCheck,
   CircleDot,
   Clock,
   Eye,
@@ -13,11 +15,6 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { text } from '@lody/ui/tokens/scales.stylex';
-
-const typography = stylex.create({
-  option: { fontSize: text.subheadlineSize, lineHeight: text.subheadlineLeading },
-});
 
 import { Popover } from '@lody/ui/popover';
 import { Button, type ButtonSize } from '@lody/ui/button';
@@ -25,11 +22,16 @@ import { menuSeparatorClassName, menuStyles } from '@/ui/menu-styles';
 import { Switch } from '@lody/ui/switch';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import type { SidebarChatScope } from '@/atoms/sidebar-state';
+import {
+  OwnerFilterPopover,
+  defaultOwnerFilterLabels,
+  summarizeOwners,
+  type OwnerFilterLabels,
+  type SidebarFilterMember,
+} from '@/components/sidebar-owner-filter';
 import { themeColors } from '../style/theme-colors.stylex';
+import { filterOptionStyles, filterOptionTypography } from './sidebar-filter-option-styles';
 import { themeRadius, themeSpace } from '../style/theme-scale.stylex';
-
-const DARK_SCOPE =
-  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 
 const styles = stylex.create({
   content: {
@@ -37,59 +39,6 @@ const styles = stylex.create({
     minWidth: 200,
     gap: 'calc(var(--spacing) * 0)',
     padding: 'calc(var(--spacing) * 0.5)',
-  },
-  /** A menu option: the row a person picks an option from. */
-  option: {
-    display: 'flex',
-    minHeight: themeSpace[7],
-    width: '100%',
-    userSelect: 'none',
-    alignItems: 'center',
-    gap: themeSpace[2],
-    borderRadius: themeRadius.md,
-    paddingInline: themeSpace[2],
-    paddingBlock: themeSpace[1],
-    textAlign: 'left',
-    backgroundColor: {
-      default: 'transparent',
-      ':hover': {
-        default: 'hsl(var(--foreground) / 0.05)',
-        [DARK_SCOPE]: {
-          '@media (hover: hover)': {
-            default: 'hsl(var(--foreground) / 0.1)',
-          },
-        },
-      },
-      ':focus-visible': {
-        default: 'hsl(var(--foreground) / 0.05)',
-        [DARK_SCOPE]: 'hsl(var(--foreground) / 0.1)',
-      },
-    },
-    color: {
-      default: themeColors.popoverForeground,
-      ':hover': themeColors.foreground,
-      ':focus-visible': themeColors.foreground,
-    },
-  },
-  optionIcon: {
-    width: themeSpace[3.5],
-    height: themeSpace[3.5],
-    flexShrink: 0,
-    color: themeColors.mutedForeground,
-  },
-  optionSpacer: {
-    width: themeSpace[3.5],
-    height: themeSpace[3.5],
-    flexShrink: 0,
-  },
-  optionLabel: {
-    minWidth: 0,
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: '0%',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
   },
   /** The menu's pre-v2 rhythm, kept on purpose: a heading hugs the rows under
       it (6px above, 2px below) instead of taking a whole 28px row of its own. */
@@ -122,6 +71,27 @@ const styles = stylex.create({
     cursor: 'pointer',
   },
   triggerGlyph: { width: '14px', height: '14px' },
+  triggerGlyphWrap: { position: 'relative', display: 'inline-flex' },
+  /** Marks a trigger whose Tasks filter narrows to chosen people. */
+  triggerActiveDot: {
+    position: 'absolute',
+    top: -2,
+    right: -3,
+    width: 6,
+    height: 6,
+    borderRadius: '50%',
+    backgroundColor: themeColors.primary,
+  },
+  ownerSummary: {
+    minWidth: 0,
+    maxWidth: 120,
+    flexShrink: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: themeColors.mutedForeground,
+  },
+  ownerSummaryCount: { flexShrink: 0, color: themeColors.mutedForeground },
 });
 
 export type { SidebarOrganizeMode, SidebarChatScope };
@@ -166,11 +136,23 @@ const defaultLabels: SidebarFilterLabels = {
   showAllTasksAction: 'Show all tasks',
 };
 
+export type { SidebarFilterMember };
+
 export type SidebarFilterPopoverProps = {
   organize: SidebarOrganizeMode;
   scope: SidebarChatScope;
   onOrganizeChange?: (next: SidebarOrganizeMode) => void;
   onScopeChange?: (next: SidebarChatScope) => void;
+  /** Workspace members the Owner list offers; the row shows only when there are two or more. */
+  members?: readonly SidebarFilterMember[];
+  /** People chosen in the team scope; empty means every owner. */
+  selectedMemberIds?: readonly string[];
+  /** Ticks or unticks one person without closing the menu. */
+  onToggleMember?: (userId: string) => void;
+  ownerLabels?: Partial<OwnerFilterLabels>;
+  /** Controlled open state of the Owner list, so a shortcut can open it with the menu. */
+  ownerOpen?: boolean;
+  onOwnerOpenChange?: (open: boolean) => void;
   /** Whether Updated-mode rows show their project identity line. */
   showUpdatedProjectNames?: boolean;
   onShowUpdatedProjectNamesChange?: (next: boolean) => void;
@@ -205,7 +187,7 @@ type MenuOptionProps = {
 };
 
 function MenuOption({ label, icon: Icon, selected, onSelect }: MenuOptionProps) {
-  const optionProps = stylex.props(styles.option, typography.option);
+  const optionProps = stylex.props(filterOptionStyles.option, filterOptionTypography.option);
   return (
     <button
       type="button"
@@ -214,12 +196,16 @@ function MenuOption({ label, icon: Icon, selected, onSelect }: MenuOptionProps) 
       className={optionProps.className}
       onClick={onSelect}
     >
-      <Icon {...stylex.props(styles.optionIcon)} strokeWidth={1.75} aria-hidden="true" />
-      <span {...stylex.props(styles.optionLabel)}>{label}</span>
+      <Icon
+        {...stylex.props(filterOptionStyles.optionIcon)}
+        strokeWidth={1.75}
+        aria-hidden="true"
+      />
+      <span {...stylex.props(filterOptionStyles.optionLabel)}>{label}</span>
       {selected ? (
-        <Check {...stylex.props(styles.optionIcon)} aria-hidden="true" />
+        <Check {...stylex.props(filterOptionStyles.optionIcon)} aria-hidden="true" />
       ) : (
-        <span {...stylex.props(styles.optionSpacer)} aria-hidden="true" />
+        <span {...stylex.props(filterOptionStyles.optionSpacer)} aria-hidden="true" />
       )}
     </button>
   );
@@ -248,10 +234,14 @@ function SwitchRow({
   kind: 'project' | 'branch' | 'empty-projects';
 }) {
   const switchId = useId();
-  const labelProps = stylex.props(styles.switchLabel, typography.option);
+  const labelProps = stylex.props(styles.switchLabel, filterOptionTypography.option);
   return (
     <div data-sidebar-filter-section-row="details" {...stylex.props(styles.switchRow)}>
-      <Icon {...stylex.props(styles.optionIcon)} strokeWidth={1.75} aria-hidden="true" />
+      <Icon
+        {...stylex.props(filterOptionStyles.optionIcon)}
+        strokeWidth={1.75}
+        aria-hidden="true"
+      />
       <label htmlFor={switchId} className={labelProps.className}>
         {label}
       </label>
@@ -274,6 +264,12 @@ export function SidebarFilterPopover({
   scope,
   onOrganizeChange,
   onScopeChange,
+  members,
+  selectedMemberIds = [],
+  onToggleMember,
+  ownerLabels,
+  ownerOpen: controlledOwnerOpen,
+  onOwnerOpenChange,
   showUpdatedProjectNames = true,
   onShowUpdatedProjectNamesChange,
   showBranchNames = false,
@@ -303,6 +299,21 @@ export function SidebarFilterPopover({
     onOrganizeChange?.(next);
     handleOpenChange(false);
   };
+  const mergedOwnerLabels = { ...defaultOwnerFilterLabels, ...ownerLabels };
+  const [uncontrolledOwnerOpen, setUncontrolledOwnerOpen] = useState(false);
+  const ownerOpen = controlledOwnerOpen ?? uncontrolledOwnerOpen;
+  const setOwnerOpen = (next: boolean) => {
+    setUncontrolledOwnerOpen(next);
+    onOwnerOpenChange?.(next);
+  };
+  const ownerMembers = members && members.length > 1 ? members : null;
+  const filtersByMember = scope === 'team' && selectedMemberIds.length > 0;
+  // My Tasks is "Owner is you": the list shows you ticked, and ticking a
+  // teammate from there keeps you (see `toggleTaskOwnerSelection`).
+  const currentUserId = members?.find((member) => member.isCurrentUser)?.userId;
+  const ownerSelectedIds =
+    scope === 'my' ? (currentUserId ? [currentUserId] : []) : selectedMemberIds;
+  const ownerSummary = filtersByMember ? summarizeOwners(members ?? [], selectedMemberIds) : null;
   const handleScopeSelect = (next: SidebarChatScope) => {
     onScopeChange?.(next);
     handleOpenChange(false);
@@ -319,9 +330,15 @@ export function SidebarFilterPopover({
               icon
               aria-label={merged.triggerAriaLabel}
               data-state-open={open || undefined}
+              data-filter-active={filtersByMember || undefined}
               className={triggerClassName}
             >
-              <SlidersHorizontal {...stylex.props(styles.triggerGlyph)} strokeWidth={1.5} />
+              <span {...stylex.props(styles.triggerGlyphWrap)}>
+                <SlidersHorizontal {...stylex.props(styles.triggerGlyph)} strokeWidth={1.5} />
+                {filtersByMember ? (
+                  <span {...stylex.props(styles.triggerActiveDot)} aria-hidden="true" />
+                ) : null}
+              </span>
             </Button>
           )
         }
@@ -368,9 +385,58 @@ export function SidebarFilterPopover({
           <MenuOption
             label={merged.showAllTasks}
             icon={Users}
-            selected={scope === 'team'}
+            selected={scope === 'team' && !filtersByMember}
             onSelect={() => handleScopeSelect('team')}
           />
+          {ownerMembers ? (
+            <OwnerFilterPopover
+              members={ownerMembers}
+              selectedMemberIds={ownerSelectedIds}
+              onToggleMember={(userId) => onToggleMember?.(userId)}
+              labels={ownerLabels}
+              open={ownerOpen}
+              onOpenChange={setOwnerOpen}
+              openOnHover
+              side="right"
+              align="start"
+              trigger={
+                <button
+                  type="button"
+                  role="menuitem"
+                  aria-haspopup="dialog"
+                  data-sidebar-filter-owner-row=""
+                  className={
+                    stylex.props(filterOptionStyles.option, filterOptionTypography.option).className
+                  }
+                >
+                  <UserCheck
+                    {...stylex.props(filterOptionStyles.optionIcon)}
+                    strokeWidth={1.75}
+                    aria-hidden="true"
+                  />
+                  <span {...stylex.props(filterOptionStyles.optionLabel)}>
+                    {mergedOwnerLabels.owner}
+                  </span>
+                  {ownerSummary ? (
+                    // The first name plus a count: the row has room for one name,
+                    // and the count must survive truncation.
+                    <>
+                      <span {...stylex.props(styles.ownerSummary)}>{ownerSummary.all[0]}</span>
+                      {ownerSummary.all.length > 1 ? (
+                        <span {...stylex.props(styles.ownerSummaryCount)}>
+                          +{ownerSummary.all.length - 1}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : null}
+                  <ChevronRight
+                    {...stylex.props(filterOptionStyles.optionIcon)}
+                    aria-hidden="true"
+                  />
+                </button>
+              }
+            />
+          ) : null}
         </div>
         <div className={menuSeparatorClassName} aria-hidden="true" />
         <div data-sidebar-filter-section="details">

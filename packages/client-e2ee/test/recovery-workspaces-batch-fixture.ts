@@ -41,7 +41,7 @@ import { WorkspaceScope } from '@lody/e2ee-core/services';
 import { Context, Layer } from 'effect';
 import { LedgerFeedStore } from '@lody/e2ee-core/services';
 import { indexedDbClientStores } from '@lody/e2ee-core/adapters/indexeddb';
-import { verifyPersonalOffer } from '@lody/e2ee-client';
+import { verifyPersonalOffer, verifyPersonalRequest } from '@lody/e2ee-client';
 import type { RecoveryVaultCiphertextDto } from '@lody/cloud-api';
 
 type Workspace = {
@@ -66,9 +66,14 @@ let stage = 'new';
 let blocked = false;
 let historyMetadata = true;
 let loseAppendReply = false;
+let lastBeginRequestHex: string | null = null;
 let emptyMailbox = false;
 let historyReads = 0;
+let entryReads = 0;
 let stagingReads = 0;
+let inlineAppendHistory: 'none' | 'contiguous' | 'gap' = 'none';
+let mailboxFetches: Array<{ workspaceId: string; recipient: string; kind?: string }> = [];
+let mailboxStatuses: Array<{ workspaceId: string; recipient: string }> = [];
 const stagedGroups = new Map<string, EpochStagedGroup>();
 /** Committed epochs whose envelopes have not reached staging yet. */
 const heldGroups = new Map<string, EpochStagedGroup>();
@@ -105,13 +110,30 @@ async function server(path: string, args: Record<string, unknown>) {
     }
   };
   if (path === 'e2eeWorkspaces:appendRecord') {
+    const startIndex = w!.records.length;
     append(w!, raw(String(args.recordHex)), args.credentialHash as string | undefined);
     if (loseAppendReply) {
       loseAppendReply = false;
       throw new Error('synthetic lost append reply');
     }
     await wait(); // Commit happened; acknowledgement is deliberately unknown.
-    return { status: 'committed', recordHash: args.requestId };
+    const page =
+      inlineAppendHistory === 'none'
+        ? undefined
+        : {
+            workspaceId: w!.id,
+            genesisHash: w!.genesisHash,
+            checkpoint: { headHash: hex(view(w!).head.toBytes()), length: w!.records.length },
+            startIndex: inlineAppendHistory === 'gap' ? w!.records.length + 1 : startIndex,
+            recordsHex: w!.records.slice(startIndex).map(hex),
+            position: `p1:${w!.id}:${w!.records.length}:opaque:0`,
+            nextCursor: null,
+          };
+    return {
+      status: 'committed',
+      recordHash: args.requestId,
+      ...(page ? { historyPage: page } : {}),
+    };
   }
   await wait();
   if (path === 'e2eeMembers:workspaces')
@@ -128,7 +150,15 @@ async function server(path: string, args: Record<string, unknown>) {
     entries.set(entry.entryId, entry);
     return { ok: true };
   }
-  if (path === 'e2eeRecoveryVault:readEntry') return entries.get(String(args.entryId)) ?? null;
+  if (path === 'e2eeRecoveryVault:readEntry') {
+    entryReads++;
+    return entries.get(String(args.entryId)) ?? null;
+  }
+  if (path === 'e2eeRecoveryVault:readEntries') {
+    const ids = args.entryIds as string[];
+    if (ids.length > 8) throw new Error('e2ee_recovery_vault_invalid');
+    return ids.map((id) => entries.get(String(id)) ?? null);
+  }
   if (path === 'e2eeRecoveryVault:readIndex') return index;
   if (path === 'e2eeRecoveryVault:compareAndSwapIndex') {
     index = args.next as RecoveryVaultCiphertextDto;
@@ -167,6 +197,11 @@ async function server(path: string, args: Record<string, unknown>) {
     );
     const recipient = w!.credentials.get(hash);
     if (!recipient) throw new Error('synthetic credential missing');
+    mailboxFetches.push({
+      workspaceId: w!.id,
+      recipient,
+      kind: view(w!).inspectState().devices.get(recipient)?.kind,
+    });
     const retained = epochZero.get(`${w!.id}:${recipient}`);
     const frame =
       retained ??
@@ -188,9 +223,25 @@ async function server(path: string, args: Record<string, unknown>) {
       next: null,
     };
   }
+  if (path === 'e2eeJoinMailbox:begin') {
+    lastBeginRequestHex = String(args.requestHex);
+    return {
+      accountId: 'abc',
+      workspaceId: args.workspaceId,
+      genesisHash: args.genesisHash,
+      pairingSessionId: args.pairingSessionId,
+      signingPublicKey: args.signingPublicKey,
+      credentialHash: args.credentialHash,
+      requestHex: args.requestHex,
+      status: 'pending',
+    };
+  }
   if (path === 'e2eeMailbox:report' || path === 'e2eeMailbox:repair') return null;
-  if (path === 'e2eeMailbox:status')
+  if (path === 'e2eeMailbox:status') {
+    const slot = args.slot as { recipient: string };
+    mailboxStatuses.push({ workspaceId: w!.id, recipient: slot.recipient });
     return { ...(args.slot as object), revision: 1, status: 'InstallationReported' };
+  }
   if (path === 'e2eeEpochStaging:readGroup') {
     stagingReads++;
     const group = stagedGroups.get(w!.id);
@@ -438,12 +489,28 @@ export async function admitted() {
     })
   );
 }
+export function setInlineAppendHistory(mode: 'none' | 'contiguous' | 'gap') {
+  inlineAppendHistory = mode;
+}
+export function resetIoCounters() {
+  historyReads = 0;
+  entryReads = 0;
+  stagingReads = 0;
+  mailboxFetches = [];
+  mailboxStatuses = [];
+}
+export async function setupWorkspace(id: string) {
+  return await run(engine.setup({ file }, [id]));
+}
 export function state() {
   return {
     stage,
     blocked,
     historyReads,
+    entryReads,
     stagingReads,
+    mailboxFetches: [...mailboxFetches],
+    mailboxStatuses: [...mailboxStatuses],
     failures,
     progress: snapshots.at(-1),
     snapshots,
@@ -671,4 +738,46 @@ export async function portRestore() {
 /** The next ledger append commits, but its reply never reaches the client. */
 export function loseNextAppendReply() {
   loseAppendReply = true;
+}
+
+/** Prepare a real ordinary personal pairing on a fresh workspace (leaving pin phase
+ * `'pending'`), then admit and revoke that device on the ledger. */
+export async function seedRevokedPendingOrdinaryPin(workspaceId: string) {
+  const w = workspaces.get(workspaceId)!;
+  const ordinaryOffer = {
+    version: 1 as const,
+    workspaceId: w.id,
+    genesisHash: w.genesisHash,
+    genesisRecordHex: hex(w.records[0]!),
+    endorser: hex(w.owner.publicKey.toBytes()),
+    membershipId: hex(view(w).inspectState().owner.toBytes()),
+    pairingSessionId: hex(new Uint8Array(16).fill(0x7a)),
+  };
+  lastBeginRequestHex = null;
+  const prepared = await runtime.preparePersonalJoin!(ordinaryOffer);
+  if (!lastBeginRequestHex) throw new Error('expected begin requestHex');
+  const req = Result.getOrThrow(verifyPersonalRequest(ordinaryOffer, lastBeginRequestHex));
+  const signingPublicKey = Result.getOrThrow(Bytes.signingPublicKey(raw(req.signingPublicKey)));
+  const encryptionPublicKey = Result.getOrThrow(
+    Bytes.encryptionPublicKey(raw(req.encryptionPublicKey))
+  );
+  const possessionSignature = Result.getOrThrow(Bytes.signature(raw(req.possessionSignature)));
+  const admit = Result.getOrThrow(
+    prepareLedgerCommand(view(w), w.owner.publicKey, {
+      _tag: 'AdmitDevice',
+      kind: 'personal',
+      signingPublicKey,
+      encryptionPublicKey,
+      possessionSignature,
+    })
+  );
+  append(w, await run(signLedgerRecord(admit, w.owner)));
+  const revoke = Result.getOrThrow(
+    prepareLedgerCommand(view(w), w.owner.publicKey, {
+      _tag: 'RevokeDevice',
+      target: signingPublicKey,
+    })
+  );
+  append(w, await run(signLedgerRecord(revoke, w.owner)));
+  return [prepared.signingPublicKey];
 }

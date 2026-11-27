@@ -1,16 +1,22 @@
 import {
   type AnalyticsOutcome,
   type AnalyticsSamplingTier,
+  isTelemetryCliType,
+  isTelemetryNativePlatform,
+  isTelemetryPlatform,
+  normalizeTelemetryAgentType,
   pickSampleRate,
   shouldSampleEvent,
+  type TelemetryNativePlatform,
+  type TelemetryPlatform,
 } from '@lody/shared';
 import { readNativeAppInfo } from './native-app-info';
+import { isNativeAppShell } from './native-platform';
 
 export { detectAppDeviceClass } from './device-class';
 export type { AppDeviceClass } from './device-class';
 
 const PERFORMANCE_UNAVAILABLE_VALUE = null;
-const MAX_PROPERTY_STRING_LENGTH = 500;
 
 export const POSTHOG_PROPERTY_DENYLIST: string[] = [
   '$current_url',
@@ -60,8 +66,6 @@ export const POSTHOG_PROPERTY_DENYLIST: string[] = [
   'workspace_slug',
 ];
 
-const postHogPropertyDenylist = new Set<string>(POSTHOG_PROPERTY_DENYLIST);
-
 // PostHog carries the project API key as the reserved `token` event property
 // (`properties.token = config.token`) and applies `property_denylist` *after*
 // setting it. Passing these reserved keys to `posthog.init({ property_denylist })`
@@ -89,10 +93,6 @@ export type PostHogAnalyticsClient = {
     groupProperties?: PostHogAnalyticsProperties
   ) => void;
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 export type AppLaunchMode = 'browser_tab' | 'electron';
 export type AppLaunchOs = 'macos' | 'windows' | 'linux' | 'ios' | 'android' | 'unknown';
@@ -193,52 +193,52 @@ export function getDurationSinceMs(startMs: number): number | null {
   return roundMs(duration);
 }
 
-function sanitizePostHogValue(value: unknown, depth: number): unknown {
-  if (value === null || value === undefined) {
-    return value;
+export function detectTelemetryPlatform(): {
+  platform: TelemetryPlatform;
+  native_platform?: TelemetryNativePlatform;
+} {
+  if (typeof window !== 'undefined' && window.__LODY_ELECTRON__) {
+    return { platform: 'electron' };
   }
-
-  if (typeof value === 'string') {
-    return value.length > MAX_PROPERTY_STRING_LENGTH
-      ? value.slice(0, MAX_PROPERTY_STRING_LENGTH)
-      : value;
+  const nativePlatform = readNativeAppInfo().native_platform?.toLowerCase();
+  if (isTelemetryNativePlatform(nativePlatform)) {
+    return { platform: 'mobile', native_platform: nativePlatform };
   }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return value;
+  if (isNativeAppShell()) {
+    return { platform: 'mobile' };
   }
-
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  if (Array.isArray(value)) {
-    return value.slice(0, 20).map((item) => sanitizePostHogValue(item, depth + 1));
-  }
-
-  if (isRecord(value) && depth < 2) {
-    return sanitizePostHogProperties(value, depth + 1);
-  }
-
-  return String(value).slice(0, MAX_PROPERTY_STRING_LENGTH);
+  return { platform: 'web' };
 }
 
 export function sanitizePostHogProperties(
-  properties: PostHogAnalyticsProperties | null | undefined,
-  depth = 0
+  properties: PostHogAnalyticsProperties | null | undefined
 ): PostHogAnalyticsProperties {
-  if (!properties) {
-    return {};
+  if (!properties) return {};
+  const safe: PostHogAnalyticsProperties = {};
+  const userId = properties.user_id;
+  if (typeof userId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(userId)) {
+    safe.user_id = userId;
   }
-
-  const sanitized: PostHogAnalyticsProperties = {};
-  for (const [key, value] of Object.entries(properties)) {
-    if (postHogPropertyDenylist.has(key)) {
-      continue;
-    }
-    sanitized[key] = sanitizePostHogValue(value, depth);
+  if (isTelemetryPlatform(properties.platform)) {
+    safe.platform = properties.platform;
   }
-  return sanitized;
+  if (isTelemetryNativePlatform(properties.native_platform)) {
+    safe.native_platform = properties.native_platform;
+  }
+  if (isTelemetryCliType(properties.cli_type)) {
+    safe.cli_type = properties.cli_type;
+  }
+  const agentType = normalizeTelemetryAgentType(properties.agent_type);
+  if (agentType !== undefined) {
+    safe.agent_type = agentType;
+  }
+  if (typeof properties.is_new_user === 'boolean') {
+    safe.is_new_user = properties.is_new_user;
+  }
+  if (properties.outcome === 'success' || properties.outcome === 'failed') {
+    safe.outcome = properties.outcome;
+  }
+  return safe;
 }
 
 export function capturePostHogEvent(
@@ -321,17 +321,6 @@ export function createThrottledCapture(
     }
     timer = setTimeout(emit, opts.intervalMs);
   };
-}
-
-export function identifyPostHogWorkspace(
-  postHog: PostHogAnalyticsClient | null | undefined,
-  workspaceId: string | null | undefined
-): void {
-  if (!postHog || !workspaceId) {
-    return;
-  }
-
-  postHog.group?.('workspace', workspaceId);
 }
 
 export function capturePostHogActiveUser(

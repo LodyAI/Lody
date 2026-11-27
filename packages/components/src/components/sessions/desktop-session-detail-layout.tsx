@@ -286,7 +286,6 @@ export function DesktopSessionDetailLayout({
         </ResizablePanel>
 
         <ResizableHandle
-          appearance="edge"
           disabled={!splitSidebarOpen}
           // The seam is the side panel's own left hairline; the handle paints
           // nothing at rest. Hover or keyboard focus reveals one small ink
@@ -342,6 +341,7 @@ export function DesktopSessionDetailLayout({
               }
               initial={false}
               animate={{ x: splitSidebarOpen ? 0 : '100%' }}
+              inert={!splitSidebarOpen}
               aria-hidden={!splitSidebarOpen}
               transition={{
                 duration: animatesSidebar ? 0.22 : 0,

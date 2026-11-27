@@ -289,6 +289,50 @@ Clears take effect at the next boot:
 A spent workspace-list retry burst retries again on `online`, on return to the
 foreground and every 30s while the page is visible. [Decision](../notes/implemented/bug-fix/2026-10-13-workspace-open-recovery.md).
 
+## Published Roost history
+
+A remote plaintext Roost session starts by requesting an exact-session Streams
+grant. Metadata publication fields wake the reader. The grant authorizes and
+identifies the replica, including when those fields have yet to arrive. The
+server distinguishes pending publication, access that requires the target
+machine, and refusal. Pending publication, required machine authorization,
+temporary transport failure, or local replica quota exhaustion lets the owning
+machine admit a fresh exact-session read. A backend without the read-grant route
+(HTTP 404) is treated as required machine authorization, so clients released
+before that route is deployed keep the machine read path. A Streams access
+refusal ends that read route.
+
+During machine admission and while the machine serves history, Streams can
+prepare a window at a captured tail independently. The route switches when
+that window is readable. The replica renews its exact-session grant before
+serving an expired window. A new grant for a different generation retires the
+old replica and restarts the affected read on Streams. Changing sources wakes
+waiting reads and expires replies and paging cursors from the previous selection.
+The status shows the
+selected source, pending publication, retry or refusal, and whether a prior
+publication is still being served. Electron reads its own machine through
+local session control. A shared snapshot catches up to an observed Streams tail
+before detaching the history.
+
+The Streams replica drains persisted SDK receipts before exposing an applied
+position. Its initial live cursor comes from the observed history window. It
+persists the window hints after the frames and cursor are durable. Losing a hint
+can repeat a window, whose imports deduplicate. Where available, Web Locks
+serialize intake across tabs before each tab reloads shared hints. The Native
+Inbox and Replay transactions own durability. Unknown application envelopes are
+skipped. Storage and admission failures retain the previous event cursor.
+
+Directory metadata reads project scalar rows from the branch seen on the first
+page. The reader allows live intake between local pages and between bounded
+fetches of missing history. An appended message can advance the live view while
+the metadata read finishes. A branch replacement or a change to an unread row
+invalidates the observation.
+
+A cursor from a replaced branch resolves against the active branch. On the
+owner read path, a verified checkpoint interval repairs the retained window
+without rereading its tail. If the interval is no longer available, a bounded
+snapshot establishes the next patch baseline.
+
 ## Locally accepted messages
 
 Child-tab draft promotion uses the same first-message acceptance unit as other

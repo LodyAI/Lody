@@ -1,0 +1,34 @@
+---
+title: "20260611"
+version: 0.58.0
+date: 2026-06-11
+description: "Prise en charge des Activités en direct iOS et de Dynamic Island, scripts de configuration et de nettoyage de worktree, navigation dans les fichiers de projet sur mobile, édition de fichiers en temps réel, aperçu et recherche Markdown, diffs distants plus fiables, agents ACP personnalisés et suppression de la PWA."
+---
+
+### Nouveautés
+
+- **Activités en direct iOS et Dynamic Island** : Suivez la progression des agents depuis l'écran verrouillé de l'iPhone et Dynamic Island sans ouvrir Lody. Lorsqu'un agent nécessite une approbation, Lody peut également envoyer une alerte Activité en direct avec actions intégrées.
+
+  <img src="/_docs-assets/20260611-island.png" alt="Activité en direct Lody sur Dynamic Island" />
+
+- **Scripts de configuration et de nettoyage de worktree** : Configurez au niveau du projet des scripts qui s'exécutent après la création d'un worktree et avant le démarrage de l'agent, ainsi que des scripts de nettoyage exécutés lors de l'archivage de la session et de la suppression du worktree.
+- **Navigation dans les fichiers de projet sur mobile** : Parcourez les répertoires de projets locaux et GitHub, puis ouvrez les fichiers directement depuis la vue projet sur mobile sans avoir à démarrer une session au préalable.
+- **Édition de fichiers de projet en temps réel** : Modifiez des fichiers texte dans le répertoire de travail actif en collaboration avec votre équipe lors de sessions locales ou distantes. L'édition sur mobile arrive bientôt.
+- **Aperçu Markdown et recherche dans la visionneuse de fichiers** : Les fichiers Markdown disposent désormais d'un basculement en un clic entre le code source et l'aperçu rendu, et les fichiers texte permettent d'ouvrir la barre de recherche intégrée.
+- **Diff du tour et Toutes les modifications plus fiables** : Le chargement des diffs est plus stable et les appareils distants peuvent désormais inspecter les fichiers et les diffs de manière plus cohérente.
+- **Agents ACP personnalisés** : Ajoutez n'importe quel agent compatible ACP en saisissant sa commande de lancement et ses arguments.
+
+### Améliorations
+
+- Ajout d'un bouton de copie sur les cartes de plan proposé, y compris pour les réponses contenant uniquement un plan en bas du message.
+- Le sélecteur de projets locaux privilégie désormais l'organisation par machine et gagne en stabilité.
+- Les listes de projets dans les nouvelles conversations sont triées par activité récente.
+- L'aperçu inclut désormais un bouton pour copier le lien de partage.
+- Les très longs messages utilisateur ne débordent plus et ne sont plus tronqués par la bulle de discussion.
+- Le bouton de repli du panneau latéral droit ne se décale plus latéralement lors du basculement.
+- Les machines et projets partagés sont conservés de manière plus fiable en cas d'instabilité de la connexion.
+- Correction des mouvements répétés de la page sur l'écran de création de conversation lorsqu'une machine est hors ligne.
+
+### Suppressions
+
+- Lody ne propose plus la prise en charge PWA.

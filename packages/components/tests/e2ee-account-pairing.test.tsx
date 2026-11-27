@@ -1022,6 +1022,75 @@ describe('automatic pairing product flow', () => {
     await click('e2ee.auto.previous.review');
     expect(text()).toContain('e2ee.auto.previous.confirm');
   });
+
+  it('allows cancel and manual switch while restart is hanging and ignores the late result', async () => {
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    let release!: (state: import('@lody/platform').E2eeAutomaticPairingState) => void;
+    const pending = new Promise<import('@lody/platform').E2eeAutomaticPairingState>((resolve) => {
+      release = resolve;
+    });
+    const cancelled: string[] = [];
+    let backed = 0;
+    let manualed = 0;
+    let joined = 0;
+    const runtime = {
+      automaticPairingState: async () => {
+        throw Object.assign(new Error('e2ee_pairing-elsewhere'), { code: 'pairing-elsewhere' });
+      },
+      accountPairingRequest: async () => ({
+        lookupId: 'a1'.repeat(16),
+        direction: 'approver-shows',
+        pairingString: null,
+        status: 'waiting',
+        expiresAt: NOW + 600_000,
+        workspaces: [{ workspaceId: 'w1', name: 'Old Alpha', state: 'pending' }],
+      }),
+      restartAutomaticPairing: async () => pending,
+      cancelAutomaticPairing: async (workspaceId: string) => {
+        cancelled.push(workspaceId);
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingPage
+          runtime={runtime}
+          workspaceId="w1"
+          onJoined={() => {
+            joined += 1;
+          }}
+          onBack={() => {
+            backed += 1;
+          }}
+          onManual={() => {
+            manualed += 1;
+          }}
+        />
+      )
+    );
+    await click('e2ee.auto.previous.review');
+    await click('e2ee.auto.previous.endAndRestart');
+    expect((button('e2ee.auto.cancel') as HTMLButtonElement).disabled).toBe(false);
+    expect((button('e2ee.auto.offline') as HTMLButtonElement).disabled).toBe(false);
+    await click('e2ee.auto.offline');
+    expect(manualed).toBe(1);
+    expect(cancelled).toEqual(['w1']);
+    await click('e2ee.auto.cancel');
+    expect(backed).toBe(1);
+    await act(async () =>
+      release({
+        id: 'late',
+        workspaceId: 'w1',
+        workspaceName: 'Old Alpha',
+        deviceName: 'Phone',
+        comparisonCode: '654321',
+        expiresAt: NOW + 600_000,
+        phase: 'joined',
+      })
+    );
+    expect(joined).toBe(0);
+    expect(text()).not.toContain('654 321');
+  });
   it.each(['restart', 'replacement', 'during-confirmation', 'legacy'] as const)(
     'requires explicit confirmation for an existing device request and preserves replacements: %s',
     async (scenario) => {
@@ -1274,7 +1343,7 @@ describe('automatic pairing product flow', () => {
       await act(async () => find('e2ee.auto.later').click());
       expect(container.textContent).toContain('e2ee.auto.inbox');
       expect(codeInput()).toBeNull();
-      expect(replay()).not.toBeNull();
+      expect(replay()).toBeNull();
       await act(async () => find('e2ee.auto.inbox').click());
       expect(document.body.textContent).toContain('Synthetic team');
       expect(replay()).toBeNull();
@@ -1293,7 +1362,7 @@ describe('automatic pairing product flow', () => {
       await tick(2000);
       expect(authorized).toBe(true);
       expect(container.textContent).toBe('');
-      expect(replay()).not.toBeNull();
+      expect(replay()).toBeNull();
     } finally {
       removeTelemetryScope();
       focus.mockRestore();

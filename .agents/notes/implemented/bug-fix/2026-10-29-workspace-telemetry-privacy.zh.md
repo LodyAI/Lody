@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-29-workspace-telemetry-privacy.md)
 
+> 以下记录早期按工作区控制遥测的实现。当前上传规则在所有工作区关闭录屏，所有事件都经过字段白名单。参见[平台遥测隐私规则](../../../../packages/platform/AGENTS.md#telemetry-privacy)。
+
 ## 摘要
 
 正文遮罩不会清理 replay 的 DOM 属性。加密或模式未知的工作区因此关闭 replay，

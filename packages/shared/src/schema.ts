@@ -1,4 +1,5 @@
 import type { SessionProjectRun } from './workspace-project';
+import type { RoostCloudHistoryBinding } from './roost-cloud-history';
 import type { SessionEntry, SessionFileDiff } from './session-data/domain';
 import type { InferInputType, InferType } from 'loro-mirror';
 import {
@@ -180,6 +181,11 @@ export type TitleGenerationConfig = {
  */
 export type AgentSessionDefaults = {
   modelId?: string;
+  /**
+   * Default legacy ACP mode (permission) for new conversations, for agents
+   * whose permission is a mode rather than a `_permission` config option.
+   */
+  modeId?: string;
   configOptionValues: Record<string, AcpConfigOptionValue>;
   /** Per-model option defaults (e.g. thought_level, fast-mode), keyed by modelId then configId. */
   modelConfigOptionValues?: Record<string, Record<string, AcpConfigOptionValue>>;
@@ -687,6 +693,9 @@ export type SessionMeta = SessionPullRequestRecordFields & {
   agentType: AgentType;
   /** Backend selected when this session was created. Missing means legacy Loro. */
   historyBackend?: SessionHistoryBackendKind;
+  /** The history generation and author that the owning machine published to Streams. */
+  roostCloudGeneration?: RoostCloudHistoryBinding['generation'];
+  roostCloudAuthor?: string;
   agentConfigId?: AgentConfigId;
   /**
    * Agent Role this session was created from, and the Role revision that was
@@ -939,10 +948,11 @@ export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'p
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project' | 'acpSessionConfig' | 'paused'
+  'project' | 'acpSessionConfig' | 'paused' | 'userName'
 > & {
   project: ProjectRef | undefined;
   paused?: boolean;
+  userName?: string;
   acpSessionConfig?: import('./ai').ACPSessionConfig &
     Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
 };

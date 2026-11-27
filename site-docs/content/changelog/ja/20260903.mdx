@@ -1,0 +1,27 @@
+---
+title: "20260903"
+version: 0.90.1
+date: 2026-09-03
+description: "Zenレイアウト、macOSの差分アップデート、セッション名の変更、およびカスタム DeepSeek Harness エンドポイントを追加し、エージェント設定、CLIの信頼性、および入力処理を改善しました。"
+---
+
+バージョン 0.90.1
+
+### ✨ 新機能
+
+- より集中して作業できるワークスペース体験のために、Zenレイアウトモードを追加しました（[#341](https://github.com/LodyAI/Lody/pull/341)）。
+- macOSの自動アップデートを強化し、差分アップデート、ネイティブの進捗表示、およびより信頼性の高いインストール検証に対応しました（[#173](https://github.com/LodyAI/Lody/pull/173)）。
+- セッション名を変更するツールを追加しました（[#337](https://github.com/LodyAI/Lody/pull/337)）。
+- カスタム DeepSeek Harness サービスエンドポイントに対応しました（[#293](https://github.com/LodyAI/Lody/pull/293)）。
+- エージェントおよびプロバイダー設定を改善し、設定内容、ステータス、利用不可時の詳細をより分かりやすく表示するようにしました（[#257](https://github.com/LodyAI/Lody/pull/257)）。
+
+### 🐛 修正と改善
+
+- CLIデーモンの起動時リカバリー、ステータス診断、およびエラーメッセージを改善しました（[#287](https://github.com/LodyAI/Lody/pull/287)）。
+- エージェント機能の更新失敗や、複数ターンにわたる操作で設定状態が不整合になる問題を修正しました。
+- Markdownリンク、太字のURL、CJK入力メソッド（IME）、およびメンション入力の挙動を改善しました（[#274](https://github.com/LodyAI/Lody/pull/274), [#309](https://github.com/LodyAI/Lody/pull/309), [#294](https://github.com/LodyAI/Lody/pull/294)）。
+- セッションタブ、プラン承認、設定ナビゲーション、およびコンパクトなモバイルレイアウトを改善しました（[#326](https://github.com/LodyAI/Lody/pull/326), [#315](https://github.com/LodyAI/Lody/pull/315), [#334](https://github.com/LodyAI/Lody/pull/334), [#285](https://github.com/LodyAI/Lody/pull/285)）。
+- ローカルプロジェクトのフォルダー選択、SVGファイルの添付、およびデスクトップ版の Cmd+W の挙動を改善しました（[#291](https://github.com/LodyAI/Lody/pull/291), [#173](https://github.com/LodyAI/Lody/pull/173)）。
+- 一部のプロキシネットワーク環境で内蔵ブラウザの接続に失敗する問題を修正しました（[#299](https://github.com/LodyAI/Lody/pull/299)）。
+- Codex の goal コマンド制御と子セッションのワークスペース案内を改善しました（[#144](https://github.com/LodyAI/Lody/pull/144), [#225](https://github.com/LodyAI/Lody/pull/225)）。
+- 外部コントリビューターの [@jeffwcx](https://github.com/jeffwcx)、[@EYHN](https://github.com/EYHN)、[@Innei](https://github.com/Innei)、[@MichaelYuhe](https://github.com/MichaelYuhe)、[@sinxy-sai](https://github.com/sinxy-sai)、[@natsustan](https://github.com/natsustan)、[@slashdevcorpse](https://github.com/slashdevcorpse)、[@ImSingee](https://github.com/ImSingee) に感謝します。

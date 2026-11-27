@@ -1,0 +1,29 @@
+---
+title: "Salida de imágenes"
+description: "Pídele a un agente de Lody que devuelva capturas de pantalla u otras imágenes generadas directamente en el chat de la sesión."
+---
+
+# Salida de imágenes
+
+Lody puede devolver hasta 8 imágenes directamente en una sesión. Puedes pedirle al agente algo como `Inicia el servidor de desarrollo del frontend, espera a que cargue la página de inicio y luego envíame una captura de pantalla.` Lody subirá automáticamente las imágenes resultantes de vuelta al chat.
+
+Cuando el entorno de ejecución seleccionado admite la generación de imágenes, como la generación de imágenes de Codex, las imágenes generadas también pueden aparecer en la conversación sin salir de la sesión.
+
+<ImageOutputPreview locale="es" />
+
+## Imágenes generadas
+
+Para la generación de imágenes de Codex, Lody mantiene la imagen generada en la misma conversación que el prompt y cualquier solicitud de seguimiento. Esto facilita pedir revisiones, comparar variantes o volver a consultar el recurso generado más adelante.
+
+<ImageOutputPreview locale="es" />
+
+## Casos de uso
+
+- Revisar rápidamente los resultados de UI desde el móvil.
+- Pedirle al agente que envíe resultados visuales desde tu máquina local.
+- Revisar las imágenes generadas junto con el prompt y el contexto de implementación.
+
+## Cómo usarlo
+
+1. Abre un chat de sesión.
+2. Pídele al agente que tome una captura de pantalla o realice otra acción que devuelva una imagen. Lody subirá automáticamente la imagen a la conversación.

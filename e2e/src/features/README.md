@@ -1,6 +1,6 @@
 # Feature index
 
-The active suite contains 29 scenarios: 6 `@P0` smoke journeys and 23 `@P1` deeper journeys.
+The active suite contains 30 scenarios: 6 `@P0` smoke journeys and 24 `@P1` deeper journeys.
 
 | Feature                             | Scope                                                                                          |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -11,7 +11,7 @@ The active suite contains 29 scenarios: 6 `@P0` smoke journeys and 23 `@P1` deep
 | `conversation-context-copy.feature` | User/assistant prefixes, streaming export, Stop, UI revisit, and Session isolation             |
 | `desktop-windows.feature`           | Auxiliary Workspace readiness and per-renderer persistent sync-cache isolation                 |
 | `mcp-catalog-editing.feature`       | MCP catalog field and enabled-state persistence through edit and deletion                      |
-| `mcp-catalog.feature`               | Workspace MCP creation, explicit Turn selection, dispatch, and deletion                        |
+| `mcp-catalog.feature`               | Workspace MCP creation, explicit Turn selection, live edit reconfiguration, and deletion       |
 | `project-lifecycle.feature`         | Local project add, selection, removal, and original-directory safety                           |
 | `project-reopen.feature`            | Cross-surface project switching and duplicate-folder identity preservation                     |
 | `session-follow-up.feature`         | Consecutive follow-ups to an idle Session dispatch once each, in order                         |

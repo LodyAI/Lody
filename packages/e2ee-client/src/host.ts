@@ -23,6 +23,7 @@ import {
 import {
   prepareVaultRestore,
   recoveryRestoreProgress,
+  scopedRecoveryVault,
   type PersonalHostRecoveryInput,
 } from './recovery-restore';
 import { Bytes, requireLedgerContinuation } from '@lody/e2ee-core/protocol';
@@ -51,6 +52,7 @@ import {
   decode,
   openPreparedIdentity,
   preparePersonalIdentity,
+  preparePersonalIdentityWithOpened,
   sameBinding,
   type PreparedPersonalIdentity,
 } from './installation';
@@ -178,9 +180,16 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     Context.add(ClientCustodyWriter, writer),
     Context.add(ClientPairingOriginalStore, pairings)
   );
-  const prepare = (offer: PersonalPairingOffer, replacement = false, existingOnly = false) =>
+  const prepare = (
+    offer: PersonalPairingOffer,
+    replacement = false,
+    existingOnly = false,
+    verifiedLost = false
+  ) =>
     Effect.scoped(
-      preparePersonalIdentity(offer, replacement, existingOnly).pipe(Effect.provide(base))
+      preparePersonalIdentity(offer, replacement, existingOnly, verifiedLost).pipe(
+        Effect.provide(base)
+      )
     );
   const publicPrepared = (p: PreparedPersonalIdentity) =>
     Object.freeze({
@@ -584,14 +593,15 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     Effect.gen(function* () {
       const base = accountPairingOffer(platform.scope, pin);
       const current = yield* installations.read();
-      if (!current || current.phase !== 'ready') return yield* prepare(base);
+      if (!current) return yield* prepare(base);
       const { own, candidate, self } = yield* accountOriginals(current);
       if (candidate) return yield* prepare(candidate, true, true);
       if (history !== undefined) {
         const view = yield* verifyPersonalHistory(base, history);
         if (verifiedAccessLoss(view, self))
-          return yield* prepare(accountPairingOffer(platform.scope, pin, self), true);
+          return yield* prepare(accountPairingOffer(platform.scope, pin, self), true, false, true);
       }
+      if (current.phase !== 'ready') return yield* prepare(base);
       return yield* prepare(own ?? base);
     });
   /** Opening a retained account-pairing offer: an approved replacement candidate is
@@ -708,9 +718,10 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
   const restoreRecovery = (input: PersonalHostRecoveryInput) =>
     Effect.scoped(
       Effect.gen(function* () {
+        const scopedVault = yield* scopedRecoveryVault(input.vault, input.reference);
         // Package authentication precedes allocating a local device or accepting server pins.
         const pin = yield* Effect.acquireUseRelease(
-          input.vault.readEntry(input.reference),
+          scopedVault.readEntry(input.reference),
           (bundle) =>
             Effect.succeed({
               genesisHash: bundle.genesis,
@@ -729,10 +740,20 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           offer.membershipId !== pin.membershipId
         )
           return yield* fail('scope-mismatch');
-        const current = () =>
-          Effect.flatMap(input.pages(), (pages) => verifyPersonalHistory(offer, pages));
         const history = yield* input.pages();
         const initial = yield* verifyPersonalHistory(offer, history);
+        let snapshot = { pages: history, view: initial };
+        let dirty = false;
+        const current = () =>
+          Effect.gen(function* () {
+            if (!dirty) return snapshot.view;
+            const nextPages = yield* input.pages();
+            const nextView = yield* verifyPersonalHistory(offer, nextPages);
+            yield* Effect.fromResult(requireLedgerContinuation(snapshot.view, nextView));
+            snapshot = { pages: nextPages, view: nextView };
+            dirty = false;
+            return nextView;
+          });
         const user = yield* Effect.fromResult(accountUserId(platform.scope.accountId));
         const member = initial.inspectState().members.get(pin.membershipId);
         if (!member || !member.userId.equals(user)) return yield* fail('scope-mismatch');
@@ -749,7 +770,7 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         const result = yield* withIdentity(p, (identity) =>
           Effect.gen(function* () {
             const plan = yield* prepareVaultRestore({
-              vault: input.vault,
+              vault: scopedVault,
               local: input.local,
               reference: input.reference,
               ports: (anchor) =>
@@ -765,12 +786,20 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
                     fetchCurrentEnvelope: input.fetchCurrentEnvelope,
                     installed: keys,
                     submitOriginalAsRecovery: (record, recovery, credential) =>
-                      input.submitOriginalAsRecovery(
-                        record,
-                        recovery,
-                        credential,
-                        identity.request.credentialHash
-                      ),
+                      input
+                        .submitOriginalAsRecovery(
+                          record,
+                          recovery,
+                          credential,
+                          identity.request.credentialHash
+                        )
+                        .pipe(
+                          Effect.ensuring(
+                            Effect.sync(() => {
+                              dirty = true;
+                            })
+                          )
+                        ),
                     acquirePersonal: () => Effect.fail(fail('unsupported')),
                   };
                 }),
@@ -783,7 +812,8 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
           })
         );
         if (result.outcome !== 'Committed') return { outcome: result.outcome, offer };
-        const approval = yield* acceptHistoryFor(p, yield* input.pages());
+        if (dirty) yield* current();
+        const approval = yield* acceptHistoryFor(p, snapshot.pages);
         yield* activateReplacement(p, approval);
         // Only the admitted session installs recovered opaque keys, through the same
         // InstalledEpochKeys commitment/protection/readback boundary as normal reception.
@@ -814,33 +844,6 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       const saved = yield* parse<MemberOriginal>(row.original);
       if (saved.version !== 1 || saved.kind !== 'member') return yield* fail('conflict');
       return saved;
-    });
-  const memberIdentity = (source: E2eeMemberOffer, settle = false) =>
-    Effect.gen(function* () {
-      const offer = yield* Effect.try({
-        try: () => MemberOfferSchema.parse(source),
-        catch: (cause) => fail('invalid-input', cause),
-      });
-      if (
-        offer.workspaceId !== platform.scope.workspaceId ||
-        offer.genesisHash !== toHex(platform.scope.genesis.toBytes())
-      )
-        return yield* fail('scope-mismatch');
-      const pairingOffer = yield* Effect.try({
-        try: () => memberPairingOffer(platform.scope.accountId, offer),
-        catch: (cause) => fail('invalid-input', cause),
-      });
-      // A new invitation first settles this account's earlier, never-admitted joins.
-      if (settle) yield* settleOtherMembers(pairingOffer.pairingSessionId);
-      // After an ended join this account's device is pinned to that membership; the new
-      // invitation then gets a replacement identity, activated only once admitted.
-      const p = yield* prepare(pairingOffer).pipe(
-        Effect.catchIf(
-          (error) => (error as { code?: string }).code === 'conflict',
-          () => prepare(pairingOffer, true)
-        )
-      );
-      return { offer, pairingOffer, p };
     });
   /** Earlier member joins of this identity that the relay confirms ended (rejected,
    * cancelled, expired or revoked) get the exact terminal receipt the installation
@@ -913,38 +916,72 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
   const prepareMember = (source: E2eeMemberOffer) =>
     Effect.gen(function* () {
       const ports = yield* relay();
-      const { offer, pairingOffer, p } = yield* memberIdentity(source, true);
-      let saved = yield* memberOriginal(p);
-      if (saved && JSON.stringify(saved.offer) !== JSON.stringify(offer))
-        return yield* fail('conflict');
-      if (!saved) {
-        const keyPackageHex = yield* withIdentity(p, (identity) =>
-          Effect.gen(function* () {
-            const request = yield* prepareJoinRequest({
-              genesis: p.binding.genesis,
-              requestId: Result.getOrThrow(Bytes.requestId(fromHex(pairingOffer.pairingSessionId))),
-              userId: yield* Effect.fromResult(accountUserId(platform.scope.accountId)),
-              encryptionPublicKey: identity.device.enc,
-              expiresAt: offer.expiresAt,
-              signer: identity.device,
+      const { offer, pairingOffer, saved } = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const offer = yield* Effect.try({
+            try: () => MemberOfferSchema.parse(source),
+            catch: (cause) => fail('invalid-input', cause),
+          });
+          if (
+            offer.workspaceId !== platform.scope.workspaceId ||
+            offer.genesisHash !== toHex(platform.scope.genesis.toBytes())
+          )
+            return yield* fail('scope-mismatch');
+          const pairingOffer = yield* Effect.try({
+            try: () => memberPairingOffer(platform.scope.accountId, offer),
+            catch: (cause) => fail('invalid-input', cause),
+          });
+          yield* settleOtherMembers(pairingOffer.pairingSessionId);
+          const { prepared: p, opened } = yield* preparePersonalIdentityWithOpened(
+            pairingOffer
+          ).pipe(
+            Effect.provide(base),
+            Effect.catchIf(
+              (error) => (error as { code?: string }).code === 'conflict',
+              () => preparePersonalIdentityWithOpened(pairingOffer, true).pipe(Effect.provide(base))
+            )
+          );
+          let saved = yield* memberOriginal(p);
+          if (saved && JSON.stringify(saved.offer) !== JSON.stringify(offer))
+            return yield* fail('conflict');
+          if (!saved) {
+            const buildKeyPackage = (
+              identity: Effect.Success<ReturnType<typeof openPreparedIdentity>>
+            ) =>
+              Effect.gen(function* () {
+                const request = yield* prepareJoinRequest({
+                  genesis: p.binding.genesis,
+                  requestId: Result.getOrThrow(
+                    Bytes.requestId(fromHex(pairingOffer.pairingSessionId))
+                  ),
+                  userId: yield* Effect.fromResult(accountUserId(platform.scope.accountId)),
+                  encryptionPublicKey: identity.device.enc,
+                  expiresAt: offer.expiresAt,
+                  signer: identity.device,
+                });
+                // The identity already bound its credential to this request id.
+                return encodeMemberKeyPackage({
+                  request,
+                  credentialHash: identity.request.credentialHash,
+                  bindingSignature: fromHex(identity.request.bindingSignature),
+                });
+              });
+            // Reused identity buffers are wiped when this Scope closes before network I/O.
+            const keyPackageHex = opened
+              ? yield* buildKeyPackage(opened)
+              : yield* withIdentity(p, buildKeyPackage);
+            const original: MemberOriginal = { version: 1, kind: 'member', offer, keyPackageHex };
+            yield* pairings.compareAndSet(key(p, 'claim'), null, {
+              revision: 1,
+              original: encode(original),
+              receipt: null,
             });
-            // The identity already bound its credential to this request id.
-            return encodeMemberKeyPackage({
-              request,
-              credentialHash: identity.request.credentialHash,
-              bindingSignature: fromHex(identity.request.bindingSignature),
-            });
-          })
-        );
-        const original: MemberOriginal = { version: 1, kind: 'member', offer, keyPackageHex };
-        yield* pairings.compareAndSet(key(p, 'claim'), null, {
-          revision: 1,
-          original: encode(original),
-          receipt: null,
-        });
-        saved = yield* memberOriginal(p);
-        if (!saved || saved.keyPackageHex !== keyPackageHex) return yield* fail('conflict');
-      }
+            saved = yield* memberOriginal(p);
+            if (!saved || saved.keyPackageHex !== keyPackageHex) return yield* fail('conflict');
+          }
+          return { offer, pairingOffer, saved };
+        })
+      );
       yield* guard;
       const reply = yield* bounded(
         ports.submit({ token: offer.token, keyPackageHex: saved.keyPackageHex })

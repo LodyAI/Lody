@@ -1,0 +1,26 @@
+---
+title: "20260828"
+version: 0.88.0
+date: 2026-08-28
+description: "為對話大綱新增預測性懸停意圖，改善模型供應商設定與公開網站體驗，並修復未送達訊息、工作區同步、對話互動與桌面端穩定性問題。"
+---
+
+版本 0.88.0
+
+### ✨ 新功能
+
+- 為對話大綱新增預測性懸停意圖，讓長對話更容易瀏覽並減少誤觸展開（[#51](https://github.com/LodyAI/Lody/pull/51)、[#97](https://github.com/LodyAI/Lody/pull/97)、[#113](https://github.com/LodyAI/Lody/pull/113)）。
+- 模型供應商設定現在會顯示更清楚的進度，並在選擇可能產生額外費用的 DeepSeek 委派模型時發出提醒（[#66](https://github.com/LodyAI/Lody/pull/66)、[#81](https://github.com/LodyAI/Lody/pull/81)）。
+- 公開部落格現已支援中英文 RSS 訂閱源、閱讀時間與上一篇／下一篇導覽；首頁示範與動態氛圍呈現也更加流暢（[#84](https://github.com/LodyAI/Lody/pull/84)、[#85](https://github.com/LodyAI/Lody/pull/85)）。
+- 公開原始碼與貢獻流程已遷移至 LodyAI/Lody，並提供結構化的 Issue 與 PR 範本、自動化檢查以及更清楚的貢獻者回饋機制（[#39](https://github.com/LodyAI/Lody/pull/39)、[#63](https://github.com/LodyAI/Lody/pull/63)、[#69](https://github.com/LodyAI/Lody/pull/69)、[#80](https://github.com/LodyAI/Lody/pull/80)、[#91](https://github.com/LodyAI/Lody/pull/91)）。
+
+### 🐛 修復與改進
+
+- 未送達的訊息現在會有明確標記，並可在確認後重新發送，避免訊息遺失或重複執行（[#48](https://github.com/LodyAI/Lody/pull/48)、[#74](https://github.com/LodyAI/Lody/pull/74)）。
+- 改善工作區切換與同步體驗，確保側邊欄內容維持在目前的工作區內，同時提升新舊用戶端之間的相容性（[#49](https://github.com/LodyAI/Lody/pull/49)、[#55](https://github.com/LodyAI/Lody/pull/55)、[#96](https://github.com/LodyAI/Lody/pull/96)、[#108](https://github.com/LodyAI/Lody/pull/108)）。
+- 修復缺少中文翻譯、任務工具設定、工作階段分頁重新命名、輸入法確認、窄版訊息欄編輯、佇列引導以及 Agent 提問相容性等問題（[#40](https://github.com/LodyAI/Lody/pull/40)、[#42](https://github.com/LodyAI/Lody/pull/42)、[#43](https://github.com/LodyAI/Lody/pull/43)、[#44](https://github.com/LodyAI/Lody/pull/44)、[#52](https://github.com/LodyAI/Lody/pull/52)、[#99](https://github.com/LodyAI/Lody/pull/99)、[#101](https://github.com/LodyAI/Lody/pull/101)）。
+- 提升桌面端穩定性，包括更輕量的 Mermaid 圖表、Windows 系統匣左鍵點擊行為、還原本機檔案預覽與工作階段控制，以及更安全的視窗導覽（[#45](https://github.com/LodyAI/Lody/pull/45)、[#46](https://github.com/LodyAI/Lody/pull/46)、[#50](https://github.com/LodyAI/Lody/pull/50)、[#71](https://github.com/LodyAI/Lody/pull/71)、[#75](https://github.com/LodyAI/Lody/pull/75)、[#77](https://github.com/LodyAI/Lody/pull/77)）。
+- 最佳化較小螢幕上的使用量日曆（包含最近幾週的位置呈現與視覺細節），並修復 Markdown 有序清單編號的對齊問題（[#53](https://github.com/LodyAI/Lody/pull/53)、[#62](https://github.com/LodyAI/Lody/pull/62)、[#78](https://github.com/LodyAI/Lody/pull/78)、[#82](https://github.com/LodyAI/Lody/pull/82)、[#83](https://github.com/LodyAI/Lody/pull/83)）。
+- 移除本機專案時會先封存相關工作階段，在等待離線裝置時仍會保持可見狀態，並能安全清理 Lody 建立的 worktree，同時保留含有未提交變更或清理失敗的項目（[#105](https://github.com/LodyAI/Lody/pull/105)、[#119](https://github.com/LodyAI/Lody/pull/119)）。
+- 修正儲存庫路徑、中文工作階段指南連結、Node.js 環境需求以及公開套件中繼資料（[#57](https://github.com/LodyAI/Lody/pull/57)、[#60](https://github.com/LodyAI/Lody/pull/60)、[#64](https://github.com/LodyAI/Lody/pull/64)）。
+- 感謝 [@clanzhang](https://github.com/clanzhang)、[@tommy0103](https://github.com/tommy0103)、[@lawvs](https://github.com/lawvs)、[@Innei](https://github.com/Innei)、[@hyoban](https://github.com/hyoban)、[@wibus-wee](https://github.com/wibus-wee)、[@limichange](https://github.com/limichange)、[@27Aaron](https://github.com/27Aaron)、[@hcz-czh](https://github.com/hcz-czh)、[@Pleasurecruise](https://github.com/Pleasurecruise)、[@frostming](https://github.com/frostming)、[@natsustan](https://github.com/natsustan) 與 [@zxch3n](https://github.com/zxch3n) 對本版本的公開貢獻。

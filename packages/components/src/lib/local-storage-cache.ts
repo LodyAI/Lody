@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import {
+  ACP_COLLABORATION_MODE_CONFIG_ID,
+  ACP_PLAN_PERMISSION_MODE_ID,
   isModelScopedSessionDefaultConfigId,
+  LODY_PLAN_MODE_CONFIG_ID,
   resolveSessionDefaultConfigOptionValues,
   WorktreeSetupScriptConfigSchema,
   type AcpConfigOptionValue,
@@ -152,6 +155,42 @@ export function persistAgentSessionDefaults(
   });
 }
 
+/**
+ * Records the run configuration of a Turn the person just sent by hand, from a
+ * new conversation or an existing one, as what the next new conversation with
+ * this Provider starts from. Planning is chosen per Turn, so it never becomes a
+ * start default: independent Plan toggles are dropped, and a permission-based
+ * Plan value keeps the permission that was remembered before it.
+ */
+export function learnAgentStartDefaults(
+  agentId: AgentConfigId | null | undefined,
+  sent: {
+    modeId?: string | null;
+    modelId?: string | null;
+    configOptionValues?: Record<string, AcpConfigOptionValue> | null;
+  }
+): void {
+  if (!agentId) return;
+  const previous = agentDefaultsCache.get(agentId);
+  const configOptionValues: Record<string, AcpConfigOptionValue> = {};
+  for (const [configId, value] of Object.entries(sent.configOptionValues ?? {})) {
+    if (configId === LODY_PLAN_MODE_CONFIG_ID || configId === ACP_COLLABORATION_MODE_CONFIG_ID) {
+      continue;
+    }
+    if (value === ACP_PLAN_PERMISSION_MODE_ID) {
+      const remembered = previous?.configOptionValues?.[configId];
+      if (remembered !== undefined) configOptionValues[configId] = remembered;
+      continue;
+    }
+    configOptionValues[configId] = value;
+  }
+  persistAgentSessionDefaults(agentId, {
+    modeId: sent.modeId === ACP_PLAN_PERMISSION_MODE_ID ? (previous?.modeId ?? null) : sent.modeId,
+    modelId: sent.modelId,
+    configOptionValues,
+  });
+}
+
 // Agent session defaults cache
 export const agentDefaultsCache = createLocalStorageCache<AgentSessionDefaults>(
   'lody:agentSessionDefaults',
@@ -234,7 +273,7 @@ export function readAgentStartDefaults(
   }
 
   return {
-    modeId: cached?.modeId ?? null,
+    modeId: provider.modeId ?? cached?.modeId ?? null,
     modelId,
     ...(Object.keys(configOptionValues).length ? { configOptionValues } : {}),
     ...(Object.keys(modelConfigOptionValues).length ? { modelConfigOptionValues } : {}),

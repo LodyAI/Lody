@@ -14,6 +14,9 @@ import type {
   LocalMachineRpcRequest as LocalMachineRpcRequestFromModule,
   LocalMachineRpcResponse as LocalMachineRpcResponseFromModule,
 } from './local-machine-rpc';
+import type { SupportedLanguage } from './language';
+
+export type DevicePairingNotificationLanguage = SupportedLanguage | 'zh';
 
 export type CliOutputEvent = {
   runId: string;
@@ -446,24 +449,29 @@ export const ElectronAuthCallbackSessionSchema = z
 
 export type ElectronAuthCallbackSession = z.infer<typeof ElectronAuthCallbackSessionSchema>;
 
-export type ElectronLoginState = {
-  revision: number;
-  attemptId: string | null;
-  phase: 'idle' | 'waiting' | 'exchanging' | 'authenticated' | 'error';
-  session: ElectronAuthCallbackSession | null;
-  error:
-    | 'browser_open_failed'
-    | 'authorization_expired'
-    | 'exchange_failed'
-    | 'exchange_certificate_failed'
-    | 'exchange_rejected'
-    | 'exchange_timeout'
-    | 'secure_storage_unavailable'
-    | 'restart_required'
-    | null;
-  /** Credential-free failure summary (HTTP status/server code or local error) for support. */
-  errorDetail: string | null;
-};
+export const ElectronLoginErrorSchema = z.enum([
+  'browser_open_failed',
+  'authorization_expired',
+  'exchange_failed',
+  'exchange_certificate_failed',
+  'exchange_rejected',
+  'exchange_timeout',
+  'secure_storage_unavailable',
+  'restart_required',
+]);
+
+export const ElectronLoginStateSchema = z
+  .object({
+    revision: z.number().int().nonnegative(),
+    attemptId: z.string().nullable(),
+    phase: z.enum(['idle', 'waiting', 'exchanging', 'authenticated', 'error']),
+    session: ElectronAuthCallbackSessionSchema.nullable(),
+    error: ElectronLoginErrorSchema.nullable(),
+    errorDetail: z.string().nullable(),
+  })
+  .strict();
+
+export type ElectronLoginState = z.infer<typeof ElectronLoginStateSchema>;
 
 /** Which Lody process reported the storage write failure that started a check. */
 export type ElectronStorageGuardSource = 'renderer' | 'cli';
@@ -518,10 +526,7 @@ export type ElectronUpdaterState = {
    * `releaseNotes` blob. Optional: a build whose main process does not publish
    * localized notes keeps falling back to `releaseNotes`.
    */
-  releaseNotesByLocale?: {
-    en?: string;
-    zh_CN?: string;
-  };
+  releaseNotesByLocale?: Partial<Record<SupportedLanguage, string>>;
   percent?: number;
   bytesPerSecond?: number;
   transferred?: number;
@@ -771,7 +776,7 @@ export type ElectronLocalPlatformSnapshot = {
   workspace: ElectronImplicitLocalWorkspace;
 };
 
-export type GlobalShortcutId = 'app.focus';
+export type GlobalShortcutId = 'app.focus' | 'today.toggleWindow';
 export const GLOBAL_SHORTCUT_TRIGGERED_CHANNEL = 'app.globalShortcut';
 
 /**
@@ -781,6 +786,7 @@ export const GLOBAL_SHORTCUT_TRIGGERED_CHANNEL = 'app.globalShortcut';
  */
 export const GLOBAL_SHORTCUT_DEFAULTS: Record<GlobalShortcutId, string | null> = {
   'app.focus': 'Mod+Shift+l',
+  'today.toggleWindow': 'Alt+Shift+n',
 };
 
 /** Rewrite the pre-TanStack `$mod` token and normalize surrounding token whitespace. */

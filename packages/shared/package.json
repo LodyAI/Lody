@@ -23,6 +23,10 @@
       "types": "./src/notifications/index.ts",
       "import": "./src/notifications/index.ts"
     },
+    "./loro-wasm-budget": {
+      "types": "./src/loro-wasm-budget.ts",
+      "import": "./src/loro-wasm-budget.ts"
+    },
     "./loro-sync-errors": {
       "types": "./src/loro-sync-errors/index.ts",
       "import": "./src/loro-sync-errors/index.ts"
@@ -101,6 +105,16 @@
       "types": "./src/electron-ipc.ts",
       "import": "./src/electron-ipc.ts",
       "default": "./src/electron-ipc.ts"
+    },
+    "./boundary-decode": {
+      "types": "./src/boundary-decode.ts",
+      "import": "./src/boundary-decode.ts",
+      "default": "./src/boundary-decode.ts"
+    },
+    "./language": {
+      "types": "./src/language.ts",
+      "import": "./src/language.ts",
+      "default": "./src/language.ts"
     },
     "./devbar": {
       "types": "./src/devbar.ts",

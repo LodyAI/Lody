@@ -1,7 +1,20 @@
 import { absolutePageUrl, SITE_URL } from './site-url.mjs';
+import type { SiteBcp47Locale } from '../src/site-pages/shared.ts';
+
 const OG_IMAGE_PATH = '/og-image.png';
 const DEFAULT_DESCRIPTION =
   'Lody is a team workspace for running AI coding agents in parallel with isolated Git worktrees, live diff review, GitHub integration, and mobile access.';
+
+const OG_LOCALE_BY_BCP47: Record<SiteBcp47Locale, string> = {
+  'en-US': 'en_US',
+  'zh-CN': 'zh_CN',
+  'zh-Hant': 'zh_TW',
+  ja: 'ja_JP',
+  ko: 'ko_KR',
+  es: 'es_ES',
+  fr: 'fr_FR',
+  ru: 'ru_RU',
+};
 
 /** Append `| Lody` to a document head title unless it is already branded. */
 export function brandTitle(title: string, brand = 'Lody'): string {
@@ -12,7 +25,7 @@ export function brandTitle(title: string, brand = 'Lody'): string {
 }
 
 type Alternate = {
-  lang: 'en-US' | 'zh-CN';
+  lang: SiteBcp47Locale;
   path: string;
 };
 
@@ -40,11 +53,12 @@ export function pageHead(args: {
   title: string;
   description?: string;
   path: string;
-  locale: 'en-US' | 'zh-CN';
+  locale: SiteBcp47Locale;
   type?: 'website' | 'article';
   publishedTime?: string;
   image?: string;
   alternates?: Alternate[];
+  canonical?: boolean;
   robots?: Robots;
   /** Extra <link> tags appended after canonical/alternates (e.g. RSS feeds). */
   links?: Array<Record<string, string>>;
@@ -52,7 +66,8 @@ export function pageHead(args: {
   jsonLd?: Record<string, unknown> | readonly Record<string, unknown>[];
 }): SiteHead {
   const description = args.description ?? DEFAULT_DESCRIPTION;
-  const canonical = absolutePageUrl(args.path);
+  const includeCanonical = args.canonical !== false;
+  const canonical = includeCanonical ? absolutePageUrl(args.path) : undefined;
   const image = new URL(args.image ?? OG_IMAGE_PATH, SITE_URL).toString();
   const robots = robotsContent(args.robots);
   const jsonLdNodes = args.jsonLd ? (Array.isArray(args.jsonLd) ? args.jsonLd : [args.jsonLd]) : [];
@@ -64,9 +79,9 @@ export function pageHead(args: {
       ...(robots ? [{ name: 'robots', content: robots }] : []),
       { property: 'og:title', content: args.title },
       { property: 'og:description', content: description },
-      { property: 'og:url', content: canonical },
+      ...(canonical ? [{ property: 'og:url', content: canonical }] : []),
       { property: 'og:site_name', content: 'Lody' },
-      { property: 'og:locale', content: args.locale.replace('-', '_') },
+      { property: 'og:locale', content: OG_LOCALE_BY_BCP47[args.locale] },
       { property: 'og:type', content: args.type ?? 'website' },
       { property: 'og:image', content: image },
       ...(args.publishedTime
@@ -78,7 +93,7 @@ export function pageHead(args: {
       { name: 'twitter:image', content: image },
     ],
     links: [
-      { rel: 'canonical', href: canonical },
+      ...(canonical ? [{ rel: 'canonical', href: canonical }] : []),
       ...(args.alternates ?? []).map((alternate) => ({
         rel: 'alternate',
         hrefLang: alternate.lang,

@@ -108,6 +108,8 @@ export function mcpAuthenticationLayer(options: {
   userId: string;
   store: McpCredentialStore;
   io: McpAuthenticationIO;
+  /** User-initiated credential writes only; background token refresh keeps mounted sessions. */
+  onCredentialsChanged?: (serverId: string) => void;
 }) {
   return Layer.effect(
     McpAuthentication,
@@ -118,7 +120,13 @@ export function mcpAuthenticationLayer(options: {
       const locks = new Map<string, Semaphore.Semaphore>();
       const leases = new Map<
         string,
-        { owner: string; key: string; scope: Scope.Closeable; server: ResolvedMcpServer }
+        {
+          owner: string;
+          key: string;
+          own: boolean;
+          scope: Scope.Closeable;
+          server: ResolvedMcpServer;
+        }
       >();
       const leaseLock = Semaphore.makeUnsafe(1);
       const closedOwners = new Set<string>();
@@ -189,24 +197,37 @@ export function mcpAuthenticationLayer(options: {
         if (attempt.fiber) yield* Fiber.interrupt(attempt.fiber);
         if (attempts.get(keyOf(server)) === attempt) attempts.delete(keyOf(server));
       });
-      const revokeLeases = (predicate: (lease: { owner: string; key: string }) => boolean) =>
+      const credentialsChanged = (server: WorkspaceMcpServerMeta) =>
+        Effect.sync(() => options.onCredentialsChanged?.(server.id));
+      const revokeLeases = (
+        predicate: (lease: { owner: string; key: string; own: boolean }) => boolean
+      ) =>
         leaseLock.withPermits(1)(
           Effect.gen(function* () {
+            let closed = 0;
             for (const [key, lease] of leases)
               if (predicate(lease)) {
                 yield* Scope.close(lease.scope, Exit.void);
                 leases.delete(key);
+                closed += 1;
               }
+            return closed;
           })
+        );
+      /** A closed relay outdates its mounts even when the credential write then fails. */
+      const revokeServerLeases = (server: WorkspaceMcpServerMeta) =>
+        revokeLeases((lease) => lease.own && lease.key === keyOf(server)).pipe(
+          Effect.tap((closed) => (closed > 0 ? credentialsChanged(server) : Effect.void))
         );
       const configure = (server: WorkspaceMcpServerMeta, settings: McpLocalAuthentication) =>
         Effect.gen(function* () {
-          yield* revokeLeases((lease) => lease.key === keyOf(server));
+          yield* revokeServerLeases(server);
           return yield* locked(
             server,
             Effect.gen(function* () {
               yield* stopAttempt(server);
               yield* write(server, { target: targetOf(server), settings });
+              yield* credentialsChanged(server);
               states.delete(keyOf(server));
               return yield* status(server);
             })
@@ -360,6 +381,7 @@ export function mcpAuthenticationLayer(options: {
                   Effect.gen(function* () {
                     if (attempts.get(keyOf(server)) !== attempt) return;
                     yield* write(server, completed.record);
+                    yield* credentialsChanged(server);
                     attempt.status = remember(server, {
                       ...result('authorized', true),
                       mode: 'oauth',
@@ -422,11 +444,12 @@ export function mcpAuthenticationLayer(options: {
       const signout = (server: WorkspaceMcpServerMeta) =>
         Effect.gen(function* () {
           yield* stopAttempt(server);
-          yield* revokeLeases((lease) => lease.key === keyOf(server));
+          yield* revokeServerLeases(server);
           return yield* locked(
             server,
             Effect.gen(function* () {
               yield* options.store.remove(keyOf(server));
+              yield* credentialsChanged(server);
               return remember(server, result('required'));
             })
           );
@@ -478,9 +501,15 @@ export function mcpAuthenticationLayer(options: {
               };
             }
             if (own && server.connection?.authentication === 'local') yield* headers(server);
-            const leaseKey = JSON.stringify([owner, server.id, targetOf(server)]);
+            const leaseKey = JSON.stringify([
+              owner,
+              server.id,
+              targetOf(server),
+              resolved.url,
+              resolved.headers,
+            ]);
             const previous = leases.get(leaseKey);
-            if (previous) return previous.server;
+            if (previous) return { ...previous.server, name: resolved.name };
             const leaseScope = yield* Scope.fork(scope);
             const queue = yield* Queue.bounded<McpRelayRequest>(32);
             const endpoint = yield* Effect.acquireRelease(
@@ -539,6 +568,7 @@ export function mcpAuthenticationLayer(options: {
             leases.set(leaseKey, {
               owner,
               key: keyOf(server),
+              own,
               scope: leaseScope,
               server: connection,
             });

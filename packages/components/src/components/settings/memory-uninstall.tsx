@@ -106,9 +106,15 @@ export function useMemoryUninstall({
               {t('settings.memory.uninstall.title', { provider: name })}
             </AlertDialog.Title>
             <AlertDialog.Description>
-              {t([`settings.memory.uninstall.notice.${providerKey}`, 'settings.memory.uninstall.notice'], {
-                provider: name,
-              })}
+              {t(
+                [
+                  `settings.memory.uninstall.notice.${providerKey}`,
+                  'settings.memory.uninstall.notice',
+                ],
+                {
+                  provider: name,
+                }
+              )}
             </AlertDialog.Description>
           </AlertDialog.Header>
           <AlertDialog.Footer>

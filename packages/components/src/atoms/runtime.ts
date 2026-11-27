@@ -5,6 +5,7 @@ import type {
   CodeCollabOpenDiffManifestResponse,
   CodeCollabReadBlobRequest,
   CodeCollabReadBlobResponse,
+  RoostHistorySyncState,
 } from '@lody/shared';
 import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
 import type {
@@ -125,6 +126,8 @@ export type SessionDocStore = {
   acquireSync: () => () => void;
   getSyncState: () => RoomSyncState;
   subscribeSyncState: (listener: (state: RoomSyncState) => void) => () => void;
+  getHistorySync?: () => RoostHistorySyncState | undefined;
+  subscribeHistorySync?: (listener: () => void) => () => void;
   getState: () => SessionDocState;
   setState: (updater: SessionDocUpdater) => void;
   subscribe: (listener: (state: SessionDocState) => void) => () => void;

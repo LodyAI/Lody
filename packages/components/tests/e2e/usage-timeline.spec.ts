@@ -89,7 +89,9 @@ test.describe('local time and UTC day detail', () => {
     );
     const range = page.getByTitle('Oct 1, 00:00 GMT+8 – Oct 2, 00:00 GMT+8');
     await expect(range).toBeVisible();
-    const splitTicks = page.locator('.recharts-xAxis').getByText('Oct 1, 00:00 GMT+8', { exact: true });
+    const splitTicks = page
+      .locator('.recharts-xAxis')
+      .getByText('Oct 1, 00:00 GMT+8', { exact: true });
     await expect(splitTicks).toHaveCount(2);
     const peak = page.getByRole('gridcell', {
       name: 'Oct 1, 07:00 GMT+8 – Oct 1, 08:00 GMT+8 · 500',
@@ -100,7 +102,9 @@ test.describe('local time and UTC day detail', () => {
     );
 
     await page.setViewportSize({ width: 390, height: 1300 });
-    await expect.poll(() => range.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+    await expect
+      .poll(() => range.evaluate((element) => element.scrollWidth - element.clientWidth))
+      .toBe(0);
     await expect(page.getByText('More', { exact: true })).toBeInViewport({ ratio: 1 });
   });
 });

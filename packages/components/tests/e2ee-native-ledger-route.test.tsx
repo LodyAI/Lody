@@ -71,7 +71,9 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
     failure,
     memberProfiles,
     children,
+    notices,
     onOpen,
+    openDisabled,
     onBack,
     memberManagement,
   }: {
@@ -86,13 +88,16 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
     failure?: unknown;
     memberProfiles?: ReadonlyMap<string, { name: string }>;
     children?: ReactNode;
+    notices?: ReactNode;
     onOpen?: () => void;
+    openDisabled?: boolean;
     onBack: () => void;
   }) => {
     fixture.management = memberManagement;
     return createElement(
       Fragment,
       null,
+      notices,
       createElement(
         'p',
         { 'data-control-state': true },
@@ -111,9 +116,15 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
           .join(','),
       }),
       children,
-      onOpen
+      onOpen && !openDisabled
         ? createElement('button', { 'data-open-workspace': true, onClick: onOpen }, 'open')
-        : null,
+        : onOpen
+          ? createElement('button', {
+              'data-open-workspace': true,
+              disabled: true,
+              'aria-label': 'open-disabled',
+            })
+          : null,
       createElement('button', { 'data-back': true, 'aria-label': 'back', onClick: onBack })
     );
   },
@@ -1508,7 +1519,7 @@ it.each([
         contentMode: 'e2ee',
       },
     ],
-    { to: '/workspace/create', search: { allowExisting: true } },
+    { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
   ],
 ])('returns "Workspaces" to the account\'s workspaces with %s', async (_, others, target) => {
   fixture.workspaces = {
@@ -1974,7 +1985,9 @@ it.each(['unavailable', 'invalid-state'] as const)(
       expect(checkpoint?.length).toBe(2);
       rejectRead = true;
       await act(async () => {
-        await expect(fixture.management!.setRole('0b'.repeat(16), 'admin')).rejects.toThrow();
+        await expect(fixture.management!.setRole('0b'.repeat(16), 'admin')).rejects.toThrow(
+          'e2ee_management_refresh_unconfirmed'
+        );
       });
       expect(f.readers()).toBe(1);
       expect(container.querySelector('[data-control-state]')?.textContent).toBe('failed');
@@ -2019,7 +2032,7 @@ it.each(['same-owner', 'account-change', 'workspace-change'] as const)(
       });
       expect(f.readers()).toBe(1);
       expect(renderedRoles()).toBe('member,owner');
-      expect(fixture.management).toBeUndefined();
+      expect(fixture.management).toBeDefined();
       if (change !== 'same-owner') {
         // A new route binding has its own reader and ledger, while the old read is pending.
         if (change === 'account-change') fixture.session.user.id = 'other-account';

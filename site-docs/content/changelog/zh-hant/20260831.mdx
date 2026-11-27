@@ -1,0 +1,37 @@
+---
+title: "20260831"
+version: 0.89.0
+date: 2026-08-31
+description: "推出重新設計的新手引導流程、統一的計畫模式、專案資料夾管理、桌面端自動啟動、本機文件搜尋與標準 ACP 身分驗證，並修復多項工作階段、協作、行動端與設定相關問題。"
+---
+
+版本 0.89.0
+
+### ✨ 新功能
+
+- 重新設計的新手引導流程支援選擇或略過第一個 Agent、透過唯讀範例專案完成初始任務，並能更清楚地掌握同步中或待設定的狀態（[#163](https://github.com/LodyAI/Lody/pull/163)、[#180](https://github.com/LodyAI/Lody/pull/180)、[#182](https://github.com/LodyAI/Lody/pull/182)、[#216](https://github.com/LodyAI/Lody/pull/216)）。
+- 計畫模式現已採用統一的對話面板，讓主要 Agent 與子 Agent 產生的計畫更容易檢視與追蹤（[#215](https://github.com/LodyAI/Lody/pull/215)、[#221](https://github.com/LodyAI/Lody/pull/221)）。
+- 專案設定現已支援依裝置管理資料夾，並為本機專案列表提供更便利的操作選項（[#205](https://github.com/LodyAI/Lody/pull/205)、[#220](https://github.com/LodyAI/Lody/pull/220)）。
+- 桌面端新增登入時自動啟動 Lody 的選項（[#176](https://github.com/LodyAI/Lody/pull/176)）。
+- 具備作用域的鍵盤導覽改善了側邊欄、選單與對話介面的鍵盤操作體驗（[#168](https://github.com/LodyAI/Lody/pull/168)）。
+- 文件網站現已提供完全在瀏覽器端執行的中英文雙語搜尋功能（[#228](https://github.com/LodyAI/Lody/pull/228)）。
+- 共用的社群入口現已加入飛書交流群 QR code（[#164](https://github.com/LodyAI/Lody/pull/164)）。
+- 登錄庫中的 Agent 現已支援標準 ACP 身分驗證，且內建的 Claude、Codex、Kimi 與 Grok 執行環境也已完成升級（[#201](https://github.com/LodyAI/Lody/pull/201)、[#208](https://github.com/LodyAI/Lody/pull/208)）。
+
+### 🐛 修復與改進
+
+- 修復已移除的內建 Agent 在重新啟動後再次出現的問題（[#94](https://github.com/LodyAI/Lody/pull/94)）。
+- 修復從側邊欄進入時專案選取狀態遺失的問題，並改善專案設定對話框的版面配置（[#87](https://github.com/LodyAI/Lody/pull/87)、[#177](https://github.com/LodyAI/Lody/pull/177)）。
+- 改善協作者之間的 Agent 設定同步，以及子分頁中的 Agent Role 選擇體驗（[#159](https://github.com/LodyAI/Lody/pull/159)、[#181](https://github.com/LodyAI/Lody/pull/181)）。
+- 修復佇列輪次的派發與 MCP 子工作階段完成通知，同時維持與舊版用戶端完成通知的相容性（[#166](https://github.com/LodyAI/Lody/pull/166)、[#200](https://github.com/LodyAI/Lody/pull/200)）。
+- 修復目前分頁狀態保留、網址同步以及長對話標題重新命名的問題（[#194](https://github.com/LodyAI/Lody/pull/194)、[#199](https://github.com/LodyAI/Lody/pull/199)、[#202](https://github.com/LodyAI/Lody/pull/202)）。
+- 修復快捷鍵引導、在子分頁搜尋模型時的焦點問題，以及發送訊息後的輸入框焦點狀態（[#95](https://github.com/LodyAI/Lody/pull/95)、[#129](https://github.com/LodyAI/Lody/pull/129)、[#143](https://github.com/LodyAI/Lody/pull/143)）。
+- 修復工作階段路徑啟動器偵測，以及 Agent 檔案連結與已編輯檔案相符時消失的問題（[#73](https://github.com/LodyAI/Lody/pull/73)、[#167](https://github.com/LodyAI/Lody/pull/167)）。
+- 修復行動端工作階段驗證復原、工作區設定間距、安全區域版面配置，以及背景分頁等待核准狀態的問題（[#190](https://github.com/LodyAI/Lody/pull/190)、[#210](https://github.com/LodyAI/Lody/pull/210)、[#222](https://github.com/LodyAI/Lody/pull/222)、[#231](https://github.com/LodyAI/Lody/pull/231)）。
+- 改善設定頁面的圓角裁切、狀態對齊、巢狀對話框背景遮罩以及連結行為（[#186](https://github.com/LodyAI/Lody/pull/186)、[#204](https://github.com/LodyAI/Lody/pull/204)、[#226](https://github.com/LodyAI/Lody/pull/226)、[#233](https://github.com/LodyAI/Lody/pull/233)）。
+- 修復首次啟動時的語言偵測與中文文件中的失效連結（[#117](https://github.com/LodyAI/Lody/pull/117)、[#175](https://github.com/LodyAI/Lody/pull/175)）。
+- 修復桌面端視窗拖曳與面板互動之間的衝突（[#169](https://github.com/LodyAI/Lody/pull/169)）。
+- 改善本機工作階段的 GitHub 專案關聯，並防止無效的 WebSocket 關閉代碼中斷預覽代理（[#197](https://github.com/LodyAI/Lody/pull/197)、[#198](https://github.com/LodyAI/Lody/pull/198)）。
+- 還原受阻目標的繼續執行操作（[#230](https://github.com/LodyAI/Lody/pull/230)）。
+- 此版本範圍亦包含公開儲存庫建置一致性與貢獻流程的維護項目（[#165](https://github.com/LodyAI/Lody/pull/165)、[#171](https://github.com/LodyAI/Lody/pull/171)）。
+- 特別感謝外部貢獻者 [@Pleasurecruise](https://github.com/Pleasurecruise)（[#73](https://github.com/LodyAI/Lody/pull/73)、[#192](https://github.com/LodyAI/Lody/pull/192)）、[@sheepbox8646](https://github.com/sheepbox8646)（[#87](https://github.com/LodyAI/Lody/pull/87)）、[@xuxu777xu](https://github.com/xuxu777xu)（[#94](https://github.com/LodyAI/Lody/pull/94)）、[@ShobhanKarthish](https://github.com/ShobhanKarthish)（[#95](https://github.com/LodyAI/Lody/pull/95)）、[@clanzhang](https://github.com/clanzhang)（[#117](https://github.com/LodyAI/Lody/pull/117)、[#143](https://github.com/LodyAI/Lody/pull/143)）、[@1-WEEK](https://github.com/1-WEEK)（[#129](https://github.com/LodyAI/Lody/pull/129)）、[@Innei](https://github.com/Innei)（[#168](https://github.com/LodyAI/Lody/pull/168)、[#169](https://github.com/LodyAI/Lody/pull/169)、[#205](https://github.com/LodyAI/Lody/pull/205)、[#227](https://github.com/LodyAI/Lody/pull/227)）、[@kovsu](https://github.com/kovsu)（[#186](https://github.com/LodyAI/Lody/pull/186)）、[@ImSingee](https://github.com/ImSingee)（[#194](https://github.com/LodyAI/Lody/pull/194)、[#226](https://github.com/LodyAI/Lody/pull/226)）、[@MichaelYuhe](https://github.com/MichaelYuhe)（[#231](https://github.com/LodyAI/Lody/pull/231)）與 [@wong2](https://github.com/wong2)（[#233](https://github.com/LodyAI/Lody/pull/233)）。

@@ -7,8 +7,7 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { formatDistance, type Locale } from 'date-fns';
-import { enUS } from 'date-fns/locale/en-US';
-import { zhCN } from 'date-fns/locale/zh-CN';
+import { getDateFnsLocale } from '@/lib/date-fns-locale';
 import type { HomeWeekForecast, HomeWeekUsage, HomeWeekUsageSource } from '@/lib/home-week-usage';
 import {
   formatAgentRateLimitWindowLabel,
@@ -320,7 +319,7 @@ export function Count({
 /** "Resets in about 2 hours", counted from `nowMs`. */
 export function useFormatResetTime(nowMs: number) {
   const { i18n } = useTranslation();
-  const dateLocale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const dateLocale: Locale = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
   return (resetsAtEpochSeconds: number | null): string | null =>
     resetsAtEpochSeconds
       ? formatDistance(new Date(resetsAtEpochSeconds * 1_000), new Date(nowMs), {

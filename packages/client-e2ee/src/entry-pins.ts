@@ -234,9 +234,10 @@ export function personalEntryPins(databaseName: string) {
      * its genesis. One transaction, unlike read-then-`finish`: a pin another tab has moved on
      * (pending again, or another offer) is never overwritten.
      */
-    retire: (accountId: string, offer: PersonalPairingOffer) =>
+    retire: (accountId: string, offer: PersonalPairingOffer, allowPending = false) =>
       transact(accountId, offer.workspaceId, true, (old) =>
-        old?.phase === 'ready' && samePersonalOffer(old.offer, offer)
+        (old?.phase === 'ready' || (allowPending && old?.phase === 'pending')) &&
+        samePersonalOffer(old.offer, offer)
           ? { result: undefined, next: { ...old, phase: 'cancelled' as const } }
           : { result: undefined }
       ),

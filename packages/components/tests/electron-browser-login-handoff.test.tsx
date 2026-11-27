@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +12,7 @@ import { Provider, createStore } from 'jotai';
 import { electronLoginErrorAtom, electronLoginPhaseAtom } from '../src/atoms';
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import { CloudPlatformProvider } from '../src/providers/cloud-platform-provider';
+import { requireGitHubTokenPort } from '../src/lib/github-token-port';
 
 // jsdom cannot navigate to a custom scheme, and `window.location.replace` is
 // unforgeable, so the one navigation primitive is replaced. Everything else in
@@ -182,6 +183,42 @@ describe('electron browser sign-in handoff', () => {
     }
   });
 
+  it('mounts and remounts standalone recovery login under StrictMode without GitHubTokenPort collision', async () => {
+    vi.stubEnv('VITE_LODY_PLATFORM', 'cloud');
+    window.history.replaceState({}, '', '/login?redirect=%2Frecovery&view=email');
+    const authClient = createAuthClient({});
+    const sessionValue = createSessionValue(false);
+    const client = new ConvexReactClient('https://standalone-login.convex.cloud');
+    const renderStandalone = (providerKey: string) =>
+      act(async () => {
+        root.render(
+          <StrictMode>
+            <Provider store={store}>
+              <AuthProvider authClient={authClient}>
+                <StableSessionContext.Provider value={sessionValue}>
+                  <ConvexProvider client={client}>
+                    <CloudPlatformProvider key={providerKey}>
+                      <LoginPage replaceLocation={() => undefined} isElectronRenderer={false} />
+                    </CloudPlatformProvider>
+                  </ConvexProvider>
+                </StableSessionContext.Provider>
+              </AuthProvider>
+            </Provider>
+          </StrictMode>
+        );
+      });
+
+    try {
+      await renderStandalone('initial');
+      await renderStandalone('redirect');
+      expect(container.querySelector('input[type="email"]')).not.toBeNull();
+      expect(findButton(/Sign in with email/i)?.disabled).toBe(false);
+      expect(() => requireGitHubTokenPort()).not.toThrow();
+    } finally {
+      await client.close();
+    }
+  });
+
   it('shows the main-process failure and allows a new browser attempt', async () => {
     window.history.replaceState({}, '', '/login');
     store.set(electronLoginPhaseAtom, 'error');
@@ -334,6 +371,27 @@ describe('electron browser sign-in handoff', () => {
     const url = handoffLink()?.getAttribute('href');
     expect(url).toMatch(/^ai\.lody\.nightly:\/\/auth\/callback#token=/);
     expect(readDeepLinkPayload(url!)).toEqual({ identifier: 'nightly-code', state: 'state-abc' });
+    expect(deepLinkNavigations).toEqual([url]);
+  });
+
+  it('uses an already-encoded better-auth.electron cookie token without double-encoding', async () => {
+    window.history.replaceState({}, '', `/login${ELECTRON_QUERY}&desktop_channel=stable`);
+    const encodedToken = btoa(JSON.stringify({ identifier: 'cookie-code', state: 'state-abc' }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '');
+    await renderLoginPage(
+      createAuthClient({
+        transferUser: async () => {
+          document.cookie = `better-auth.electron=${encodedToken}; path=/`;
+          return { data: {} };
+        },
+      })
+    );
+    await clickButton(/Continue with this account/i);
+    const url = handoffLink()?.getAttribute('href');
+    expect(url).toMatch(/^ai\.lody\.stable:\/\/auth\/callback#token=/);
+    expect(readDeepLinkPayload(url!)).toEqual({ identifier: 'cookie-code', state: 'state-abc' });
     expect(deepLinkNavigations).toEqual([url]);
   });
 

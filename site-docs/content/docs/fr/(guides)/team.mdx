@@ -1,0 +1,83 @@
+---
+title: "Fonctionnalités d'équipe"
+description: "Utilisez les fonctionnalités d'équipe de Lody pour inviter des membres, gérer les permissions, partager des sessions, consulter la consommation et contrôler la visibilité des machines."
+---
+
+# Fonctionnalités d'équipe
+
+Lody prend en charge la collaboration en équipe depuis le premier jour. Vous pouvez partager des configurations d'agent et l'intégralité du
+contexte de conversation avec votre équipe. D'autres capacités collaboratives sont prévues, notamment les documents partagés,
+les mentions de membres et la gestion des tâches.
+
+Pour inviter un coéquipier **dans une session d'agent de code existante** afin qu'il puisse poursuivre la même
+conversation, les mêmes diffs et le même worktree — et pas seulement consulter une transcription —, consultez
+[Partager une session d'agent de code](/fr/docs/session-handoff). Un lien de partage est une archive, et non ce
+transfert en direct : [Lien de partage vs transfert en direct](/fr/docs/compare/share-link-vs-live-handoff).
+
+Pour exécuter plusieurs agents simultanément — worktrees isolés, modèles mixtes et sessions visibles par l'équipe —, consultez
+[Agents de code en parallèle](/fr/docs/parallel-agents).
+
+## Inviter des membres
+
+Accédez à **Paramètres** -> **Espace de travail** -> **Général**, puis, dans la section **Membres**, cliquez sur **Inviter un membre**.
+Saisissez l'adresse e-mail du membre et choisissez son rôle avant d'envoyer l'invitation.
+
+Une fois l'invitation envoyée, le membre reçoit un e-mail d'invitation. Vous pouvez également copier le lien d'invitation et l'envoyer
+manuellement.
+
+## Modifier les permissions des membres
+
+Les propriétaires et administrateurs de l'espace de travail peuvent modifier les permissions d'un membre depuis l'action de modification située à droite
+dans la liste des membres.
+
+## Supprimer des membres
+
+Les propriétaires et administrateurs de l'espace de travail peuvent supprimer des membres à l'aide de l'action de suppression située à droite dans la
+liste des membres.
+
+## Voir les sessions des autres membres
+
+Sur la page d'accueil, utilisez le filtre de la barre latérale pour basculer entre **Mes tâches** et **Toutes les tâches** (sur
+mobile, **Tâches de l'équipe**). Par défaut, la liste affiche **Toutes les tâches**. Les avatars indiquent qui a démarré chaque
+session.
+
+## Consommation de tokens par membre
+
+Dans **Paramètres** -> **Utilisation de l'IA**, vous pouvez consulter la consommation totale de tokens d'IA ainsi que les graphiques de tendance. Utilisez
+**Par membre** pour examiner la répartition de la consommation par membre.
+
+<img src="/_docs-assets/token-by-member.png" alt="" />
+
+## Visibilité des machines d'équipe
+
+Chaque machine que vous enregistrez est **privée par défaut**. Rejoindre l'espace de travail d'une autre personne
+n'expose pas votre propre machine de développement : les autres membres ne peuvent ni la voir dans leur liste de machines, ni y démarrer
+des sessions.
+
+Lorsque vous souhaitez que vos coéquipiers puissent accéder à une machine spécifique — par exemple un serveur de build partagé ou un
+worker cloud —, vous pouvez la partager explicitement avec l'espace de travail.
+
+### Partager une machine
+
+1. Accédez à **Paramètres** -> **Machines**.
+2. Repérez la machine sous **Mes machines**.
+3. Activez l'option **Partager la machine**.
+
+La machine apparaît alors sous **Machines de l'équipe** pour les autres membres, qui peuvent la sélectionner lors de la
+création d'une session. Vous pouvez désactiver cette option à tout moment ; dès que le partage est désactivé, la machine
+disparaît des listes de machines des autres membres et leurs barres latérales de sessions cessent de recevoir les
+conversations qui s'y exécutent.
+
+Seul le propriétaire d'une machine peut modifier son état de partage.
+
+### Ce que signifie « partagée »
+
+- **Visibilité dans la liste** : les machines partagées apparaissent dans la section `Team Machines` des paramètres de machines de chaque
+  membre. Les machines non partagées restent uniquement sous `My Machines` chez leur propriétaire.
+- **Accessibilité des sessions** : les sessions ne peuvent être créées que sur les machines auxquelles le créateur a accès —
+  ses propres machines, ainsi que toute machine d'équipe actuellement partagée.
+- **Barre latérale des conversations** : les sessions exécutées sur une machine non partagée ne sont pas synchronisées dans la
+  barre latérale des autres membres.
+
+Rejoindre un espace de travail et accorder l'accès à vos machines sont deux opérations totalement indépendantes : vous pouvez inviter des
+coéquipiers sans craindre que votre ordinateur portable personnel ne devienne un worker partagé.

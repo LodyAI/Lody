@@ -1,446 +1,519 @@
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// @vitest-environment jsdom
+import { expect, it, vi } from 'vitest';
+import type { PostHog } from 'posthog-js';
+import { createPostHogPrivacy } from '../src/lib/posthog-privacy';
+import { identifyPostHogUser } from '../src/lib/posthog-identity';
+import { writeDeviceUsageSharing } from '../src/lib/usage-sharing';
 
-import { POSTHOG_OPTIONS } from '../src/providers/posthog-options';
-
-import {
-  postHogPrivacy,
-  createPostHogPrivacy,
-  holdPrivateTelemetrySurface,
-  installWorkspaceTelemetryScope,
-  setTelemetryRouteTarget,
-  suspendWorkspaceTelemetry,
-} from '../src/lib/posthog-privacy';
-
-function runBeforeSend(event: {
-  event: string;
-  properties?: Record<string, unknown>;
-}): { event: string; properties?: Record<string, unknown> } | null {
-  const beforeSend = POSTHOG_OPTIONS.before_send;
-  if (typeof beforeSend !== 'function') {
-    throw new Error('Expected PostHog before_send to be configured');
-  }
-  return beforeSend(event) as { event: string; properties?: Record<string, unknown> } | null;
-}
-
-describe('PostHog provider options', () => {
-  let uninstall: () => void;
-  beforeEach(() => {
-    uninstall = installWorkspaceTelemetryScope(() => 'plain-test-scope');
-    setTelemetryRouteTarget('test', true);
-  });
-  afterEach(() => {
-    uninstall();
-    vi.unstubAllGlobals();
-  });
-
-  it('retires boundary analytics and projects boundary exceptions in ordinary scopes too', () => {
-    expect(
-      runBeforeSend({
-        event: 'app/error_boundary_triggered',
-        properties: {
-          reason_code: 'SYNTHETIC_TOKEN',
-          error_fingerprint: 'SYNTHETIC_HASH',
-        },
-      })
-    ).toBeNull();
-    const projected = runBeforeSend({
-      event: '$exception',
-      properties: {
-        errorBoundary: 'SYNTHETIC_BOUNDARY',
-        error_type: 'SYNTHETIC_NAME',
-        error_code: 'SYNTHETIC_CODE',
-        componentStack: 'SYNTHETIC_STACK',
-        $exception_list: [{ type: 'SYNTHETIC_NAME', value: 'SYNTHETIC_MESSAGE' }],
-        $groups: { workspace: 'SYNTHETIC_WORKSPACE' },
-      },
-    });
-    expect(projected?.properties).toMatchObject({
-      source: 'errorBoundary',
-      error_type: 'unknown',
-      error_code: 'redacted_exception',
-      $exception_list: [{ type: 'Error', value: 'redacted_exception' }],
-    });
-    expect(JSON.stringify(projected)).not.toContain('SYNTHETIC_');
-  });
-
-  it('keeps an encrypted approval private above ordinary workspaces until all actual surfaces retire', () => {
-    let current = 'ordinary-A';
-    const removeScope = installWorkspaceTelemetryScope(() => current);
-    const first = holdPrivateTelemetrySurface(),
-      nested = holdPrivateTelemetrySurface();
-    const frame = {
-      event: '$snapshot',
-      properties: { $snapshot_data: ['synthetic pairing code'] },
-    };
-    try {
-      expect(runBeforeSend(frame)).toBeNull();
-      first();
-      first();
-      expect(runBeforeSend(frame)).toBeNull();
-      current = 'ordinary-B';
-      setTelemetryRouteTarget('B', true);
-      expect(runBeforeSend(frame)).toBeNull();
-      expect(
-        runBeforeSend({
-          event: '$exception',
-          properties: { message: 'synthetic device name', error_code: 'e2ee_pairing_expired' },
-        })?.properties
-      ).not.toHaveProperty('message');
-      nested();
-      expect(
-        runBeforeSend({ event: '$snapshot', properties: { $snapshot_data: ['ordinary-B'] } })
-      ).not.toBeNull();
-    } finally {
-      first();
-      nested();
-      removeScope();
-    }
-  });
-
-  it('drops snapshots and redacts exceptions across an unknown workspace transition', () => {
-    const snapshot = { event: '$snapshot', properties: { $snapshot_data: ['private path'] } };
-    expect(runBeforeSend(snapshot)).toEqual(snapshot);
-    suspendWorkspaceTelemetry();
-    expect(runBeforeSend(snapshot)).toBeNull();
-    expect(
-      runBeforeSend({
-        event: '$exception',
-        properties: {
-          $exception_list: [{ value: 'private error', stacktrace: { frames: ['private path'] } }],
-          arbitrary: { secret: 'private content' },
-          error_code: 'e2ee_feature_unavailable',
-        },
-      })
-    ).toEqual({
-      event: '$exception',
-      properties: {
-        token: undefined,
-        distinct_id: undefined,
-        $exception_list: [{ type: 'Error', value: 'e2ee_feature_unavailable' }],
-        error_code: 'e2ee_feature_unavailable',
-        error_type: 'unknown',
-        source: 'unknown',
-        platform: 'web',
-        $lib: 'unknown',
-        $exception_fingerprint:
-          'lody-redacted-v1:web:web:unknown:unknown:unknown:e2ee_feature_unavailable',
-      },
-    });
-  });
-
-  it('keeps recovery recordings and late exceptions private until both UI and command settle', () => {
-    const releaseUI = holdPrivateTelemetrySurface();
-    const releaseCommand = holdPrivateTelemetrySurface();
-    const prepared = postHogPrivacy.prepareException([new Error('recovery-secret')]);
-    releaseUI();
-    setTelemetryRouteTarget('test', true);
-    expect(
-      runBeforeSend({ event: '$snapshot', properties: { $snapshot_data: ['recovery-secret'] } })
-    ).toBeNull();
-    releaseUI(); // releasing one holder twice cannot release the pending command
-    expect(postHogPrivacy.isAllowed()).toBe(false);
-    releaseCommand();
-    expect(postHogPrivacy.isAllowed()).toBe(true);
-    const late = runBeforeSend({
-      event: '$exception',
-      properties: {
-        ...(prepared[1] as Record<string, unknown>),
-        $exception_list: [{ value: 'recovery-secret' }],
-      },
-    });
-    expect(JSON.stringify(late)).not.toContain('recovery-secret');
-  });
-
-  it('keeps delayed exceptions redacted across unknown and returning plaintext scopes', () => {
-    const plaintext = postHogPrivacy.prepareException([
-      new Error('private-before-switch'),
-      { nested: { file: 'private path' } },
-    ]);
-    suspendWorkspaceTelemetry();
-    const unknown = postHogPrivacy.prepareException([
-      new Error('private-unknown'),
-      { nested: { file: 'private path' } },
-    ]);
-    setTelemetryRouteTarget('test', true);
-    for (const prepared of [plaintext, unknown]) {
-      const event = runBeforeSend({
-        event: '$exception',
-        properties: {
-          ...(prepared[1] as Record<string, unknown>),
-          $exception_list: [{ value: String(prepared[0]) }],
-          $exception_steps: [{ message: 'private breadcrumb' }],
-        },
-      });
-      expect(JSON.stringify(event)).not.toContain('private');
-      expect(event).toMatchObject({ properties: { error_code: 'redacted_exception' } });
-    }
-  });
-});
-
-it('keeps GitHub installation retry capabilities out of the locked SDK replay URL metadata', () => {
-  const require = createRequire(import.meta.url);
-  const sdkRoot = dirname(require.resolve('posthog-js/package.json'));
-  // Exercise the real locked recorder URL masking boundary without starting replay timers.
-  const { LazyLoadedSessionRecording } = require(
-    join(sdkRoot, 'lib/src/extensions/replay/external/lazy-loaded-session-recorder.js')
-  );
-  const recorder = Object.assign(Object.create(LazyLoadedSessionRecording.prototype), {
-    _instance: {
-      config: { ...POSTHOG_OPTIONS, session_recording: { ...POSTHOG_OPTIONS.session_recording } },
-    },
-  }) as {
-    _instance: {
-      config: {
-        disable_capture_url_hashes?: boolean;
-        session_recording: { maskCapturedNetworkRequestFn?: unknown };
-      };
-    };
-    _maskReplayUrl: (url: string) => string;
+it('projects persisted batches by default and blocks uploads after opt-out', () => {
+  window.localStorage.clear();
+  writeDeviceUsageSharing(false);
+  const blocked: unknown[] = [];
+  const blockedClient = {
+    _send_request: (options: { data: unknown }) => blocked.push(options.data),
   };
-  const capability =
-    'https://lody.example/team/settings/github#github-install-retry=SIGNED_INSTALL_STATE_SECRET';
-  expect(recorder._maskReplayUrl(capability)).toBe('https://lody.example/team/settings/github');
-  recorder._instance.config.disable_capture_url_hashes = false;
-  delete recorder._instance.config.session_recording.maskCapturedNetworkRequestFn;
-  expect(recorder._maskReplayUrl(capability)).toContain('SIGNED_INSTALL_STATE_SECRET');
-});
+  const optedOutPrivacy = createPostHogPrivacy(() => 'ordinary');
+  optedOutPrivacy.attach(blockedClient as unknown as PostHog);
+  blockedClient._send_request({
+    data: [{ event: 'session/message_submit_requested', properties: { distinct_id: 'u1' } }],
+  });
+  expect(blocked).toEqual([]);
 
-it.each([
-  '?state=QUERY_CAPABILITY_SECRET&theme=dark',
-  '?github-install-retry=https%3A%2F%2Fcallback.example%2F%3Fstate%3DQUERY_CAPABILITY_SECRET&theme=dark',
-  '?github_install_error=temporarily_unavailable%23github-install-retry%3Dhttps%253A%252F%252Fcallback.example%252F%253Fstate%253DQUERY_CAPABILITY_SECRET&theme=dark',
-  '?next=https%253A%252F%252Fcallback.example%252F%253Fstate%253DQUERY_CAPABILITY_SECRET&theme=dark',
-])('keeps accidental query capabilities out of real SDK replay metadata: %s', (query) => {
-  const require = createRequire(import.meta.url);
-  const sdkRoot = dirname(require.resolve('posthog-js/package.json'));
-  const { LazyLoadedSessionRecording } = require(
-    join(sdkRoot, 'lib/src/extensions/replay/external/lazy-loaded-session-recorder.js')
-  );
-  const recorder = Object.assign(Object.create(LazyLoadedSessionRecording.prototype), {
-    _instance: {
-      config: { ...POSTHOG_OPTIONS, session_recording: { ...POSTHOG_OPTIONS.session_recording } },
-    },
-  }) as {
-    _maskReplayUrl: (url: string) => string;
-    _instance: { config: { session_recording: { maskCapturedNetworkRequestFn?: unknown } } };
-  };
-  const source = `https://lody.example/team/chat${query}`;
-  const masked = recorder._maskReplayUrl(source);
-  expect(masked).not.toContain('QUERY_CAPABILITY_SECRET');
-  expect(new URL(masked).searchParams.get('theme')).toBe('dark');
-  delete recorder._instance.config.session_recording.maskCapturedNetworkRequestFn;
-  expect(recorder._maskReplayUrl(source)).toContain('QUERY_CAPABILITY_SECRET');
-});
-
-it('scrubs nested replay and exception query contamination while keeping neutral diagnostics', () => {
-  const uninstall = installWorkspaceTelemetryScope(() => 'ordinary');
-  setTelemetryRouteTarget('ordinary', true);
-  const contaminated =
-    'https://lody.example/team/chat?github_install_error=temporarily_unavailable%23github-install-retry%3Dhttps%253A%252F%252Fcallback.example%252F%253Fstate%253DQUERY_CAPABILITY_SECRET&theme=dark';
+  window.localStorage.clear();
   try {
-    for (const event of ['$snapshot', '$exception', 'navigation/failed']) {
-      const result = runBeforeSend({
-        event,
-        properties: {
-          state: 'loading',
-          error_code: 'temporarily_unavailable',
-          nested: [
-            {
-              data: {
-                href: contaminated,
-                detail: encodeURIComponent(contaminated),
-                neutral: 'https://lody.example/team/chat?theme=dark&tab=github',
-              },
+    for (const scope of [null, 'ordinary']) {
+      const sent: unknown[] = [];
+      const client = { _send_request: (options: { data: unknown }) => sent.push(options.data) };
+      const privacy = createPostHogPrivacy(() => scope);
+      privacy.attach(client as unknown as PostHog);
+      client._send_request({
+        data: [
+          { event: 'synthetic-private-name', properties: {} },
+          { event: '$snapshot', properties: { data: 'private' } },
+          { event: '$autocapture', properties: { elements: 'private' } },
+          { event: '$pageview', properties: { $current_url: 'https://app.lody.ai/private' } },
+          { event: 'session/open_in_ide_clicked', properties: { $lib: 'web' } },
+          {
+            event: 'session/message_submit_requested',
+            uuid: 'private',
+            timestamp: { route: 'private' },
+            offset: 0,
+            $set_once: { name: 'private' },
+            properties: {
+              $lib: 'web',
+              token: 'project',
+              distinct_id: 'synthetic_123',
+              email: 'private',
+              $current_url: 'private',
+              $title: 'private',
+              $set: { nested: 'private' },
+              user_id: 'me@example.test',
+              cli_type: 'builtin',
+              agent_type: 'claude',
             },
-          ],
-        },
-      });
-      expect(JSON.stringify(result)).not.toContain('QUERY_CAPABILITY_SECRET');
-      expect(result?.properties?.state).toBe('loading');
-      expect(result?.properties?.error_code).toBe('temporarily_unavailable');
-      expect(result?.properties?.nested).toEqual([
-        {
-          data: {
-            href: 'https://lody.example/team/chat?theme=dark',
-            detail: '[redacted_installation_capability]',
-            neutral: 'https://lody.example/team/chat?theme=dark&tab=github',
           },
-        },
+          {
+            event: 'session/chat',
+            offset: 0,
+            properties: {
+              distinct_id: 'synthetic_123',
+              cli_type: 'custom',
+              agent_type: 'PRIVATE_CUSTOM_AGENT',
+            },
+          },
+          {
+            event: 'auth/oauth_returned',
+            offset: 0,
+            properties: {
+              distinct_id: 'synthetic_123',
+              is_new_user: true,
+              outcome: 'success',
+              provider: 'github',
+            },
+          },
+          { event: '$identify', offset: 0, properties: { distinct_id: 'me@example.test' } },
+        ],
+      });
+      expect(sent).toEqual([
+        [
+          {
+            event: 'session/message_submit_requested',
+            offset: 0,
+            properties: {
+              $lib: 'web',
+              token: 'project',
+              distinct_id: 'synthetic_123',
+              platform: 'web',
+              cli_type: 'builtin',
+              agent_type: 'claude',
+            },
+          },
+          {
+            event: 'session/chat',
+            offset: 0,
+            properties: {
+              distinct_id: 'synthetic_123',
+              platform: 'web',
+              cli_type: 'custom',
+              agent_type: 'other',
+            },
+          },
+          {
+            event: 'auth/oauth_returned',
+            offset: 0,
+            properties: {
+              distinct_id: 'synthetic_123',
+              platform: 'web',
+              is_new_user: true,
+              outcome: 'success',
+            },
+          },
+        ],
       ]);
     }
   } finally {
-    uninstall();
+    window.localStorage.clear();
   }
 });
 
-it('scrubs a queued replay URL contaminated after capture before it reaches the transport encoder', () => {
-  const bodies: string[] = [];
+it('identifies only an opaque internal account id', () => {
+  const calls: unknown[][] = [];
   const client = {
-    __loaded: false,
-    _send_request: (options: { data: unknown }) => {
-      bodies.push(JSON.stringify(options.data));
+    identify: (...args: unknown[]) => {
+      calls.push(args);
     },
   };
-  const privacy = createPostHogPrivacy(() => 'ordinary');
-  privacy.attach(client as never);
-  const frame = {
-    event: '$snapshot',
-    properties: {
-      token: 'synthetic-project-key',
-      $snapshot_data: [{ data: { href: 'https://lody.example/team/chat?theme=dark' } }],
-    },
-  };
-  privacy.beforeSend(frame);
-  frame.properties.$snapshot_data[0]!.data.href =
-    'https://lody.example/team/chat?state=QUEUED_CAPABILITY_SECRET&theme=dark';
-  client._send_request({ data: [frame] });
-  expect(bodies).toHaveLength(1);
-  expect(bodies[0]).not.toContain('QUEUED_CAPABILITY_SECRET');
-  expect(bodies[0]).toContain('theme=dark');
-  expect(bodies[0]).toContain('synthetic-project-key');
+  identifyPostHogUser(client, 'opaque_123');
+  identifyPostHogUser(client, 'test@example.test');
+  expect(calls).toEqual([['opaque_123']]);
 });
 
-it('keeps restricted categories, source and version through deferred capture and repeated transport redaction', () => {
-  const bodies: unknown[] = [];
-  let scope: string | null = null;
-  const privacy = createPostHogPrivacy(() => scope);
-  const client = {
-    __loaded: false,
-    _send_request: (options: { data: unknown }) => bodies.push(options.data),
+it('stops and resumes uploads from the settings switch and retains the choice on remount', async () => {
+  const { createElement, act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { PlatformContext } = await import('@lody/platform/react');
+  const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
+  const { UsageSharingRow } = await import('../src/components/settings/usage-sharing-row');
+  const { usageSharingAllowed } = await import('../src/lib/usage-sharing');
+  const { initI18n } = await import('../src/i18n');
+  await initI18n('en');
+  const platform = {
+    ...TEST_CLOUD_PLATFORM,
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useMutation: () => async () => null,
+      useOptionalAuthenticatedQuery: undefined,
+    },
+  } as typeof TEST_CLOUD_PLATFORM;
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  const row = createElement(
+    PlatformContext.Provider,
+    { value: platform },
+    createElement(UsageSharingRow)
+  );
+  const toggle = () => host.querySelector<HTMLElement>('[role="switch"]')!;
+  try {
+    await act(async () => root.render(row));
+    expect(toggle().getAttribute('aria-checked')).toBe('true');
+    expect(usageSharingAllowed()).toBe(true);
+    window.localStorage.setItem('ph_test_posthog', 'cached-id');
+    await act(async () => toggle().click());
+    expect(usageSharingAllowed()).toBe(false);
+    expect(window.localStorage.getItem('ph_test_posthog')).toBeNull();
+    await act(async () => root.render(null));
+    await act(async () => root.render(row));
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    await act(async () => toggle().click());
+    expect(usageSharingAllowed()).toBe(true);
+  } finally {
+    await act(async () => root.unmount());
+    window.localStorage.clear();
+  }
+});
+
+it('waits for cloud save before re-enabling desktop usage sharing and disables the switch while account preference loads', async () => {
+  const { createElement, act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { PlatformContext } = await import('@lody/platform/react');
+  const { createStore: createPlatformStore } = await import('@lody/platform');
+  const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
+  const { UsageSharingRow } = await import('../src/components/settings/usage-sharing-row');
+  const { usageSharingAllowed, writeDeviceUsageSharing } = await import('../src/lib/usage-sharing');
+  const { initI18n } = await import('../src/i18n');
+  await initI18n('en');
+  vi.stubGlobal('__LODY_ELECTRON__', true);
+  writeDeviceUsageSharing(false);
+  const nativeCalls: boolean[] = [];
+  vi.stubGlobal('ipc', {
+    invoke: async (channel: string, enabled: boolean) => {
+      if (channel === 'app.setUsageSharingEnabled') nativeCalls.push(enabled);
+    },
+  });
+  let accountData: boolean | undefined = undefined;
+  let shouldRejectSave = true;
+  const session = createPlatformStore<import('@lody/platform').PlatformSessionState>({
+    status: 'authenticated',
+    user: { id: 'opaque_user' },
+  });
+  const platform = {
+    ...TEST_CLOUD_PLATFORM,
+    identity: { ...TEST_CLOUD_PLATFORM.identity, session },
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useOptionalAuthenticatedQuery: () => ({ data: accountData }),
+      useMutation: () => async () => {
+        if (shouldRejectSave) throw new Error('offline');
+        accountData = true;
+        return null;
+      },
+    },
+  } as unknown as typeof TEST_CLOUD_PLATFORM;
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  const renderRow = () =>
+    act(async () =>
+      root.render(
+        createElement(PlatformContext.Provider, { value: platform }, createElement(UsageSharingRow))
+      )
+    );
+  const toggle = () => host.querySelector<HTMLButtonElement>('[role="switch"]')!;
+  try {
+    await renderRow();
+    expect(toggle().disabled).toBe(true);
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+
+    accountData = false;
+    await renderRow();
+    expect(toggle().disabled).toBe(false);
+    await act(async () => toggle().click());
+    expect(nativeCalls).toEqual([]);
+    expect(usageSharingAllowed()).toBe(false);
+
+    shouldRejectSave = false;
+    await act(async () => toggle().click());
+    expect(nativeCalls).toEqual([true]);
+    expect(usageSharingAllowed()).toBe(true);
+  } finally {
+    await act(async () => root.unmount());
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('allows immediate opt-out when account query fails or lags and prevents LodyPostHogProvider from bouncing back to on', async () => {
+  const { createElement, act, useSyncExternalStore } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { PlatformContext } = await import('@lody/platform/react');
+  const { createStore: createPlatformStore } = await import('@lody/platform');
+  const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
+  const { UsageSharingRow } = await import('../src/components/settings/usage-sharing-row');
+  const { LodyPostHogProvider } = await import('../src/providers/posthog-provider');
+  const {
+    pendingAccountChoice,
+    readDeviceUsageChoice,
+    usageSharingAllowed,
+  } = await import('../src/lib/usage-sharing');
+  const { initI18n } = await import('../src/i18n');
+  await initI18n('en');
+
+  const makeQueryStore = (initial: { data: boolean | undefined; error: Error | null }) => {
+    let state = initial;
+    const listeners = new Set<() => void>();
+    return {
+      get: () => state,
+      set: (next: { data: boolean | undefined; error: Error | null }) => {
+        state = next;
+        for (const listener of listeners) listener();
+      },
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
   };
-  privacy.attach(client as never);
-  const emit = (
-    error: unknown,
-    extra: Record<string, unknown> = {},
-    version = '0.112.0-nightly.3'
-  ) => {
-    const prepared = privacy.prepareException([
-      error,
-      {
-        errorBoundary: 'PRIVATE_BOUNDARY',
-        path: '/PRIVATE_PATH',
-        ...extra,
+
+  vi.stubGlobal('__LODY_ELECTRON__', true);
+  let diskChoice: boolean | null = null;
+  const nativeWrites: boolean[] = [];
+  vi.stubGlobal('ipc', {
+    invoke: async (channel: string, arg?: unknown) => {
+      if (channel === 'app.getUsageSharingEnabled') return diskChoice;
+      if (channel === 'app.isUsageSharingDisabledByEnv') return false;
+      if (channel === 'app.setUsageSharingEnabled') {
+        diskChoice = arg as boolean;
+        nativeWrites.push(arg as boolean);
+        return;
+      }
+      throw new Error(`unexpected ipc: ${channel}`);
+    },
+  });
+
+  const session = createPlatformStore<import('@lody/platform').PlatformSessionState>({
+    status: 'authenticated',
+    user: { id: 'opaque_user_optout' },
+  });
+  const queryStore = makeQueryStore({ data: undefined, error: new Error('backend unavailable') });
+  const observedQueryArgs: unknown[] = [];
+  const observedMutations: unknown[] = [];
+  let rejectSave = true;
+
+  const platform = {
+    ...TEST_CLOUD_PLATFORM,
+    identity: { ...TEST_CLOUD_PLATFORM.identity, session },
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useOptionalAuthenticatedQuery: (_op: unknown, args: unknown) => {
+        observedQueryArgs.push(args);
+        const snap = useSyncExternalStore(queryStore.subscribe, queryStore.get, queryStore.get);
+        return { ...snap, retry: () => {} };
       },
-    ]);
-    expect(JSON.stringify(prepared)).not.toContain('PRIVATE_');
-    const event = privacy.beforeSend({
-      event: '$exception',
-      properties: {
-        ...(prepared[1] as Record<string, unknown>),
-        $exception_list: [
-          { type: 'Error', value: String(prepared[0]), stacktrace: 'PRIVATE_STACK' },
-        ],
-        platform: 'electron',
-        electron_process: 'renderer',
-        $lib: 'desktop',
-        app_version: version,
-        $lib_version: version,
-        $exception_fingerprint: 'PRIVATE_FINGERPRINT',
+      useMutation: () => async (args: unknown) => {
+        observedMutations.push(args);
+        if (rejectSave) throw new Error('offline');
+        return null;
       },
+    },
+  } as unknown as typeof TEST_CLOUD_PLATFORM;
+
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  const peerHost = document.createElement('div');
+  const peerRoot = createRoot(peerHost);
+  const toggle = () => host.querySelector<HTMLButtonElement>('[role="switch"]')!;
+  try {
+    // 1) Query failed: switch is ON but MUST remain clickable so opt-out fails closed immediately.
+    await act(async () =>
+      root.render(
+        createElement(
+          PlatformContext.Provider,
+          { value: platform },
+          createElement(LodyPostHogProvider, null, createElement(UsageSharingRow))
+        )
+      )
+    );
+    expect(observedQueryArgs[0]).toEqual({});
+    expect(toggle().getAttribute('aria-checked')).toBe('true');
+    expect(toggle().disabled).toBe(false);
+
+    await act(async () => toggle().click());
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(diskChoice).toBe(false);
+    expect(usageSharingAllowed()).toBe(false);
+    expect(observedMutations).toEqual([{ enabled: false }]);
+    expect(pendingAccountChoice('opaque_user_optout')).toBe(false);
+
+    // 2) Server comes back online with stale account=true and save succeeds before query flips to false.
+    // Neither this window nor a second window/reload may bounce the choice back to true.
+    rejectSave = false;
+    observedMutations.length = 0;
+    await act(async () => queryStore.set({ data: true, error: null }));
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(diskChoice).toBe(false);
+    expect(observedMutations).toEqual([{ enabled: false }]);
+
+    // Mount a second provider (simulating another Electron window or reload) while account is still true:
+    await act(async () =>
+      peerRoot.render(
+        createElement(
+          PlatformContext.Provider,
+          { value: platform },
+          createElement(LodyPostHogProvider, null)
+        )
+      )
+    );
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(diskChoice).toBe(false);
+    expect(usageSharingAllowed()).toBe(false);
+
+    // Once server query confirms account=false, pending marker clears and opt-out remains stable.
+    await act(async () => queryStore.set({ data: false, error: null }));
+    expect(pendingAccountChoice('opaque_user_optout')).toBeNull();
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(diskChoice).toBe(false);
+
+    // 3) Re-enable and then click OFF against a healthy backend: only 1 mutation fires, no bounce-back.
+    observedMutations.length = 0;
+    await act(async () => toggle().click());
+    await act(async () => queryStore.set({ data: true, error: null }));
+    expect(toggle().getAttribute('aria-checked')).toBe('true');
+    expect(observedMutations).toEqual([{ enabled: true }]);
+
+    observedMutations.length = 0;
+    nativeWrites.length = 0;
+    await act(async () => toggle().click());
+    expect(observedMutations).toEqual([{ enabled: false }]);
+    expect(nativeWrites).toEqual([false]);
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(pendingAccountChoice('opaque_user_optout')).toBe(false);
+
+    await act(async () => queryStore.set({ data: false, error: null }));
+    expect(pendingAccountChoice('opaque_user_optout')).toBeNull();
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+  } finally {
+    await act(async () => {
+      root.unmount();
+      peerRoot.unmount();
     });
-    client._send_request({ data: [event] });
-    scope = 'ordinary';
-    privacy.sync();
-    scope = null;
-    client._send_request({ data: [event] });
-    return (bodies.at(-1) as Array<{ properties: Record<string, unknown> }>)[0]!.properties;
-  };
-  const type = emit(new TypeError('PRIVATE_TOKEN'));
-  const again = emit(new TypeError('PRIVATE_OTHER_TEXT'));
-  const nextVersion = emit(new TypeError('PRIVATE_TOKEN'), {}, '0.113.0');
-  const manual = emit(new TypeError('PRIVATE_TOKEN'), { errorBoundary: undefined });
-  const range = emit(new RangeError('PRIVATE_TOKEN'));
-  const forbidden = emit(new TypeError('PRIVATE_TOKEN'), { error_code: 'forbidden' });
-  expect(type).toMatchObject({
-    error_type: 'TypeError',
-    source: 'errorBoundary',
-    platform: 'electron',
-    electron_process: 'renderer',
-    app_version: '0.112.0-nightly.3',
-    $lib: 'desktop',
-  });
-  expect(type.$exception_fingerprint).toBe(again.$exception_fingerprint);
-  expect(type.$exception_fingerprint).toBe(nextVersion.$exception_fingerprint);
-  expect(nextVersion.app_version).toBe('0.113.0');
-  expect(type.$exception_fingerprint).not.toBe(manual.$exception_fingerprint);
-  expect(type.$exception_fingerprint).not.toBe(range.$exception_fingerprint);
-  expect(type.$exception_fingerprint).not.toBe(forbidden.$exception_fingerprint);
-  expect(bodies[0]).toEqual(bodies[1]);
-  expect(JSON.stringify(bodies)).not.toContain('PRIVATE_');
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+  }
 });
 
-it('rejects unrecognized diagnostic fields and versions rather than hashing secret error text', () => {
-  const privacy = createPostHogPrivacy(() => null);
-  const result = privacy.beforeSend({
-    event: '$exception',
-    properties: {
-      $exception_list: [
-        { type: 'PRIVATE_TYPE', value: 'PRIVATE_MESSAGE', mechanism: { type: 'PRIVATE_SOURCE' } },
-      ],
-      error_code: 'PRIVATE_CODE',
-      source: 'PRIVATE_SOURCE',
-      platform: 'PRIVATE_PLATFORM',
-      $lib: 'PRIVATE_LIB',
-      $lib_version: '1.2.3-PRIVATE_TOKEN',
-      app_version: 'PRIVATE_VERSION',
-      release: 'PRIVATE_RELEASE',
-      operation: 'PRIVATE_OPERATION',
-      stage: 'doc_meta_scan_failed',
-      failure_kind: 'rejected',
-      handling_state: 'observed',
-      retry_state: 'not_scheduled',
-      $exception_fingerprint: 'PRIVATE_FINGERPRINT',
-      extra: { cause: 'PRIVATE_CAUSE' },
+it('preserves environment-forced telemetry opt-out in LodyPostHogProvider despite account=true', async () => {
+  const { createElement, act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { PlatformContext } = await import('@lody/platform/react');
+  const { createStore: createPlatformStore } = await import('@lody/platform');
+  const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
+  const { LodyPostHogProvider } = await import('../src/providers/posthog-provider');
+  const { readDeviceUsageChoice, usageSharingAllowed } = await import('../src/lib/usage-sharing');
+
+  vi.stubGlobal('__LODY_ELECTRON__', true);
+  const nativeWrites: boolean[] = [];
+  vi.stubGlobal('ipc', {
+    invoke: async (channel: string, arg?: unknown) => {
+      if (channel === 'app.getUsageSharingEnabled') return false;
+      if (channel === 'app.isUsageSharingDisabledByEnv') return true;
+      if (channel === 'app.setUsageSharingEnabled') {
+        nativeWrites.push(arg as boolean);
+        return;
+      }
+      throw new Error(`unexpected ipc: ${channel}`);
     },
   });
-  expect(result?.properties).toMatchObject({
-    error_type: 'unknown',
-    source: 'unknown',
-    platform: 'unknown',
+  const session = createPlatformStore<import('@lody/platform').PlatformSessionState>({
+    status: 'authenticated',
+    user: { id: 'opaque_user_env' },
   });
-  expect(result?.properties).not.toHaveProperty('app_version');
-  expect(result?.properties).not.toHaveProperty('stage');
-  expect(JSON.stringify(result)).not.toContain('PRIVATE_');
+  const platform = {
+    ...TEST_CLOUD_PLATFORM,
+    identity: { ...TEST_CLOUD_PLATFORM.identity, session },
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useOptionalAuthenticatedQuery: () => ({ data: true, error: null, retry: () => {} }),
+      useMutation: () => async () => null,
+    },
+  } as unknown as typeof TEST_CLOUD_PLATFORM;
+
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          PlatformContext.Provider,
+          { value: platform },
+          createElement(LodyPostHogProvider, null)
+        )
+      )
+    );
+    expect(readDeviceUsageChoice()).toBe(false);
+    expect(usageSharingAllowed()).toBe(false);
+    expect(nativeWrites).toEqual([]);
+  } finally {
+    await act(async () => root.unmount());
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+  }
 });
 
-it('preserves fixed sync diagnostics through deferred capture and transport reprojection', () => {
-  const privacy = createPostHogPrivacy(() => null);
-  const sent: unknown[] = [];
-  const client = {
-    __loaded: false,
-    _send_request: (options: { data: unknown }) => sent.push(options.data),
-  };
-  privacy.attach(client as never);
-  const prepared = privacy.prepareException([
-    new Error('PRIVATE_MESSAGE'),
-    {
-      operation: 'workspace_sync',
-      stage: 'doc_meta_scan_failed',
-      failure_kind: 'rejected',
-      handling_state: 'observed',
-      retry_state: 'not_scheduled',
-      workspace_id: 'PRIVATE_WORKSPACE',
-    },
-  ]);
-  const event = privacy.beforeSend({
-    event: '$exception',
-    properties: prepared[1] as Record<string, unknown>,
-  });
-  client._send_request({ data: [event] });
-  client._send_request({ data: sent[0] });
-  expect(sent[1]).toEqual(sent[0]);
-  expect(sent[0]).toMatchObject([
-    {
-      properties: {
-        operation: 'workspace_sync',
-        stage: 'doc_meta_scan_failed',
-        failure_kind: 'rejected',
-        handling_state: 'observed',
-        retry_state: 'not_scheduled',
-      },
-    },
-  ]);
-  expect(JSON.stringify(sent)).not.toContain('PRIVATE_');
+it('renders the web cookie consent banner only in European consent regions and updates gtag on choice', async () => {
+  const { createElement, act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { WebCookieConsentBanner, readWebCookieConsent, requiresRegionalCookieConsent } =
+    await import('../src/components/web-cookie-consent-banner');
+  const { initI18n } = await import('../src/i18n');
+  await initI18n('en');
+  const gtagCalls: unknown[][] = [];
+  vi.stubGlobal('gtag', (...args: unknown[]) => gtagCalls.push(args));
+  const mount = document.createElement('div');
+  document.body.appendChild(mount);
+  const root = createRoot(mount);
+  try {
+    document.cookie = 'lody-consent-region=US; path=/';
+    expect(requiresRegionalCookieConsent()).toBe(false);
+    await act(async () => root.render(createElement(WebCookieConsentBanner)));
+    expect(mount.querySelector('aside')).toBeNull();
+    await act(async () => root.unmount());
+
+    const euRoot = createRoot(mount);
+    try {
+      document.cookie = 'lody-consent-region=DE; path=/';
+      expect(requiresRegionalCookieConsent()).toBe(true);
+      await act(async () => euRoot.render(createElement(WebCookieConsentBanner)));
+      const buttons = Array.from(mount.querySelectorAll<HTMLButtonElement>('button'));
+      expect(buttons.map((button) => button.textContent)).toEqual([
+        'Essential only',
+        'Accept analytics cookies',
+      ]);
+      await act(async () => buttons[1]!.click());
+      expect(mount.querySelector('aside')).toBeNull();
+      expect(readWebCookieConsent()).toBe('granted');
+      expect(gtagCalls).toEqual([
+        [
+          'consent',
+          'update',
+          {
+            ad_storage: 'denied',
+            ad_user_data: 'denied',
+            ad_personalization: 'denied',
+            analytics_storage: 'granted',
+          },
+        ],
+      ]);
+    } finally {
+      await act(async () => euRoot.unmount());
+    }
+  } finally {
+    document.cookie = 'lody-consent-region=; Max-Age=0; path=/';
+    mount.remove();
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+  }
 });

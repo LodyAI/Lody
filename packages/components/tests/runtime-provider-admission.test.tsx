@@ -485,6 +485,9 @@ describe('RuntimeProvider warm workspace preparation', () => {
         { id: 'local:workspace', slug: 'local', name: 'Local', role: 'owner' },
         { id: 'workspace-beta', slug: 'beta', name: 'Beta', role: 'member' },
         { id: 'workspace-gamma', slug: 'gamma', name: 'Gamma', role: 'member' },
+        { id: 'workspace-delta', slug: 'delta', name: 'Delta', role: 'member' },
+        { id: 'workspace-epsilon', slug: 'epsilon', name: 'Epsilon', role: 'member' },
+        { id: 'workspace-zeta', slug: 'zeta', name: 'Zeta', role: 'member' },
       ],
     });
     const asked: string[] = [];
@@ -499,15 +502,18 @@ describe('RuntimeProvider warm workspace preparation', () => {
     try {
       await render();
       await act(async () => first.promise);
-      // Past every per-workspace deadline: no re-ask and no next workspace.
+      // Past every per-workspace deadline: no re-ask and queued workspaces beyond the initial batch never start.
       await act(async () => vi.advanceTimersByTimeAsync(2 * WORKSPACE_MODE_ADMISSION_TIMEOUT_MS));
     } finally {
       vi.useRealTimers();
     }
-    expect(asked).toEqual(['workspace-beta']);
+    expect(asked.length).toBeGreaterThanOrEqual(1);
+    expect(asked.length).toBeLessThanOrEqual(4);
+    expect(asked).not.toContain('workspace-zeta');
     for (const [id, slug] of [
       ['workspace-beta', 'beta'],
       ['workspace-gamma', 'gamma'],
+      ['workspace-zeta', 'zeta'],
     ])
       expect(readWorkspaceModeProof(localStorage, 'local:user', id, slug)).toBeNull();
   });

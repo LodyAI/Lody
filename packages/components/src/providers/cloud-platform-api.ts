@@ -4,13 +4,66 @@ import { ConvexError } from 'convex/values';
 import { isConvexUnauthenticatedError } from '@lody/shared';
 import { useOptionalAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
-import type { CloudAction, CloudApi, CloudMutation, CloudQuery } from '@lody/platform';
+import type {
+  CloudAction,
+  CloudApi,
+  CloudMutation,
+  CloudOperationDecoder,
+  CloudQuery,
+  CloudQueryState,
+} from '@lody/platform';
 import {
+  useOptionalPublicConvexQuery,
   useOptionalRecoverableConvexQuery,
   usePublicConvexQuery,
   useRecoverableConvexQuery,
 } from '@/hooks/use-recoverable-convex-query';
 import { markPersistentWorkspaceSenderCloudApi } from '@/lib/workspace-sender-identity';
+import { recordClientError } from '@/lib/client-log';
+
+function decodeCloudResult<Result>(
+  operationName: string,
+  decode: CloudOperationDecoder<Result> | undefined,
+  raw: unknown
+): { ok: true; data: Result } | { ok: false; error: Error } {
+  if (!decode) {
+    return { ok: true, data: raw as Result };
+  }
+  const decoded = decode(raw);
+  if (!decoded.ok) {
+    recordClientError('cloud.boundary_decode_failed', decoded.error, {
+      operation: operationName,
+    });
+    return decoded;
+  }
+  return decoded;
+}
+
+function decodeCloudQueryState<Args, Result>(
+  operation: CloudQuery<Args, Result>,
+  state: { data: unknown; error: Error | null; retry: () => void }
+): CloudQueryState<Result> {
+  if (state.error !== null || state.data === undefined) {
+    return {
+      data: undefined,
+      error: state.error,
+      retry: state.retry,
+    };
+  }
+  const decoded = decodeCloudResult(operation.name, operation.decode, state.data);
+  if (!decoded.ok) {
+    return {
+      data: undefined,
+      error: decoded.error,
+      retry: state.retry,
+    };
+  }
+  return {
+    data: decoded.data,
+    error: null,
+    retry: state.retry,
+  };
+}
 
 function queryReference<Args, Result>(
   operation: CloudQuery<Args, Result>
@@ -30,6 +83,30 @@ function actionReference<Args, Result>(
   return makeFunctionReference<'action'>(operation.name);
 }
 
+function useCloudPlatformQueryState<Args, Result>(
+  operation: CloudQuery<Args, Result>,
+  args: Args | 'skip'
+): CloudQueryState<Result> {
+  const reference = queryReference(operation);
+  const publicResult = useOptionalPublicConvexQuery(
+    reference,
+    operation.access === 'public'
+      ? (args as Parameters<typeof useOptionalPublicConvexQuery>[1])
+      : 'skip'
+  );
+  const authenticatedResult = useOptionalRecoverableConvexQuery(
+    reference,
+    operation.access === 'authenticated'
+      ? (args as Parameters<typeof useOptionalRecoverableConvexQuery>[1])
+      : 'skip'
+  );
+  const rawState = operation.access === 'public' ? publicResult : authenticatedResult;
+  return useMemo(
+    () => decodeCloudQueryState(operation, rawState),
+    [operation, rawState.data, rawState.error, rawState.retry]
+  );
+}
+
 function useCloudPlatformQuery<Args, Result>(
   operation: CloudQuery<Args, Result>,
   args: Args | 'skip'
@@ -45,7 +122,12 @@ function useCloudPlatformQuery<Args, Result>(
       ? (args as Parameters<typeof useRecoverableConvexQuery>[1])
       : 'skip'
   );
-  return (operation.access === 'public' ? publicResult : authenticatedResult) as Result | undefined;
+  const rawResult = operation.access === 'public' ? publicResult : authenticatedResult;
+  return useMemo(() => {
+    if (rawResult === undefined) return undefined;
+    const decoded = decodeCloudResult(operation.name, operation.decode, rawResult);
+    return decoded.ok ? decoded.data : undefined;
+  }, [operation, rawResult]);
 }
 
 /** Keep imperative owners stable across recovery, just like mounted query hooks. */
@@ -114,7 +196,7 @@ function useCloudAuthGate() {
 
 function useCloudCommand<Args, Result>(
   operation: CloudMutation<Args, Result> | CloudAction<Args, Result>,
-  run: (args: Args) => Promise<Result>
+  run: (args: Args) => Promise<unknown>
 ) {
   const gate = useCloudAuthGate();
   return useCallback(
@@ -122,13 +204,29 @@ function useCloudCommand<Args, Result>(
       gate.assert(operation.access);
       const session = gate.session();
       try {
-        return await run(args);
+        const raw = await run(args);
+        const decoded = decodeCloudResult(operation.name, operation.decode, raw);
+        if (!decoded.ok) throw decoded.error;
+        return decoded.data;
       } catch (error) {
         if (operation.access === 'authenticated' && session === gate.session()) gate.failed(error);
         throw error;
       }
     },
-    [gate, operation.access, run]
+    [gate, operation, run]
+  );
+}
+
+function useOptionalAuthenticatedCloudPlatformQuery<Args, Result>(
+  operation: CloudQuery<Args, Result>,
+  args: Args | 'skip'
+): CloudQueryState<Result> {
+  if (operation.access !== 'authenticated')
+    throw new Error('Optional metadata requires an authenticated query');
+  const rawState = useOptionalRecoverableConvexQuery(queryReference(operation), args as never);
+  return useMemo(
+    () => decodeCloudQueryState(operation, rawState),
+    [operation, rawState.data, rawState.error, rawState.retry]
   );
 }
 
@@ -138,29 +236,23 @@ function useCloudCommand<Args, Result>(
  * to this cloud assembly and can move to `platform-cloud` unchanged in Phase 1.
  */
 export const cloudPlatformApi: CloudApi = {
+  useQueryState: <Args, Result>(operation: CloudQuery<Args, Result>, args: Args | 'skip') =>
+    useCloudPlatformQueryState(operation, args),
   useOptionalAuthenticatedQuery: <Args, Result>(
     operation: CloudQuery<Args, Result>,
     args: Args | 'skip'
-  ) => {
-    if (operation.access !== 'authenticated')
-      throw new Error('Optional metadata requires an authenticated query');
-    return useOptionalRecoverableConvexQuery(queryReference(operation), args as never) as {
-      data: Result | undefined;
-      error: Error | null;
-      retry: () => void;
-    };
-  },
+  ) => useOptionalAuthenticatedCloudPlatformQuery(operation, args),
   useQuery: <Args, Result>(operation: CloudQuery<Args, Result>, args: Args | 'skip') =>
     useCloudPlatformQuery(operation, args),
   useMutation: <Args, Result>(operation: CloudMutation<Args, Result>) =>
     useCloudCommand(
       operation,
-      useMutation(mutationReference(operation)) as (args: Args) => Promise<Result>
+      useMutation(mutationReference(operation)) as (args: Args) => Promise<unknown>
     ),
   useAction: <Args, Result>(operation: CloudAction<Args, Result>) =>
     useCloudCommand(
       operation,
-      useAction(actionReference(operation)) as (args: Args) => Promise<Result>
+      useAction(actionReference(operation)) as (args: Args) => Promise<unknown>
     ),
 };
 
@@ -227,7 +319,14 @@ export function useCloudPlatformClient() {
             return;
           try {
             const value = query.localQueryResult();
-            if (value !== undefined) changed(value as Result);
+            if (value !== undefined) {
+              const decoded = decodeCloudResult(operation.name, operation.decode, value);
+              if (!decoded.ok) {
+                failed(decoded.error);
+              } else {
+                changed(decoded.data);
+              }
+            }
           } catch (error) {
             // A resumed watch can still hold its pre-refresh error until the
             // SDK receives the server's next result. Do not reject the new JWT
@@ -257,23 +356,29 @@ export function useCloudPlatformClient() {
         changed: () => void
       ) => subscribe(operation, args, changed, changed),
       query: <Args, Result>(operation: CloudQuery<Args, Result>, args: Args): Promise<Result> =>
-        run(
-          operation.access,
-          () => client.query(queryReference(operation), args as never) as Promise<Result>
-        ),
+        run(operation.access, async () => {
+          const raw = await client.query(queryReference(operation), args as never);
+          const decoded = decodeCloudResult(operation.name, operation.decode, raw);
+          if (!decoded.ok) throw decoded.error;
+          return decoded.data;
+        }),
       mutation: <Args, Result>(
         operation: CloudMutation<Args, Result>,
         args: Args
       ): Promise<Result> =>
-        run(
-          operation.access,
-          () => client.mutation(mutationReference(operation), args as never) as Promise<Result>
-        ),
+        run(operation.access, async () => {
+          const raw = await client.mutation(mutationReference(operation), args as never);
+          const decoded = decodeCloudResult(operation.name, operation.decode, raw);
+          if (!decoded.ok) throw decoded.error;
+          return decoded.data;
+        }),
       action: <Args, Result>(operation: CloudAction<Args, Result>, args: Args): Promise<Result> =>
-        run(
-          operation.access,
-          () => client.action(actionReference(operation), args as never) as Promise<Result>
-        ),
+        run(operation.access, async () => {
+          const raw = await client.action(actionReference(operation), args as never);
+          const decoded = decodeCloudResult(operation.name, operation.decode, raw);
+          if (!decoded.ok) throw decoded.error;
+          return decoded.data;
+        }),
     };
   }, [client, gate]);
 }
@@ -283,8 +388,12 @@ export function useOptionalCloudPlatformQuery<Args, Result>(
   operation: CloudQuery<Args, Result>,
   args: Args | 'skip'
 ): { data: Result | undefined; error: Error | null } {
-  return useOptionalRecoverableConvexQuery(
+  const rawState = useOptionalRecoverableConvexQuery(
     queryReference(operation),
     args as Parameters<typeof useOptionalRecoverableConvexQuery>[1]
-  ) as { data: Result | undefined; error: Error | null };
+  );
+  return useMemo(() => {
+    const state = decodeCloudQueryState(operation, rawState);
+    return { data: state.data, error: state.error };
+  }, [operation, rawState.data, rawState.error, rawState.retry]);
 }

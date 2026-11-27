@@ -256,6 +256,7 @@ export async function coldHistoryHandlerFixture(
       workspaceId: 'test-workspace',
       encryptedWorkspace: encrypted,
       verifyRoostInput: LoroDocumentManager.prototype.verifyRoostInput,
+      prioritizeRoostCloudHistory: LoroDocumentManager.prototype.prioritizeRoostCloudHistory,
       getOrCreateSessionDoc: async (id: SessionId) => {
         const doc = docs.get(id)!;
         if (!doc.handle) {

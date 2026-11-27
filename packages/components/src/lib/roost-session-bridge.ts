@@ -3,6 +3,7 @@ import type {
   LocalSessionControlResponse,
   MachineId,
   PermissionOutcome,
+  RoostHistorySyncState,
   SessionHistoryChange,
   SessionHistoryInput,
   SessionHistoryReadQuery,
@@ -31,6 +32,7 @@ import {
   type SessionHistoryReader,
   type SessionImportResult,
   type SessionSnapshot,
+  type SessionObservation,
   type SessionTurn,
   type SessionTurnRead,
   type SessionInputAcceptanceResult,
@@ -52,6 +54,10 @@ import {
 import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
 import type { SessionSnapshotService } from '@lody/shared/session-data';
 import { SessionHistoryChangesSchema } from '@lody/shared';
+import {
+  canReadRoostHistoryFromOwnerAfter,
+  type createRoostHistoryReplica,
+} from './roost-history-replica';
 
 type HistoryReadResponse = Extract<
   LocalSessionControlResponse,
@@ -83,6 +89,9 @@ type RoostHistoryTransport = {
 };
 
 type RoostHistoryObservationOptions = {
+  readonly cloudHistory?: (sessionId: SessionId) => ReturnType<typeof createRoostHistoryReplica>;
+  readonly onCloudHistoryRoute?: (active: boolean) => void;
+  readonly onHistorySync?: (state: RoostHistorySyncState) => void;
   readonly cacheNamespace?: string;
   readonly pollIntervalMs?: number;
   readonly coherentInspection?: boolean | (() => boolean);
@@ -258,15 +267,374 @@ const assertSerializableHistoryPayload = (
   }
 };
 
+// The native runtime bundles this bridge for older WebViews.
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function routeRoostHistory(
+  owner: SessionHistoryReader,
+  cloud: ReturnType<typeof createRoostHistoryReplica>,
+  allowCloud: () => Promise<boolean>,
+  admitOwnerRead: () => Promise<unknown>,
+  { active = () => true, onCloudHistoryRoute, onHistorySync }: RoostHistoryObservationOptions
+) {
+  type SelectedReader = {
+    readonly reader: SessionHistoryReader;
+    readonly cursorPrefix: string;
+    readonly invalidated: AbortController;
+  };
+  type Observer = {
+    listener: SessionDataChangeListener;
+    selection?: SelectedReader;
+    observation?: SessionObservation;
+  };
+  type OwnerAdmission = {
+    readonly result: Promise<void>;
+    readonly resumeStreams: () => void;
+    readonly cancel: () => void;
+  };
+
+  let selection: SelectedReader | undefined;
+  let selectionNumber = 0;
+  let opening: Promise<SelectedReader> | undefined;
+  let planeCheck: Promise<boolean> | undefined;
+  let streamProbe: Promise<void> | undefined;
+  let ownerAdmission: OwnerAdmission | undefined;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let failures = 0;
+  let disposed = false;
+  let cloudAllowed = false;
+  let pendingReads = 0;
+  let lastStatus: RoostHistorySyncState | undefined;
+  const observers = new Set<Observer>();
+  const hasReaders = () => observers.size > 0 || pendingReads > 0;
+  const closeError = () => new DOMException('Roost session bridge is disposed', 'AbortError');
+
+  const assertOpen = () => {
+    if (disposed) throw closeError();
+  };
+  const emitStatus = () => {
+    if (disposed || !selection || !onHistorySync) return;
+    const source = selection.reader === owner ? 'machine' : 'streams';
+    const status = cloudAllowed ? cloud.syncStatus() : { phase: 'idle' as const };
+    if (
+      source === lastStatus?.source &&
+      status.phase === lastStatus.phase &&
+      status.httpStatus === lastStatus.httpStatus &&
+      status.newerVersionPending === lastStatus.newerVersionPending
+    )
+      return;
+    lastStatus = { ...status, source };
+    onHistorySync(lastStatus);
+  };
+  const attach = (observer: Observer, selected: SelectedReader) => {
+    if (observer.selection === selected && observer.observation) return observer.observation;
+    observer.observation?.unsubscribe();
+    observer.selection = selected;
+    const observation = selected.reader.observe((change) => {
+      if (selection === selected && observers.has(observer)) observer.listener(change);
+    });
+    void observation.initial.catch(() => {});
+    void observation.initialPage?.catch(() => {});
+    return (observer.observation = observation);
+  };
+  const select = (reader: SessionHistoryReader) => {
+    const previous = selection;
+    if (disposed || previous?.reader === reader) return;
+    const selected: SelectedReader = {
+      reader,
+      cursorPrefix: `${reader === owner ? 'owner' : 'streams'}:${++selectionNumber}:`,
+      invalidated: new AbortController(),
+    };
+    selection = selected;
+    previous?.invalidated.abort();
+    onCloudHistoryRoute?.(reader === cloud.history);
+    emitStatus();
+    if (previous) {
+      for (const observer of observers) {
+        if (!observer.observation) continue;
+        attach(observer, selected);
+        observer.listener({ kind: 'structure', from: 0, to: Number.MAX_SAFE_INTEGER });
+      }
+    }
+  };
+  const clearRetry = () => {
+    if (retry) clearTimeout(retry);
+    retry = undefined;
+  };
+  const scheduleRetry = () => {
+    if (retry || disposed || !cloudAllowed || !hasReaders() || !active()) return;
+    failures++;
+    retry = setTimeout(
+      () => {
+        retry = undefined;
+        if (hasReaders() && active()) void probeStreams();
+      },
+      Math.min(30_000, 500 * 2 ** Math.min(failures, 6))
+    );
+  };
+  const settleStreams = () => {
+    clearRetry();
+    failures = 0;
+    const pending = ownerAdmission;
+    ownerAdmission = undefined;
+    select(cloud.history);
+    emitStatus();
+    pending?.resumeStreams();
+  };
+  const checkPlane = () =>
+    (planeCheck ??= (async () => {
+      const allowed = await allowCloud();
+      assertOpen();
+      if (cloudAllowed !== allowed) {
+        cloudAllowed = allowed;
+        clearRetry();
+        failures = 0;
+        const pending = ownerAdmission;
+        ownerAdmission = undefined;
+        if (selection) select(allowed ? cloud.history : owner);
+        pending?.resumeStreams();
+      }
+      emitStatus();
+      return allowed;
+    })().finally(() => {
+      planeCheck = undefined;
+    }));
+  const probeStreams = () =>
+    (streamProbe ??= (async () => {
+      if (!(await checkPlane()) || cloud.syncStatus().phase === 'refused') return;
+      await cloud.prepareLatestWindow();
+      if (await checkPlane()) settleStreams();
+    })()
+      .catch(() => {
+        if (cloud.syncStatus().phase !== 'refused') scheduleRetry();
+      })
+      .finally(() => {
+        streamProbe = undefined;
+      }));
+  const initialReader = () => {
+    assertOpen();
+    if (selection) return Promise.resolve(selection);
+    return (opening ??= (async () => {
+      const allowed = await checkPlane();
+      select(allowed ? cloud.history : owner);
+      return selection!;
+    })().finally(() => {
+      opening = undefined;
+    }));
+  };
+  const recoverOwner = () => {
+    if (ownerAdmission) return ownerAdmission.result;
+    if (disposed || selection?.reader !== cloud.history || !cloudAllowed) return Promise.resolve();
+    if (cloud.syncStatus().phase === 'refused') return Promise.resolve();
+
+    const selected = selection;
+    const result = createDeferred<void>();
+    const admission: OwnerAdmission = {
+      result: result.promise,
+      resumeStreams: () => result.resolve(),
+      cancel: () => result.reject(closeError()),
+    };
+    ownerAdmission = admission;
+    void admitOwnerRead().then(
+      () => {
+        if (ownerAdmission !== admission || selection !== selected) return;
+        ownerAdmission = undefined;
+        select(owner);
+        result.resolve();
+      },
+      (error) => {
+        if (ownerAdmission !== admission) return;
+        ownerAdmission = undefined;
+        result.reject(error);
+        scheduleRetry();
+      }
+    );
+    if (!retry) void probeStreams();
+    return result.promise;
+  };
+  const refresh = () => {
+    if (disposed || !selection || !active()) return;
+    if (selection.reader === owner || ownerAdmission) {
+      if (!retry) void probeStreams();
+      return;
+    }
+    void checkPlane()
+      .then((allowed) => {
+        if (allowed) cloud.refresh();
+      })
+      .catch(() => {});
+  };
+  const unsubscribePublication = cloud.watchPublication(() => {
+    clearRetry();
+    refresh();
+  });
+  const unsubscribeStatus = cloud.watchSyncStatus(() => {
+    if (disposed || !cloudAllowed) return;
+    const { phase } = cloud.syncStatus();
+    if (phase === 'refused') settleStreams();
+    else emitStatus();
+    if (
+      selection?.reader === cloud.history &&
+      observers.size &&
+      active() &&
+      cloud.ownerReadAllowed()
+    )
+      void recoverOwner().catch(() => {});
+  });
+  const sourceChanged = Symbol('Roost history source changed');
+  const whileSelected = async <T>(
+    selected: SelectedReader,
+    work: () => T | Promise<T>
+  ): Promise<T | typeof sourceChanged> => {
+    const signal = selected.invalidated.signal;
+    if (signal.aborted) return sourceChanged;
+    const changed = createDeferred<typeof sourceChanged>();
+    const invalidate = () => changed.resolve(sourceChanged);
+    signal.addEventListener('abort', invalidate, { once: true });
+    try {
+      return await Promise.race([work(), changed.promise]);
+    } catch (error) {
+      if (signal.aborted) return sourceChanged;
+      throw error;
+    } finally {
+      signal.removeEventListener('abort', invalidate);
+    }
+  };
+  const readSelected = async <T>(
+    work: (selected: SelectedReader) => T | Promise<T>
+  ): Promise<T> => {
+    let retriedStreams = false;
+    for (;;) {
+      const selected = await initialReader();
+      try {
+        const value = await whileSelected(selected, () => work(selected));
+        assertOpen();
+        if (value !== sourceChanged && selection === selected) return value;
+      } catch (error) {
+        assertOpen();
+        if (selection !== selected) continue;
+        if (selected.reader === cloud.history && canReadRoostHistoryFromOwnerAfter(error)) {
+          await whileSelected(selected, recoverOwner);
+          if (selection === selected && !retriedStreams) {
+            retriedStreams = true;
+            continue;
+          }
+        } else if (
+          selected.reader === owner &&
+          error instanceof SessionHistoryRequestError &&
+          error.failure.source === 'transport'
+        ) {
+          if (streamProbe) await whileSelected(selected, () => streamProbe!);
+          else if (cloudAllowed) await whileSelected(selected, probeStreams);
+        }
+        assertOpen();
+        if (selection === selected) throw error;
+      }
+    }
+  };
+  const read = async <T>(work: (selected: SelectedReader) => T | Promise<T>): Promise<T> => {
+    pendingReads++;
+    try {
+      if (selection?.reader === owner && cloudAllowed && !retry && active()) void probeStreams();
+      return await readSelected(work);
+    } finally {
+      pendingReads--;
+      if (!hasReaders()) clearRetry();
+    }
+  };
+  const pageWithSource = (selected: SelectedReader, page: SessionHistoryDirectoryPage) =>
+    page.cursor ? { ...page, cursor: selected.cursorPrefix + page.cursor } : page;
+  const history: SessionHistoryReader = {
+    count: () => read(({ reader }) => reader.count()),
+    readAt: (position) => read(({ reader }) => reader.readAt(position)),
+    readTurn: (turnId) => read(({ reader }) => reader.readTurn(turnId)),
+    readRange: (from, to) => read(({ reader }) => reader.readRange(from, to)),
+    readDirectory: (from, to) => read(({ reader }) => reader.readDirectory(from, to)),
+    readMetadata: () => read(({ reader }) => reader.readMetadata!()),
+    readAll: () => read(({ reader }) => reader.readAll()),
+    readTurnOutput: (id) => read(({ reader }) => reader.readTurnOutput(id)),
+    readLatestDirectoryPage: (limit) =>
+      read(async (selected) =>
+        pageWithSource(selected, await selected.reader.readLatestDirectoryPage!(limit))
+      ),
+    readOlderDirectoryPage: (cursor, limit) =>
+      read(async (selected) => {
+        const { reader, cursorPrefix } = selected;
+        if (!cursor.startsWith(cursorPrefix)) throw new Error('Roost history source changed');
+        return pageWithSource(
+          selected,
+          await reader.readOlderDirectoryPage!(cursor.slice(cursorPrefix.length), limit)
+        );
+      }),
+    observe(listener) {
+      const observer: Observer = { listener };
+      observers.add(observer);
+      let usedObservation: SessionObservation | undefined;
+      const initialPage = read(async (selected) => {
+        const { reader: source } = selected;
+        if (!observers.has(observer))
+          return pageWithSource(selected, await source.readLatestDirectoryPage!(40));
+        const observation = attach(observer, selected);
+        const pendingPage =
+          usedObservation === observation
+            ? source.readLatestDirectoryPage!(40)
+            : observation.initialPage!;
+        usedObservation = observation;
+        return pageWithSource(selected, await pendingPage);
+      });
+      return {
+        initialPage,
+        initial: initialPage.then((page) => page.rows),
+        unsubscribe() {
+          observers.delete(observer);
+          observer.observation?.unsubscribe();
+          if (!hasReaders()) clearRetry();
+        },
+      };
+    },
+  };
+  return {
+    history,
+    readSnapshot: (readOwner: () => Promise<SessionEntry[]>) =>
+      read(({ reader }) =>
+        reader === cloud.history ? cloud.readPublishedSnapshot() : readOwner()
+      ),
+    usingCloud: () => selection?.reader === cloud.history,
+    refresh,
+    dispose() {
+      disposed = true;
+      selection?.invalidated.abort();
+      ownerAdmission?.cancel();
+      ownerAdmission = undefined;
+      unsubscribePublication();
+      unsubscribeStatus();
+      clearRetry();
+      for (const observer of observers) observer.observation?.unsubscribe();
+      observers.clear();
+      cloud.dispose();
+    },
+  };
+}
+
 const createRoostSessionDataFactoryFromTransport =
   (
     createTransport: (sessionId: SessionId) => RoostHistoryTransport,
     cacheScope: (sessionId: SessionId) => string,
     targetMachineId: MachineId,
-    options: RoostHistoryObservationOptions = {}
+    options: RoostHistoryObservationOptions = {},
+    allowCloud: () => Promise<boolean> = async () => true
   ): ConversationSessionDataFactory =>
   ({ sessionId }) => {
     const transport = createTransport(sessionId);
+    const cloudHistory = options.cloudHistory?.(sessionId);
     const incrementalEnabled = () =>
       typeof options.incremental === 'function'
         ? options.incremental()
@@ -817,8 +1185,6 @@ const createRoostSessionDataFactoryFromTransport =
         const checkpoint = prior?.checkpoint ?? prior?.recoveryCheckpoint;
         let ownerReset = false;
         if (incrementalEnabled() && prior && !checkpoint) {
-          // No verified interval remains. Establish a new bounded window;
-          // unknown older bodies must not become a patch baseline.
           replacingSnapshot = true;
           bodies.clear();
         }
@@ -984,8 +1350,6 @@ const createRoostSessionDataFactoryFromTransport =
             notifyAppliedChanges(from, Math.max(prior.count, count), change.ids);
             retryDelay = refreshRequested ? 0 : 250;
             consecutiveSupersessions = 0;
-            // Complete checkpoint coverage repairs the retained window even
-            // when older pages have never been loaded. Do not reread its tail.
             return;
           } else {
             // Revisions belong to a Native generation. An explicit owner reset
@@ -1216,12 +1580,6 @@ const createRoostSessionDataFactoryFromTransport =
         });
     };
 
-    const unsubscribeWake = options.subscribeWake?.(() => {
-      if (!active() || !subscriptionEnabled()) stopSubscription();
-      startSubscription();
-      if (!transport.subscribeHistory || !subscriptionEnabled()) scheduleRefresh();
-    });
-
     const history: SessionHistoryReader = {
       readMetadata: async () => {
         const head = await canReadCache();
@@ -1306,6 +1664,22 @@ const createRoostSessionDataFactoryFromTransport =
         };
       },
     };
+    const routed =
+      cloudHistory &&
+      routeRoostHistory(
+        history,
+        cloudHistory,
+        allowCloud,
+        () => transport.readHistory({ kind: 'count' }),
+        options
+      );
+    const unsubscribeWake = options.subscribeWake?.(() => {
+      if (routed) routed.refresh();
+      if (routed?.usingCloud()) return;
+      if (!active() || !subscriptionEnabled()) stopSubscription();
+      startSubscription();
+      if (!transport.subscribeHistory || !subscriptionEnabled()) scheduleRefresh();
+    });
 
     const write = async (
       operation: SessionHistoryWriteOperation,
@@ -1314,6 +1688,10 @@ const createRoostSessionDataFactoryFromTransport =
       if (disposed) throw new Error('Roost session bridge is disposed');
       assertSerializableHistoryPayload(operation, payload);
       const receipt = await transport.writeHistory(operation, payload);
+      if (routed?.usingCloud()) {
+        routed.refresh();
+        return receipt.result;
+      }
       await notifyChanged(
         receipt.historyChange,
         receipt.historyRevision,
@@ -1359,8 +1737,10 @@ const createRoostSessionDataFactoryFromTransport =
 
     const snapshots: SessionSnapshotService = {
       capture: async (): Promise<SessionSnapshot> => {
+        const readOwner = async () =>
+          [...(await readEntries({ kind: 'readAll' }))] as SessionEntry[];
         const snapshot = Object.freeze({
-          history: [...(await readEntries({ kind: 'readAll' }))],
+          history: await (routed ? routed.readSnapshot(readOwner) : readOwner()),
         }) as unknown as SessionSnapshot;
         snapshotProvenance.add(snapshot);
         return snapshot;
@@ -1379,7 +1759,7 @@ const createRoostSessionDataFactoryFromTransport =
 
     const sessionData = createRoostSessionData({
       sessionId,
-      history,
+      history: routed?.history ?? history,
       commands,
       snapshots,
       inputAcceptance: {
@@ -1393,6 +1773,7 @@ const createRoostSessionDataFactoryFromTransport =
       },
       dispose: () => {
         disposed = true;
+        routed?.dispose();
         stopSubscription();
         unsubscribeWake?.();
         if (refreshTimer) clearTimeout(refreshTimer);
@@ -1563,7 +1944,8 @@ export function createLocalRoostSessionDataFactory(
     (sessionId) => localHistoryTransport(options, sessionId),
     (sessionId) => historyCacheScope(options, sessionId),
     options.machineId,
-    options
+    options,
+    async () => false
   );
 }
 
@@ -1609,6 +1991,7 @@ export function createRoostSessionDataFactoryForMachine(
     },
     (sessionId) => historyCacheScope(options, sessionId),
     options.machineId,
-    options
+    options,
+    async () => (await options.resolvePlane(options.machineId)) === 'cloud'
   );
 }

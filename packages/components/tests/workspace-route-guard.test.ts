@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isAdmittedEncryptedWorkspace,
   resolveOptimisticWorkspaceRouteGuard,
   resolveWorkspaceAccessDeniedFallback,
 } from '../src/lib/workspace-route-guard';
@@ -56,6 +57,51 @@ describe('resolveOptimisticWorkspaceRouteGuard', () => {
         activeOrganization: null,
       })
     ).toBe('render');
+  });
+});
+
+describe('freshly created encrypted workspace', () => {
+  const stale = {
+    workspaceName: 'vault',
+    organizations: [{ slug: 'personal' }],
+    activeOrganization: { slug: 'personal' },
+  };
+  const mode = {
+    accountId: 'account-A',
+    workspaceSlug: 'vault',
+    workspaceId: 'ws-vault',
+    descriptor: { contentMode: 'e2ee' },
+  };
+  const runtime = { accountId: 'account-A', workspaceId: 'ws-vault', contentMode: 'e2ee' };
+
+  it('stays open after admission while the organization list is still stale', () => {
+    const accessConfirmed = isAdmittedEncryptedWorkspace('vault', mode, runtime);
+    expect(accessConfirmed).toBe(true);
+    expect(
+      resolveOptimisticWorkspaceRouteGuard({ ...stale, serverAccessConfirmed: accessConfirmed })
+    ).toBe('render');
+  });
+
+  it('does not count another workspace, account or an unopened runtime as admission', () => {
+    expect(isAdmittedEncryptedWorkspace('other', mode, runtime)).toBe(false);
+    expect(
+      isAdmittedEncryptedWorkspace('vault', mode, { ...runtime, accountId: 'account-B' })
+    ).toBe(false);
+    expect(isAdmittedEncryptedWorkspace('vault', mode, { ...runtime, workspaceId: 'ws-old' })).toBe(
+      false
+    );
+    expect(isAdmittedEncryptedWorkspace('vault', mode, null)).toBe(false);
+    expect(
+      isAdmittedEncryptedWorkspace(
+        'vault',
+        { ...mode, descriptor: { contentMode: 'plaintext' } },
+        {
+          ...runtime,
+          contentMode: 'plaintext',
+        }
+      )
+    ).toBe(false);
+    expect(resolveOptimisticWorkspaceRouteGuard(stale)).toBe('redirect');
   });
 });
 

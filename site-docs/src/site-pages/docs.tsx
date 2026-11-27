@@ -11,7 +11,14 @@ import { deserializePageTree } from 'fumadocs-core/source/client';
 import type { TOCItemType } from 'fumadocs-core/toc';
 import { DocsLayout } from 'fumadocs-ui/layouts/docs';
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/layouts/docs/page';
-import { type DocsRouteData, localeCode, type SerializedTocItem, type SiteLocale } from './shared';
+import {
+  buildLocaleAlternates,
+  localeCode,
+  switchSiteLocalePath,
+  type DocsRouteData,
+  type SerializedTocItem,
+  type SiteLocale,
+} from './shared';
 
 const docsContentLoaders = {
   en: browserCollections.docsEn.createClientLoader({
@@ -26,21 +33,53 @@ const docsContentLoaders = {
       return <MDX components={getMDXComponents()} />;
     },
   }),
+  'zh-hant': browserCollections.docsZhHant.createClientLoader({
+    id: 'docsZhHant',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  ja: browserCollections.docsJa.createClientLoader({
+    id: 'docsJa',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  ko: browserCollections.docsKo.createClientLoader({
+    id: 'docsKo',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  es: browserCollections.docsEs.createClientLoader({
+    id: 'docsEs',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  fr: browserCollections.docsFr.createClientLoader({
+    id: 'docsFr',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  ru: browserCollections.docsRu.createClientLoader({
+    id: 'docsRu',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
 };
 
 export function docsHead(locale: SiteLocale, data: DocsRouteData): SiteHead {
-  const enPath = locale === 'zh' ? data.path.replace(/^\/zh/u, '') || '/docs' : data.path;
-  const zhPath = enPath === '/docs' ? '/zh/docs' : `/zh${enPath}`;
+  const enPath = switchSiteLocalePath(data.path, 'en');
 
   return pageHead({
     title: brandTitle(data.title),
     description: data.description,
     path: data.path,
     locale: localeCode(locale),
-    alternates: [
-      { lang: 'en-US', path: enPath },
-      { lang: 'zh-CN', path: zhPath },
-    ],
+    alternates: buildLocaleAlternates(enPath),
     jsonLd: faqJsonLd(docsFaqForPath(data.path)),
   });
 }

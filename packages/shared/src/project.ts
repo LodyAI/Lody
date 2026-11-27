@@ -244,6 +244,44 @@ export function isDirectLocalProject(project: unknown, sessionIsWorktree?: unkno
   );
 }
 
+export type WorktreeSessionMetaInput = {
+  readonly projectRun?: {
+    readonly members?: Readonly<Record<string, { readonly access?: string }>>;
+  };
+  readonly project?: unknown;
+  readonly isWorktree?: unknown;
+  readonly repoFullName?: unknown;
+};
+
+/**
+ * Whether a Session runs in a Session-owned Git worktree (GitHub Session,
+ * local-project worktree Session, or Project group with any worktree member)
+ * rather than directly in a local checkout or plain chat directory.
+ */
+export function isWorktreeSessionMeta(meta: WorktreeSessionMetaInput | null | undefined): boolean {
+  if (!meta) {
+    return false;
+  }
+  if (meta.projectRun?.members) {
+    return Object.values(meta.projectRun.members).some(
+      (member) => member.access !== 'additional' && member.access !== 'link'
+    );
+  }
+  if (meta.project && typeof meta.project === 'object') {
+    const typedProject = meta.project as { kind?: unknown };
+    if (typedProject.kind === 'github') {
+      return true;
+    }
+    if (typedProject.kind === 'local') {
+      return !isDirectLocalProject(typedProject, meta.isWorktree);
+    }
+  }
+  if (meta.isWorktree === true) {
+    return true;
+  }
+  return getTrimmedRepoFullName(meta.repoFullName) !== undefined;
+}
+
 export function resolveBaseBranchPreference(options: {
   preferredBranch?: unknown;
   baseBranch?: unknown;

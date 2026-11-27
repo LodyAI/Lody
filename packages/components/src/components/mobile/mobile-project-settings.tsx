@@ -689,7 +689,6 @@ function MobileProjectRow({
             />
           </>
         ) : null}
-
       </div>
       {activeHistoryState ? (
         <div {...stylex.props(styles.historyPanel)}>

@@ -9,8 +9,8 @@ import {
 } from '@lody/e2ee-client';
 import {
   readRecoveryHistory,
-  recoveryRestoreIncomplete,
   restoreOutcome,
+  scopedRecoveryVault,
   type VaultWorkspaceRestoreResult,
 } from '@lody/e2ee-client/recovery-restore';
 import { recoveryFetchEnvelope } from '@lody/e2ee-client/vault-replacement';
@@ -25,6 +25,8 @@ import { personalEntryPins } from './entry-pins';
 import type { PersonalEntryRecovery } from './entry';
 import {
   makeClientRecovery,
+  recoveryFailure,
+  recoveryRpc,
   type ClientRecoveryOptions,
   type ClientRecoveryUnlock,
 } from './recovery';
@@ -74,26 +76,23 @@ export type RecoveryPasskeyState = {
 };
 type Observe = (progress: RecoveryWorkspaceProgress) => void;
 const workspaceWait = '30 seconds';
-const rpcTimeout = '90 seconds';
 export type RecoveryWorkspacesOptions = ClientRecoveryOptions & {
   readonly commands: PersonalEntryRecovery;
 };
 /** One vault unlock for the selected workspaces. The caller fixes platform and passkey; pins use that platform's constant namespace. */
 export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
-  const failure = () =>
-    new Error(options.platform === 'web' ? 'e2ee_browser_unlock_failed' : 'e2ee_recovery_failed');
   const recovery = makeClientRecovery(options);
   const pins = personalEntryPins(`lody-e2ee:${options.platform}:v1:entry-pins`);
   let disposed = false;
   const check = () => {
+    if (!options.enabled()) throw new Error('e2ee_recovery_disabled');
     const current = options.currentSession();
     if (
       disposed ||
-      !options.enabled() ||
       current?.accountId !== options.accountId ||
       current.sessionId !== options.sessionId
     ) {
-      throw failure();
+      throw new Error('e2ee_recovery_cancelled');
     }
   };
   const request = <A>(work: () => Promise<A>) =>
@@ -104,17 +103,10 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
         check();
         return value;
       },
-      catch: () => failure(),
+      catch: recoveryFailure,
     });
   const rpc = <A>(work: () => Promise<A>) =>
-    request(work).pipe(
-      Effect.interruptible,
-      Effect.timeoutOrElse({
-        duration: rpcTimeout,
-        orElse: () => Effect.fail(failure()),
-      }),
-      Effect.interruptible
-    );
+    recoveryRpc(work, check).pipe(Effect.mapError(recoveryFailure));
   const workspaceList = () => rpc(() => options.client.query(api.e2eeMembers.workspaces, {}));
   const pages = (workspaceId: string) =>
     readRecoveryHistory<E2eeWorkspaceHistoryPage, Error>((next) =>
@@ -177,12 +169,14 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
     Effect.scoped(
       Effect.gen(function* () {
         if (kind === 'restore') {
-          const reference = (yield* vault.readIndex()).value.entries.find(
+          const index = yield* vault.readIndex();
+          const reference = index.value.entries.find(
             (ref) => !ref.retired && ref.genesis === workspace.genesisHash
           );
           if (!reference) return { outcome: 'not-backed-up' } as const;
+          const scopedVault = yield* scopedRecoveryVault(vault, reference, index);
           const offer = yield* Effect.acquireUseRelease(
-            vault.readEntry(reference),
+            scopedVault.readEntry(reference),
             (bundle) =>
               Effect.sync(() =>
                 accountPairingOffer(
@@ -198,7 +192,15 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
               ),
             (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
           );
-          const read = () => pages(workspace.id);
+          let cachedPages: E2eeWorkspaceHistoryPage[] | null = null;
+          const read = () =>
+            cachedPages
+              ? Effect.succeed(cachedPages)
+              : Effect.tap(pages(workspace.id), (rows) =>
+                  Effect.sync(() => {
+                    cachedPages = rows;
+                  })
+                );
           const view = () => Effect.flatMap(read(), (rows) => verifyPersonalHistory(offer, rows));
           const fetchCurrentEnvelope = envelope(workspace.id, view);
           const routed = () =>
@@ -217,7 +219,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
             });
           const restoreWith = (retained: PersonalPairingOffer | undefined) =>
             options.commands.restore(workspace.id, retained ?? offer, {
-              vault,
+              vault: scopedVault,
               local,
               reference,
               offer: retained,
@@ -240,6 +242,12 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                           credentialHash,
                           signerCredential,
                         })
+                      ).pipe(
+                        Effect.ensuring(
+                          Effect.sync(() => {
+                            cachedPages = null;
+                          })
+                        )
                       );
                       return {
                         outcome:
@@ -261,10 +269,12 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                 error.message === 'e2ee_device_revoked',
               () =>
                 Effect.flatMap(routed(), (next) =>
-                  next === undefined ? restoreVia(undefined) : Effect.fail(failure())
+                  next === undefined
+                    ? restoreVia(undefined)
+                    : Effect.fail(new Error('e2ee_recovery_conflict'))
                 )
             ),
-            Effect.mapError(() => failure())
+            Effect.mapError(recoveryFailure)
           );
           return restoreOutcome(result);
         }
@@ -274,7 +284,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           options.client.query(api.e2eeRecoveryVault.replacementState, {})
         );
         if (vault.vaultId !== state.current || state.replacing !== null)
-          return yield* Effect.fail(failure());
+          return yield* Effect.fail(new Error('e2ee_recovery_conflict'));
         const pin = yield* pins.read(options.accountId, workspace.id);
         if (pin?.phase !== 'ready') return { outcome: 'not-admitted' } as const;
         const result = yield* request(() =>
@@ -295,11 +305,15 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                     : {}),
                 })
               ).pipe(
-                Effect.map((reply) => ({
-                  outcome:
-                    reply.status === 'committed' ? ('Committed' as const) : ('Conflict' as const),
-                  record: record.slice(),
-                }))
+                Effect.map((reply) => {
+                  const parsed = historyPage.safeParse(reply.historyPage);
+                  return {
+                    outcome:
+                      reply.status === 'committed' ? ('Committed' as const) : ('Conflict' as const),
+                    record: record.slice(),
+                    ...(parsed.success ? { historyPage: parsed.data } : {}),
+                  };
+                })
               ),
           })
         );
@@ -316,20 +330,23 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
     unlock: ClientRecoveryUnlock,
     selected: readonly string[],
     observe?: Observe,
-    reserved?: boolean
+    reserved?: boolean,
+    prefetchedPlan?: RecoveryWorkspacePlan
   ) => Effect.Effect<RecoveryWorkspaceResult[], unknown>;
+  const plannedWorkspaces = new WeakMap<RecoveryWorkspacePlan, readonly Workspace[]>();
   let active: { ready: Deferred.Deferred<Run, unknown> } | undefined;
   const batch = (
     kind: Kind,
     unlock: ClientRecoveryUnlock,
     selected: readonly string[],
-    observe?: Observe
+    observe?: Observe,
+    prefetchedPlan?: RecoveryWorkspacePlan
   ): Effect.Effect<RecoveryWorkspaceResult[], unknown> =>
     Effect.suspend(() => {
       check();
       if (active)
         return Effect.flatMap(Deferred.await(active.ready), (run) =>
-          run(kind, unlock, selected, observe)
+          run(kind, unlock, selected, observe, false, prefetchedPlan)
         );
       const owner = { ready: Deferred.makeUnsafe<Run, unknown>() };
       active = owner;
@@ -353,10 +370,10 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                   Deferred.doneUnsafe(idle, Effect.void);
                 }
               };
-              const run: Run = (nextKind, nextUnlock, ids, observe, reserved = false) =>
+              const run: Run = (nextKind, nextUnlock, ids, observe, reserved = false, nextPlan) =>
                 Effect.suspend(() => {
                   // Admission and retirement are synchronous; never fork into a closing Scope.
-                  if (!accepting) return batch(nextKind, nextUnlock, ids, observe);
+                  if (!accepting) return batch(nextKind, nextUnlock, ids, observe, nextPlan);
                   if (!reserved) pending++;
                   return Effect.gen(function* () {
                     const results = new Map<string, RecoveryWorkspaceResult>();
@@ -376,7 +393,9 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                       }
                     };
                     const work = yield* Effect.gen(function* () {
-                      const visible = yield* workspaceList();
+                      const visible =
+                        (nextPlan ? plannedWorkspaces.get(nextPlan) : undefined) ??
+                        (yield* workspaceList());
                       chosen = visible.filter((w) => ids.includes(w.id));
                       return yield* Effect.forEach(chosen, (workspace) =>
                         Effect.gen(function* () {
@@ -456,7 +475,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                   }).pipe(Effect.uninterruptible);
                 });
               yield* Deferred.succeed(owner.ready, run);
-              return yield* run(kind, unlock, selected, observe, true).pipe(
+              return yield* run(kind, unlock, selected, observe, true, prefetchedPlan).pipe(
                 Effect.ensuring(Deferred.await(idle))
               );
             })
@@ -504,8 +523,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           const usable = yield* Effect.exit(
             Effect.gen(function* () {
               const pin = yield* pins.read(options.accountId, workspace.id);
-              if (pin?.phase !== 'ready') return false;
-              return !(yield* recoveryRestoreIncomplete(local, workspace.id));
+              return pin?.phase === 'ready';
             })
           );
           const row = { id: workspace.id, name: workspace.name };
@@ -529,16 +547,18 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                   : { kind: 'saved' },
           });
         }
-        yield* Effect.try({ try: check, catch: failure });
-        return {
+        yield* Effect.try({ try: check, catch: recoveryFailure });
+        const result: RecoveryWorkspacePlan = {
           ...(state.current ? { methods: yield* recovery.methods(state.current) } : {}),
           hasVault: state.current !== null,
           replacing: state.replacing !== null,
           covered,
           uncovered,
         };
+        plannedWorkspaces.set(result, visible);
+        return result;
       })
-    ).pipe(Effect.mapError(() => failure()));
+    ).pipe(Effect.mapError(recoveryFailure));
   return {
     ...recovery,
     listWorkspaces: () => workspaceList(),
@@ -575,8 +595,12 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           return { removed: Exit.isSuccess(removed), ...state.value };
         })
       ),
-    restore: (unlock: ClientRecoveryUnlock, selected: readonly string[], observe?: Observe) =>
-      batch('restore', unlock, [...selected], observe),
+    restore: (
+      unlock: ClientRecoveryUnlock,
+      selected: readonly string[],
+      observe?: Observe,
+      prefetchedPlan?: RecoveryWorkspacePlan
+    ) => batch('restore', unlock, [...selected], observe, prefetchedPlan),
     setup: (unlock: ClientRecoveryUnlock, selected: readonly string[], observe?: Observe) =>
       batch('setup', unlock, [...selected], observe),
     dispose: () => {

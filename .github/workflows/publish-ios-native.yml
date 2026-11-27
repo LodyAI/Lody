@@ -31,6 +31,7 @@ jobs:
       CONVEX_URL: ${{ vars.LODY_AUTH_URL }}
       CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL }}
       CF_WORKER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      LODY_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       LODY_ONESIGNAL_APP_ID: ${{ vars.VITE_ONESIGNAL_APP_ID || vars.ONESIGNAL_APP_ID }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
       IOS_BUNDLE_ID: ai.lody.mobile

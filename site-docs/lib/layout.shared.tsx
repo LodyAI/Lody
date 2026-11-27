@@ -1,6 +1,5 @@
+import { localizeSitePath, type SiteLocale } from '@site/src/site-pages/shared';
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-
-type Locale = 'en' | 'zh';
 
 function docsNavTitle() {
   return (
@@ -20,13 +19,11 @@ function docsNavTitle() {
   );
 }
 
-export function baseOptions(locale: Locale): BaseLayoutProps {
-  const isZh = locale === 'zh';
-
+export function baseOptions(locale: SiteLocale): BaseLayoutProps {
   return {
     nav: {
       title: docsNavTitle(),
-      url: isZh ? '/zh/home' : '/home',
+      url: localizeSitePath('/', locale),
     },
     // Social + theme live only in `DocsSidebarFooter` (sidebar.footer).
     // Empty links + disabled themeSwitch avoid fumadocs' dual sun/moon pill.

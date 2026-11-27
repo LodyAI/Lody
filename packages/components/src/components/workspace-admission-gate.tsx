@@ -1,14 +1,22 @@
 import { runtimeInitializingAtom } from '@/atoms/control-connection';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { usePlatform } from '@lody/platform/react';
+import { Button } from '@lody/ui/button';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { BootNavigate } from '@/components/boot-navigate';
 import { RouteMessage } from '@/components/route-message';
 import { BlockingWaitPlaceholder } from '@/components/blocking-wait-placeholder';
 import { userAtom } from '@/atoms';
+import {
+  getPreferredOrdinaryWorkspaceSlug,
+  isNavigableWorkspaceSlug,
+  readPreferredWorkspaceSlug,
+} from '@/lib/workspace';
 import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import {
@@ -52,6 +60,27 @@ function showsEncryptionDetail(
   );
 }
 
+const WAIT_BACK_DELAY_MS = 6_000;
+
+const styles = stylex.create({
+  failureShell: { position: 'relative' },
+  failureBack: {
+    position: 'fixed',
+    top: `calc(${space[4]} + env(safe-area-inset-top, 0px))`,
+    insetInlineStart: space[4],
+    zIndex: 1,
+  },
+  waitBack: {
+    animationName: stylex.keyframes({
+      from: { opacity: 0 },
+      to: { opacity: 1 },
+    }),
+    animationDuration: '200ms',
+    animationTimingFunction: 'ease-out',
+    animationFillMode: 'both',
+  },
+});
+
 /** Holds the routed workspace until the runtime's admission verdict exists.
  * Ordinary workspaces receive a provisional verdict immediately and render as
  * before E2EE; only workspaces with encryption evidence wait here.
@@ -85,12 +114,57 @@ export function WorkspaceAdmissionGate({
   const currentScope = useRef<string | null>(recoveryScope);
   currentScope.current = recoveryScope;
   const [recheckScope, setRecheckScope] = useState<string | null>(null);
+  const [showWaitBack, setShowWaitBack] = useState(false);
+  const modeMissing = !mode || mode.workspaceSlug !== workspaceName || mode.accountId !== accountId;
+  const runtimeReadyForEncrypted =
+    encrypted &&
+    runtime?.workspaceId === mode?.workspaceId &&
+    runtime?.accountId === mode?.accountId &&
+    runtime?.contentMode === 'e2ee';
+  const waitingForAdmission =
+    Boolean(platform.e2eeWorkspaces) &&
+    ((modeMissing && failure?.workspaceSlug !== workspaceName) ||
+      (!modeMissing && encrypted && !runtimeReadyForEncrypted && initializing));
+  useEffect(() => {
+    if (!waitingForAdmission) {
+      setShowWaitBack(false);
+      return undefined;
+    }
+    setShowWaitBack(false);
+    const timer = setTimeout(() => setShowWaitBack(true), WAIT_BACK_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [waitingForAdmission, workspaceName]);
   useEffect(() => {
     currentScope.current = recoveryScope;
     return () => {
       if (currentScope.current === recoveryScope) currentScope.current = null;
     };
   }, [recoveryScope]);
+  const backToWorkspaces = () => {
+    const workspaces = platform.workspaces?.state.get();
+    const others =
+      workspaces?.status === 'ready'
+        ? workspaces.workspaces.filter((item) => item.slug !== workspaceName)
+        : [];
+    const ordinarySlug = getPreferredOrdinaryWorkspaceSlug(
+      workspaces?.status === 'ready'
+        ? others.find((item) => item.id === workspaces.activeWorkspaceId)
+        : null,
+      others,
+      readPreferredWorkspaceSlug()
+    );
+    const fallbackSlug =
+      ordinarySlug ??
+      others.find(
+        (item): item is typeof item & { slug: string } =>
+          typeof item.slug === 'string' && isNavigableWorkspaceSlug(item.slug)
+      )?.slug;
+    void navigate(
+      fallbackSlug
+        ? { to: '/$workspaceName/chat', params: { workspaceName: fallbackSlug } }
+        : { to: '/workspace/create', search: { allowExisting: true } }
+    );
+  };
   if (
     failure?.workspaceSlug === workspaceName &&
     failure.errorType === 'e2ee_device_revoked' &&
@@ -118,6 +192,8 @@ export function WorkspaceAdmissionGate({
         testId="workspace-access-removed"
         title={t('e2ee.members.removedTitle')}
         description={t('e2ee.members.removed')}
+        actionLabel={t('e2ee.lostAccess.back')}
+        onRetry={backToWorkspaces}
       />
     );
   if (!platform.e2eeWorkspaces) return children;
@@ -128,51 +204,81 @@ export function WorkspaceAdmissionGate({
           gate="workspace_admission"
           variant="boot"
           title={t('workspace.route.loadingTitle')}
-          description={t('workspace.route.loadingDescription')}
+          description={t(
+            encrypted || needsNativeIdentity
+              ? 'e2ee.mode.verifyingAccess'
+              : 'workspace.route.loadingDescription'
+          )}
+          action={
+            showWaitBack ? (
+              <div {...stylex.props(styles.waitBack)}>
+                <Button
+                  variant="ghost"
+                  size="small"
+                  data-testid="workspace-admission-wait-back"
+                  onClick={backToWorkspaces}
+                >
+                  {t('e2ee.lostAccess.back')}
+                </Button>
+              </div>
+            ) : undefined
+          }
         />
       );
     }
     const encryption = showsEncryptionDetail(failure, encryptedCreationEnabled);
     return (
-      <RouteMessage
-        gate="workspace_admission"
-        title={encryption ? t('e2ee.mode.failed') : t('workspace.route.openErrorTitle')}
-        description={
-          encryption
-            ? t(
-                recheckScope === recoveryScope
-                  ? 'e2ee.mode.identityRecheckHelp'
-                  : admissionFailureHelp(failure.errorType)
-              )
-            : t('workspace.route.openErrorDescription')
-        }
-        onRetry={() => {
-          const identityFailure =
-            failure.errorType === E2eeLocalEvidenceCorruptError.name ||
-            failure.errorType === E2eeLocalEvidenceConflictError.name;
-          const workspaceId = failure.modeAdmission?.workspaceId;
-          const native = platform.e2eeWorkspaces?.runtime;
-          const isCurrent = () => currentScope.current === recoveryScope;
-          void (async () => {
-            try {
-              if (identityFailure && accountId) {
-                if (workspaceId)
-                  await recoverE2eeWorkspaceIdentity({
-                    storage: localStorage,
-                    accountId,
-                    workspaceId,
-                    runtime: native,
-                    isCurrent,
-                  });
-                else repairUnreadableE2eeCaches(localStorage, accountId);
+      <div {...stylex.props(styles.failureShell)}>
+        <div {...stylex.props(styles.failureBack)}>
+          <Button
+            variant="secondary"
+            size="small"
+            data-testid="workspace-admission-back"
+            onClick={backToWorkspaces}
+          >
+            {t('e2ee.lostAccess.back')}
+          </Button>
+        </div>
+        <RouteMessage
+          gate="workspace_admission"
+          title={encryption ? t('e2ee.mode.failed') : t('workspace.route.openErrorTitle')}
+          description={
+            encryption
+              ? t(
+                  recheckScope === recoveryScope
+                    ? 'e2ee.mode.identityRecheckHelp'
+                    : admissionFailureHelp(failure.errorType)
+                )
+              : t('workspace.route.openErrorDescription')
+          }
+          onRetry={() => {
+            const identityFailure =
+              failure.errorType === E2eeLocalEvidenceCorruptError.name ||
+              failure.errorType === E2eeLocalEvidenceConflictError.name;
+            const workspaceId = failure.modeAdmission?.workspaceId;
+            const native = platform.e2eeWorkspaces?.runtime;
+            const isCurrent = () => currentScope.current === recoveryScope;
+            void (async () => {
+              try {
+                if (identityFailure && accountId) {
+                  if (workspaceId)
+                    await recoverE2eeWorkspaceIdentity({
+                      storage: localStorage,
+                      accountId,
+                      workspaceId,
+                      runtime: native,
+                      isCurrent,
+                    });
+                  else repairUnreadableE2eeCaches(localStorage, accountId);
+                }
+                if (isCurrent()) retryAdmission((value) => value + 1);
+              } catch {
+                if (isCurrent()) setRecheckScope(recoveryScope);
               }
-              if (isCurrent()) retryAdmission((value) => value + 1);
-            } catch {
-              if (isCurrent()) setRecheckScope(recoveryScope);
-            }
-          })();
-        }}
-      />
+            })();
+          }}
+        />
+      </div>
     );
   }
   if (
@@ -192,7 +298,21 @@ export function WorkspaceAdmissionGate({
           gate="workspace_admission"
           variant="boot"
           title={t('workspace.route.loadingTitle')}
-          description={t('workspace.route.loadingDescription')}
+          description={t('e2ee.mode.verifyingAccess')}
+          action={
+            showWaitBack ? (
+              <div {...stylex.props(styles.waitBack)}>
+                <Button
+                  variant="ghost"
+                  size="small"
+                  data-testid="workspace-admission-wait-back"
+                  onClick={backToWorkspaces}
+                >
+                  {t('e2ee.lostAccess.back')}
+                </Button>
+              </div>
+            ) : undefined
+          }
         />
       );
     return (

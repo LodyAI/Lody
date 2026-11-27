@@ -1,0 +1,27 @@
+---
+title: "20260917"
+version: 0.95.0
+date: 2026-09-17
+description: "Ajout de Pi intégré et amélioration des agents locaux, du partage de sessions et de la récupération de sessions."
+---
+
+Version 0.95.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Ajout d'un agent Pi intégré et géré. La migration d'un fournisseur Pi existant demande confirmation et préserve ses paramètres ainsi que l'historique enregistré ; les sessions Pi précédentes ne peuvent pas être reprises après la migration, veuillez donc démarrer une nouvelle discussion.
+- Renvoi direct des résultats de partage de session approuvés aux agents MCP.
+- Lancement de Devin depuis la CLI locale.
+- Fermeture et récupération plus fiables des sessions partagées dans un espace de travail.
+
+### 🐛 Correctifs et améliorations
+
+- Correction du démarrage de DeepSeek Harness avec certaines versions de Node en l'exécutant avec la version de Node intégrée à Lody.
+- Correction d'un écran blanc occasionnel sous iOS après la reprise de l'application depuis l'arrière-plan.
+- Amélioration de l'interruption, de la récupération, du préchargement en arrière-plan et du comportement du streaming afin de réduire la perte de brouillons et les pannes affectant toute la conversation.
+- Amélioration des demandes de partage, des paramètres de fournisseur, de la récupération sur erreur et du comportement d'archivage.
+- Correction de l'interprétation erronée du JSON d'entrée d'outil en tant que formules mathématiques Markdown.
+
+### 🤝 Contributions de la communauté
+
+- Un grand merci à [@tommy0103](https://github.com/tommy0103) pour [#711](https://github.com/LodyAI/Lody/pull/711), ainsi qu'à [@Astro-Han](https://github.com/Astro-Han) pour [acp-extension-pi #1](https://github.com/LodyAI/acp-extension-pi/pull/1).

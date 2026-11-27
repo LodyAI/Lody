@@ -1,0 +1,72 @@
+---
+title: "GitHub 整合"
+description: "將 GitHub 儲存庫連接至 Lody，以支援專案複製、Issue 與 PR 上下文、Worktree 工作階段、CI 狀態與 Review 評論同步。"
+---
+
+# GitHub 整合
+
+為了讓桌面端與行動端的工作流程保持順暢，Lody 將 GitHub 整合視為產品的核心功能之一。為你的儲存庫安裝 Lody GitHub App 後，Lody 就能從任何裝置複製（Clone）你的專案、擷取 Issue 與 PR 上下文，並提供更流暢的工作流程。
+
+## 設定
+
+前往 **設定** -> **GitHub** -> **管理**，即可跳轉至 GitHub App 安裝頁面。選取你希望 Lody 存取的儲存庫，然後返回 Lody。所選的儲存庫會顯示在 **可加入工作區的儲存庫** 下方，將需要的儲存庫加入目前的工作區即可。
+
+Lody 支援在多個工作區之間共用同一個儲存庫。在其他工作區中，已安裝過 GitHub App 的儲存庫可以直接選取並加入。
+
+### 在已授權列表中找不到儲存庫？
+
+如果你已授權的儲存庫沒有出現在 **已授權儲存庫** 中，通常是 GitHub App 安裝過程中漏選了該儲存庫（例如在選取該儲存庫前就先按下了 **Install**，或是該儲存庫位於需要管理員核准的組織中）。
+
+最簡單的解決方式是重新進行授權：
+
+1. 開啟 [github.com/settings/installations](https://github.com/settings/installations)（個人儲存庫），或前往所屬組織的 **Settings → GitHub Apps → Lody → Configure** 頁面。
+2. 解除安裝 **Lody** GitHub App。
+3. 回到 Lody，開啟 **設定 → GitHub → 管理** 並重新安裝應用程式，這次請務必選取所有你希望 Lody 存取的儲存庫。
+
+重新安裝完成後，返回「設定」頁面——儲存庫就會出現在列表中，並可加入工作區。
+
+## 個人 GitHub 身分
+
+GitHub App 安裝賦予 Lody 儲存庫的存取權限。個人身分則是獨立且可選的功能：僅當你希望 PR 評論、Review 操作與合併（Merge）以你自己的 GitHub 使用者身分執行時，才需要啟用它。若要使用此功能，請在 **設定** -> **GitHub** 中開啟 **Act as you for PRs, comments, and merges**，然後授權你的 GitHub 帳號。
+
+授權完成後，「設定」頁面會顯示已連接的 GitHub 帳號。這不會改變 Lody 可存取的儲存庫範圍；儲存庫存取權限仍由 GitHub App 安裝決定。如果之後想改回僅使用工作區的 GitHub App 身分，隨時可以關閉此選項。
+
+## 為對話選擇儲存庫
+
+在首頁中，使用輸入框左上角的儲存庫選擇器，選取已加入工作區的儲存庫。接著 Lody 會列出該儲存庫中的所有分支，讓你選擇要從哪一個分支開始。
+
+<GithubRepoPickerPreview locale="zh-hant" />
+
+建立對話後，Lody 會在 CLI 機器上複製並初始化該儲存庫，然後從你選擇的分支建立一個新的 [Worktree](/zh-hant/docs/worktrees)。每個對話都在各自的分支上運作，不會影響其他對話。
+
+## 從 Issue 或 Pull Request 開始
+
+在首頁選取儲存庫後，輸入 `@` 開啟提及選單，接著選擇 **Issues** 或 **Pull Requests**，即可提及目前儲存庫中的項目。
+
+<MentionPreview locale="zh-hant" kind="issue" />
+
+使用上下方向鍵選取項目，然後按下 Enter 確認。Lody 會將所選項目以 `#<number>` 寫入輸入框，並將其上下文注入提示詞（Prompt）中，讓 Agent 能夠處理像是 `Fix #12` 或 `Review the implementation in #56` 這類任務。
+
+## PR 狀態與 CI 同步
+
+當工作階段關聯到 GitHub PR 時，Lody 會在工作階段介面中顯示 PR 編號、開啟／關閉／已合併狀態，以及 CI 狀態。執行中、通過與失敗的檢查項目都會在 Lody 中即時更新，讓你無需一直切換回 GitHub 查看分支是否已準備就緒。
+
+如果你在已經有 PR 的分支上繼續開發，Lody 也會嘗試偵測該 PR 並自動將它關聯至目前的工作階段。
+
+## 在 Lody 中操作 PR
+
+點擊已關聯工作階段頂部的 PR 徽章，即可開啟 PR 面板。你可以在不離開 Lody 的情況下，直接檢視 PR 標題、說明、分支、CI、評論與 Review。
+
+草稿 PR 會在 PR 面板中顯示 **Ready for review** 操作。當 PR 就緒且可合併時，你也可以直接在 Lody 中進行合併；若 GitHub 上仍保留該分支，也可在合併後刪除該分支。
+
+## PR 工作階段的提交與推送
+
+對於已關聯 PR 的 GitHub 託管工作階段，Lody 會在每次 Agent 回合結束後檢查工作區。如果有尚未提交的變更，或有尚未推送的本機提交，Lody 可以請 Agent 將其提交並推送至對應的 PR 分支。
+
+你依然可以隨時從工作階段介面手動觸發 **Commit & Push**，或在 Review 評論需要進一步處理時使用 **Fix PR Comments**。
+
+## Review 評論同步
+
+在 [Diff Comments](/zh-hant/docs/diff-comments) 中，已關聯 PR 的工作階段只要啟用 **Sync to GitHub**，就能將新的行內評論發佈回 GitHub。
+
+GitHub 上現有的 PR Review 行內評論也會顯示在 Lody 的 Diff 檢視中，且在 Lody 中送出的回覆也會同步張貼回 GitHub。這讓程式碼審查、檢視與後續的 Agent 修正工作都能集中在同一處完成。

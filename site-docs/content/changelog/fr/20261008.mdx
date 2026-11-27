@@ -1,0 +1,78 @@
+---
+title: "20261008"
+version: 0.104.0
+date: 2026-10-08
+description: "Aperçus du simulateur iOS, mémoire des Rôles, Devin intégré et modifications de PR, avec des améliorations pour les paramètres de modèles, l'édition de fichiers, le partage et les tâches planifiées."
+---
+
+Version 0.104.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Prévisualisez et contrôlez un simulateur iOS exécuté sur votre Mac directement dans une session, ou demandez à un Agent de démarrer l'aperçu.
+- Associez des Rôles d'agent à des identités mémoire Nowledge Mem et gérez-les dans les paramètres.
+- Ajout de la prise en charge intégrée de Devin.
+- Pi peut désormais utiliser un exécutable personnalisé.
+- Dupliquez (fork) des sessions DeepSeek Harness à partir de tours de conversation terminés pour explorer d'autres approches.
+- Consultez les modifications de code dans le panneau des PR, filtrez par commit unique ou plage de commits, et recherchez des fichiers modifiés.
+- Affichez les outils fournis par un serveur dans les paramètres MCP.
+- Les Agents créant des sessions via MCP peuvent spécifier un mode de permission et les options de configuration pris en charge par l'Agent cible.
+- Saisissez `￥` pour ouvrir le sélecteur de compétences (skills), facilitant leur invocation avec une méthode de saisie chinoise.
+- Les messages délégués par un Agent vers une autre session affichent désormais l'identité de l'Agent ou du Rôle expéditeur et donnent accès à la session source.
+- Ajout d'un pack de langages de code optionnel permettant d'activer la coloration syntaxique pour davantage de langages de programmation.
+- Lorsque les langages étendus sont activés, les aperçus de fichiers prennent en charge la coloration syntaxique pour Coq, Rocq et Lean.
+
+### 🐛 Correctifs et améliorations
+
+- Correction de la perte des paramètres Fast non envoyés lors du changement d'onglet de session.
+- Correction d'un problème où des options incompatibles subsistaient après le changement de modèle d'un Rôle et empêchaient sa sélection correcte.
+- Correction de la réinitialisation des modèles, Rôles et autres paramètres sélectionnés lors de la préparation de pièces jointes ou de l'envoi de messages.
+- Rétablissement de la prise en charge des extensions Pi intégrées, corrigeant la page des paramètres qui demandait de manière répétée aux utilisateurs de mettre à jour.
+- Correction de l'indisponibilité de la liste des modèles après la sélection d'extensions Pi.
+- Amélioration des noms des extensions Pi en utilisant le nom de leur paquet ou de leur répertoire pour les distinguer.
+- Correction d'un problème où les échecs de nettoyage des identifiants masquaient l'erreur d'authentification Codex d'origine.
+- Accélération du chargement des Raccourcis de prompt, réduisant l'attente lors de la première sélection.
+- Correction de la perte des sélections de Raccourcis de prompt sur les appareils tactiles lorsque le compositeur reprenait le focus.
+- Correction du positionnement des sous-menus de modèles et de Rôles, et amélioration de la recherche et du défilement dans les longues listes de modèles.
+- Correction de la gestion du Markdown, du code et de caractères tels que les tirets bas dans la recherche de session afin que le nombre de résultats et les surbrillances concordent.
+- Amélioration des états vides dans la recherche de mentions de session pour distinguer l'absence de sessions de l'absence de résultats correspondants.
+- Affichage de « Finalisation » une fois la génération d'une réponse terminée au lieu de continuer à afficher « Réflexion en cours ».
+- Correction du défilement rapide vers le bas pendant une réponse en streaming qui s'arrêtait à un ancien bas de page et ne suivait pas le nouveau contenu.
+- Correction de mises à jour répétées lors du défilement d'une conversation pouvant provoquer une erreur sur la page.
+- Amélioration du dimensionnement des colonnes de tableaux Markdown afin que les longs chemins ou textes ne compriment pas les autres colonnes.
+- Amélioration de l'espacement entre le texte du message et les résumés d'outils.
+- Alignement du rendu du contenu dans les boîtes de dialogue des sous-agents sur celui de la conversation principale.
+- Correction de la disparition ou du scintillement des aperçus de pièces jointes lors du passage de l'état en cours de téléversement à envoyé.
+- Les miniatures d'images dans le compositeur conservent désormais leurs couleurs d'origine avant la fin du téléversement.
+- Correction d'un problème où « Toutes les modifications » utilisait une base de comparaison incorrecte sur certaines branches, garantissant la cohérence des listes de fichiers, des statistiques et des diffs.
+- Correction de l'éditeur de fichiers qui continuait d'afficher des modifications non enregistrées et un avertissement à la fermeture après qu'une annulation eut rétabli le contenu enregistré.
+- Correction du clavier mobile qui masquait l'éditeur de fichiers ou laissait sa mise en page incorrecte après sa fermeture.
+- Correction des problèmes d'interaction et de focus dans la visionneuse de diffs sur mobile.
+- Correction de l'isolation du focus et des contrôles clavier dans les aperçus d'images.
+- L'exportation d'images de partage sur mobile utilise désormais la feuille de partage système.
+- Correction des couleurs des images de partage de chat et d'utilisation qui étaient affectées par le thème de l'application.
+- Amélioration des messages d'erreur de partage pour expliquer les limites telles que la taille d'image.
+- Correction de l'utilisation de fuseaux horaires incohérents pour la saisie et l'aperçu des tâches planifiées ponctuelles.
+- Amélioration de la gestion des tâches planifiées lors des changements d'heure (heure d'été/heure d'hiver).
+- Correction de la conversion incorrecte des valeurs de configuration lors de l'enregistrement ou de l'exécution de tâches planifiées comportant des interrupteurs tels que Fast et Plan.
+- Correction de l'éditeur de tâches planifiées sur mobile qui ne respectait pas les zones de sécurité de l'écran.
+- Correction des informations de quota qui étaient écrasées ou mélangées entre des comptes utilisant le même fournisseur d'Agent.
+- L'indicateur de quota du compositeur donne désormais la priorité à la fenêtre d'utilisation de cinq heures.
+- Les notifications de réinitialisation Codex peuvent afficher les heures de réinitialisation planifiées publiées par la source de données, en distinguant les heures indéterminées des réinitialisations qui n'ont pas encore été confirmées.
+- Correction des limites UTC et des libellés s'étendant sur plusieurs jours dans les graphiques d'utilisation.
+- Correction de la réouverture inattendue des détails d'un ancien jour ou de l'écrasement d'une nouvelle sélection après modification de la plage de dates d'utilisation.
+- Correction d'un problème où les PR GitHub découvertes n'apparaissaient pas en cas d'échec de l'association de PR.
+- Amélioration des réessais après des échecs temporaires de requêtes GitHub et réduction des requêtes répétées lors d'échecs persistants.
+- Correction du service en arrière-plan qui redémarrait parfois une ancienne version de la CLI après une mise à jour.
+- Amélioration de la compatibilité du tunnel de partage d'aperçu sur les réseaux qui restreignent le protocole UDP.
+- Réduction des flashs blancs lors du démarrage de l'application et de la navigation.
+- Amélioration de la navigation dans les paramètres et de la disposition des boutons dans les fenêtres étroites.
+- Unification de la mise à l'échelle de la taille de police et de la hauteur de ligne afin que le texte, le code, les sorties d'outils et les contrôles des paramètres suivent plus fidèlement le réglage de taille de police.
+- Alignement des boutons de fenêtre macOS avec la barre latérale.
+- Correction des liens internes dans les détails des compétences qui quittaient le document en cours.
+- Correction des liens de la documentation du site Web qui perdaient leurs ancres de section.
+- Correction de l'application Web qui affichait le forfait gratuit après le retour du paiement alors que l'abonnement était encore en cours de confirmation.
+- Ajout des instructions d'installation via Homebrew.
+- Clarification du nettoyage des répertoires de travail, des sauvegardes et de la conservation des branches après l'archivage d'une session.
+
+Merci à Astro-Han, ladydd, Lampese, Pleasurecruise, samzong, scbizu, yayoinoyume et Zach677 pour leur contribution à cette mise à jour !

@@ -458,7 +458,8 @@ describe('SessionList PR badge', () => {
       );
     });
 
-    const row = () => container!.querySelector<HTMLElement>('[data-sidebar-session-id="session-merge"]');
+    const row = () =>
+      container!.querySelector<HTMLElement>('[data-sidebar-session-id="session-merge"]');
     expect(row()?.querySelector('[data-session-mergeable-pill]')).not.toBeNull();
 
     flushSync(() => {
@@ -468,7 +469,11 @@ describe('SessionList PR badge', () => {
     const mergingIndicator = row()?.querySelector<HTMLElement>('[data-session-row-indicator]');
     expect(mergingIndicator?.dataset.sessionPrMergePhase).toBe('merging');
     expect(mergingIndicator?.getAttribute('aria-label')).toBe('Merging PR #42…');
-    expect(mergingIndicator?.querySelector('[data-session-send-ring]')?.getAttribute('data-session-send-ring')).toBe('indeterminate');
+    expect(
+      mergingIndicator
+        ?.querySelector('[data-session-send-ring]')
+        ?.getAttribute('data-session-send-ring')
+    ).toBe('indeterminate');
 
     flushSync(() => {
       setSessionPrMergedOptimistic(store, 'session-merge', {
@@ -505,5 +510,4 @@ describe('SessionList PR badge', () => {
     expect(row()?.querySelector('[data-session-row-indicator]')).toBeNull();
     vi.useRealTimers();
   });
-
 });

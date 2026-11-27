@@ -49,7 +49,7 @@ export function getCreatedSessionCards(message: SessionHistoryParsed): Card[] | 
 const styles = stylex.create({
   header: { display: 'grid', minWidth: 0 },
   headerLabel: { flexGrow: 1, textAlign: 'start' },
-  list: { minWidth: 0, scrollbarGutter: 'stable', overscrollBehaviorY: 'contain' },
+  list: { minWidth: 0, scrollbarGutter: 'stable' },
   bounded: {
     // Five compact control rows, with four separators.
     maxHeight: `calc(5 * ${control.small} + 4px)`,

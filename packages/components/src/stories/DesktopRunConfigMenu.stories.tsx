@@ -313,10 +313,13 @@ function StoryShell({
   isEmptyConversation,
   machineSelected = true,
   configuredSelectors = selectors,
+  withPermissionDefault = false,
 }: {
   isEmptyConversation: boolean;
   machineSelected?: boolean;
   configuredSelectors?: AcpConfigOptionSelector[];
+  /** Offers "Use for new conversations" in the permission menu. */
+  withPermissionDefault?: boolean;
 }) {
   const store = useMemo(() => {
     const s = createStore();
@@ -332,6 +335,7 @@ function StoryShell({
   const [values, setValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
     Object.fromEntries(configuredSelectors.map((sel) => [sel.configId, sel.currentValue]))
   );
+  const [permissionDefault, setPermissionDefault] = useState<string | null>(null);
 
   return (
     <Provider store={store}>
@@ -359,6 +363,11 @@ function StoryShell({
             configOptionSelectors={configuredSelectors}
             configOptionValues={values}
             onConfigOptionChange={(id, v) => setValues((p) => ({ ...p, [id]: v }))}
+            permissionDefault={
+              withPermissionDefault
+                ? { value: () => permissionDefault, onChange: (_, v) => setPermissionDefault(v) }
+                : undefined
+            }
           />
         </div>
       </div>
@@ -638,6 +647,10 @@ type Story = StoryObj<typeof meta>;
 
 export const LockedAgent: Story = { args: { isEmptyConversation: false } };
 export const EmptyConversationAgentPickable: Story = { args: { isEmptyConversation: true } };
+/** The permission menu's last row makes the current permission the default. */
+export const PermissionDefault: Story = {
+  args: { isEmptyConversation: true, withPermissionDefault: true },
+};
 export const MachineRequired: Story = {
   args: { isEmptyConversation: true, machineSelected: false },
 };
@@ -703,11 +716,30 @@ export const GenericSelect: Story = {
 export const SpeedTiers: Story = {
   args: { isEmptyConversation: false },
   render: () => <SpeedTierShell />,
-
 };
 
 const themeStyles = stylex.create({
-  column: { display: 'flex', minHeight: '100dvh', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-end', gap: 'calc(var(--spacing) * 4)', backgroundColor: uiColors.background, padding: 'calc(var(--spacing) * 8)' },
+  column: {
+    display: 'flex',
+    minHeight: '100dvh',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    justifyContent: 'flex-end',
+    gap: 'calc(var(--spacing) * 4)',
+    backgroundColor: uiColors.background,
+    padding: 'calc(var(--spacing) * 8)',
+  },
 });
 
-const runConfigSceneStyles = stylex.create({ composer: { containerType: 'inline-size', containerName: 'composer-face', display: 'flex', alignItems: 'center', borderRadius: '14px', backgroundColor: uiColors.elevatedBackground, paddingInline: 'calc(var(--spacing) * 2)', paddingBlock: 'calc(var(--spacing) * 1.5)' } });
+const runConfigSceneStyles = stylex.create({
+  composer: {
+    containerType: 'inline-size',
+    containerName: 'composer-face',
+    display: 'flex',
+    alignItems: 'center',
+    borderRadius: '14px',
+    backgroundColor: uiColors.elevatedBackground,
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+  },
+});

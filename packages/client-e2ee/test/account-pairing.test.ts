@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { expect, it } from 'vitest';
 import { Cause, Effect, Exit, ManagedRuntime } from 'effect';
 import { TestClock } from 'effect/testing';
+import { ConvexError } from 'convex/values';
 import { getFunctionName } from 'convex/server';
 import { accountPairingErrorCode } from '@lody/platform';
 import {
@@ -138,6 +139,63 @@ it.each(['workspaces', 'history'] as const)(
       const error = await listing;
       expect(String(error)).toContain('e2ee_pairing_relay_failed');
       expect(accountPairingErrorCode(error)).toBeNull();
+    } finally {
+      await clock.dispose();
+    }
+  }
+);
+
+it.each(['transient', 'account switch', '403', 'ConvexError', '560'] as const)(
+  'pairing ledger append handles %s with the original account and request',
+  async (scenario) => {
+    const clock = ManagedRuntime.make(TestClock.layer({ warningDelay: '1 hour' }));
+    try {
+      await clock.context();
+      let account = 'account-A';
+      const original = {
+        workspaceId: 'workspace-A',
+        requestId: 'request-A',
+        recordHex: 'aa',
+        credentialHash: genesisHash,
+      };
+      const request = { ...original };
+      const sent: unknown[] = [];
+      const started = Promise.withResolvers<void>();
+      const error =
+        scenario === 'ConvexError'
+          ? new ConvexError('HTTP 503 business refusal')
+          : Object.assign(new Error('gateway'), {
+              status: scenario === '403' ? 403 : scenario === '560' ? 560 : 503,
+            });
+      const ports = portsOver(
+        async (_name, args) => {
+          sent.push(structuredClone(args));
+          started.resolve();
+          if (sent.length < 3) throw error;
+          return { status: 'committed', recordHash: genesisHash };
+        },
+        () => account,
+        (effect) => clock.runPromiseExit(effect)
+      );
+      const pending = ports.appendRecord(request).then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error })
+      );
+      await started.promise;
+      if (scenario === 'account switch') account = 'account-B';
+      request.recordHex = 'bb';
+      await clock.runPromise(TestClock.adjust(1200));
+      if (scenario === 'transient') {
+        expect(await pending).toEqual({
+          result: { status: 'committed', recordHash: genesisHash },
+        });
+        expect(sent).toEqual([original, original, original]);
+      } else {
+        expect(await pending).toEqual({
+          error: scenario === 'account switch' ? new Error('e2ee_pairing_relay_failed') : error,
+        });
+        expect(sent).toEqual([original]);
+      }
     } finally {
       await clock.dispose();
     }

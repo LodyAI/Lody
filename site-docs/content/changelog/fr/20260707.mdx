@@ -1,0 +1,27 @@
+---
+title: "20260707"
+version: 0.67.2
+date: 2026-07-07
+description: "Ajout du mode rapide de Claude Code, des tâches en arrière-plan et planifiées, d'un préréglage de fournisseur GLM Claude Code, d'une réinitialisation du cache dans les paramètres, d'un nouveau système de gestion des binaires Codex/Claude et d'un pipeline d'envoi/d'arrêt plus rapide."
+---
+
+### Nouveautés
+
+- Claude Code prend désormais en charge le mode rapide.
+- Claude Code prend désormais en charge les tâches en arrière-plan et les tâches planifiées.
+- Ajout d'un préréglage de fournisseur GLM Claude Code.
+- Ajout d'une option Vider le cache dans les Paramètres pour réinitialiser les anomalies de données locales pouvant survenir lors des migrations de version.
+
+### Correctifs et améliorations
+
+- Nouveau système de gestion des binaires pour Codex et Claude, réduisant les problèmes d'utilisation liés aux différences d'environnement. Veuillez actualiser de nouveau sous Paramètres → Agent.
+- Optimisation du pipeline d'envoi et d'arrêt des messages : il est désormais plus rapide.
+- Amélioration de la stratégie de synchronisation des données.
+- Correction d'un problème où l'affichage d'un diff ou d'un fichier échouait parfois.
+- Correction du bouton Ajouter qui devenait non cliquable lorsque le chemin du projet était trop long.
+- Sous Windows, la couleur de la barre de titre de l'application suit désormais le thème.
+- Correction d'un problème empêchant de fermer le clavier dans la version web mobile.
+- Correction d'images dans les conversations qui ne pouvaient parfois pas être ouvertes.
+- Ajout d'une entrée de signalement de bug dans la page Paramètres sur mobile.
+- Correction d'une redirection défaillante lors de la connexion sur Linux.
+- L'ouverture dans Zed d'un projet déjà ouvert met désormais au premier plan la fenêtre existante au lieu d'en ouvrir une nouvelle.

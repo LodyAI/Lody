@@ -1,6 +1,7 @@
+import { localeCode, localizeSitePath, type SiteLocale } from '@site/src/site-pages/shared';
 import { blogReadingMinutes } from './blog-reading-time.generated';
 
-export type BlogLocale = 'en' | 'zh';
+export type BlogLocale = SiteLocale;
 
 type BlogFrontmatter = {
   title: string;
@@ -87,7 +88,7 @@ export function normalizeBlogEntries(locale: BlogLocale, entries: BlogSourceEntr
         date,
         image: normalizeImagePath(entry.image),
         readingMinutes: blogReadingMinutes[locale]?.[slug],
-        url: locale === 'zh' ? `/zh/blog/${slug}` : `/blog/${slug}`,
+        url: localizeSitePath(`/blog/${slug}`, locale),
         docPath: entry.info.path,
       };
     })
@@ -104,9 +105,11 @@ export function formatBlogDate(date: string | undefined, locale: BlogLocale) {
   if (match === null) return date;
 
   const parsed = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
-  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+  const useLongMonth =
+    locale === 'zh' || locale === 'zh-hant' || locale === 'ja' || locale === 'ko';
+  return new Intl.DateTimeFormat(localeCode(locale), {
     year: 'numeric',
-    month: locale === 'zh' ? 'long' : 'short',
+    month: useLongMonth ? 'long' : 'short',
     day: 'numeric',
   }).format(parsed);
 }

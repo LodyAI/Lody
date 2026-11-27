@@ -1,0 +1,37 @@
+---
+title: "Diff 評論"
+description: "在 Lody diff 中新增行級評論、於討論串中回覆，並將審查評論同步至 GitHub。"
+---
+
+# Diff 評論
+
+Diff 評論讓你可以直接在程式碼變更處進行審查。你可以將它用於團隊審查，或將特定程式碼行傳送回對話中，讓 Agent 解釋、修復或重新檢視。
+
+## 新增評論
+
+1. 從當前回合或 `Changes` 側邊欄開啟 session diff。
+2. 將滑鼠游標停留在可評論的行上，然後點擊行號旁的 `+`。
+3. 撰寫你的評論內容。支援 Markdown。
+4. 點擊 **Comment**，或按下 `Ctrl+Enter` / `Cmd+Enter`。
+
+在行動裝置上，輕觸可評論的 diff 行即可開啟評論框。
+
+## 回覆與解決討論串
+
+評論會以討論串的形式顯示在 diff 行下方。你可以：
+
+- 在同一個討論串中回覆
+- 編輯或刪除你自己的評論
+- 在討論完成時點擊 **Resolve**
+- 點擊 **Unresolve** 重新開啟討論串
+- 當你只需要查看摘要時收合討論串
+
+## 將討論串傳送給 Agent
+
+使用評論討論串上的傳送按鈕，即可在目前對話中引用該討論串。接著你可以請 Agent 處理這則評論、說明設計權衡，或進行所需的修復。
+
+## 與 GitHub 同步
+
+當 session 已關聯至 GitHub PR 時，啟用 **Sync to GitHub** 即可將新的 Lody 評論同步為 GitHub PR Review 行評論。
+
+Lody 也會將現有的 GitHub PR Review 討論串載入 diff 中。你可以在上下文中閱讀這些評論並從 Lody 回覆；回覆內容會發佈回 GitHub。

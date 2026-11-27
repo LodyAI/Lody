@@ -1,20 +1,12 @@
 import * as fs from 'fs';
 import { ensureLodyDataDir } from '@lody/shared/node/installation-profile';
-import { writePrivateCredentialFile } from './private-credential-file';
-import path from 'path';
 import { getConfigPath } from '@/utils';
 import chalk from 'chalk';
 import ora from 'ora';
 import os from 'os';
 import { z } from 'zod';
 import { Logger, getLogger } from '../utils/logger';
-import {
-  getOrCreateStableMachineIdAsync,
-  LODY_AUTH_SITE_URL,
-  LODY_AUTH_URL,
-  SITE_APP_BASE_PATH,
-  SITE_URL,
-} from '@/utils/const';
+import { LODY_AUTH_SITE_URL, LODY_AUTH_URL, SITE_APP_BASE_PATH, SITE_URL } from '@/utils/const';
 import { MACHINE_PAIRING_TOKEN_PREFIX } from '@lody/shared';
 import { openBrowser } from '@/utils/open-browser';
 import { createAuthClient } from 'better-auth/client';
@@ -22,6 +14,13 @@ import { apiKeyClient } from '@better-auth/api-key/client';
 import { deviceAuthorizationClient } from 'better-auth/client/plugins';
 import { convexClient } from '@convex-dev/better-auth/client/plugins';
 import { deriveConvexSiteUrl, normalizeBaseUrl } from './convex-site-url';
+import {
+  CredentialsUserSchema,
+  MachineIdSchema,
+  readCredentialsFile,
+  writeCredentialsFile,
+} from './credentials-file';
+import { getOrCreateMachineId, persistMachineId } from './machine-identity';
 import { normalizeAppBasePath } from './site-app-base-path';
 
 export interface UserInfo {
@@ -66,31 +65,6 @@ export type LoginResult =
   | ({ success: true } & AuthInfo)
   | { success: false; error: string; retryable?: boolean };
 export type LogoutResult = { success: true; user?: UserInfo } | { success: false; error: string };
-
-const UserInfoSchema = z
-  .object({
-    id: z.string(),
-    email: z.string(),
-    name: z.string().nullable().optional(),
-  })
-  .passthrough();
-
-const MachineInfoSchema = z
-  .object({
-    machineName: z.string(),
-    machineId: z.string(),
-  })
-  .passthrough();
-
-const AuthInfoSchema = z
-  .object({
-    version: z.literal(3),
-    token: z.string(),
-    user: UserInfoSchema,
-    machine: MachineInfoSchema,
-    createdAt: z.string().optional(),
-  })
-  .passthrough();
 
 const DEVICE_CLIENT_ID = 'lody-cli';
 const DEVICE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
@@ -183,7 +157,7 @@ const CliApiKeyCreateResponseSchema = z
     apiKey: z.string(),
     apiKeyId: z.string().optional(),
     apiKeyStart: z.string().nullable().optional(),
-    user: UserInfoSchema.nullable().optional(),
+    user: CredentialsUserSchema.nullable().optional(),
   })
   .passthrough();
 
@@ -386,7 +360,7 @@ export class AuthClient {
   }
 
   async bootstrapFromSessionToken(sessionToken: string, machineName: string): Promise<LoginResult> {
-    const machineId = await getOrCreateStableMachineIdAsync();
+    const machineId = getOrCreateMachineId();
     return await this.finalizeLoginFromSessionToken({
       sessionToken,
       machineName,
@@ -411,7 +385,7 @@ export class AuthClient {
       return { success: false, error: 'Invalid API key. Generate a new key and retry.' };
     }
 
-    const machineId = await getOrCreateStableMachineIdAsync();
+    const machineId = getOrCreateMachineId();
     const authInfo = {
       token: accessToken,
       user: validation.user,
@@ -435,7 +409,7 @@ export class AuthClient {
       return { success: false, error: 'Invalid or expired machine connection token.' };
     }
 
-    const machineId = await getOrCreateStableMachineIdAsync();
+    const machineId = getOrCreateMachineId();
     let response: Response;
     try {
       response = await fetch(`${this.siteUrl}/api/cli/machine-pairing/exchange`, {
@@ -490,7 +464,7 @@ export class AuthClient {
   }
 
   async login(machineName: string): Promise<LoginResult> {
-    const machineId = await getOrCreateStableMachineIdAsync();
+    const machineId = getOrCreateMachineId();
 
     this.logger.debug(`[device-auth] siteUrl=${this.siteUrl} serverUrl=${this.serverUrl}`);
     const deviceCodeRes = await this.betterAuthClient.device.code({ client_id: DEVICE_CLIENT_ID });
@@ -676,6 +650,8 @@ export class AuthClient {
       return { success: true, user: undefined };
     }
 
+    persistMachineId(MachineIdSchema.parse(existingAuth.machine.machineId));
+
     // 获取配置文件路径
     const configPath = getConfigPath();
     try {
@@ -692,6 +668,8 @@ export class AuthClient {
     if (!existingAuth || existingAuth.token.trim() !== rejectedToken.trim()) {
       return 'not_current';
     }
+
+    persistMachineId(MachineIdSchema.parse(existingAuth.machine.machineId));
 
     try {
       fs.unlinkSync(getConfigPath());
@@ -762,38 +740,50 @@ export async function saveAuthInfo(
   user: UserInfo,
   machine: { machineName: string; machineId: string }
 ): Promise<void> {
-  const configPath = getConfigPath();
-  ensureLodyDataDir();
+  const dataDir = ensureLodyDataDir();
+  const machineId = MachineIdSchema.parse(machine.machineId);
 
-  // 保存认证信息
-  const authData = {
-    version: 3,
-    token,
-    user,
-    machine,
-    createdAt: new Date().toISOString(),
-  };
-
-  writePrivateCredentialFile(configPath, JSON.stringify(authData, null, 2));
+  writeCredentialsFile(
+    {
+      version: 3,
+      token,
+      user,
+      machine: {
+        machineName: machine.machineName,
+        machineId,
+      },
+      createdAt: new Date().toISOString(),
+    },
+    dataDir
+  );
+  persistMachineId(machineId, { dataDir });
 }
 
 /**
  * 读取认证信息
  */
 export function loadAuthInfo(): AuthInfo | null {
-  try {
-    const configPath = getConfigPath();
-    const data = fs.readFileSync(configPath, 'utf-8');
-    const parsed = AuthInfoSchema.safeParse(JSON.parse(data));
-    if (!parsed.success) {
-      getLogger('auth').debug('Invalid credentials.json; please run `lody logout` + `lody login`');
-      return null;
-    }
-    return parsed.data;
-  } catch {
-    getLogger('auth').debug('Failed to load auth info from disk');
+  const auth = readCredentialsFile();
+  if (
+    !auth ||
+    typeof auth.user.email !== 'string' ||
+    typeof auth.machine.machineName !== 'string'
+  ) {
+    getLogger('auth').debug('Failed to load valid auth info from disk');
     return null;
   }
+  return {
+    token: auth.token,
+    user: {
+      id: auth.user.id,
+      email: auth.user.email,
+      name: auth.user.name,
+    },
+    machine: {
+      machineName: auth.machine.machineName,
+      machineId: auth.machine.machineId,
+    },
+  };
 }
 
 /**

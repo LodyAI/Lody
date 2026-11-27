@@ -51,19 +51,21 @@ export function shouldAttemptDesktopInviteHandoff(environment: {
   );
 }
 
-export function attemptDesktopInviteHandoff(deepLinkUrl: string): boolean {
+export function canAttemptDesktopInviteHandoff(): boolean {
   if (typeof window === 'undefined') {
     return false;
   }
 
-  if (
-    !shouldAttemptDesktopInviteHandoff({
-      isElectron: window.__LODY_ELECTRON__ === true,
-      isNativeAppShell: isNativeAppShell(),
-      isIOSRuntime: isIOSRuntimeEnvironment(),
-      userAgent: window.navigator.userAgent,
-    })
-  ) {
+  return shouldAttemptDesktopInviteHandoff({
+    isElectron: window.__LODY_ELECTRON__ === true,
+    isNativeAppShell: isNativeAppShell(),
+    isIOSRuntime: isIOSRuntimeEnvironment(),
+    userAgent: window.navigator.userAgent,
+  });
+}
+
+export function attemptDesktopInviteHandoff(deepLinkUrl: string): boolean {
+  if (!canAttemptDesktopInviteHandoff()) {
     return false;
   }
 

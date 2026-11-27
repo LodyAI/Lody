@@ -164,11 +164,27 @@ export function desktopRecoveryPort(e2ee: IpcServices['e2ee']): RecoveryPort {
       },
       finish: async ({ compromised }) => {
         const finished = await e2ee.continueRecoveryReplacement({ compromised });
-        return { outcome: finished.outcome };
+        return finished.outcome === 'Pending'
+          ? {
+              outcome: finished.outcome,
+              ...('workspace' in finished && finished.workspace
+                ? { workspace: finished.workspace }
+                : {}),
+              ...('step' in finished && finished.step ? { step: finished.step } : {}),
+            }
+          : { outcome: finished.outcome };
       },
       abandon: async () => {
         const abandoned = await e2ee.abandonRecoveryReplacement();
-        return { outcome: abandoned.outcome };
+        return abandoned.outcome === 'Pending'
+          ? {
+              outcome: abandoned.outcome,
+              ...('workspace' in abandoned && abandoned.workspace
+                ? { workspace: abandoned.workspace }
+                : {}),
+              ...('step' in abandoned && abandoned.step ? { step: abandoned.step } : {}),
+            }
+          : { outcome: abandoned.outcome };
       },
     },
   };

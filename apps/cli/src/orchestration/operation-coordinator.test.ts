@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getAgentConfigRoomId,
   getSessionRoomId,
+  LODY_MAX_CHAIN_DEPTH,
   machineFlockKeys,
   type AgentConfigMeta,
   type MachineId,
@@ -51,6 +52,7 @@ const makeHarness = async (options?: {
   busy?: boolean;
   activeTurnId?: string;
   agentConfigId?: string;
+  continuationInputConfig?: Record<string, unknown>;
   configurationSyncSucceeds?: boolean;
   configurationSync?: () => Promise<boolean>;
   beforeTurnClaim?: () => Promise<void>;
@@ -402,7 +404,11 @@ const makeHarness = async (options?: {
     frozenContinuationConfig: {
       ...(options?.author ? { sourceTurnId: options.author.turnId } : {}),
       ...(options?.agentConfigId ? { agentConfigId: options.agentConfigId } : {}),
-      inputConfig: { cliType: 'builtin', agentType: 'codex', chainDepth: 0 },
+      inputConfig: options?.continuationInputConfig ?? {
+        cliType: 'builtin',
+        agentType: 'codex',
+        chainDepth: 0,
+      },
     },
     initiatorChainDepth: 0,
     createdAt: '2026-07-19T00:00:00.000Z',
@@ -655,6 +661,93 @@ describe('LodyOperationCoordinator', () => {
         ])
       );
       expect(store.get(harness.requesterSessionId, 'review-round-1').author).toEqual(author);
+    } finally {
+      store.close();
+      await harness.coordinator.stop();
+    }
+  });
+
+  it('continues delegated results from an Automation-started Turn as ordinary system input', async () => {
+    const completed = Promise.withResolvers<void>();
+    const harness = await makeHarness({
+      afterTurnComplete: completed.resolve,
+      continuationInputConfig: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        chainDepth: 0,
+        _lodyAutomation: {
+          invocationId: 'invocation-1',
+          ruleId: 'rule-1',
+          ruleRevision: 1,
+          eventRef: 'event-1',
+          authorizationUserId: 'user-1',
+          nativeSessionId: 'native-1',
+        },
+      },
+    });
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      store.finish(harness.requesterSessionId, 'review-round-1', {
+        type: 'result',
+        value: { items: [] },
+      });
+      harness.coordinator.start();
+      await completed.promise;
+      await harness.coordinator.stop();
+
+      const [message] = harness.continueSession.mock.calls[0] ?? [];
+      const { acpSessionConfig } = message as { acpSessionConfig: Record<string, unknown> };
+      expect(acpSessionConfig).not.toHaveProperty('_lodyAutomation');
+      expect(acpSessionConfig).toMatchObject({ cliType: 'builtin', agentType: 'codex' });
+      expect(queuedResults(store, harness.coordinatorOptions.workspaceId)).toEqual([]);
+    } finally {
+      store.close();
+      await harness.coordinator.stop();
+    }
+  });
+
+  it('tells the requester once when the chain cap holds results back from the agent', async () => {
+    const harness = await makeHarness({
+      continuationInputConfig: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        chainDepth: LODY_MAX_CHAIN_DEPTH,
+      },
+    });
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    const notices = () =>
+      (harness.histories.get(harness.requesterSessionId) ?? []).filter((entry) =>
+        entry.items?.some((item) => item.type === 'system_notice' && item.name === 'agent_warning')
+      );
+    try {
+      store.finish(harness.requesterSessionId, 'review-round-1', {
+        type: 'result',
+        value: { items: [] },
+      });
+      harness.coordinator.start();
+      await harness.coordinator.idle();
+      harness.triggerOperationStoreWake();
+      await harness.coordinator.idle();
+      harness.triggerOperationStoreWake();
+      await harness.coordinator.idle();
+
+      expect(harness.continueSession).not.toHaveBeenCalled();
+      const [notice] = notices();
+      expect(notices()).toHaveLength(1);
+      expect(notice).toMatchObject({
+        role: 'system',
+        items: [
+          {
+            type: 'system_notice',
+            name: 'agent_warning',
+            meta: { source: 'delegationChainResultsHeld' },
+          },
+        ],
+      });
+      const message = (notice?.items?.[0] as { meta?: { message?: string } }).meta?.message;
+      expect(message).toContain(`${LODY_MAX_CHAIN_DEPTH} hops`);
+      expect(message).toContain('1 delegated result');
+      expect(queuedResults(store, harness.coordinatorOptions.workspaceId)).toHaveLength(1);
     } finally {
       store.close();
       await harness.coordinator.stop();

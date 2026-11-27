@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { getCliPlatformKind } from '@/lib/cli-platform';
-import { getOrCreateStableMachineIdAsync } from '@/utils/const';
+import { getOrCreateMachineId } from '@/lib/machine-identity';
 import { getLogger } from '@/utils/logger';
 /** Keep custody/core outside the ordinary CLI entry graph. */
 export const machinePairCommand = new Command('pair')
@@ -22,7 +22,7 @@ export const machinePairCommand = new Command('pair')
       let displayed = '';
       const result = await pairRemoteMachineLegacy({
         encodedOffer: args.offer,
-        machineId: await getOrCreateStableMachineIdAsync(),
+        machineId: getOrCreateMachineId(),
         cloud: createCloudE2eePort({ authBaseUrl: offer.deploymentUrl, logger }),
         signal: controller.signal,
         claim: createCloudRemoteMachinePairingClaim({ ingressUrl: offer.ingressUrl, logger }),

@@ -1,0 +1,66 @@
+---
+title: "Flujo de trabajo recomendado"
+description: "Flujo de trabajo recomendado en Lody para dividir tareas, ejecutar agentes en paralelo, revisar diffs, crear PRs y archivar sesiones completadas."
+---
+
+# Flujo de trabajo recomendado
+
+Actualmente, Lody considera la [integración con GitHub](/es/docs/github) y los [Worktrees](/es/docs/worktrees) como capacidades
+fundamentales, por lo que recomendamos utilizarlos como tu flujo de trabajo predeterminado.
+
+Antes de comenzar, completa la [configuración de inicio rápido](/es/docs/quickstart).
+
+## Divide el trabajo en tareas pequeñas
+
+Debido a que los agentes tienen límites de contexto, ejecutar varias tareas pequeñas en paralelo suele funcionar mejor
+que abordar una tarea grande y compleja en una sola conversación. Antes de empezar, divide tu trabajo
+en funcionalidades o correcciones atómicas. Esto te permite aprovechar el aislamiento de archivos a nivel de worktree para el desarrollo
+en paralelo, lo que reduce el tiempo de espera.
+
+## Desarrollo en paralelo
+
+Después de dividir los requisitos, describe una funcionalidad o corrección por conversación en el compositor de la página de inicio.
+En este flujo de trabajo, una conversación corresponde a una funcionalidad o corrección y, por lo general, a un PR. Puedes
+ejecutar tantas conversaciones en paralelo como te lo permitan tu máquina y tu capacidad para cambiar de contexto. Para conocer el
+modelo de producto detrás de esto —worktrees aislados, agentes combinados y visibilidad para el equipo—, consulta
+[Agentes de programación en paralelo](/es/docs/parallel-agents).
+
+Cuando Lody termina una ronda, envía una [notificación](/es/docs/notification). Al hacer clic en la notificación,
+accederás a la sesión relacionada. Si te sientes cómodo leyendo código, revisa los archivos modificados
+directamente en Lody. Si no es así, copia el nombre de la rama que aparece debajo de esa sesión en la barra lateral izquierda y cambia a
+esa rama en tu entorno de desarrollo preferido para realizar pruebas de extremo a extremo.
+
+Una vez que el resultado esté prácticamente listo, haz clic en **Create PR** sobre la conversación. Lody crea un PR
+con el resumen completo de los requisitos y de la implementación, y lo vincula a la conversación. Luego puedes
+hacer clic en el botón del PR vinculado para ir directamente al PR en GitHub.
+
+## Ciclo de revisión con IA
+
+Si conectas Claude Code, Codex, Devin o herramientas similares a tu repositorio, pueden revisar cada
+PR en detalle. Cuando lleguen los comentarios de revisión, puedes pedirle a Lody algo como:
+`Obtén los comentarios del PR, evalúa si cada punto es válido, corrige los problemas válidos y márcalos como resueltos; de lo contrario, responde explicando el motivo.`
+Lody obtendrá los comentarios del PR, los evaluará, aplicará las correcciones y hará push de un nuevo commit. Esto activa la
+siguiente ronda de revisión con IA (de forma automática o manualmente mediante `@`) hasta que no queden problemas evidentes.
+
+## Archiva las sesiones completadas
+
+Cuando se hace merge de un PR, esa sesión ha cumplido su función. Salvo que aparezca un error relacionado, no
+recomendamos continuar con trabajo no relacionado en la misma sesión. Usa la [acción de archivar](/es/docs/session#archivar-sesiones)
+en la barra lateral para quitar las sesiones completadas de tu lista activa.
+
+Archivar permite liberar el directorio del worktree gestionado conservando la conversación y la
+rama local. Guarda primero fuera del worktree los archivos ignorados que necesites; consulta
+[Retención y recuperación de worktrees](/es/docs/worktrees#limpieza-automática).
+
+## Elimina periódicamente las sesiones archivadas
+
+Cuando ya no necesites una conversación, [elimina la sesión archivada](/es/docs/session#eliminar-sesiones)
+para borrar su historial de forma permanente. Esto no elimina la rama local de Git conservada ni sus
+commits de respaldo; no es un método para liberar todo el almacenamiento del repositorio.
+
+## Proyectos fuera de GitHub
+
+Este flujo de trabajo es ideal para proyectos alojados en GitHub. Para trabajos que no estén respaldados por GitHub, agrega el
+directorio como un [Proyecto local](/es/docs/local-project). Los proyectos locales siguen admitiendo chat, listas de archivos,
+revisión de diffs, acceso móvil y Lody Preview, pero la automatización de PRs y CI específica de GitHub no está
+disponible.

@@ -1,0 +1,37 @@
+---
+title: "20260831"
+version: 0.89.0
+date: 2026-08-31
+description: "Introduction d'un parcours d'intégration repensé, d'un mode Plan unifié, de la gestion des dossiers de projet, du lancement automatique sur ordinateur, de la recherche locale dans la documentation et de l'authentification ACP standard, ainsi que de correctifs pour les sessions, la collaboration, le mobile et les paramètres."
+---
+
+Version 0.89.0
+
+### ✨ Nouveautés
+
+- Le parcours d'intégration repensé vous permet de choisir ou d'ignorer le premier agent, d'effectuer une première tâche avec un projet d'exemple en lecture seule et de comprendre plus clairement les états de synchronisation ou de configuration en attente ([#163](https://github.com/LodyAI/Lody/pull/163), [#180](https://github.com/LodyAI/Lody/pull/180), [#182](https://github.com/LodyAI/Lody/pull/182), [#216](https://github.com/LodyAI/Lody/pull/216)).
+- Le mode Plan utilise désormais un panneau de conversation unifié, facilitant la relecture et le suivi des plans des agents principaux et enfants ([#215](https://github.com/LodyAI/Lody/pull/215), [#221](https://github.com/LodyAI/Lody/pull/221)).
+- Les paramètres des projets prennent désormais en charge les dossiers par machine ainsi que des actions plus pratiques pour les lignes de projets locaux ([#205](https://github.com/LodyAI/Lody/pull/205), [#220](https://github.com/LodyAI/Lody/pull/220)).
+- L'application de bureau inclut désormais une option pour lancer Lody automatiquement à l'ouverture de session ([#176](https://github.com/LodyAI/Lody/pull/176)).
+- La navigation au clavier contextuelle améliore l'utilisation au clavier dans la barre latérale, les menus et les surfaces de conversation ([#168](https://github.com/LodyAI/Lody/pull/168)).
+- Le site de documentation dispose désormais d'une recherche bilingue qui s'exécute entièrement dans le navigateur ([#228](https://github.com/LodyAI/Lody/pull/228)).
+- Un point d'entrée communautaire partagé inclut désormais le code QR du groupe Feishu ([#164](https://github.com/LodyAI/Lody/pull/164)).
+- Les agents du registre prennent désormais en charge l'authentification ACP standard, et les runtimes intégrés Claude, Codex, Kimi et Grok ont été mis à jour ([#201](https://github.com/LodyAI/Lody/pull/201), [#208](https://github.com/LodyAI/Lody/pull/208)).
+
+### 🐛 Corrections et améliorations
+
+- Correction d'un problème où les agents intégrés supprimés réapparaissaient après un redémarrage ([#94](https://github.com/LodyAI/Lody/pull/94)).
+- Correction de la perte de sélection de projet lors de l'accès depuis la barre latérale et amélioration de la mise en page de la boîte de dialogue des paramètres des projets ([#87](https://github.com/LodyAI/Lody/pull/87), [#177](https://github.com/LodyAI/Lody/pull/177)).
+- Amélioration de la synchronisation des configurations d'agent entre collaborateurs et de la sélection des rôles d'agent dans les onglets enfants ([#159](https://github.com/LodyAI/Lody/pull/159), [#181](https://github.com/LodyAI/Lody/pull/181)).
+- Correction de la distribution des tours en file d'attente et des notifications d'achèvement de session enfant MCP, tout en maintenant la compatibilité avec les notifications d'achèvement des anciens clients ([#166](https://github.com/LodyAI/Lody/pull/166), [#200](https://github.com/LodyAI/Lody/pull/200)).
+- Correction de la conservation de l'onglet actif, de la synchronisation de l'URL et du renommage pour les titres de conversation longs ([#194](https://github.com/LodyAI/Lody/pull/194), [#199](https://github.com/LodyAI/Lody/pull/199), [#202](https://github.com/LodyAI/Lody/pull/202)).
+- Correction des indications de raccourcis, du focus lors de la recherche d'un modèle dans les onglets enfants et du focus du composeur après l'envoi d'un message ([#95](https://github.com/LodyAI/Lody/pull/95), [#129](https://github.com/LodyAI/Lody/pull/129), [#143](https://github.com/LodyAI/Lody/pull/143)).
+- Correction de la détection des lanceurs de chemin de session et de la disparition des liens de fichiers d'agent lorsqu'ils correspondaient à des fichiers modifiés ([#73](https://github.com/LodyAI/Lody/pull/73), [#167](https://github.com/LodyAI/Lody/pull/167)).
+- Correction de la récupération d'authentification de session sur mobile, de l'espacement des paramètres de l'espace de travail, de la mise en page des zones sûres (safe area) et des onglets en arrière-plan en attente d'approbation ([#190](https://github.com/LodyAI/Lody/pull/190), [#210](https://github.com/LodyAI/Lody/pull/210), [#222](https://github.com/LodyAI/Lody/pull/222), [#231](https://github.com/LodyAI/Lody/pull/231)).
+- Amélioration du détourage des coins arrondis, de l'alignement des statuts, de l'arrière-plan des boîtes de dialogue imbriquées et du comportement des liens dans les paramètres ([#186](https://github.com/LodyAI/Lody/pull/186), [#204](https://github.com/LodyAI/Lody/pull/204), [#226](https://github.com/LodyAI/Lody/pull/226), [#233](https://github.com/LodyAI/Lody/pull/233)).
+- Correction de la détection de la langue au premier lancement et des liens cassés dans la documentation en chinois ([#117](https://github.com/LodyAI/Lody/pull/117), [#175](https://github.com/LodyAI/Lody/pull/175)).
+- Correction des conflits entre le déplacement de la fenêtre sur ordinateur et les interactions avec les panneaux ([#169](https://github.com/LodyAI/Lody/pull/169)).
+- Amélioration de l'association des projets GitHub pour les sessions locales et prévention des interruptions du proxy d'aperçu dues à des codes de fermeture WebSocket invalides ([#197](https://github.com/LodyAI/Lody/pull/197), [#198](https://github.com/LodyAI/Lody/pull/198)).
+- Rétablissement de l'action de reprise pour les objectifs bloqués ([#230](https://github.com/LodyAI/Lody/pull/230)).
+- Cette série de correctifs inclut également la maintenance du dépôt public pour la cohérence des builds et le workflow de contribution ([#165](https://github.com/LodyAI/Lody/pull/165), [#171](https://github.com/LodyAI/Lody/pull/171)).
+- Un merci tout particulier aux contributeurs externes [@Pleasurecruise](https://github.com/Pleasurecruise) ([#73](https://github.com/LodyAI/Lody/pull/73), [#192](https://github.com/LodyAI/Lody/pull/192)), [@sheepbox8646](https://github.com/sheepbox8646) ([#87](https://github.com/LodyAI/Lody/pull/87)), [@xuxu777xu](https://github.com/xuxu777xu) ([#94](https://github.com/LodyAI/Lody/pull/94)), [@ShobhanKarthish](https://github.com/ShobhanKarthish) ([#95](https://github.com/LodyAI/Lody/pull/95)), [@clanzhang](https://github.com/clanzhang) ([#117](https://github.com/LodyAI/Lody/pull/117), [#143](https://github.com/LodyAI/Lody/pull/143)), [@1-WEEK](https://github.com/1-WEEK) ([#129](https://github.com/LodyAI/Lody/pull/129)), [@Innei](https://github.com/Innei) ([#168](https://github.com/LodyAI/Lody/pull/168), [#169](https://github.com/LodyAI/Lody/pull/169), [#205](https://github.com/LodyAI/Lody/pull/205), [#227](https://github.com/LodyAI/Lody/pull/227)), [@kovsu](https://github.com/kovsu) ([#186](https://github.com/LodyAI/Lody/pull/186)), [@ImSingee](https://github.com/ImSingee) ([#194](https://github.com/LodyAI/Lody/pull/194), [#226](https://github.com/LodyAI/Lody/pull/226)), [@MichaelYuhe](https://github.com/MichaelYuhe) ([#231](https://github.com/LodyAI/Lody/pull/231)) et [@wong2](https://github.com/wong2) ([#233](https://github.com/LodyAI/Lody/pull/233)).

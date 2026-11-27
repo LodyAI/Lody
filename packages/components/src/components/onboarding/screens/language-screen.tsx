@@ -15,22 +15,25 @@ import { onboardingSurface as surface } from './surface';
 const styles = stylex.create({
   options: {
     display: 'grid',
-    gridTemplateColumns: { default: '1fr', '@media (min-width: 640px)': 'repeat(2, 1fr)' },
-    gap: space[3],
+    gridTemplateColumns: {
+      default: 'repeat(2, 1fr)',
+      '@media (min-width: 640px)': 'repeat(4, 1fr)',
+    },
+    gap: space[2],
   },
-  option: { position: 'relative', paddingInline: space[6], paddingBlock: space[6] },
-  check: { position: 'absolute', insetBlockStart: space[3], insetInlineEnd: space[3] },
+  option: { position: 'relative', paddingInline: space[3], paddingBlock: space[4] },
+  check: { position: 'absolute', insetBlockStart: space[2], insetInlineEnd: space[2] },
   glyph: {
-    width: '56px',
-    height: '56px',
-    fontSize: '24px',
+    width: '40px',
+    height: '40px',
+    fontSize: '18px',
     fontWeight: 500,
     color: colors.label,
   },
   labels: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
   nativeLabel: {
-    fontSize: text.headlineSize,
-    lineHeight: text.headlineLeading,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
     fontWeight: 500,
     color: colors.label,
   },
@@ -47,7 +50,13 @@ interface LanguageOption {
 
 const LANGUAGE_OPTIONS: LanguageOption[] = [
   { value: 'en', nativeLabel: 'English', caption: 'English', glyph: 'A' },
-  { value: 'zh_CN', nativeLabel: '简体中文', caption: 'Chinese (Simplified)', glyph: '中' },
+  { value: 'zh_CN', nativeLabel: '简体中文', caption: 'Chinese (Simplified)', glyph: '简' },
+  { value: 'zh_Hant', nativeLabel: '繁體中文', caption: 'Chinese (Traditional)', glyph: '繁' },
+  { value: 'ja', nativeLabel: '日本語', caption: 'Japanese', glyph: 'あ' },
+  { value: 'ko', nativeLabel: '한국어', caption: 'Korean', glyph: '한' },
+  { value: 'es', nativeLabel: 'Español', caption: 'Spanish', glyph: 'Ñ' },
+  { value: 'fr', nativeLabel: 'Français', caption: 'French', glyph: 'Ç' },
+  { value: 'ru', nativeLabel: 'Русский', caption: 'Russian', glyph: 'Я' },
 ];
 
 export interface LanguageScreenViewProps {

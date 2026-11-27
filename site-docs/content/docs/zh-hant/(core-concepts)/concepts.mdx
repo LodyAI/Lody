@@ -1,0 +1,103 @@
+---
+title: "概念與術語表"
+description: "Lody 背後的心智模型——工作階段、輪次、Agent Config、角色、執行環境、Worktree 與 Pull Request——以及本文件各處使用的術語表。"
+---
+
+# 概念與術語表
+
+Lody 的大部分介面都是由一組精簡的物件構成，並在每個畫面上以相同的方式呈現。讀完這一頁後，後續指南的內容就會更容易融會貫通。
+
+## 心智模型
+
+```text
+工作區（workspace）
+├── 專案 / 儲存庫
+│   └── 工作階段（session）    一項任務、一段對話、一個分支 / Worktree
+│       ├── 輪次（round）      一次 Agent 回覆 + 它產生的變更
+│       ├── 側邊對話           不會中斷主任務的 Fork 提問
+│       └── Pull Request       審查後可選的 GitHub 交接
+├── Agent Configs              執行環境 + 驗證 + 執行主機
+│   └── Agent Roles            已儲存的主機 + 設定 + 模型 + 權限
+└── 團隊成員                   可檢視共享的工作階段，而非私人主機
+```
+
+工作階段是你最常操作的物件。其他所有元素不是作為它的輸入（專案、儲存庫、Agent Config、角色），就是從它產出（diff、Pull Request、交接）。
+
+## 任務的推進流程
+
+1. **新增專案或儲存庫。** [本機專案](/zh-hant/docs/local-project)就是一個目錄；[GitHub 儲存庫](/zh-hant/docs/github)則額外提供 Pull Request、CI 與審查同步功能。
+2. **選擇執行方式。** [Agent Config](/zh-hant/docs/quickstart) 會將執行環境綁定至特定主機與其憑證；[Agent Role](/zh-hant/docs/agent-roles) 則可將常用的組合儲存下來。
+3. **開啟工作階段。** 在首頁的輸入框中選取專案、分支、設定、模型與權限範圍。詳見[工作階段](/zh-hant/docs/session)。
+4. **以輪次推進工作。** 每個輪次包含一次 Agent 回覆與一份 diff。你可以使用[差異檢視器](/zh-hant/docs/diff-viewer)進行審查，並透過[差異註解](/zh-hant/docs/diff-comments)留言討論。
+5. **完成任務。** 建立 Pull Request、保留分支，或封存該工作階段。詳見[推薦工作流程](/zh-hant/docs/workflow)。
+
+## 核心物件
+
+| 術語 | 說明 | 延伸閱讀 |
+| --- | --- | --- |
+| **工作區（Workspace）** | 團隊層級的容器：包含成員、共享主機、工作階段與各項設定。 | [團隊功能](/zh-hant/docs/team) |
+| **專案 / 儲存庫** | 工作階段所處理的程式碼——可為本機目錄或 GitHub 儲存庫。 | [本機專案](/zh-hant/docs/local-project) · [GitHub 整合](/zh-hant/docs/github) |
+| **工作階段（Session）** | 對應一項任務，包含一段對話、一個分支，通常還有一個獨立的 Worktree。 | [工作階段](/zh-hant/docs/session) |
+| **輪次（Round）** | 一次 Agent 回覆加上它所產生的檔案變更。 | [差異檢視器](/zh-hant/docs/diff-viewer) |
+| **Worktree（工作樹）** | 隔離的簽出目錄，讓兩個工作階段能同時編輯同一個儲存庫而不會互相衝突。 | [Worktree](/zh-hant/docs/worktrees) |
+| **Agent Config** | 一個執行環境（Claude Code、Codex、Kimi、ACP 等）加上它的驗證資訊與執行主機。 | [Agent Config](/zh-hant/docs/quickstart) · [CLI 執行環境類型](/zh-hant/docs/cli-runtimes) |
+| **Agent Role** | 已儲存的預設組合，包含主機、Agent Config、模型、推理設定、權限以及可選的指令。 | [Agent 角色](/zh-hant/docs/agent-roles) |
+
+## 各概念之間的關聯
+
+<Accordions>
+<Accordion title="工作階段、輪次與單次回覆（Turn）有什麼區別？">
+**工作階段**代表整項任務及其完整歷程；**輪次**則是一次 Agent 回覆加上它產生的 diff。當本文件提到「審查這個輪次」時，意思是在繼續下一步之前，先檢視該次回覆所產生的 diff。
+</Accordion>
+<Accordion title="Agent Config 與 Agent Role 有什麼區別？">
+**Agent Config** 回答的是「這台主機上能執行什麼，以及如何進行驗證？」；**Agent Role** 回答的則是「當我開始這類任務時，應該自動選用哪台主機、哪個設定、哪個模型與什麼權限？」。Role 會參照 Config，而 Config 不會參照 Role。
+</Accordion>
+<Accordion title="Fork、側邊對話（Side Chat）與交接有什麼區別？">
+- **Fork** 會將對話複製到新的工作階段，讓你可以嘗試不同的方向。
+- **側邊對話（Side Chat）** 是釘選在主對話旁的 Fork，方便快速提問。
+- **交接（Handoff）** 則是邀請團隊成員加入同一個工作階段，而不會建立複本。詳見[分享 Coding Agent 工作階段](/zh-hant/docs/session-handoff)。
+</Accordion>
+<Accordion title="平行工作階段與 Agent 工作階段控制有什麼區別？">
+- **平行工作階段**是由你自行啟動的，每個工作階段都有各自的任務與 Worktree。詳見[平行 Coding Agents](/zh-hant/docs/parallel-agents)。
+- **Agent 工作階段控制**則是讓 Agent 透過 Lody 的 MCP 工具來建立、指揮並彙整其他工作階段。詳見[Agent 工作階段控制](/zh-hant/docs/session-orchestration)。
+</Accordion>
+</Accordions>
+
+## 常見術語表
+
+| 術語 | 含義 |
+| --- | --- |
+| **ACP** | Agent Client Protocol，Lody 用來啟動並與各種 Coding Agent CLI 溝通的介面。詳見[CLI 執行環境類型](/zh-hant/docs/cli-runtimes)。 |
+| **MCP** | Model Context Protocol。Lody 提供內建的 MCP 工具，讓 Agent 能對 Lody 對話與其他資源執行操作。 |
+| **Daemon** | 在背景執行的 Lody CLI 處理程序，負責實際在主機上運行 Agent。詳見[CLI 指令](/zh-hant/docs/cli)。 |
+| **權限範圍（Permission scope）** | Agent 在不需事先詢問的情況下能執行的操作程度（例如編輯檔案或執行 shell 指令）。可在輸入框中依個別工作階段進行設定。 |
+| **Context Window（上下文視窗）** | 模型單次能容納的對話量。Lody 會在聊天介面中顯示剩餘容量。詳見[Context、Token 與配額](/zh-hant/docs/usage-and-quota)。 |
+| **交接（Handoff）** | 邀請團隊成員進入進行中的工作階段，讓對方能接著同一段對話、diff 與 Worktree 繼續作業。 |
+| **編排（Orchestration）** | 讓一個 Agent 建立其他工作階段、對其發送訊息並收集結果。 |
+
+## 常見問題
+
+### Agent Config 和 Agent Role 的差別是什麼？
+
+Agent Config 是執行環境加上它的驗證資訊與執行主機；Agent Role 則是已儲存的預設組合，用來在啟動工作階段時選取主機、Agent Config、模型、推理設定與權限，並可附帶可選指令，方便重複套用相同的設定。詳見 [Agent Config](/zh-hant/docs/quickstart) 與[Agent 角色](/zh-hant/docs/agent-roles)。
+
+### Fork 工作階段與交接工作階段有什麼不同？
+
+Fork 會把對話複製成一個歸你所有的新工作階段；交接則是把其他人邀請進現有的工作階段，讓雙方看見同一份即時對話、diff 與 Worktree。Fork 不會將任何人加入原本的工作階段。詳見[工作階段](/zh-hant/docs/session)與[分享 Coding Agent 工作階段](/zh-hant/docs/session-handoff)。
+
+### 使用 Lody 需要先了解 Worktree 嗎？
+
+你完全不需要打開 Worktree 目錄也能正常使用 Lody。它只有在你同時執行多個工作階段時才顯得重要：每個 Worktree 正是用來隔離彼此編輯內容的機制。詳見 [Worktree](/zh-hant/docs/worktrees)。
+
+### 「任務」和「工作階段」是一樣的嗎？
+
+在這套文件中，是的——一項任務通常就對應一個工作階段、一個分支與一個 Pull Request。[推薦工作流程](/zh-hant/docs/workflow)說明了為什麼較小的任務通常效果更好。
+
+## 下一步
+
+<Cards>
+  <Card href="/zh-hant/docs/session" title="工作階段" />
+  <Card href="/zh-hant/docs/quickstart" title="Agent Config" />
+  <Card href="/zh-hant/docs/worktrees" title="Worktree" />
+  <Card href="/zh-hant/docs/first-session" title="你的第一個工作階段" />
+</Cards>

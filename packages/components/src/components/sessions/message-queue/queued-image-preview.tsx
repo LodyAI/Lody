@@ -67,6 +67,7 @@ export function QueuedImagePreview({
   const runtime = useAtomValue(runtimeAtom);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [originalUrl, setOriginalUrl] = useState<string | undefined>(undefined);
   const label = image.fileName || t('sessions.uploadedImage', 'Uploaded image');
@@ -183,6 +184,7 @@ export function QueuedImagePreview({
     sessionId,
     workspaceId,
     size,
+    retryNonce,
   ]);
 
   return (
@@ -193,19 +195,26 @@ export function QueuedImagePreview({
           render={
             <button
               type="button"
-              disabled={loadFailed}
               onClick={(event) => {
-                // The row is draggable and editable; opening the preview is all
-                // this click should do.
+                // The row is draggable and editable; opening the preview or retrying
+                // a failed load is all this click should do.
                 event.stopPropagation();
+                if (loadFailed) {
+                  setRetryNonce((nonce) => nonce + 1);
+                  return;
+                }
                 setPreviewOpen(true);
               }}
               onPointerDown={(event) => event.stopPropagation()}
               className={cn(stylex.props(styles.trigger).className, className)}
-              style={{ width: size, height: size }}
-              aria-label={t('sessions.messageQueue.previewImage', 'Preview {{name}}', {
-                name: label,
-              })}
+              style={{ width: size, height: size, cursor: loadFailed ? 'pointer' : undefined }}
+              aria-label={
+                loadFailed
+                  ? t('common.retry', 'Retry')
+                  : t('sessions.messageQueue.previewImage', 'Preview {{name}}', {
+                      name: label,
+                    })
+              }
             >
               {thumbnailUrl ? (
                 <img src={thumbnailUrl} alt={label} {...stylex.props(styles.thumbnail)} />
@@ -220,7 +229,9 @@ export function QueuedImagePreview({
             </button>
           }
         />
-        <Tooltip.Content side="top">{label}</Tooltip.Content>
+        <Tooltip.Content side="top">
+          {loadFailed ? t('common.retry', 'Retry') : label}
+        </Tooltip.Content>
       </Tooltip.Root>
       <ZoomableImageViewer
         open={previewOpen}

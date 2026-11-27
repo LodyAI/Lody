@@ -1,4 +1,6 @@
-export type PageLocale = 'en' | 'zh';
+import { localizeSitePath, type SiteLocale } from '@site/src/site-pages/shared';
+
+export type PageLocale = SiteLocale;
 
 export type LegalPageSlug = 'privacy' | 'terms' | 'support' | 'account-deletion';
 
@@ -54,7 +56,7 @@ export function normalizeLegalPages(
       slug,
       title: entry.title,
       description: entry.description,
-      url: locale === 'zh' ? `/zh/${slug}` : `/${slug}`,
+      url: localizeSitePath(`/${slug}`, locale),
       docPath: entry.info.path,
     });
   }

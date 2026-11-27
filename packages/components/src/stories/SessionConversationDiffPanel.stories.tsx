@@ -114,17 +114,6 @@ function OpenFromChangesHarness(args: ComponentProps<typeof SessionConversationD
   );
 }
 
-function ScopedAllChangesHarness(args: ComponentProps<typeof SessionConversationDiffPanel>) {
-  const [scope, setScope] = useState<'branch' | 'uncommitted'>('branch');
-  return (
-    <SessionConversationDiffPanel
-      {...args}
-      allChangesScope={scope}
-      onAllChangesScopeChange={setScope}
-    />
-  );
-}
-
 export const OpenFromChanges: Story = {
   render: (args) => <OpenFromChangesHarness {...args} />,
 };
@@ -140,7 +129,6 @@ export const AllChangesScopeSwitch: Story = {
     allChangesScopeSupported: true,
     fileProvider: uncommittedProvider,
   },
-  render: (args) => <ScopedAllChangesHarness {...args} />,
 };
 export const Hidden: Story = { args: { active: false } };
 

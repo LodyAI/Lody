@@ -66,13 +66,11 @@ export function useMachineAcpAuthentication(
             result?.success &&
             (result.disposition === 'cancelled' || result.disposition === 'not-running')
           ) {
-            activeAuthenticationsRef.current
-              .get(args.authenticationRequestId)
-              ?.finish?.({
-                ...result,
-                requestId: args.authenticationRequestId,
-                disposition: 'cancelled',
-              });
+            activeAuthenticationsRef.current.get(args.authenticationRequestId)?.finish?.({
+              ...result,
+              requestId: args.authenticationRequestId,
+              disposition: 'cancelled',
+            });
           }
         })
         .catch(() => {

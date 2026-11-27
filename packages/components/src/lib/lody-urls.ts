@@ -1,3 +1,4 @@
+import { toSiteLocalePrefix } from '@lody/shared/language';
 import { isNativeAppShell } from './native-platform';
 
 const LODY_FALLBACK_ORIGIN = 'https://lody.ai';
@@ -22,10 +23,22 @@ export function getLodyOrigin(): string {
   return window.location.origin;
 }
 
+export function getSiteLocalePrefix(language: string | undefined): string {
+  return toSiteLocalePrefix(language);
+}
+
+export function getSiteLocalizedUrl(
+  path: string,
+  language: string | undefined,
+  origin: string = getLodyOrigin()
+): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const prefix = getSiteLocalePrefix(language);
+  return new URL(`${prefix}${normalizedPath}`, origin).toString();
+}
+
 export function getDownloadPageUrl(language: string | undefined): string {
-  const isChinese = language?.startsWith('zh') ?? false;
-  const path = isChinese ? '/zh/download' : '/download';
-  return new URL(path, getLodyOrigin()).toString();
+  return getSiteLocalizedUrl('/download', language);
 }
 
 export function getNightlyDownloadPageUrl(language: string | undefined): string {
@@ -33,13 +46,11 @@ export function getNightlyDownloadPageUrl(language: string | undefined): string 
 }
 
 export function getChangelogUrl(language: string | undefined): string {
-  const isChinese = language?.startsWith('zh') ?? false;
-  const path = isChinese ? '/zh/changelog' : '/changelog';
-  return new URL(path, getLodyOrigin()).toString();
+  return getSiteLocalizedUrl('/changelog', language);
 }
 
 export function getWebsiteUrl(language: string | undefined): string {
-  const isChinese = language?.startsWith('zh') ?? false;
-  const path = isChinese ? '/zh/' : '/home';
+  const prefix = getSiteLocalePrefix(language);
+  const path = prefix ? `${prefix}/` : '/home';
   return new URL(path, getLodyOrigin()).toString();
 }

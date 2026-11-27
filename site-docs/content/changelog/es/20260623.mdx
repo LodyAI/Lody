@@ -1,0 +1,36 @@
+---
+title: "20260623"
+version: 0.63.0
+date: 2026-06-23
+description: "Se añadieron atajos personalizables, una paleta de comandos, gestión de Skills, ajuste del tamaño de fuente en las conversaciones, lanzadores con rutas personalizadas, adjuntos de cualquier tipo de archivo y más."
+---
+
+### Novedades
+
+- Se añadió `lody review`, una herramienta local de revisión de código que te permite ver informes de revisión sin iniciar sesión.
+- Las sesiones ahora admiten adjuntos de cualquier tipo de archivo, incluidas vistas previas. Los agentes también pueden leer los adjuntos y enviar archivos de vuelta.
+- Se añadió una nueva paleta de comandos (⌘K) para buscar comandos y cambiar rápidamente de sesión.
+- Se añadieron ajustes de atajos de teclado, donde cada atajo se puede personalizar o reasignar con detección de conflictos.
+- Se añadió una ventana de Sesión rápida en escritorio (⌘⇧N) con control completo por teclado.
+- La terminal de escritorio ahora sigue el tema de la aplicación e incluye una barra de estado inferior al estilo de VS Code.
+- El menú «Abrir en» de la sesión ahora admite Xcode, Sublime Text y lanzadores personalizados.
+- Usa `$` en el editor de mensajes para mencionar una Skill del proyecto y explora las Skills disponibles desde la nueva página Skills.
+- Ahora se pueden eliminar proyectos locales desde otros dispositivos.
+- Se añadió un ajuste para el tamaño de fuente de la conversación.
+- Se añadió el proveedor DeepSeek Reasonix.
+- Los usuarios de escritorio pueden desactivar el inicio automático de la CLI y usar Lody únicamente como control remoto.
+
+### Correcciones y mejoras
+
+- Se mejoró el rendimiento de la lista All Changes.
+- Las pull requests ahora muestran una insignia de estado Draft.
+- La carga de imágenes ahora funciona en toda la interfaz de conversación.
+- Se añadió almacenamiento en caché para los scripts de worktree para evitar esperas al cargarlos.
+- Se corrigió el problema por el que el teclado móvil cubría la interfaz de respuesta al contestar una pregunta de la IA.
+- Se mejoró la visualización de nombres largos de modelos en móvil.
+- Se redujeron los tirones y el calentamiento del dispositivo durante las respuestas en streaming.
+- Se corrigió una pantalla en negro al pulsar Cmd+W en modo pantalla completa en macOS.
+- Se corrigieron los contornos de selección recortados en la barra lateral y el espacio adicional antes de las marcas de tiempo.
+- Se cambió el atajo de búsqueda en la sesión a ⌘F en macOS.
+- Los nombres largos de modelos son más fáciles de leer en el selector de modelos en móvil y su menú ya no queda cubierto por el teclado.
+- Detener una tarea manualmente ya no activa una notificación incorrecta de «completada».

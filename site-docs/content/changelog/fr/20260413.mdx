@@ -1,0 +1,67 @@
+---
+title: "20260413"
+version: 0.42.0
+date: 2026-04-13
+description: "Introduction du nouveau moteur de synchronisation, des sessions multi-onglets, des commentaires sur les diffs, des thèmes VS Code, de la recherche dans les conversations et des notes de migration."
+---
+
+### Changements incompatibles et migration
+
+- Après la mise à jour, vous devrez peut-être vous reconnecter.
+- Si vous utilisez GitHub Worktree, la machine qui exécute l'Agent doit être configurée avec votre identité GitHub (via `gh auth`) ; à défaut, nous utiliserons par défaut l'identité `lody` pour créer la Pull Request.
+- Lody est passé à un nouveau moteur de synchronisation et à une nouvelle structure de données. Les anciens espaces de travail ne seront plus disponibles ; vous devez donc créer un nouvel espace de travail pour utiliser Lody.
+- Lody ne demande plus les autorisations d'identité personnelle GitHub des utilisateurs. Par conséquent, il n'est plus possible d'autoriser un même dépôt GitHub une seule fois pour le partager entre plusieurs espaces de travail. Un dépôt est désormais associé à un seul espace de travail.
+
+### ✨ Sessions multi-onglets
+
+Vous pouvez désormais ouvrir plusieurs onglets de conversation et visionneuses de fichiers au sein d'une même session. À l'instar de la barre d'onglets de VSCode, vous pouvez discuter avec l'Agent à gauche tout en consultant des fichiers et des diffs à droite, sans interrompre aucun des deux côtés. Les onglets enfants héritent du répertoire de travail du parent et prennent en charge le réagencement par glisser-déposer ainsi que le renommage.
+
+<img src="/_docs-assets/20260413-multi-tab.png" alt="" />
+
+### 💬 Commentaires ligne par ligne dans les diffs
+
+Vous pouvez désormais ajouter des commentaires directement dans la visionneuse de diffs. Prise en charge de Markdown, des réponses en fil de discussion, du marquage des fils comme résolus, de la synchronisation avec GitHub et de l'envoi en un clic vers la fenêtre de conversation.
+
+<img src="/_docs-assets/20260413-diff-comment.png" alt="" />
+
+### 🎨 Améliorations de l'interface et prise en charge des thèmes VSCode
+
+- Ajout de la compatibilité avec les thèmes VSCode, avec plusieurs excellents thèmes open source intégrés nativement (Vitesse, Gruvbox Material, Tokyo Night, One Dark Pro, et bien d'autres). Un grand merci aux auteurs open source pour leur travail remarquable !
+  <img src="/_docs-assets/20260413-theme.png" alt="" />
+
+- Amélioration du rendu Markdown et du chargement des diffs
+- Recherche au sein de la conversation
+  <img src="/_docs-assets/20260413-session-find.png" alt="" />
+
+### 🖥️ Mode Daemon
+
+Le CLI prend désormais en charge le mode Daemon, qui maintient Lody actif en arrière-plan avec redémarrage automatique :
+
+```bash
+lody daemon start     # Démarrer le daemon en arrière-plan
+lody daemon status    # Vérifier le statut
+lody daemon logs      # Consulter les journaux
+lody daemon stop      # Arrêter le daemon
+```
+
+### 🔗 Améliorations de l'intégration GitHub
+
+- Le statut des vérifications CI des PR se synchronise en temps réel dans l'interface de session ; vous n'avez plus besoin de basculer vers GitHub pour voir les résultats des builds
+- Les sessions liées à une PR prennent en charge le commit et le push automatiques
+
+### 🌐 Synchronisation et stabilité
+
+- Remplacement du moteur de synchronisation pour une fiabilité accrue
+- Limites de ressources CLI tenant compte des cgroups afin d'éviter les blocages dans les environnements de conteneurs Linux
+- Réduction du délai d'inactivité ACP à 30 minutes pour économiser les ressources
+- Éviction automatique des sessions en cas de pression mémoire
+
+### 🛠️ Correctifs et améliorations
+
+- Ajout de la connexion tierce via Google, Apple et Discord.
+- Correction de problèmes de chargement et de synchronisation des diffs
+- Correction du délai d'actualisation du jeton d'authentification GitHub
+- Correction d'un plantage au démarrage sur Safari < 16.4
+- Correction de divers problèmes de mise en page sur l'interface mobile
+- Réduction du bruit dans les journaux du CLI et de l'utilisation disque
+- Les sessions utilisent le début du prompt comme titre initial au lieu de « Untitled »

@@ -1,0 +1,822 @@
+---
+title: "Comandos de la CLI"
+description: "Consulta la referencia de comandos de la CLI de Lody para inicio de sesión, modo daemon, espacios de trabajo, repositorios de GitHub, proyectos, sesiones, máquinas y configuraciones de agente."
+---
+
+# Comandos de la CLI
+
+`lody` es tanto:
+
+- un proceso de entorno de ejecución local iniciado con `lody start` o `lody daemon start`
+- una CLI de comandos puntuales para gestionar espacios de trabajo, repositorios de GitHub, sesiones, máquinas y configuraciones de agente
+
+Si eres nuevo en Lody, lee primero [Inicio rápido](/es/docs/quickstart), [Sesiones](/es/docs/session),
+[Configuración de agente](/es/docs/quickstart) y [Tipos de entorno de ejecución de CLI](/es/docs/cli-runtimes).
+
+## Ayuda y descubrimiento de parámetros
+
+La salida de ayuda integrada es la fuente de referencia exacta para las opciones y los argumentos posicionales.
+
+```bash
+lody --help
+lody session --help
+lody session create --help
+lody agent-config update --help
+```
+
+Usa este patrón para cualquier comando:
+
+| Alcance               | Comando                            |
+| --------------------- | ---------------------------------- |
+| Resumen general       | `lody --help`                      |
+| Grupo de comandos     | `lody <group> --help`              |
+| Subcomando específico | `lody <group> <subcommand> --help` |
+
+## Resumen de comandos
+
+| Grupo de comandos                     | Para qué sirve                                                                      | Comando de ayuda           | Documentación                                                                       |
+| ------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------- |
+| `lody` / `login` / `logout` / `start` | Iniciar sesión, consultar la CLI y ejecutar el entorno local en primer plano        | `lody --help`              | [Comandos principales](#comandos-principales)                                       |
+| `daemon`                              | Iniciar, detener, inspeccionar y leer los registros del daemon en segundo plano     | `lody daemon --help`       | [Modo daemon](#modo-daemon)                                                         |
+| `workspace`                           | Consultar los ID y slugs de los espacios de trabajo accesibles                      | `lody workspace --help`    | [Comandos de espacio de trabajo](#comandos-de-espacio-de-trabajo)                   |
+| `github`                              | Listar los repositorios de GitHub ya vinculados a un espacio de trabajo              | `lody github --help`       | [Comandos de GitHub](#comandos-de-github)                                           |
+| `project`                             | Gestionar registros de proyectos locales                                            | `lody project --help`      | [Comandos de proyecto](#comandos-de-proyecto)                                       |
+| `app`                                 | Abrir la aplicación de escritorio o restablecer su caché local si se queda bloqueada | `lody app --help`         | [Comandos de la aplicación de escritorio](#comandos-de-la-aplicación-de-escritorio) |
+| `session`                             | Crear, chatear, inspeccionar, archivar, restaurar y eliminar sesiones               | `lody session --help`      | [Comandos de sesión](#comandos-de-sesión)                                           |
+| `machine`                             | Inspeccionar las máquinas registradas en un espacio de trabajo                      | `lody machine --help`      | [Comandos de máquina](#comandos-de-máquina)                                         |
+| `agent-config`                        | Gestionar configuraciones de agente y actualizar capacidades del entorno de ejecución | `lody agent-config --help` | [Comandos de configuración de agente](#comandos-de-configuración-de-agente)         |
+
+## Comandos principales
+
+| Comando       | Qué hace                                            | Comando de ayuda     |
+| ------------- | --------------------------------------------------- | -------------------- |
+| `lody`        | Mostrar la ayuda general y los comandos disponibles | `lody --help`        |
+| `lody login`  | Iniciar sesión y registrar la máquina actual        | `lody login --help`  |
+| `lody logout` | Borrar las credenciales locales                     | `lody logout --help` |
+| `lody start`  | Ejecutar la CLI de Lody en la terminal actual       | `lody start --help`  |
+
+Los comandos que se comunican directamente con el entorno de ejecución local suelen necesitar que `lody start` esté ejecutándose en
+primer plano o que `lody daemon start` esté ejecutándose en segundo plano:
+
+- `lody session create`
+- `lody session chat`
+- `lody session cancel`
+- `lody agent-config refresh-capabilities`
+
+### Inicio de sesión no interactivo con `--auth`
+
+De forma predeterminada, `lody login` abre un flujo de autorización de dispositivo en tu navegador. En máquinas sin interfaz gráfica
+(runners de CI, servidores remotos, contenedores), puedes omitir el navegador pasando en su lugar un token de CLI
+creado previamente:
+
+```bash
+lody login --auth <token>
+lody start --auth <token>          # iniciar sesión y arrancar el entorno de ejecución en un solo paso
+```
+
+- `--auth <token>` autentica mediante un **token de CLI** generado en
+  **Configuración → Cuenta → Token de CLI** en la aplicación de escritorio o web. Haz clic en **Crear token**, añade una breve
+  nota (por ejemplo `CI runner`, `home server`) y copia el token antes de cerrar el diálogo:
+  solo se muestra una vez.
+- Los tokens se pueden revocar en cualquier momento desde el mismo panel. Revocar un token deshabilita de inmediato todas las CLI
+  que lo estuvieran usando.
+- `--auth` acepta la misma opción `--machine-name <name>` que el inicio de sesión interactivo, para que puedas sobrescribir
+  el nombre de host predeterminado.
+- Si se omite `--auth` en `lody login`, el comando recurre al flujo interactivo de autorización de dispositivo;
+  si se omite en `lody start` en un entorno sin una sesión existente, el entorno de ejecución te pedirá
+  que inicies sesión por separado.
+
+Guarda el token en un lugar privado (por ejemplo, un gestor de secretos o la variable de entorno `LODY_AUTH`).
+Concede el mismo acceso que un inicio de sesión interactivo para los espacios de trabajo a los que perteneces.
+
+## Analítica del producto
+
+Las interfaces en la nube (escritorio, web, móvil y CLI) comparten de forma predeterminada recuentos mínimos de uso del producto y errores anonimizados, controlados mediante un único interruptor a nivel de cuenta en Configuración → Acerca de → **Compartir datos de uso de la aplicación**. Desactivarlo detiene la recopilación en escritorio, web, móvil, la analítica del lado de la cuenta y los procesos de la CLI en la nube con sesión iniciada.
+
+Para cualquier proceso de la CLI en la nube, también puedes establecer `LODY_DISABLE_USAGE_SHARING=1` (o `DO_NOT_TRACK=1`) en su entorno como anulación local estricta para mantener la analítica desactivada.
+
+Las compilaciones locales desactivan PostHog. Cuando una CLI en la nube tiene la analítica activada, solo envía nombres mínimos de eventos registrados, la hora del evento, un identificador de proceso aleatorio, metadatos generales de `platform` / `cli_type` / `agent_type` integrado normalizado (`other` para agentes personalizados) y metadatos de la biblioteca sin crear perfiles de persona. Los errores automáticos llevan un tipo y un código fijos. Los argumentos de comandos, los ID de máquina, las rutas de repositorios, los nombres de agentes personalizados y los mensajes de error se excluyen de estas solicitudes.
+
+## Modo daemon
+
+`lody daemon start` ejecuta la CLI de Lody en segundo plano y la mantiene disponible para los clientes de escritorio, web
+y móviles sin dejar una ventana de terminal abierta. Este también es el comando que conecta una
+máquina remota: ejecútalo por SSH en un servidor o en otra estación de trabajo y esa máquina se unirá a tu
+espacio de trabajo.
+
+Antes de pasar a segundo plano, `lody daemon start` verifica que puede conectarse con Lody y que
+esta máquina tiene la sesión iniciada:
+
+- Sesión iniciada y accesible: inicia el daemon.
+- Sin sesión iniciada (o la credencial almacenada fue rechazada): inicia el flujo de autorización de dispositivo,
+  abre el enlace de inicio de sesión en tu navegador (o lo imprime cuando no hay navegador) y espera a que
+  termines antes de entrar en modo daemon. Sin una terminal conectada —como en CI o un comando SSH con script—,
+  no espera al navegador: falla y solicita `lody login` o `--auth <cli_token>`.
+- Lody inaccesible: se detiene con el error de conexión en lugar de dejar un daemon que no puede sincronizarse.
+  Pasa `--skip-auth-check` para iniciar de todos modos, o `--auth <cli_token>` para iniciar sesión de forma no interactiva.
+
+| Comando               | Qué hace                                                            |
+| --------------------- | ------------------------------------------------------------------- |
+| `lody daemon start`   | Iniciar el daemon en segundo plano                                  |
+| `lody daemon status`  | Mostrar el estado del entorno de ejecución, la máquina y la conexión |
+| `lody daemon logs`    | Imprimir los registros recientes, 50 líneas por defecto             |
+| `lody daemon stop`    | Detener el daemon en segundo plano                                  |
+| `lody daemon restart` | Detener el daemon si está en ejecución y volver a iniciarlo         |
+
+Ejemplos comunes:
+
+```bash
+lody daemon start
+lody daemon status
+lody daemon logs --lines 100
+lody daemon restart
+lody daemon stop
+```
+
+Los registros del daemon se escriben en `~/.lody/logs`. Usa `lody daemon logs` cuando falle el inicio o la interfaz
+no pueda conectarse con la CLI. Usa `lody start` en su lugar cuando quieras ver la salida en vivo en primer plano mientras depuras.
+
+## Comandos de espacio de trabajo
+
+Usa los comandos de espacio de trabajo cuando necesites un ID o slug exacto de espacio de trabajo para comandos posteriores.
+
+| Comando               | Qué hace                                               | Comando de ayuda             |
+| --------------------- | ------------------------------------------------------ | ---------------------------- |
+| `lody workspace list` | Listar los espacios de trabajo a los que tienes acceso | `lody workspace list --help` |
+
+### workspace list
+
+`lody workspace list` imprime una tabla con `ID`, `Name` y `Slug`. Úsalo antes de los comandos que
+aceptan `--workspace <idOrSlug>`.
+
+```bash
+lody workspace list
+lody workspace list --json
+```
+
+## Comandos de GitHub
+
+Usa los comandos de GitHub para inspeccionar qué repositorios ya se han vinculado a un espacio de trabajo desde
+Configuración → GitHub.
+
+| Comando            | Qué hace                                                             | Comando de ayuda          |
+| ------------------ | -------------------------------------------------------------------- | ------------------------- |
+| `lody github list` | Listar los repositorios de GitHub vinculados a un espacio de trabajo | `lody github list --help` |
+
+### github list
+
+`lody github list` imprime los repositorios ya añadidos a un espacio de trabajo. No muestra todos los
+repositorios a los que puede acceder la aplicación de GitHub, solo los que están vinculados actualmente a ese espacio de trabajo.
+
+```bash
+lody github list --workspace my-team
+lody github list --workspace my-team --json
+```
+
+Parámetros destacados:
+
+- `--workspace <idOrSlug>` elige el espacio de trabajo de destino
+- la salida predeterminada es una tabla legible con el ID del repositorio, el nombre completo y la visibilidad
+- `--json` devuelve datos estructurados del repositorio para automatización
+
+Opciones exactas:
+
+```bash
+lody github list --help
+```
+
+## Comandos de proyecto
+
+Los comandos de proyecto gestionan los registros de proyectos locales que luego pueden seleccionarse al crear una sesión.
+
+| Comando                   | Qué hace                                  | Comando de ayuda             |
+| ------------------------- | ----------------------------------------- | ---------------------------- |
+| `lody project add [path]` | Registrar un directorio de proyecto local | `lody project add --help`    |
+| `lody project list`       | Listar los proyectos locales registrados  | `lody project list --help`   |
+| `lody project delete`     | Eliminar proyectos locales registrados    | `lody project delete --help` |
+
+Sin selectores, `lody project list` lee la máquina actual a través de su daemon local. Para
+inspeccionar proyectos registrados en una máquina del espacio de trabajo sin ejecutar un daemon en el cliente, usa la
+ruta del catálogo en la nube:
+
+```bash
+lody project list --workspace <id|slug|name> [--machine <id|name>] --json
+```
+
+Sin `--machine`, el catálogo del espacio de trabajo incluye proyectos locales autorizados en todas las máquinas y
+repositorios de GitHub habilitados. Usa `--kind local` o `--kind github` para seleccionar un tipo;
+`--machine` restringe el resultado a los proyectos locales en esa máquina. `--catalog` selecciona el
+catálogo del espacio de trabajo sin un selector de espacio de trabajo explícito. El listado remoto no está disponible en la
+plataforma local de código abierto porque ese modo no realiza E/S en la nube.
+
+### Descubrimiento de recursos y paginación
+
+Las listas de máquinas, proyectos, configuraciones de agente, roles y MCP del espacio de trabajo devuelven 20 entradas por defecto.
+Usa `--limit` (1–100), `--query` y `--cursor` con los mismos filtros, o `--all-pages`.
+JSON devuelve `items`, `hasMore` y `nextCursor` opcional, además del alias de arreglo específico del recurso.
+Son resúmenes seguros; se omiten los valores de conexión de MCP y las credenciales de lanzamiento del agente.
+
+```bash
+lody agent-role list --workspace my-team --all-pages --json
+lody agent-role get ROLE_ID --workspace my-team --json
+lody agent-config get AGENT_ID --workspace my-team --json
+lody mcp list --workspace my-team --json
+lody operation list --workspace my-team --session SESSION_ID --state active --json
+lody session list --workspace my-team --query parser --machine-id MACHINE_ID --agent-config-id AGENT_ID --agent-role-id ROLE_ID
+```
+
+Los detalles del rol incluyen el prefijo de prompt; las listas conservan los roles no disponibles legibles con sus motivos.
+El listado de operaciones lee el almacén de esta máquina, limitado a la sesión solicitante y al usuario
+autenticado, con `--state`, `--limit` y `--cursor`. No agrega almacenes de otras máquinas.
+El filtro de rol de sesión coincide con el origen de creación. Lody MCP expone las acciones correspondientes
+de solo lectura de `lody_catalog` (`machines`, `projects`, `agent_configs`,
+`agent_roles`, `mcp_servers`) y la herramienta `lody_operation`.
+
+Para consultar las opciones exactas actuales, revisa siempre la ayuda integrada:
+
+```bash
+lody project add --help
+lody project list --help
+lody project delete --help
+```
+
+## Crear y actualizar roles de agente
+
+La CLI y MCP pueden proponer un rol nuevo o cambios en un rol de tu propiedad. La propuesta aparece
+como una tarjeta de revisión en una conversación activa. Haz clic en **Guardar** en Lody para aplicarla o descarta
+la tarjeta para dejar el catálogo sin cambios. Un comando exitoso informa una propuesta pendiente,
+no un rol guardado.
+
+```bash
+lody agent-role create --name "Reviewer" --description "Review code" \
+  --prompt-prefix "Find actionable bugs" \
+  --machine-id MACHINE_ID --agent-config-id CONFIG_ID --session SESSION_ID
+
+lody agent-role update ROLE_ID --name "Code reviewer" \
+  --description "" --prompt-prefix "Focus on correctness" --session SESSION_ID
+```
+
+| Opción                   | Creación    | Actualización           |
+| ------------------------ | ----------- | ----------------------- |
+| `--name <name>`          | Obligatoria | Opcional                |
+| `--description <text>`   | Opcional    | Opcional; `""` la borra |
+| `--prompt-prefix <text>` | Opcional    | Opcional; `""` lo borra |
+| `--machine-id <id>`      | Obligatoria | No admitida             |
+| `--agent-config-id <id>` | Obligatoria | No admitida             |
+
+Las actualizaciones requieren al menos un campo. Los campos omitidos permanecen sin cambios. Los roles nuevos son privados
+y usan la configuración de ejecución predeterminada del agente vinculado. Cambia el modelo, los permisos, el uso compartido
+y otros ajustes en el editor de roles.
+
+Usa `--session` o define `LODY_SESSION_ID` para seleccionar la conversación activa, y
+`--workspace <id-or-slug>` cuando el espacio de trabajo sea ambiguo. Reutiliza `--request-id <id>`
+con una entrada idéntica al reintentar; el resultado informa el desenlace de la propuesta existente.
+
+También se admiten archivos JSON:
+
+```bash
+lody agent-role create --file role.json --session SESSION_ID
+lody agent-role update ROLE_ID --file patch.json --session SESSION_ID
+```
+
+Un archivo de creación contiene `name`, `machineId`, `agentConfigId` y, opcionalmente, `description`
+y `promptPrefix`. Un archivo de actualización contiene únicamente los campos modificados `name`, `description` o
+`promptPrefix`. `--file` no se puede combinar con opciones directas de campos del rol. Para instrucciones
+almacenadas en Markdown, pasa en su lugar `--prompt-prefix "$(cat reviewer.md)"`.
+
+`role.json`:
+
+```json
+{
+  "name": "Reviewer",
+  "machineId": "MACHINE_ID",
+  "agentConfigId": "CONFIG_ID",
+  "description": "Review code",
+  "promptPrefix": "Check correctness.\nReport actionable bugs."
+}
+```
+
+`patch.json`:
+
+```json
+{
+  "description": "",
+  "promptPrefix": "Focus on correctness.\nExplain each finding."
+}
+```
+
+Los archivos deben contener un único objeto JSON en UTF-8, usando las claves en camelCase mostradas arriba.
+El archivo de actualización es el parche en sí: no lo envuelvas en `patch`; pasa el ID del rol como
+argumento del comando. Pasa los ID de reintento con `--request-id`. Las cadenas JSON usan `\n` para los saltos de
+línea; los comentarios y las comas finales no son JSON válido.
+
+Todos los valores de campo son cadenas de texto. La creación requiere `name`, `machineId` y `agentConfigId`.
+Las actualizaciones requieren al menos un campo admitido. Los campos de actualización omitidos permanecen sin cambios;
+`""` borra la descripción o las instrucciones, mientras que `null` se rechaza. Los nombres no deben estar vacíos,
+deben ser compatibles con menciones y tener como máximo 60 caracteres tras recortar los espacios; las descripciones permiten hasta
+140 puntos de código Unicode; las instrucciones permiten hasta 32.768 caracteres antes de recortar los espacios.
+Los ID de máquina y configuración no deben estar vacíos y deben tener como máximo 128 caracteres tras recortar los espacios.
+Los campos no admitidos se rechazan.
+
+MCP expone el mismo flujo de confirmación mediante las acciones `create` y
+`update` de `lody_agent_role`. Create toma `requestId` además de los campos de creación anteriores; update
+toma `requestId`, `roleId` y un `patch` que contiene los campos de texto modificados.
+Consulta [Roles de agente](/es/docs/agent-roles) para ver cómo se usan los roles guardados.
+
+## Comandos de la aplicación de escritorio
+
+| Comando                | Qué hace                                                                   | Comando de ayuda              |
+| ---------------------- | -------------------------------------------------------------------------- | ----------------------------- |
+| `lody app [path]`      | Abrir la aplicación de escritorio en un chat nuevo con un directorio listo | `lody app --help`             |
+| `lody app reset-cache` | Borrar la caché local de la aplicación de escritorio en su próximo inicio  | `lody app reset-cache --help` |
+
+### Recuperar una ventana de escritorio congelada
+
+Si la ventana de escritorio deja de responder —o vuelve al mismo estado defectuoso tras reiniciar—,
+es posible que su caché local sea la causa y no puedas acceder a **Configuración → Borrar caché** para repararla.
+Programa en su lugar la misma reparación desde una terminal:
+
+```bash
+lody app reset-cache          # borrar cachés recuperables; mantener la sesión iniciada
+lody app reset-cache --hard   # borrar todos los datos locales y cerrar sesión
+lody app reset-cache --cancel # deshacer cualquiera de las opciones anteriores
+```
+
+El comando solo registra la solicitud; la aplicación la aplica la próxima vez que se inicia, así que **cierra la
+aplicación de escritorio y vuelve a abrirla**. No se envía nada a ningún sitio y no necesita ni inicio de sesión ni
+un daemon en ejecución.
+
+`lody app reset-cache` conserva tu cuenta, ajustes y borradores de Shortcut sin enviar, y vuelve a descargar
+las conversaciones desde el espacio de trabajo. Usa `--hard` solo cuando la aplicación siga bloqueada después: también
+elimina la sesión iniciada y las preferencias locales. Una solicitud que nunca se aplica caduca después de
+un día.
+
+## Comandos de sesión
+
+Los comandos de sesión son el flujo de trabajo principal fuera de la web para Lody.
+
+Antes de usarlos:
+
+- `session create`, `session chat` y `session cancel` necesitan que `lody start` o `lody daemon start` se esté ejecutando en la máquina actual
+- `session list`, `history`, `observe`, `show`, `rename`, `archive`, `restore` y `delete` solo necesitan inicio de sesión y acceso al espacio de trabajo
+- Usa [`lody workspace list`](#comandos-de-espacio-de-trabajo) si necesitas un ID o slug de espacio de trabajo
+- `sessionId` se puede pasar de forma posicional o mediante `LODY_SESSION_ID`
+
+| Subcomando             | Qué hace                                                | Requiere entorno local | Comando de ayuda              |
+| ---------------------- | ------------------------------------------------------- | ---------------------- | ----------------------------- |
+| `lody session create`  | Crear una nueva sesión en la máquina actual             | Sí                     | `lody session create --help`  |
+| `lody session chat`    | Enviar un nuevo turno a una sesión local existente      | Sí                     | `lody session chat --help`    |
+| `lody session cancel`  | Cancelar el turno en ejecución en una sesión local      | Sí                     | `lody session cancel --help`  |
+| `lody session list`    | Listar sesiones en un espacio de trabajo                | No                     | `lody session list --help`    |
+| `lody session history` | Leer el historial visible de la transcripción           | No                     | `lody session history --help` |
+| `lody session observe` | Inspeccionar y seguir el estado persistido de la sesión | No                     | `lody session observe --help` |
+| `lody session show`    | Mostrar metadatos de la sesión                          | No                     | `lody session show --help`    |
+| `lody session rename`  | Renombrar una sesión                                    | No                     | `lody session rename --help`  |
+| `lody session archive` | Mover una sesión fuera de la lista activa               | No                     | `lody session archive --help` |
+| `lody session restore` | Restaurar una sesión archivada                          | No                     | `lody session restore --help` |
+| `lody session delete`  | Eliminar permanentemente una sesión archivada           | No                     | `lody session delete --help`  |
+
+### session create
+
+Crea una sesión vinculada a un repositorio de GitHub o a un proyecto local registrado.
+
+```bash
+lody session create --workspace my-team --agent-config codex --repo owner/repo "Fix the failing test"
+```
+
+Parámetros destacados:
+
+- `--workspace <idOrSlug>` elige el espacio de trabajo de destino
+- `--agent-config <idOrName>` elige la configuración de agente desde [Configuración de agente](/es/docs/quickstart)
+- `--agent-role <idOrName>` crea la sesión a partir de un rol de agente del espacio de trabajo; la máquina, la configuración de agente y la configuración de ejecución del rol anulan `--machine`, `--agent`/`--agent-config`, `--mode`, `--model` y `--config-option` (una advertencia enumera las opciones ignoradas)
+- `--repo <owner/repo>` adjunta un repositorio de GitHub
+- `--local-project <id|name|path>` adjunta un proyecto local registrado previamente
+- `--repo` y `--local-project` son mutuamente excluyentes
+- `--branch <name>` selecciona la rama inicial
+- `--mode <modeId>` y `--model <modelId>` anulan las selecciones de ACP
+- `--env KEY=VALUE` puede repetirse y se guarda con la sesión para reanudarla más tarde
+- la entrada del prompt puede provenir de texto posicional, `--prompt`, `--prompt-file` o stdin
+
+Opciones exactas:
+
+```bash
+lody session create --help
+```
+
+### session chat
+
+Envía otro turno de usuario a una sesión existente en la máquina actual.
+
+```bash
+lody session chat <sessionId> "continue from the last patch"
+LODY_SESSION_ID=<sessionId> lody session chat --prompt "continue from the last patch"
+```
+
+Parámetros destacados:
+
+- `sessionId` puede provenir del argumento posicional o de `LODY_SESSION_ID`
+- la entrada del prompt puede provenir de texto posicional, `--prompt`, `--prompt-file` o stdin
+- `--mode <modeId>` y `--model <modelId>` anulan las selecciones de ACP para este turno
+
+Opciones exactas:
+
+```bash
+lody session chat --help
+```
+
+### Adjuntos de entrada
+
+Tanto create como chat aceptan `--attach <path>` repetible:
+
+```bash
+lody session create --machine remote --prompt "Analyze the data" --attach ./data.csv
+lody session chat <sessionId> --prompt "Use this screenshot too" --attach ./screen.png
+```
+
+Las rutas se leen en la máquina que ejecuta el comando, de forma relativa a su directorio actual.
+Todos los adjuntos deben terminar de prepararse antes de que se envíe el mensaje. Cualquier fallo
+aborta el envío. Se admiten hasta ocho archivos no vacíos de 100 MiB cada uno.
+Las imágenes compatibles dentro del límite de tamaño de imagen conservan la entrada visual; las imágenes más grandes se envían como archivos.
+El texto es opcional cuando hay adjuntos presentes. `--prompt-file` sigue leyendo el texto del prompt.
+Volver a ejecutar un comando de CLI independiente envía un nuevo mensaje.
+
+### session cancel
+
+Cancela el turno actualmente en ejecución de una sesión local.
+
+```bash
+lody session cancel <sessionId>
+```
+
+Si la cancelación falla, el comando sale con un código distinto de cero. Opciones exactas:
+
+```bash
+lody session cancel --help
+```
+
+### session list
+
+Lista las sesiones de un espacio de trabajo. De forma predeterminada muestra solo las sesiones activas.
+
+```bash
+lody session list --workspace my-team
+lody session list --workspace my-team --archived
+lody session list --workspace my-team --all --limit 50 --json
+```
+
+Parámetros destacados:
+
+- `--archived` muestra solo las sesiones archivadas
+- `--all` incluye tanto las sesiones activas como las archivadas
+- `--limit <count>` limita el tamaño del resultado
+- la salida predeterminada es una tabla legible; `--json` devuelve datos estructurados
+
+Opciones exactas:
+
+```bash
+lody session list --help
+```
+
+### session history
+
+Lee la transcripción visible de una sesión. Este comando oculta intencionalmente el razonamiento interno,
+las llamadas a herramientas y otros elementos no visibles para el usuario.
+
+```bash
+lody session history <sessionId> --limit 20
+lody session history <sessionId> --all --reverse
+lody session history <sessionId> --jsonl
+```
+
+Parámetros destacados:
+
+- `--limit <count>` devuelve los N turnos visibles más recientes
+- `--all` devuelve la transcripción visible completa
+- `--reverse` imprime primero los más recientes
+- `--json` y `--jsonl` son útiles para la automatización
+
+Opciones exactas:
+
+```bash
+lody session history --help
+```
+
+### session observe
+
+Conéctate a una sesión existente sin enviar una tarea ni cambiar el estado de no leído.
+Este comando usa actualmente el inicio de sesión en la nube y el acceso al espacio de trabajo; no se admite
+la conexión únicamente con el daemon local.
+
+```bash
+lody session observe <sessionId> --json
+lody session observe <sessionId> --jsonl --follow
+lody session observe --workspace my-team --all --jsonl --follow
+```
+
+Sin `--follow`, imprime una instantánea y sale. Follow requiere `--jsonl`. A diferencia de
+`history --jsonl`, permanece conectado para turnos posteriores. El modo de espacio de trabajo requiere tanto
+`--workspace` como `--all`, rechaza un ID de sesión posicional e ignora `LODY_SESSION_ID`.
+
+Los eventos JSONL son `snapshot`, `ready`, `session.changed`, `turn.started`,
+`turn.finished` y `session.removed`. Cada evento exitoso tiene `version: 1`,
+`streamId`, `sequence`, `observedAt` (milisegundos Unix) y `workspaceId`.
+`turn.finished` incluye los ID de usuario y opcionales de asistente y
+`outcome: completed | failed | canceled`. Las instantáneas iniciales incluyen `latestTurn`
+para que el resultado de una tarea rápida siga siendo legible; los turnos antiguos no se reproducen como eventos.
+
+Las instantáneas de sesión distinguen `source: persisted | metadata` y
+`freshness: synced | unavailable`. El evento `ready` del espacio de trabajo marca la enumeración del catálogo,
+no la apertura de cada sala de historial: las sesiones solo de metadatos tienen `state: unknown`.
+Las salas históricas inactivas se dejan sin abrir; los cambios exclusivos en su historial quedan fuera del
+alcance del seguimiento del espacio de trabajo. Conéctate individualmente cuando sea necesario. La finalización requiere
+evidencia de turno persistida; el estado inactivo de metadatos o la pérdida de presencia no son suficientes. La actualización (`freshness`)
+es una lectura confirmada, no una prueba de que el agente esté actualmente en línea.
+
+La secuencia ordena un proceso en ejecución y no puede reanudar otro proceso ni garantizar
+la repetición. Tras un reinicio, concilia las instantáneas y el historial. El texto de streaming habitual
+se omite. Los diagnósticos estructurados se envían a stderr; los errores de comandos usan el formato
+de error existente de la CLI. Ctrl+C detiene la observación sin cancelar la ejecución.
+
+```bash
+lody session observe --help
+```
+
+### session show
+
+Muestra metadatos de la sesión como estado, máquina, vinculación con el espacio de trabajo y recuento del historial.
+
+```bash
+lody session show <sessionId>
+lody session show <sessionId> --json
+```
+
+Opciones exactas:
+
+```bash
+lody session show --help
+```
+
+### session rename
+
+Renombra una sesión.
+
+```bash
+lody session rename <sessionId> "New title"
+LODY_SESSION_ID=<sessionId> lody session rename --title "New title"
+```
+
+Si dependes de `LODY_SESSION_ID`, prefiere `--title` para que el título no se confunda con un selector
+explícito de sesión.
+
+Opciones exactas:
+
+```bash
+lody session rename --help
+```
+
+### session archive
+
+Archiva una sesión para que desaparezca de la lista activa pero siga siendo recuperable.
+
+```bash
+lody session archive <sessionId>
+```
+
+Opciones exactas:
+
+```bash
+lody session archive --help
+```
+
+### session restore
+
+Restaura una sesión archivada de vuelta a la lista activa.
+
+```bash
+lody session restore <sessionId>
+```
+
+Esto solo funciona para sesiones archivadas. Opciones exactas:
+
+```bash
+lody session restore --help
+```
+
+### session delete
+
+Elimina permanentemente una sesión archivada. Esto también pone en cola la limpieza en la máquina para que
+puedan eliminarse el worktree y los recursos del entorno de ejecución.
+
+```bash
+lody session delete <sessionId>
+```
+
+Esto solo funciona para sesiones archivadas. Opciones exactas:
+
+```bash
+lody session delete --help
+```
+
+## Comandos de máquina
+
+Usa los comandos de máquina para inspeccionar qué máquinas están registradas en un espacio de trabajo y si parecen
+estar en línea.
+
+| Comando             | Qué hace                                     | Comando de ayuda           |
+| ------------------- | -------------------------------------------- | -------------------------- |
+| `lody machine list` | Listar las máquinas de un espacio de trabajo | `lody machine list --help` |
+
+### machine list
+
+```bash
+lody machine list --workspace my-team
+lody machine list --workspace my-team --online-only
+lody machine list --workspace my-team --json
+lody machine list --workspace my-team --json --include-acp-capabilities
+```
+
+La tabla predeterminada muestra la identidad y disponibilidad de la máquina. JSON conserva
+`onlineStatus: online | offline | unknown`; una presencia no disponible no se informa como sin conexión (`offline`).
+`--include-acp-capabilities` y `--include-agents` conservan la salida detallada heredada y no pueden
+combinarse con opciones de paginación o filtrado de directorio. Usa `agent-config list/get` para obtener capacidades paginadas.
+
+- de forma predeterminada se muestran tanto las máquinas en línea como las desconectadas
+- usa `--online-only` para filtrar la lista y mostrar solo las máquinas con un latido reciente
+- `--json` omite `acpCapabilities` por defecto para mantener las cargas útiles más pequeñas
+- pasa `--include-acp-capabilities` cuando necesites la caché de capacidades en la salida JSON
+
+Esto resulta útil antes de `agent-config refresh-capabilities`.
+
+Opciones exactas:
+
+```bash
+lody machine list --help
+```
+
+## Comandos de configuración de agente
+
+Los comandos de configuración de agente reflejan gran parte del comportamiento de la interfaz web en [Configuración de agente](/es/docs/quickstart).
+
+Antes de usarlos:
+
+- los selectores aceptan un ID o un nombre
+- si varias configuraciones o máquinas comparten el mismo nombre, la CLI requiere un ID explícito
+- `refresh-capabilities` actualmente solo funciona en la máquina actual desde la CLI
+
+| Subcomando                               | Qué hace                                         | Comando de ayuda                                |
+| ---------------------------------------- | ------------------------------------------------ | ----------------------------------------------- |
+| `lody agent-config list`                 | Listar configuraciones en un espacio de trabajo  | `lody agent-config list --help`                 |
+| `lody agent-config show`                 | Mostrar una configuración                        | `lody agent-config show --help`                 |
+| `lody agent-config create`               | Crear una nueva configuración                    | `lody agent-config create --help`               |
+| `lody agent-config import-magpie`        | Importar proveedores locales de Magpie           | `lody agent-config import-magpie --help`        |
+| `lody agent-config update`               | Actualizar una configuración existente           | `lody agent-config update --help`               |
+| `lody agent-config delete`               | Eliminar una configuración                       | `lody agent-config delete --help`               |
+| `lody agent-config refresh-capabilities` | Actualizar modos, modelos y opciones compatibles | `lody agent-config refresh-capabilities --help` |
+
+### agent-config list
+
+```bash
+lody agent-config list --workspace my-team
+```
+
+Muestra la identidad de la configuración, la máquina y la disponibilidad. JSON también incluye el tipo de agente, la descripción
+y los ajustes de modelo/ejecución compatibles. Usa `--machine`, `--query` y paginación para acotar la lista.
+
+### agent-config show
+
+```bash
+lody agent-config show <idOrName>
+LODY_AGENT_CONFIG_ID=<id> lody agent-config show
+```
+
+Muestra los campos de la configuración en un formato legible o en JSON.
+
+### agent-config create
+
+Crea una configuración para un entorno de ejecución de agente integrado o del registro.
+
+```bash
+lody agent-config create \
+  --workspace my-team \
+  --agent-type codex \
+  --name "Codex Default" \
+  --env OPENAI_API_KEY=... \
+  --prompt "Always run tests before finishing"
+```
+
+Parámetros destacados:
+
+- `--agent-type <type>` es obligatorio
+- `claude` y `codex` se tratan como entornos de ejecución integrados
+- todos los demás tipos de agente se tratan como entornos de ejecución del registro
+- `--env KEY=VALUE` puede repetirse
+- `--env-file <path>` carga variables de entorno desde un archivo
+- `--prompt` o `--prompt-file` establece el prefijo de prompt predeterminado
+
+Opciones exactas:
+
+```bash
+lody agent-config create --help
+```
+
+### agent-config import-magpie
+
+Importa proveedores de Magpie en el servidor que ejecuta el comando, para todos los agentes compatibles o un subconjunto seleccionado:
+
+```bash
+lody agent-config import-magpie --workspace my-team --json
+```
+
+Consulta [Conectar Magpie](/es/docs/magpie) para ver la configuración, las opciones y los estados de resultado.
+
+### agent-config update
+
+Actualiza una configuración existente directamente.
+
+```bash
+lody agent-config update <idOrName> --name "Codex CI"
+lody agent-config update <idOrName> --env OPENAI_API_KEY=... --unset-env OLD_KEY
+lody agent-config update <idOrName> --prompt ""
+```
+
+Parámetros destacados:
+
+- `--name` actualiza el nombre visible
+- `--description ""` borra la descripción
+- `--env` y `--env-file` combinan nuevos valores de entorno
+- `--unset-env KEY` elimina una o más variables de entorno
+- `--prompt ""` borra el prefijo de prompt predeterminado
+
+Opciones exactas:
+
+```bash
+lody agent-config update --help
+```
+
+### agent-config delete
+
+```bash
+lody agent-config delete <idOrName>
+```
+
+Elimina una configuración por ID o nombre único.
+
+### agent-config refresh-capabilities
+
+Actualiza las capacidades almacenadas en caché para una configuración de agente en la máquina actual.
+
+```bash
+lody agent-config refresh-capabilities <idOrName> --workspace my-team
+```
+
+Úsalo después de:
+
+- instalar o actualizar una CLI de programación
+- cambiar el entorno de una configuración de agente
+- actualizar los modelos o modos disponibles en la máquina
+
+Parámetros destacados:
+
+- `--machine <idOrName>` toma la máquina actual por defecto
+- la máquina seleccionada debe estar en línea
+- la CLI actualmente rechaza la actualización en máquinas remotas; usa la máquina actual para este comando
+- se admiten `--json` y `--jsonl` para automatización
+
+Opciones exactas:
+
+```bash
+lody agent-config refresh-capabilities --help
+```
+
+## Ejemplos comunes
+
+```bash
+# Encuentra el id o slug del espacio de trabajo que quieres usar
+lody workspace list
+
+# Inspecciona los repositorios de GitHub ya vinculados a ese espacio de trabajo
+lody github list --workspace my-team
+
+# Inspecciona las configuraciones de agente en ese espacio de trabajo
+lody agent-config list --workspace my-team
+
+# Inicia el daemon local en segundo plano
+lody daemon start
+
+# El modo en primer plano es útil para depuración temporal
+lody start
+
+# Crea una sesión en un repositorio de GitHub
+lody session create \
+  --workspace my-team \
+  --agent-config codex \
+  --repo owner/repo \
+  "Fix the failing tests"
+
+# Lee los últimos turnos visibles de la transcripción
+lody session history <sessionId> --limit 20
+
+# Inspecciona máquinas y actualiza capacidades en la máquina actual
+lody machine list --workspace my-team --online-only
+lody agent-config refresh-capabilities codex --workspace my-team
+```

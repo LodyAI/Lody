@@ -17,6 +17,7 @@ import {
 } from 'react';
 import { getDefaultStore } from 'jotai';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
+import { readAgentStartDefaults } from '../src/lib/local-storage-cache';
 import { selectedMessageMarkdown } from '../src/components/ai-gui/message-quote-markdown';
 import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
@@ -37,7 +38,8 @@ import type {
   SessionMeta,
   SessionHistory,
   SessionInputBlock,
-  WorkspaceMcpServerMeta} from '@lody/shared';
+  WorkspaceMcpServerMeta,
+} from '@lody/shared';
 
 const scheduleMachine = vi.hoisted(() => ({ value: null as MachineMeta | null }));
 vi.mock('../src/hooks/use-resolved-machine-meta', () => ({
@@ -453,6 +455,57 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(hint()).toBeNull();
     await act(async () => publish?.('Open a PR'));
     expect(hint()?.textContent).toContain('Open a PR');
+  });
+
+  it('makes a permission picked inside a conversation the next new conversation default', async () => {
+    const send = async (sessionId: string, modeId: string) => {
+      const textarea = await renderComposer({
+        sessionId,
+        onSendMessage: async () => true,
+        overrides: {
+          session: {
+            id: sessionId,
+            userId: 'user-1',
+            machineId: 'machine-1',
+            agentConfigId: 'agent-learn',
+            cliType: 'builtin',
+            agentType: 'claude',
+            status: { type: 'idle' },
+            isArchived: false,
+            createdAt: '2026-11-26T00:00:00.000Z',
+          } as SessionMeta,
+          selectedModeId: modeId,
+          modeOptions: [
+            { value: 'default', label: 'Ask' },
+            { value: 'bypassPermissions', label: 'Full access' },
+            { value: 'plan', label: 'Plan' },
+          ],
+        },
+      });
+      await act(async () => {
+        textarea.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      });
+    };
+    const startMode = () => readAgentStartDefaults({ id: 'agent-learn' as never })?.modeId;
+
+    await send('learn-full-access', 'bypassPermissions');
+    expect(startMode()).toBe('bypassPermissions');
+
+    // Plan is a one-turn choice and keeps the permission learned before it.
+    await send('learn-plan', 'plan');
+    expect(startMode()).toBe('bypassPermissions');
+
+    // A Role's values belong to the Role, not to the person's own defaults.
+    sessionAgentRoleState.control = {
+      items: [],
+      selectedRoleId: null,
+      onSelect: () => undefined,
+      turnSelection: { agentRoleId: 'role-1' as AgentRoleId, agentRoleRevision: 1 },
+    };
+    await send('learn-role', 'default');
+    expect(startMode()).toBe('bypassPermissions');
   });
 
   it('restores an archived conversation from the composer without losing its draft', async () => {

@@ -1,0 +1,28 @@
+---
+title: "20260223"
+version: 0.32.3
+date: 2026-02-23
+description: "Sonnet 4.6 및 gpt-5.3-code-spark 지원, 로컬 프로젝트, CLI 실행 개선 및 성능 수정 사항을 추가했습니다."
+---
+
+### Sonnet 4.6 및 gpt-5.3-code-spark 지원
+
+### 로컬 프로젝트 지원
+
+- 모든 로컬 디렉토리를 가져와 실시간으로 동기화 상태를 유지합니다
+
+<img src="/_docs-assets/20260223-local-project.png" width="300px" />
+
+### CLI 실행 및 로그인 경험 개선
+
+- 원클릭 실행을 위해 CLI 시작 절차를 간소화했습니다
+- Docker 모드를 제거했습니다
+- 로컬 프로젝트를 관리할 수 있는 `project` 명령 그룹을 추가했습니다
+  - `npx lody project add [path]` lody에 로컬 프로젝트 추가
+  - `npx lody project list` 로컬 프로젝트 목록 조회
+  - `npx lody project delete` 대화형으로 로컬 프로젝트 삭제
+
+### 성능 및 안정성 개선
+
+- 파일 diff를 열 때 UI가 버벅이던 문제를 수정했습니다
+- 일부 시나리오에서 발생하던 인증 흐름 문제를 수정했습니다

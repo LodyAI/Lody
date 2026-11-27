@@ -1,0 +1,30 @@
+---
+title: "20260905"
+version: 0.91.0
+date: 2026-09-05
+description: "新增工作階段檔案操作、語意化 diff、未讀指示與更好用的提及搜尋，並改善 Agent 模型、Markdown、行動端與公開網站體驗。"
+---
+
+版本 0.91.0
+
+### ✨ 新功能
+
+- 支援 GPT-6 Astra。
+- 新增工作階段檔案操作，讓無法直接預覽的檔案能透過系統應用程式開啟、在檔案管理員中顯示或下載（[#375](https://github.com/LodyAI/Lody/pull/375)）。
+- Markdown 現在可渲染語意化 diff 程式碼區塊（[#373](https://github.com/LodyAI/Lody/pull/373)）。
+- 工作階段側邊欄與桌面端子工作階段分頁現在會顯示未讀狀態（[#332](https://github.com/LodyAI/Lody/pull/332)、[#384](https://github.com/LodyAI/Lody/pull/384)）。
+- 檔案、Issue 與 PR 提及現在採用 VS Code 風格的模糊比對，更容易找到目標（[#378](https://github.com/LodyAI/Lody/pull/378)）。
+- 新增共享工作階段交接、並行 Agent 與 Agent 團隊的雙語使用指南（[#387](https://github.com/LodyAI/Lody/pull/387)、[#389](https://github.com/LodyAI/Lody/pull/389)、[#390](https://github.com/LodyAI/Lody/pull/390)、[#393](https://github.com/LodyAI/Lody/pull/393)、[#394](https://github.com/LodyAI/Lody/pull/394)）。
+
+### 🐛 修復與改進
+
+- 強化團隊預覽與本機瀏覽器連線檢查，提供更安全可靠的存取體驗（[#374](https://github.com/LodyAI/Lody/pull/374)）。
+- DeepSeek Harness 現在會從自訂服務自動偵測模型，並依目前運行中的執行環境提供模型、推理與權限選項（[#380](https://github.com/LodyAI/Lody/pull/380)、[#395](https://github.com/LodyAI/Lody/pull/395)、[DeepSeek ACP #10](https://github.com/LodyAI/acp-extension-dsh/pull/10)、[#11](https://github.com/LodyAI/acp-extension-dsh/pull/11)）。
+- Kimi 模型選擇器現在會顯示並支援搜尋模型提供商，讓同名模型更容易區分（[Kimi ACP #7](https://github.com/LodyAI/acp-extension-kimi/pull/7)）。
+- 改善 Markdown 與串流訊息渲染：支援 TeX 方括號分隔符、修正非 ASCII 標點符號周圍的自動連結邊界、保留最終文字輸出，並讓 Mermaid 全螢幕檢視器支援觸控關閉（[#336](https://github.com/LodyAI/Lody/pull/336)、[#370](https://github.com/LodyAI/Lody/pull/370)、[#388](https://github.com/LodyAI/Lody/pull/388)、[#396](https://github.com/LodyAI/Lody/pull/396)）。
+- 修復調整側邊欄寬度時聊天畫面抖動的問題，並加快計費資訊載入速度（[#368](https://github.com/LodyAI/Lody/pull/368)、[#371](https://github.com/LodyAI/Lody/pull/371)）。
+- 降低 Live Activity 更新負荷，並限制行動端工作階段群組預覽行數，讓長清單捲動更流暢（[#319](https://github.com/LodyAI/Lody/pull/319)、[#323](https://github.com/LodyAI/Lody/pull/323)）。
+- 改善 App Store 評分提示的出現時機及其狀態處理方式（[#310](https://github.com/LodyAI/Lody/pull/310)）。
+- 更新 ACP Provider 圖示與執行環境登錄資訊（[#369](https://github.com/LodyAI/Lody/pull/369)）。
+- 改善公開網站的頁面標題、搜尋可探索性與未知頁面的 404 處理（[#379](https://github.com/LodyAI/Lody/pull/379)、[#383](https://github.com/LodyAI/Lody/pull/383)、[#391](https://github.com/LodyAI/Lody/pull/391)）。
+- 感謝外部貢獻者 [@nokizw](https://github.com/nokizw) 對 Kimi 模型選擇器中提供商顯示與搜尋體驗的改進（[Kimi ACP #7](https://github.com/LodyAI/acp-extension-kimi/pull/7)）。

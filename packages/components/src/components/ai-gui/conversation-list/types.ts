@@ -39,6 +39,8 @@ export interface ConversationListHandle {
   anchorToRow(index: number): void;
   /** The held row's index after rows above it changed; negative when it is gone. */
   retargetAnchor(index: number): void;
+  /** Hold a disclosure header at `targetScreenY` before its body changes the layout. */
+  preserveDisclosure(rowKey: string, offsetPx: number, targetScreenY?: number): void;
 }
 
 export interface ConversationScrollerState {

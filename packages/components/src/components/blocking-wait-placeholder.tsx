@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { triggerDocMetaRescanAtom } from '../atoms/doc-meta';
 import { AlertTriangle } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -313,12 +314,14 @@ export function BlockingWaitPlaceholder({
   variant,
   title,
   description,
+  action,
   recoveryDelayMs = BLOCKING_WAIT_RECOVERY_DELAY_MS,
 }: {
   gate: string;
   variant: 'content' | 'boot';
   title: string;
   description?: string;
+  action?: ReactNode;
   recoveryDelayMs?: number;
 }) {
   const observation = useWorkspaceDataScopeState();
@@ -326,7 +329,14 @@ export function BlockingWaitPlaceholder({
   const [waitStartedAt] = useState(() => Date.now());
 
   if (state === 'waiting') {
-    return <LoadingPlaceholder variant={variant} title={title} description={description} />;
+    return (
+      <LoadingPlaceholder
+        variant={variant}
+        title={title}
+        description={description}
+        action={action}
+      />
+    );
   }
   return (
     <RecoveryPage
@@ -354,6 +364,7 @@ export function RecoveryPage({
   waitStartedAt: number;
 }) {
   const { t } = useTranslation();
+  const triggerDocMetaRescan = useSetAtom(triggerDocMetaRescanAtom);
   const connectionUiState = useAtomValue(lodyConnectionUiStateAtom);
   const controlConnectionState = useAtomValue(lodyControlConnectionStateAtom);
   const [clearOpen, setClearOpen] = useState(false);
@@ -366,6 +377,13 @@ export function RecoveryPage({
   const [lastLocalClear] = useState(() => readRecentLocalClear(Date.now()));
   const requestFailure = useLatestBootRequestFailure();
   const storageFailure = isLocalStorageFailure(observation);
+  const blocker = blockerOf(observation);
+  const e2eeBlocked =
+    gate.includes('e2ee') ||
+    (observation.targetEncrypted &&
+      (gate === 'workspace_admission' ||
+        blocker === 'runtime_missing' ||
+        blocker === 'runtime_init_failed'));
   // A clear that already ran in this process and left databases behind may have
   // hit a storage backend that is itself broken; only a retry of that relaunches
   // the desktop (stopping the embedded CLI) instead of reloading this window.
@@ -442,15 +460,27 @@ export function RecoveryPage({
             : t('workspace.route.recovery.slowTitleGeneric')
       }
       description={
-        storageFailure
-          ? t('workspace.route.recovery.description')
-          : requestFailure !== null
-            ? t('workspace.route.recovery.descriptionRequest')
-            : t('workspace.route.recovery.descriptionGeneric')
+        e2eeBlocked
+          ? t('workspace.route.recovery.descriptionE2ee')
+          : storageFailure
+            ? t('workspace.route.recovery.description')
+            : requestFailure !== null
+              ? t('workspace.route.recovery.descriptionRequest')
+              : t('workspace.route.recovery.descriptionGeneric')
       }
     >
       <StatusPageActions>
-        <Button type="button" size="small" onClick={() => reloadApp()}>
+        {blocker === 'doc_meta_scan_failed' ? (
+          <Button type="button" size="small" onClick={() => triggerDocMetaRescan()}>
+            {t('common.retry')}
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant={blocker === 'doc_meta_scan_failed' ? 'secondary' : 'primary'}
+          size="small"
+          onClick={() => reloadApp()}
+        >
           {t('errorBoundary.reload')}
         </Button>
         <Button type="button" variant="secondary" size="small" onClick={() => setClearOpen(true)}>
@@ -518,6 +548,9 @@ export function RecoveryPage({
         onOpenChange={setHardResetOpen}
         isResetting={hardResetting}
         onConfirm={handleHardReset}
+        additionalWarning={
+          e2eeBlocked ? t('workspace.route.recovery.hardResetE2eeWarning') : undefined
+        }
       />
     </StatusPage>
   );

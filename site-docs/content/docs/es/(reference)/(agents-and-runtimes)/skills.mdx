@@ -1,0 +1,52 @@
+---
+title: "Skills"
+description: "Explora los Skills de proyecto y globales de máquina en Lody, inspecciona sus instrucciones en SKILL.md y menciónalos en los prompts con $."
+---
+
+# Skills
+
+Lody detecta Agent Skills desde los directorios de skills compatibles del proyecto y globales de la máquina. Un Skill
+es un directorio que contiene un archivo `SKILL.md` con instrucciones reutilizables para un agente de programación.
+
+Los Skills en Lody son de solo lectura: Lody puede detectarlos, mostrarlos y referenciarlos, pero no
+instala, edita ni sincroniza los archivos de Skill.
+
+## Explorar Skills
+
+En escritorio, abre **Configuración** -> **Proyectos**, selecciona un proyecto y cambia a la pestaña **Skills**.
+
+En móvil, abre el proyecto, cambia a **Configuración** y elige **Skills del proyecto**.
+
+La lista se agrupa por ruta de origen y muestra los metadatos disponibles, como el nombre, la descripción, la versión,
+el autor, el alcance y el estado de los enlaces simbólicos. Abre un Skill para leer el contenido renderizado de su archivo `SKILL.md`.
+
+## Skills de proyecto y globales
+
+- Los **Skills de proyecto** provienen de directorios de Skills reconocidos dentro de un proyecto local o de la rama
+  predeterminada de un proyecto de GitHub.
+- Los **Skills globales** provienen de directorios reconocidos del usuario actual del sistema operativo en la máquina que ejecuta
+  el agente, como `~/.codex/skills` o `~/.claude/skills`.
+
+Los Skills globales son específicos de cada máquina. La configuración de un proyecto de GitHub muestra los Skills del repositorio, mientras que un chat
+también puede ofrecer Skills globales compatibles desde la máquina seleccionada para esa sesión.
+
+## Mencionar un Skill
+
+1. Selecciona un proyecto y un Agent Config para la conversación.
+2. Escribe `$` en el compositor.
+3. Sigue escribiendo para filtrar por nombre del Skill.
+4. Usa las teclas de flecha y presiona `Enter`, o haz clic en el Skill.
+
+El compositor conserva un token legible `$skill-name`. Cuando se envía el mensaje, Lody expande la
+referencia con la ruta correspondiente de `SKILL.md` para que el agente seleccionado pueda cargarla y seguirla.
+
+El menú se filtra según el proveedor ACP actual cuando la compatibilidad de directorios difiere entre agentes.
+
+## Actualización y comportamiento sin conexión
+
+Lody almacena en caché los metadatos de los Skills en el dispositivo actual y los actualiza en segundo plano. Si el proyecto
+o la máquina propietaria no están disponibles temporalmente, los resultados almacenados previamente en caché pueden seguir visibles en estado
+desactualizado o no disponible.
+
+Se admiten enlaces simbólicos siempre que permanezcan dentro del límite permitido del proyecto o del directorio de inicio del usuario. Los enlaces inseguros o
+rotos se omiten.

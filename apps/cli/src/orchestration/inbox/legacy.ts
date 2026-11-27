@@ -113,6 +113,8 @@ export const operationInboxLegacy = (options: {
           return owner.failure;
         },
         members: () => runtime.runPromise(owner.members),
+        sources: () => runtime.runPromise(owner.sources),
+        narrow: (drop: readonly number[]) => runtime.runPromise(owner.narrow(drop)),
         adopt: (next: InboxInput, update: () => void) =>
           runtime.runPromise(owner.adopt(next, update)),
         register: (resource: ExecutionResource) => runtime.runSync(owner.register(resource)),

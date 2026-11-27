@@ -1,3 +1,15 @@
+export {
+  isAgentProviderTelemetryEvent,
+  isPostHogProductEvent,
+  isTelemetryCliType,
+  isTelemetryNativePlatform,
+  isTelemetryPlatform,
+  normalizeTelemetryAgentType,
+  type TelemetryCliType,
+  type TelemetryNativePlatform,
+  type TelemetryPlatform,
+} from './posthog-events';
+
 /**
  * Shared analytics foundation (PostHog) used by Web, CLI, and Convex.
  *
@@ -31,17 +43,15 @@ export const DEFAULT_SAMPLE_RATES: Record<AnalyticsSamplingTier, number> = {
  * `1/sample_rate` weighting beyond 1x or go negative.
  */
 export function pickSampleRate(tier: AnalyticsSamplingTier, override?: number): number {
-  const rate = typeof override === 'number' && Number.isFinite(override) ? override : DEFAULT_SAMPLE_RATES[tier];
+  const rate =
+    typeof override === 'number' && Number.isFinite(override)
+      ? override
+      : DEFAULT_SAMPLE_RATES[tier];
   if (rate <= 0) return 0;
   if (rate >= 1) return 1;
   return rate;
 }
 
-/**
- * Decide whether a single event should be emitted, with probability equal to
- * the resolved sample rate (uniform random draw). rate>=1 always emits, rate<=0
- * never emits.
- */
 export function shouldSampleEvent(tier: AnalyticsSamplingTier, override?: number): boolean {
   const rate = pickSampleRate(tier, override);
   if (rate >= 1) return true;

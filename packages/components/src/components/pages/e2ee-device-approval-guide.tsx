@@ -1,10 +1,12 @@
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
+import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
-import { ChevronLeft, MonitorSmartphone, RefreshCw } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ChevronLeft, RefreshCw } from 'lucide-react';
+import { Children, isValidElement, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
 const styles = stylex.create({
   page: {
@@ -33,7 +35,6 @@ const styles = stylex.create({
   },
   back: { marginInlineStart: `calc(-1 * ${space[2]})`, alignSelf: 'flex-start' },
   hero: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[3] },
-  icon: { color: colors.secondaryLabel },
   title: { fontSize: type.titleSize, lineHeight: type.titleLeading, fontWeight: 600, margin: 0 },
   lead: { margin: 0, color: colors.secondaryLabel },
   steps: {
@@ -79,6 +80,19 @@ export interface E2eeDeviceApprovalGuideProps {
  */
 export function E2eeDeviceApprovalGuide(props: E2eeDeviceApprovalGuideProps) {
   const { t } = useTranslation();
+  const childList = Children.toArray(props.children);
+  const hasAccountPairing = childList.some((child) => {
+    if (!isValidElement<{ runtime?: Record<string, unknown> }>(child)) return false;
+    const runtime = child.props?.runtime;
+    return Boolean(runtime?.requestAccountPairing || runtime?.inspectAccountPairing);
+  });
+  const visibleChildren = hasAccountPairing
+    ? childList.filter((child) => {
+        if (!isValidElement<Record<string, unknown>>(child)) return true;
+        // Hide the legacy personal-pairing card when account pairing is supported.
+        return !('canApprove' in child.props && 'accountId' in child.props);
+      })
+    : childList;
   return (
     <main
       data-testid="e2ee-device-approval-guide"
@@ -91,7 +105,7 @@ export function E2eeDeviceApprovalGuide(props: E2eeDeviceApprovalGuideProps) {
           {t('e2ee.control.back')}
         </Button>
         <header {...stylex.props(styles.hero)}>
-          <MonitorSmartphone size={28} aria-hidden="true" {...stylex.props(styles.icon)} />
+          <E2eeDevicePairArt width={140} />
           <h1 {...stylex.props(styles.title)}>{t('e2ee.approvalGuide.title')}</h1>
           <p {...stylex.props(styles.lead)}>
             {t(
@@ -108,8 +122,17 @@ export function E2eeDeviceApprovalGuide(props: E2eeDeviceApprovalGuideProps) {
           <p {...stylex.props(styles.note)}>{t('e2ee.approvalGuide.noDevice')}</p>
         )}
         <div {...stylex.props(styles.actions)}>
-          <Button variant="secondary" disabled={props.refreshing} onClick={props.onRefresh}>
-            <RefreshCw size={14} aria-hidden="true" />
+          <Button
+            variant="secondary"
+            disabled={props.refreshing}
+            aria-busy={props.refreshing || undefined}
+            onClick={props.onRefresh}
+          >
+            {props.refreshing ? (
+              <Spinner size="small" />
+            ) : (
+              <RefreshCw size={14} aria-hidden="true" />
+            )}
             {t('e2ee.approvalGuide.refresh')}
           </Button>
           <Button variant="ghost" onClick={props.onShowDetails}>
@@ -121,7 +144,7 @@ export function E2eeDeviceApprovalGuide(props: E2eeDeviceApprovalGuideProps) {
             </Button>
           )}
         </div>
-        {props.children}
+        {visibleChildren}
       </div>
     </main>
   );

@@ -1,0 +1,32 @@
+---
+title: "20260915"
+version: 0.94.0
+date: 2026-09-15
+description: "Ajout du partage de sessions en lecture seule et des raccourcis de prompt, ainsi que d'améliorations aux longues conversations, aux fournisseurs ACP, à la récupération locale et à la collaboration multi-appareils."
+---
+
+Version 0.94.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Partagez des sessions et une sélection de sessions enfants via des liens en lecture seule consultables sans connexion.
+- Gérez plus facilement vos partages publiés : consultez l'état du partage, parcourez les sessions enfants partagées, redimensionnez la barre latérale de partage et revenez à la conversation source.
+- Créez, modifiez, supprimez et partagez des raccourcis de prompt, puis invoquez-les depuis le menu `/` avec des variables et des portées de contexte.
+- Ajout de Bub comme fournisseur ACP intégré.
+- Lisez et restaurez les longues conversations par fenêtres afin de réduire l'attente lors de l'ouverture de sessions volumineuses.
+- Réinitialisez le cache local de l'application de bureau depuis la CLI lorsque l'application ne peut pas s'ouvrir normalement.
+- Partagez des fichiers depuis une conversation via le flux de partage natif du système.
+
+### 🐛 Correctifs et améliorations
+
+- Amélioration du chargement de la page de partage, de la lecture de l'historique compressé, de la navigation et de la récupération afin qu'une requête en échec ne fasse plus planter toute la conversation.
+- Correction des messages de connexion sur la page de partage, des connecteurs de l'arborescence de conversation, de la hiérarchie des titres et de la mise en page de la barre latérale.
+- Amélioration de la récupération de session, de la synchronisation de l'historique, de la reprise après compactage interrompu et de la gestion des sessions archivées.
+- Correction des chemins de session sous Windows, des worktrees archivés, de la navigation entre projets sur machine partagée et de la confirmation de compte lors de la connexion sur l'application de bureau.
+- Amélioration de la saisie de prompt avec des brouillons par espace de travail, le focus pour l'édition des messages en file d'attente, la gestion d'état des onglets du terminal et un retour clair en cas de collage trop volumineux.
+- Amélioration de la compatibilité ACP, des valeurs par défaut de Grok, du comportement de DeepSeek Harness et de la comptabilisation de l'utilisation de l'agent intégré.
+- Affichage de la durée d'exécution de l'agent sur mobile, et amélioration des contrôles de taille de police ainsi que de la disposition des pièces jointes multi-images.
+- Correction de la reprise du paiement après l'expiration d'un abonnement offert.
+- Correction des pages d'aperçu qui ne parvenaient pas à se charger en l'absence de données d'annotation facultatives.
+- Maintien des menus à l'intérieur des petites fenêtres et des zones sûres, et correction du chevauchement de l'entrée d'archive sous macOS.
+- Merci aux contributeurs externes @gu18168, @EYHN, @UniversePeak, @Astro-Han, @lawvs, @VeraPyuyi et @liuxiaocs7 pour leurs améliorations sur le comportement ACP, la récupération de session, les contrôles de tâches, la gestion de la saisie, la compatibilité d'exécution et l'interface de bureau.

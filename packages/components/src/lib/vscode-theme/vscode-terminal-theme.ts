@@ -250,9 +250,7 @@ const getContrastRatio = (first: RgbTriplet, second: RgbTriplet): number => {
 const relativeLuminance = ({ r, g, b }: RgbTriplet): number => {
   const [red, green, blue] = [r, g, b].map((channel) => {
     const normalized = channel / 255;
-    return normalized <= 0.03928
-      ? normalized / 12.92
-      : ((normalized + 0.055) / 1.055) ** 2.4;
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
   });
 
   return 0.2126 * red + 0.7152 * green + 0.0722 * blue;

@@ -105,7 +105,8 @@ export function resolveCompositionInsertTextEcho({
   // - lastStableComposingValue is the final CJK result (e.g., "一二三")
   // These are unrelated, so we should not treat this as a commit echo.
   const isWhitespaceOrSinglePunctuation = /^\s$|^[^\w\s]$/.test(committedData);
-  const composingValueIsCjk = lastStableComposingValue && /[\u4e00-\u9fa5]/.test(lastStableComposingValue);
+  const composingValueIsCjk =
+    lastStableComposingValue && /[\u4e00-\u9fa5]/.test(lastStableComposingValue);
   const isUnrelatedToComposition =
     isWhitespaceOrSinglePunctuation &&
     composingValueIsCjk &&
@@ -119,9 +120,7 @@ export function resolveCompositionInsertTextEcho({
   const start = Math.max(0, Math.min(max, compositionStartSelectionStart));
   const end = Math.max(start, Math.min(max, compositionStartSelectionEnd));
   const committedValue =
-    compositionStartValue.slice(0, start) +
-    committedData +
-    compositionStartValue.slice(end);
+    compositionStartValue.slice(0, start) + committedData + compositionStartValue.slice(end);
 
   if (committedValue === nextValue) {
     return committedValue;

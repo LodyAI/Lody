@@ -77,9 +77,7 @@ export const mergeHistoryStreamText = (item: StreamText, delta: string) => {
     // coercion/refusal path rather than silently converting malformed values.
     const stored = item.text as string;
     const merged =
-      !stored || delta.startsWith(stored)
-        ? delta
-        : stored + streamChunkSuffix(stored, delta);
+      !stored || delta.startsWith(stored) ? delta : stored + streamChunkSuffix(stored, delta);
     return { item: { ...item, text: sanitizeLodyInternalInstructions(merged) }, suffix: undefined };
   }
   const prior = analyzeText(item);

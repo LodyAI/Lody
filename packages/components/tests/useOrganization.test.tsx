@@ -8,6 +8,7 @@ import { useE2eeWorkspaceRemoval } from '../src/components/pages/e2ee-workspace-
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { getCachedWorkspaceId } from '../src/lib/local-storage-cache';
 import { readPreferredWorkspaceSlug, writePreferredWorkspaceSlug } from '../src/lib/workspace';
+import { resolveOptimisticWorkspaceRouteGuard } from '../src/lib/workspace-route-guard';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   editSessionRunConfigDraftAtom,
@@ -265,12 +266,28 @@ describe('useOrganization setActive dedupe', () => {
     });
   }
 
-  it('opens a ledger-bound workspace with a full projected roster without Better Auth setActive', async () => {
+  it('keeps a newly joined encrypted deep link pending instead of redirecting to an existing workspace', async () => {
+    const workspaceName = 'cipher-team';
+    organizationMocks.encryptedWorkspaces = undefined;
+    await render(workspaceName, 0);
+    const { activeOrganization, error, organizations, organizationsLoading } =
+      latestOrganizationState!;
+    expect(
+      resolveOptimisticWorkspaceRouteGuard({
+        workspaceName,
+        organizations,
+        activeOrganization,
+        error,
+      })
+    ).not.toBe('redirect');
+    expect(organizationsLoading).toBe(true);
+    expect(organizations).toBeUndefined();
+
     organizationMocks.encryptedWorkspaces = [
       {
         id: 'encrypted',
         name: 'Cipher Team',
-        slug: 'cipher-team',
+        slug: workspaceName,
         contentMode: 'e2ee',
         contentModeVersion: 1,
         cryptoOrgId: '11'.repeat(32),
@@ -286,7 +303,8 @@ describe('useOrganization setActive dedupe', () => {
         ],
       },
     ];
-    await render('cipher-team', 0);
+    await render(workspaceName, 1);
+    expect(latestOrganizationState!.organizationsLoading).toBe(false);
     expect(latestOrganizationState!.activeOrganization).toMatchObject({
       id: 'encrypted',
       members: [{ userId: 'user-1', role: 'member' }],
@@ -331,11 +349,14 @@ describe('useOrganization setActive dedupe', () => {
   });
   it('isolates an unavailable encrypted directory from a healthy ordinary workspace and fails closed for an unknown encrypted target', async () => {
     organizationMocks.encryptedWorkspaces = undefined;
-    organizationMocks.directoryError = new Error('directory unavailable');
     await render('old-workspace', 0, true);
+    expect(latestOrganizationState!.organizationsLoading).toBe(false);
+    expect(latestGlobalState!.organizationsLoading).toBe(false);
+    organizationMocks.directoryError = new Error('directory unavailable');
+    await render('old-workspace', 1, true);
     expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
     expect(latestOrganizationState!.error).toBeNull();
-    await render('unknown-encrypted', 1, true);
+    await render('unknown-encrypted', 2, true);
     expect(latestOrganizationState!.activeOrganization).toBeNull();
     expect(latestOrganizationState!.organizationsError?.message).toContain(
       'Encrypted membership directory'
@@ -833,5 +854,289 @@ describe('useOrganization list recovery', () => {
     ]);
     expect(latestOrganizationState?.activeOrganization?.id).toBe('workspace-first-login');
     expect(latestOrganizationState?.error).toBeNull();
+  });
+
+  it('prevents a slow ordinary workspace switch from clobbering a newer encrypted workspace selection', async () => {
+    const ordinaryB = createOrganization('ordinary-b', 'ordinary-b', 'Ordinary B');
+    const encryptedA = {
+      id: 'encrypted-a',
+      name: 'Encrypted A',
+      slug: 'encrypted-a',
+      contentMode: 'e2ee' as const,
+      contentModeVersion: 1 as const,
+      cryptoOrgId: '11'.repeat(32),
+      genesisHash: '11'.repeat(32),
+      role: 'owner',
+      members: [
+        {
+          id: 'm1',
+          userId: 'user-1',
+          role: 'owner',
+          user: { id: 'user-1', name: 'User', email: 'user@example.com' },
+        },
+      ],
+    };
+    let resolveOrdinarySwitch!: (value: { data: TestOrganization; error: null }) => void;
+    const ordinarySwitchPromise = new Promise<{ data: TestOrganization; error: null }>(
+      (resolve) => {
+        resolveOrdinarySwitch = resolve;
+      }
+    );
+    organizationMocks.encryptedWorkspaces = [encryptedA];
+    organizationMocks.setActive.mockImplementation(() => ordinarySwitchPromise);
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useListOrganizations: () => ({
+        data: [ordinaryB],
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: null,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    const raceStore = createStore();
+    await act(async () => {
+      if (!container) {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+      }
+      root?.render(createElement(TestApp, { targetSlug: '', renderVersion: 0, store: raceStore }));
+    });
+    // Start switching to ordinary B (in-flight async), then immediately switch to encrypted A.
+    const ordinarySwitch = latestOrganizationState!.activateOrganization('ordinary-b');
+    await act(async () => {
+      await latestOrganizationState!.activateOrganization('encrypted-a');
+    });
+    expect(latestOrganizationState?.activeOrganization?.id).toBe('encrypted-a');
+
+    // Now the stale ordinary B switch resolves; it must NOT clear the encrypted A selection.
+    await act(async () => {
+      resolveOrdinarySwitch({ data: ordinaryB, error: null });
+      await ordinarySwitch;
+    });
+    expect(latestOrganizationState?.activeOrganization?.id).toBe('encrypted-a');
+  });
+
+  it('ignores null entries in ordinary and encrypted organization lists without throwing', async () => {
+    const ordinaryA = createOrganization('ordinary-a', 'ordinary-a', 'Ordinary A');
+    organizationMocks.encryptedWorkspaces = [null];
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useListOrganizations: () => ({
+        data: [null, ordinaryA],
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: ordinaryA,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    const store = createStore();
+    await act(async () => {
+      if (!container) {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+      }
+      root?.render(createElement(TestApp, { targetSlug: 'ordinary-a', renderVersion: 0, store }));
+    });
+    expect(latestOrganizationState?.organizations?.map((org) => org.id)).toEqual(['ordinary-a']);
+  });
+
+  it('drops null and malformed items from organization lists without crashing render', async () => {
+    const validOrg = createOrganization('workspace-valid', 'valid-workspace', 'Valid Workspace');
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useListOrganizations: () => ({
+        data: [null, { slug: 'missing-id' }, validOrg, undefined] as unknown[],
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: validOrg,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    const localStore = createStore();
+    await act(async () => {
+      if (!container) {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+      }
+      root?.render(
+        createElement(TestApp, {
+          targetSlug: 'valid-workspace',
+          renderVersion: 1,
+          store: localStore,
+        })
+      );
+    });
+    expect(latestOrganizationState?.organizations).toEqual([validOrg]);
+    expect(latestOrganizationState?.activeOrganization?.id).toBe('workspace-valid');
+    expect(latestOrganizationState?.error).toBeNull();
+  });
+
+  it('degrades malformed activeOrganization payloads into an explicit error instead of crashing', async () => {
+    const validOrg = createOrganization('workspace-valid', 'valid-workspace', 'Valid Workspace');
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useListOrganizations: () => ({
+        data: [validOrg],
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: { slug: 'broken-without-id' } as unknown,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    const localStore = createStore();
+    await act(async () => {
+      if (!container) {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+      }
+      root?.render(
+        createElement(TestApp, {
+          targetSlug: 'valid-workspace',
+          renderVersion: 1,
+          store: localStore,
+        })
+      );
+    });
+    expect(latestOrganizationState?.activeOrganization).toBeNull();
+    expect(latestOrganizationState?.error).toBeInstanceOf(Error);
+  });
+});
+
+describe('runtime external boundary decoding across auth, cloud, and IPC', () => {
+  it('preserves verified account id when display name is empty (e.g. Apple Sign-In) and still fails closed without account id', async () => {
+    const { safeNormalizeCurrentUserFromSessionUser } = await import('../src/lib/current-user');
+
+    expect(
+      safeNormalizeCurrentUserFromSessionUser({
+        id: 'user-apple-1',
+        email: 'apple.user@privaterelay.appleid.com',
+        name: '',
+      })
+    ).toEqual({
+      id: 'user-apple-1',
+      email: 'apple.user@privaterelay.appleid.com',
+      name: 'User',
+      image: undefined,
+    });
+
+    expect(
+      safeNormalizeCurrentUserFromSessionUser({
+        id: 'user-apple-2',
+        email: 'member@example.com',
+        name: '   ',
+      })
+    ).toEqual({
+      id: 'user-apple-2',
+      email: 'member@example.com',
+      name: 'User',
+      image: undefined,
+    });
+
+    expect(
+      safeNormalizeCurrentUserFromSessionUser({
+        id: '',
+        email: 'missing-id@example.com',
+        name: 'Has Name',
+      })
+    ).toBeNull();
+
+    expect(
+      safeNormalizeCurrentUserFromSessionUser({
+        email: 'no-id@example.com',
+        name: 'Has Name',
+      })
+    ).toBeNull();
+  });
+
+  it('filters null organization items and rejects malformed single objects in cloudOperations decoders', async () => {
+    const { cloudOperations } = await import('../src/lib/cloud-api-operations');
+
+    const membersDecoded = cloudOperations.workspaceMembers.list.decode!([
+      null,
+      { userId: 'u-1', name: 'Alice', image: null },
+      { userId: '' },
+    ]);
+    expect(membersDecoded.ok).toBe(true);
+    if (membersDecoded.ok) {
+      expect(membersDecoded.data).toEqual([{ userId: 'u-1', name: 'Alice', image: null }]);
+    }
+
+    const badAccess = cloudOperations.auth.getWorkspaceAccessBySlug.decode!({
+      status: 'member',
+    });
+    expect(badAccess.ok).toBe(false);
+
+    const goodAccess = cloudOperations.auth.getWorkspaceAccessBySlug.decode!({
+      status: 'member',
+      organizationId: 'org-1',
+    });
+    expect(goodAccess).toEqual({
+      ok: true,
+      data: { status: 'member', organizationId: 'org-1' },
+    });
+  });
+
+  it('drops malformed IPC push payloads in onIpcEvent', async () => {
+    const { onIpcEvent } = await import('../src/lib/electron-ipc-client');
+    let listener: ((payload: unknown) => void) | undefined;
+    const prevIpc = window.ipc;
+    window.ipc = {
+      invoke: async () => undefined,
+      send: () => {},
+      on: (_channel, fn) => {
+        listener = fn;
+        return () => {};
+      },
+    };
+    const received: unknown[] = [];
+    try {
+      const stop = onIpcEvent('auth.loginState', (state) => {
+        received.push(state);
+      });
+      listener?.({ phase: 'authenticated', revision: 'not-a-number' });
+      expect(received).toEqual([]);
+      const validState = {
+        revision: 1,
+        attemptId: null,
+        phase: 'idle',
+        session: null,
+        error: null,
+        errorDetail: null,
+      };
+      listener?.(validState);
+      expect(received).toEqual([validState]);
+      stop();
+    } finally {
+      window.ipc = prevIpc;
+    }
   });
 });

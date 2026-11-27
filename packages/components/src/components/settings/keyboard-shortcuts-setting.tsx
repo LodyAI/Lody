@@ -1,8 +1,10 @@
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { useAtomValue } from 'jotai';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { todayFeatureEnabledAtom } from '@/atoms/settings';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, radius } from '@lody/ui/tokens/scales.stylex';
@@ -120,9 +122,16 @@ export function KeyboardShortcutsSetting() {
 
   const anyOverridden = useMemo(() => all.some((cmd) => commands.hasUserOverride(cmd.id)), [all]);
 
+  const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
+  const visibleGlobalShortcuts = useMemo(
+    () =>
+      GLOBAL_SHORTCUTS.filter((shortcut) => shortcut.id !== 'today.toggleWindow' || todayEnabled),
+    [todayEnabled]
+  );
+
   // Global (OS-level) shortcuts are registered in the Electron main process and only
   // exist on the desktop app — hide the section entirely on web/mobile.
-  const showGlobalShortcuts = getRuntime() === 'electron' && GLOBAL_SHORTCUTS.length > 0;
+  const showGlobalShortcuts = getRuntime() === 'electron' && visibleGlobalShortcuts.length > 0;
   const { shortcuts: globalBindings, setBinding: setGlobalBinding } = useGlobalShortcuts();
 
   const handleResetAll = useCallback(() => {
@@ -135,15 +144,18 @@ export function KeyboardShortcutsSetting() {
     (binding: string): string | null => {
       const canonical = canonicalizeBinding(binding);
       if (!canonical) return null;
+      const visibleIds = new Set(visibleGlobalShortcuts.map((shortcut) => shortcut.id));
       const hit = globalBindings.find(
         (entry: GlobalShortcutBinding) =>
-          entry.binding !== null && canonicalizeBinding(entry.binding) === canonical
+          visibleIds.has(entry.id) &&
+          entry.binding !== null &&
+          canonicalizeBinding(entry.binding) === canonical
       );
       if (!hit) return null;
-      const mirror = GLOBAL_SHORTCUTS.find((shortcut) => shortcut.id === hit.id);
+      const mirror = visibleGlobalShortcuts.find((shortcut) => shortcut.id === hit.id);
       return mirror ? t(mirror.titleKey, { defaultValue: mirror.defaultTitle }) : hit.id;
     },
-    [globalBindings, t]
+    [globalBindings, t, visibleGlobalShortcuts]
   );
 
   return (
@@ -178,7 +190,7 @@ export function KeyboardShortcutsSetting() {
 
       {showGlobalShortcuts && (
         <CompactSection title={t('settings.keyboardShortcuts.globalSection')}>
-          {GLOBAL_SHORTCUTS.map((shortcut) => {
+          {visibleGlobalShortcuts.map((shortcut) => {
             const live = globalBindings.find((entry) => entry.id === shortcut.id);
             return (
               <GlobalShortcutRow

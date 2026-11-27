@@ -27,6 +27,11 @@ on:
         description: 'Original release-clients push: validation failed and all publishers skipped'
         required: true
         type: string
+      skip_validate:
+        description: Emergency bypass to skip lint/typecheck validation
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 env:
@@ -56,6 +61,7 @@ jobs:
       build_number: ${{ steps.recovery.outputs.build_number || github.run_number }}
       linux_arm64: ${{ github.event_name != 'workflow_dispatch' || steps.recovery.outputs.linux_arm64 == 'true' }}
       target_environment: ${{ (steps.recovery.outputs.validated == 'true' || github.ref_name == 'release') && 'production' || 'staging' }}
+      skip_validate: ${{ (github.event_name == 'push' && contains(github.event.head_commit.message || '', '[emergency-release]')) || (github.event_name == 'workflow_dispatch' && inputs.skip_validate == true) }}
     steps:
       - name: Checkout reviewed recovery helper
         if: github.event_name == 'workflow_dispatch'
@@ -112,7 +118,7 @@ jobs:
     needs: release
     permissions:
       contents: read
-    if: ${{ needs.release.outputs.publish_requested == 'true' }}
+    if: ${{ needs.release.outputs.publish_requested == 'true' && needs.release.outputs.skip_validate != 'true' }}
     runs-on: ubuntu-latest
     env:
       NODE_OPTIONS: --max-old-space-size=6144
@@ -163,6 +169,14 @@ jobs:
           - typecheck-desktop-cli
           - typecheck-mobile
     name: validate-app-redirects (${{ matrix.check }})
+  e2e-gate:
+    needs: release
+    if: ${{ needs.release.outputs.publish_requested == 'true' && needs.release.outputs.skip_validate != 'true' }}
+    uses: ./.github/workflows/release-e2e-gate.yml
+    with:
+      source-sha: ${{ needs.release.outputs.checkout_sha }}
+      target-environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+    secrets: inherit
   publish-daemon:
     permissions:
       contents: read
@@ -170,9 +184,13 @@ jobs:
     needs:
       - release
       - validate-app-redirects
-    if:
-      ${{ needs.release.outputs.publish_requested == 'true' && (contains(fromJSON(needs.release.outputs.paths_released),
-      'apps/cli') || github.event_name == 'workflow_dispatch') }}
+      - e2e-gate
+    if: >-
+      ${{ !cancelled() && needs.release.result == 'success' &&
+      ((needs.validate-app-redirects.result == 'success' && needs.e2e-gate.result == 'success') ||
+      (needs.validate-app-redirects.result == 'skipped' && needs.e2e-gate.result == 'skipped' && needs.release.outputs.skip_validate == 'true')) &&
+      needs.release.outputs.publish_requested == 'true' &&
+      (contains(fromJSON(needs.release.outputs.paths_released), 'apps/cli') || github.event_name == 'workflow_dispatch') }}
     uses: ./.github/workflows/publish-daemon-sea.yml
     with:
       source-sha: ${{ needs.release.outputs.checkout_sha }}
@@ -217,12 +235,16 @@ jobs:
     needs:
       - release
       - validate-app-redirects
+      - e2e-gate
       - verify-daemon-installation
     permissions:
       contents: read
       id-token: write
     if: |-
-      ${{ needs.verify-daemon-installation.result == 'success' &&
+      ${{ !cancelled() && needs.release.result == 'success' &&
+        ((needs.validate-app-redirects.result == 'success' && needs.e2e-gate.result == 'success') ||
+        (needs.validate-app-redirects.result == 'skipped' && needs.e2e-gate.result == 'skipped' && needs.release.outputs.skip_validate == 'true')) &&
+        needs.verify-daemon-installation.result == 'success' &&
         (
           needs.release.outputs.publish_requested == 'true' &&
           contains(fromJSON(needs.release.outputs.paths_released), 'apps/cli')
@@ -237,6 +259,7 @@ jobs:
       LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
       LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL }}
       SITE_URL: ${{ vars.SITE_URL }}
+      LODY_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
@@ -291,18 +314,23 @@ jobs:
     needs:
       - release
       - validate-app-redirects
+      - e2e-gate
     permissions:
       contents: read
     if: |-
-      ${{
+      ${{ !cancelled() && needs.release.result == 'success' &&
+        ((needs.validate-app-redirects.result == 'success' && needs.e2e-gate.result == 'success') ||
+        (needs.validate-app-redirects.result == 'skipped' && needs.e2e-gate.result == 'skipped' && needs.release.outputs.skip_validate == 'true')) &&
         (
-          needs.release.outputs.publish_requested == 'true' &&
-          contains(fromJSON(needs.release.outputs.paths_released), 'apps/electron')
-        ) ||
-        (
-          github.event_name == 'push' &&
-          needs.release.outputs.target_environment == 'production' &&
-          contains(github.event.head_commit.message || '', '[electron-release]')
+          (
+            needs.release.outputs.publish_requested == 'true' &&
+            contains(fromJSON(needs.release.outputs.paths_released), 'apps/electron')
+          ) ||
+          (
+            github.event_name == 'push' &&
+            needs.release.outputs.target_environment == 'production' &&
+            contains(github.event.head_commit.message || '', '[electron-release]')
+          )
         )
       }}
     strategy:
@@ -352,6 +380,7 @@ jobs:
           'next'
         }}
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      LODY_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       NODE_OPTIONS: --max-old-space-size=6144
       npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
       LODY_PLATFORM: cloud
@@ -854,17 +883,20 @@ jobs:
     needs:
       - release
       - validate-app-redirects
+      - e2e-gate
       - verify-daemon-installation
     permissions:
       contents: read
       actions: read
     if: >-
-      ${{ !cancelled() && needs.release.result == 'success' && needs.validate-app-redirects.result == 'success' &&
+      ${{ !cancelled() && needs.release.result == 'success' &&
+      ((needs.validate-app-redirects.result == 'success' && needs.e2e-gate.result == 'success') ||
+      (needs.validate-app-redirects.result == 'skipped' && needs.e2e-gate.result == 'skipped' && needs.release.outputs.skip_validate == 'true')) &&
       needs.verify-daemon-installation.result == 'success' &&
           ((github.event_name == 'push' || inputs.component == 'android') &&
         needs.release.outputs.publish_requested == 'true' &&
         contains(fromJSON(needs.release.outputs.paths_released), 'apps/mobile-capacitor')) }}
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
     env:
       LODY_ENV: ${{ needs.release.outputs.target_environment == 'production' && 'production' || 'staging' }}
@@ -901,6 +933,7 @@ jobs:
           vars.MOBILE_ANDROID_DOWNLOAD_BASE_URL_STAGING
         }}
       MOBILE_VERSION_CODE: ${{ needs.release.outputs.build_number }}
+      VITE_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
@@ -1103,11 +1136,14 @@ jobs:
     needs:
       - release
       - validate-app-redirects
+      - e2e-gate
     permissions:
       contents: read
       actions: read
     if: |-
-      ${{ !cancelled() && needs.release.result == 'success' && needs.validate-app-redirects.result == 'success' &&
+      ${{ !cancelled() && needs.release.result == 'success' &&
+        ((needs.validate-app-redirects.result == 'success' && needs.e2e-gate.result == 'success') ||
+        (needs.validate-app-redirects.result == 'skipped' && needs.e2e-gate.result == 'skipped' && needs.release.outputs.skip_validate == 'true')) &&
           ((github.event_name == 'push' || inputs.component == 'ios') &&
         needs.release.outputs.publish_requested == 'true' &&
         contains(fromJSON(needs.release.outputs.paths_released), 'apps/mobile-capacitor') &&
@@ -1137,6 +1173,7 @@ jobs:
       VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
       VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
       VITE_VIBELOFT_WEB_AUTH_KEY: ${{ vars.VITE_VIBELOFT_WEB_AUTH_KEY }}
+      VITE_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
       IOS_BUNDLE_ID: ai.lody.mobile
       LODY_PLATFORM: cloud
@@ -1567,3 +1604,37 @@ jobs:
             read: () => fs.readFile(path.join(root,name))}));
 
             await attachReleaseAssets({github, repo: context.repo, version, assets});
+  notify-feishu:
+    needs:
+      - release
+      - validate-app-redirects
+      - e2e-gate
+      - publish-daemon
+      - verify-daemon-installation
+      - publish-cli
+      - build-electron
+      - upload-electron-to-r2
+      - build-mobile-android
+      - upload-mobile-ios-to-app-store-connect
+      - attach-electron-release
+    if: always() && needs.release.outputs.publish_requested == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.release.outputs.checkout_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Send Feishu release notification
+        env:
+          FEISHU_ALERT_WEBHOOK_URL: ${{ secrets.FEISHU_ALERT_WEBHOOK_URL }}
+          FEISHU_ALERT_WEBHOOK_SECRET: ${{ secrets.FEISHU_ALERT_WEBHOOK_SECRET }}
+          FEISHU_NOTIFY_ON_SUCCESS: ${{ vars.FEISHU_NOTIFY_ON_SUCCESS || '' }}
+          RELEASE_CHANNEL: stable
+          RELEASE_MODE: ${{ needs.release.outputs.skip_validate == 'true' && 'emergency' || 'verified' }}
+          SOURCE_SHA: ${{ needs.release.outputs.checkout_sha || github.sha }}
+          JOB_RESULTS_JSON: ${{ toJSON(needs) }}
+        run: node .github/scripts/feishu-alert.mjs

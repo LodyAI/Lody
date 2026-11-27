@@ -1,0 +1,169 @@
+---
+title: "Si vienes de Codex o Claude Code"
+description: "Cómo se relaciona Lody con las CLI de Codex y Claude Code: qué se mantiene igual, qué añade Lody, una equivalencia de conceptos y una lista de verificación para migrar."
+---
+
+# Si vienes de Codex o Claude Code
+
+No tienes que dejar de usar la CLI de `codex` o `claude`. Lody ejecuta esos mismos entornos de ejecución mediante
+[Agent Configs](/es/docs/quickstart) y añade el espacio de trabajo a su alrededor: worktrees aislados, varias
+sesiones a la vez, revisión de diffs en vivo, traspaso en equipo y acceso móvil.
+
+<Callout title="En resumen">
+- Tus suscripciones, claves de API e inicios de sesión locales en la máquina se mantienen donde están.
+- Una sesión es el equivalente en Lody a una conversación de la CLI; un Agent Config es el entorno de ejecución que hay detrás.
+- Lo que añade Lody es la capa del espacio de trabajo: worktrees en paralelo, revisión, compartición y orquestación.
+</Callout>
+
+## Qué se mantiene igual
+
+- **El entorno de ejecución.** Lody lanza el mismo proceso de agente; no reemplaza el modelo ni el comportamiento
+  propio de la CLI.
+- **Tu autenticación.** Lody usa el inicio de sesión de la suscripción o la configuración de entorno que ya existe en
+  la máquina. Consulta [Agent Config](/es/docs/quickstart).
+- **Las convenciones de tu repositorio.** `AGENTS.md`, `CLAUDE.md` y el resto de las instrucciones de tu
+  proyecto siguen funcionando porque el agente sigue ejecutándose en el proyecto.
+- **Tu terminal.** Para una tarea puntual rápida, ejecutar la CLI directamente sigue siendo una buena opción.
+
+## Equivalencia de conceptos
+
+| A lo que estás acostumbrado | En Lody | Notas |
+| --- | --- | --- |
+| `claude` o `codex` en una terminal | Una [sesión](/es/docs/session) con un [Agent Config](/es/docs/quickstart) | El mismo entorno de ejecución, más una interfaz gráfica, acceso móvil y capa de equipo |
+| Un único checkout del repositorio | Un [worktree](/es/docs/worktrees) por sesión | Las sesiones dejan de colisionar sobre los mismos archivos |
+| Un prompt y sus ediciones | Una [ronda](/es/docs/diff-viewer) | Lody muestra el diff después de cada ronda |
+| `--resume` o `resume` | Reabrir la sesión desde la barra lateral | La conversación, la rama y el worktree permanecen juntos |
+| Revisión manual con `git diff` | [Visor de diffs](/es/docs/diff-viewer) y [Comentarios en el diff](/es/docs/diff-comments) | Comenta en líneas concretas y sincroniza con el PR de GitHub |
+| Una terminal a la vez | Varias [sesiones en paralelo](/es/docs/parallel-agents) | Cada tarea obtiene su propia rama y su propio worktree |
+| Comandos slash y modos | [Comandos slash](/es/docs/slash-commands) expuestos por el entorno de ejecución | Lody detecta lo que el entorno de ejecución admite |
+| Capturas de pantalla o transcripciones para el equipo | [Traspaso de sesión](/es/docs/session-handoff) | Invita a un compañero directamente a la sesión en vivo |
+
+Las capacidades opcionales de ACP y de extensiones de Lody que admite cada proveedor integrado se detallan en la matriz de
+[Compatibilidad de funciones de ACP y extensiones](/es/docs/acp-feature-support).
+
+## Qué añade Lody
+
+<Cards>
+  <Card href="/es/docs/parallel-agents" title="Trabajo en paralelo">
+    Ejecuta varias sesiones en tareas independientes sin que los archivos colisionen.
+  </Card>
+  <Card href="/es/docs/agent-collaboration" title="Colaboración multiagente">
+    Permite que Claude Code, Codex, Kimi o Grok deleguen y revisen el trabajo entre sí.
+  </Card>
+  <Card href="/es/docs/diff-comments" title="Ciclo de revisión">
+    Comenta sobre las líneas modificadas y envía el hilo de vuelta al agente.
+  </Card>
+  <Card href="/es/docs/session-handoff" title="Traspaso en equipo">
+    Incorpora a un compañero dentro de la misma sesión en vivo en lugar de enviarle una transcripción.
+  </Card>
+  <Card href="/es/docs/mobile" title="Móvil y remoto">
+    Dirige desde tu teléfono sesiones que se ejecutan en una máquina compartida.
+  </Card>
+  <Card href="/es/docs/scheduled-tasks" title="Tareas programadas">
+    Ejecuta trabajo recurrente de agentes en una máquina que esté en línea.
+  </Card>
+</Cards>
+
+## Lista de verificación para la migración
+
+<Steps>
+<Step>
+
+### 1. Instala Lody e inicia sesión
+
+Sigue la [Guía de inicio rápido](/es/docs/quickstart). Puedes empezar desde la aplicación de escritorio, la aplicación móvil o la
+CLI en una máquina remota.
+
+</Step>
+<Step>
+
+### 2. Conserva tu inicio de sesión actual
+
+Abre **Settings** -> **Agent Config** y añade una configuración para cada entorno de ejecución que uses. En la mayoría de los casos
+no necesitas nuevas credenciales: Lody utiliza el inicio de sesión de la suscripción o la configuración de entorno que ya está
+presente en la máquina.
+
+</Step>
+<Step>
+
+### 3. Añade tus proyectos
+
+Añade un [proyecto local](/es/docs/local-project) para un directorio en el que ya trabajas, o conecta un
+[repositorio de GitHub](/es/docs/github) para pull requests y CI. Si ya has estado ejecutando Codex o
+Claude Code en ese proyecto local, Lody puede importar y continuar el historial existente. Consulta
+[Sincronizar el historial de agentes de código](/es/docs/local-project#sincronizar-el-historial-de-agentes-de-código-codex-claude-code-y-más).
+
+</Step>
+<Step>
+
+### 4. Ejecuta una sesión pequeña
+
+Usa [Tu primera sesión](/es/docs/first-session) con una tarea que podrías terminar en una sola sesión de CLI.
+Confirma que el proyecto, el Agent Config y el modelo sean los que esperas.
+
+</Step>
+<Step>
+
+### 5. Guarda la configuración que repites
+
+Si siempre empiezas el mismo tipo de tarea con la misma máquina, configuración, modelo e instrucciones,
+guárdalo como un [Agent Role](/es/docs/agent-roles) en lugar de elegirlo todo cada vez.
+
+</Step>
+<Step>
+
+### 6. Añade la capa del espacio de trabajo cuando la necesites
+
+Conecta GitHub para PRs y CI, prueba las [sesiones en paralelo](/es/docs/parallel-agents) con dos tareas pequeñas o
+invita a un compañero con el [traspaso de sesión](/es/docs/session-handoff). Puedes adoptar estas funciones una por una.
+
+</Step>
+</Steps>
+
+## Cuándo la CLI sigue siendo la mejor herramienta
+
+<Callout type="info" title="Conserva la terminal para las tareas adecuadas">
+Usa la CLI directamente cuando quieras una única edición rápida sin rastro de revisión, cuando estés depurando
+el propio agente o en una máquina donde no quieras ejecutar el daemon de Lody. Lody resulta más útil
+cuando una tarea se beneficia de un worktree, un diff revisable, un compañero de equipo o un segundo dispositivo.
+</Callout>
+
+## Preguntas frecuentes
+
+### ¿Lody reemplaza la CLI de Codex o Claude Code?
+
+No. Lody lanza esos entornos de ejecución, entre otros, y añade un espacio de trabajo a su alrededor. La CLI sigue siendo una
+forma compatible de trabajar, y la misma máquina puede usar ambas.
+
+### ¿Tengo que mover mis claves de API o mi suscripción?
+
+No. En el caso habitual, Lody utiliza el inicio de sesión de la suscripción o la configuración de entorno que ya está en
+la máquina. Añades un [Agent Config](/es/docs/quickstart) para que Lody sepa qué entorno de ejecución lanzar; no
+migras las credenciales dentro de Lody.
+
+### ¿Puedo seguir usando el AGENTS.md o CLAUDE.md de mi repositorio?
+
+Sí. El agente sigue ejecutándose dentro de tu repositorio, por lo que los archivos de instrucciones que ya lee siguen
+funcionando.
+
+### ¿Cómo reanudo una conversación como con `codex resume` o `claude --resume`?
+
+Abre la sesión desde la barra lateral. Lody mantiene juntos la conversación, la rama y el worktree. Cuando
+el entorno de ejecución admite la bifurcación nativa, también puedes crear un
+[fork](/es/docs/session#bifurcar-una-sesión) para continuar en una nueva dirección sin modificar el original.
+Consulta [Sesiones](/es/docs/session).
+
+### ¿Puedo usar Lody desde mi teléfono con la misma sesión?
+
+Sí. La máquina de ejecución debe estar en línea y con la sesión iniciada en el mismo espacio de trabajo de Lody. Consulta
+[Acceso móvil](/es/docs/mobile).
+
+## Siguiente
+
+<Cards>
+  <Card href="/es/docs/first-session" title="Tu primera sesión" />
+  <Card href="/es/docs/concepts" title="Conceptos y glosario" />
+  <Card href="/es/docs/workflow" title="Flujo de trabajo recomendado" />
+  <Card href="/es/docs/parallel-agents" title="Agentes de programación en paralelo" />
+  <Card href="/es/docs/acp-feature-support" title="Compatibilidad de funciones de ACP y extensiones" />
+</Cards>

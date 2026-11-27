@@ -187,14 +187,14 @@ describe('Antigravity ACP v1 compatibility and sessionActivity boundary', () => 
     });
     await builtin.client.startSession({} as never, '/synthetic/project');
     expect(builtin.client.reportsSessionActivity()).toBe(false);
-    expect(builtin.client.getNativeActivityObservation()).toBe('unknown');
+    expect(builtin.client.getNativeWork()).toBeNull();
 
     const customModern = createHarness({
       agentConfig: { cliType: 'custom', agentType: 'my-agy' },
     });
     await customModern.client.startSession({} as never, '/synthetic/project');
     expect(customModern.client.reportsSessionActivity()).toBe(false);
-    expect(customModern.client.getNativeActivityObservation()).toBe('unknown');
+    expect(customModern.client.getNativeWork()).toBeNull();
 
     mockState.prompt.mockResolvedValueOnce({
       stopReason: 'end_turn',
@@ -240,7 +240,7 @@ describe('Antigravity ACP v1 compatibility and sessionActivity boundary', () => 
     });
     await customLegacy.client.startSession({} as never, '/synthetic/project');
     expect(customLegacy.client.reportsSessionActivity()).toBe(false);
-    expect(customLegacy.client.getNativeActivityObservation()).toBe('unknown');
+    expect(customLegacy.client.getNativeWork()).toBeNull();
     await expect(
       customLegacy.client.unstable_createElicitation(elicitationParams)
     ).resolves.toEqual({ action: 'cancel' });
@@ -328,6 +328,7 @@ describe('Antigravity ACP v1 compatibility and sessionActivity boundary', () => 
     const harness = createHarness();
     await harness.client.startSession({} as never, '/synthetic/project');
     expect(harness.client.reportsSessionActivity()).toBe(true);
+    expect(harness.client.getNativeWork()).toBeNull();
 
     await mockState.client?.extNotification?.('_lody/session/activity_update', {
       version: 1,

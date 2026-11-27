@@ -34,6 +34,7 @@ export type InboxMember = {
   chainDepth: number;
   completion: unknown;
 };
+export type DepthLimitedIntent = { intentId: string; sessionId: string; pendingResults: number };
 export type InboxRelease = InboxInput & {
   executionId: string;
   outcome: 'normal' | 'user_stop' | 'failed';

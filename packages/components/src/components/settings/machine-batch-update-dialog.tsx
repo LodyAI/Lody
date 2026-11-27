@@ -23,6 +23,13 @@ export type BatchUpdateProbe = {
   update?: ManagedDaemonUpdateStatus | null;
 };
 type SwitchPolicy = 'when-idle' | 'immediate';
+type ProbeResult = {
+  lifecycle: MachineLifecycleCapability | null;
+  /** Set when the `machine/status` read itself failed, with its error. */
+  failure?: string;
+  /** Another attempt is scheduled or in flight. */
+  retrying: boolean;
+};
 type RequestState = {
   request: 'requesting' | 'accepted' | 'failed';
   error?: string;
@@ -58,6 +65,13 @@ const styles = stylex.create({
     marginBlockStart: space[2],
   },
 });
+
+/**
+ * A failed status read (a Streams 503 during a cloud restart, a 30s timeout) is
+ * retried while the dialog is in review; the delays span about a minute of outage.
+ * The read is a pure query, so a repeat has no effect on the machine.
+ */
+export const BATCH_PROBE_RETRY_DELAYS_MS = [5_000, 15_000, 30_000] as const;
 
 const TERMINAL: ReadonlySet<BatchRowStatus['kind']> = new Set([
   'updated',
@@ -95,10 +109,8 @@ export function MachineBatchUpdateDialog({
   ) => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [lifecycleById, setLifecycleById] = useState<
-    Map<string, MachineLifecycleCapability | null>
-  >(new Map());
-  const [probing, setProbing] = useState(false);
+  const [probeById, setProbeById] = useState<Map<string, ProbeResult>>(new Map());
+  const [probeTargetIds, setProbeTargetIds] = useState<readonly string[]>([]);
   const [policy, setPolicy] = useState<SwitchPolicy>('when-idle');
   const [step, setStep] = useState<'review' | 'confirm-immediate' | 'running'>('review');
   const [requests, setRequests] = useState<Map<string, RequestState>>(new Map());
@@ -112,6 +124,40 @@ export function MachineBatchUpdateDialog({
   const probesInFlight = useRef(new Set<string>());
   // A run with unfinished machines survives closing and reopening the dialog.
   const runActiveRef = useRef(false);
+  // Bumped when the dialog closes or a run starts: older probe chains stop.
+  const probeGenerationRef = useRef(0);
+  const probeTimersRef = useRef(new Set<ReturnType<typeof setTimeout>>());
+
+  const stopProbeRetries = useCallback(() => {
+    probeGenerationRef.current += 1;
+    for (const timer of probeTimersRef.current) clearTimeout(timer);
+    probeTimersRef.current.clear();
+  }, []);
+
+  /** Read one machine's capability, retrying a failed read after each delay. */
+  const probeMachine = useCallback((machineId: string, delays: readonly number[]) => {
+    const generation = probeGenerationRef.current;
+    const attempt = async (remaining: readonly number[]): Promise<void> => {
+      const outcome = await probeRef.current(machineId).then(
+        (result): Omit<ProbeResult, 'retrying'> => ({ lifecycle: result.lifecycle }),
+        (error: unknown): Omit<ProbeResult, 'retrying'> => ({
+          lifecycle: null,
+          failure: error instanceof Error ? error.message : String(error),
+        })
+      );
+      if (generation !== probeGenerationRef.current) return;
+      const [delay, ...rest] = remaining;
+      const retrying = outcome.failure !== undefined && delay !== undefined;
+      setProbeById((current) => new Map(current).set(machineId, { ...outcome, retrying }));
+      if (!retrying) return;
+      const timer = setTimeout(() => {
+        probeTimersRef.current.delete(timer);
+        void attempt(rest);
+      }, delay);
+      probeTimersRef.current.add(timer);
+    };
+    void attempt(delays);
+  }, []);
 
   // Probe each owned online machine's lifecycle capability when the dialog opens.
   useEffect(() => {
@@ -119,34 +165,33 @@ export function MachineBatchUpdateDialog({
     setStep('review');
     setRequests(new Map());
     setPolicy('when-idle');
-    let cancelled = false;
+    setProbeById(new Map());
     const targets = machinesRef.current.filter((machine) => machine.isOwn && machine.isOnline);
-    setProbing(true);
-    void Promise.all(
-      targets.map(async (machine) => {
-        const result = await probeRef.current(machine.id).catch(() => ({ lifecycle: null }));
-        return [machine.id, result.lifecycle] as const;
-      })
-    ).then((entries) => {
-      if (cancelled) return;
-      setLifecycleById(new Map(entries));
-      setProbing(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
+    setProbeTargetIds(targets.map((machine) => machine.id));
+    for (const machine of targets) probeMachine(machine.id, BATCH_PROBE_RETRY_DELAYS_MS);
+    return stopProbeRetries;
+  }, [open, probeMachine, stopProbeRetries]);
 
+  const retryProbe = (machineId: string) => {
+    setProbeById((current) => new Map(current).set(machineId, { lifecycle: null, retrying: true }));
+    probeMachine(machineId, []);
+  };
+
+  const probing = probeTargetIds.some((machineId) => !probeById.has(machineId));
   const plan = useMemo(
     () =>
       planMachineBatchUpdate(
-        machines.map((machine) => ({
-          ...machine,
-          lifecycle: lifecycleById.get(machine.id) ?? null,
-        })),
+        machines.map((machine) => {
+          const probe = probeById.get(machine.id);
+          return {
+            ...machine,
+            lifecycle: probe?.lifecycle ?? null,
+            probeFailed: probe?.failure !== undefined || probe?.retrying === true,
+          };
+        }),
         latestByChannel ?? {}
       ),
-    [machines, lifecycleById, latestByChannel]
+    [machines, probeById, latestByChannel]
   );
   const updatable = plan.filter((row) => row.kind === 'update');
   const runningTotal = updatable.reduce((sum, row) => sum + row.runningSessionCount, 0);
@@ -226,6 +271,11 @@ export function MachineBatchUpdateDialog({
   }, [open, pendingKey, step]);
 
   const start = useCallback(() => {
+    // Rows still unreachable stay out of this run; a late answer must not add them.
+    stopProbeRetries();
+    setProbeById(
+      (current) => new Map([...current].map(([id, probe]) => [id, { ...probe, retrying: false }]))
+    );
     setStep('running');
     setRequests(
       new Map(updatable.map((row) => [row.machineId, { request: 'requesting' } as RequestState]))
@@ -252,7 +302,7 @@ export function MachineBatchUpdateDialog({
           )
       );
     }
-  }, [policy, requestUpgrade, updatable]);
+  }, [policy, requestUpgrade, stopProbeRetries, updatable]);
 
   const confirm = () => {
     if (policy === 'immediate' && runningTotal > 0 && step === 'review') {
@@ -322,6 +372,15 @@ export function MachineBatchUpdateDialog({
             'settings.machines.batchUpdate.unsupported.unknown',
             'Could not read whether this machine can update remotely'
           ),
+          unreachable: probeById.get(row.machineId)?.retrying
+            ? t(
+                'settings.machines.batchUpdate.unsupported.unreachableRetrying',
+                "Couldn't reach this machine through Lody's cloud; retrying…"
+              )
+            : t(
+                'settings.machines.batchUpdate.unsupported.unreachable',
+                "Couldn't reach this machine through Lody's cloud. Try again in a moment."
+              ),
         }[row.reason ?? 'unknown'];
     }
   };
@@ -380,6 +439,24 @@ export function MachineBatchUpdateDialog({
                   ) : null}
                   {!status && row.kind === 'unsupported' && row.reason === 'install' ? (
                     <code {...stylex.props(styles.command)}>{installCommand}</code>
+                  ) : null}
+                  {!status &&
+                  row.reason === 'unreachable' &&
+                  !probeById.get(row.machineId)?.retrying ? (
+                    <div {...stylex.props(styles.rowLine)}>
+                      <span {...stylex.props(styles.detail)}>
+                        {probeById.get(row.machineId)?.failure}
+                      </span>
+                      {step === 'review' ? (
+                        <Button
+                          size="small"
+                          variant="secondary"
+                          onClick={() => retryProbe(row.machineId)}
+                        >
+                          {t('common.retry', 'Retry')}
+                        </Button>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
               );

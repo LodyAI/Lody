@@ -38,7 +38,8 @@ function useMinuteClock() {
 }
 
 const duration = (t: TFunction, ms: number) => {
-  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (ms < 60_000) return t('e2ee.offline.lessThanMinute');
+  const minutes = Math.round(ms / 60_000);
   const hours = Math.floor(minutes / 60);
   return hours === 0
     ? t('e2ee.offline.minutes', { count: minutes })
@@ -80,6 +81,7 @@ export function E2eeMachineWindowPillView(props: { window: E2eeOfflineWindow; no
   const minutes = Math.max(0, Math.floor(left / 60_000));
   return (
     <Badge
+      tone={left > 0 ? 'neutral' : 'warning'}
       data-e2ee-machine-window={left > 0 ? 'active' : 'paused'}
     >
       {left > 0

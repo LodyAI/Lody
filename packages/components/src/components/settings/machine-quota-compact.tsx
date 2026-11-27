@@ -8,8 +8,7 @@ import {
   parseRateLimitEntryKey,
 } from '@lody/shared';
 import { formatDistanceToNow, type Locale } from 'date-fns';
-import { enUS } from 'date-fns/locale/en-US';
-import { zhCN } from 'date-fns/locale/zh-CN';
+import { getDateFnsLocale } from '@/lib/date-fns-locale';
 import { AnthropicIcon } from '@/components/icons/anthropic-icon';
 import { OpenAIIcon } from '@/components/icons/openai-icon';
 import * as stylex from '@stylexjs/stylex';
@@ -36,7 +35,7 @@ export type MachineQuotaCompactProps = {
 
 export function MachineQuotaCompact({ raceLimits, filterCliType }: MachineQuotaCompactProps) {
   const { t, i18n } = useTranslation();
-  const localeObj: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const localeObj: Locale = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
   const entries = useMemo(
     () =>
       Object.entries(raceLimits ?? {})

@@ -108,7 +108,11 @@ function SidebarHeaderIconButton({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className={cn(stylex.props(sidebarSurface.iconButton, navStyles.button, disabled && navStyles.disabled).className, className)}
+      className={cn(
+        stylex.props(sidebarSurface.iconButton, navStyles.button, disabled && navStyles.disabled)
+          .className,
+        className
+      )}
     >
       {children}
     </button>
@@ -145,9 +149,7 @@ export function SidebarHistoryControls({
   const { canGoBack, canGoForward } = useNavigationAvailability();
   return (
     <Tooltip.Provider delay={400}>
-      <div
-        className={cn(stylex.props(navStyles.row).className, className)}
-      >
+      <div className={cn(stylex.props(navStyles.row).className, className)}>
         {onToggleSidebar ? (
           <SidebarHeaderIconButton
             label={t('commands.sidebar.toggle', 'Toggle Sidebar')}
@@ -155,7 +157,6 @@ export function SidebarHistoryControls({
             onClick={() => onToggleSidebar()}
             // Always visible: the collapse control is found where it
             // was last seen, not revealed by hovering the header.
-
           >
             <CuidaSidebarExpandOutline {...stylex.props(themeStyles.glyph)} />
           </SidebarHeaderIconButton>

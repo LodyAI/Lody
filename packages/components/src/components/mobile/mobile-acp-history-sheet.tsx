@@ -3,8 +3,7 @@ import { useFoldAwareSheetHeight } from './use-vertical-division';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Locale } from 'date-fns';
-import { enUS } from 'date-fns/locale/en-US';
-import { zhCN } from 'date-fns/locale/zh-CN';
+import { getDateFnsLocale } from '@/lib/date-fns-locale';
 import { formatDistanceToNow } from 'date-fns';
 import { AlertCircle, Check, Download, RefreshCw, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -398,7 +397,7 @@ export function MobileAcpHistorySheet({
 }: MobileAcpHistorySheetProps) {
   const { t, i18n } = useTranslation();
   const maxHeight = useFoldAwareSheetHeight(88);
-  const localeObj: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const localeObj: Locale = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
   const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
   const providerLabel = state.providerLabel ?? getHistoryProviderLabel(state.provider);
   const [conflictSessionToResolve, setConflictSessionToResolve] =

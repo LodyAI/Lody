@@ -56,9 +56,7 @@ export type SessionSendProgress = {
 };
 
 /** One held message's own status, for surfaces that list messages separately. */
-export function deriveSessionSendProgress(
-  send: PendingSessionSend
-): SessionSendProgress {
+export function deriveSessionSendProgress(send: PendingSessionSend): SessionSendProgress {
   const { totalBytes, sentBytes } = sendBytes(send);
   return {
     state: send.error ? 'failed' : 'sending',

@@ -874,6 +874,21 @@ export function portableCreation(input: PortableCreateOptions & { readonly accou
               try: () => store.write({ ...record, boundWorkspaceId: created.workspaceId }),
               catch: (cause) => cause,
             });
+            const tempNames = creationNames(input.namespace, record.requestId);
+            if (
+              typeof indexedDB !== 'undefined' &&
+              typeof indexedDB.deleteDatabase === 'function'
+            ) {
+              for (const dbName of [
+                tempNames.ledger,
+                tempNames.custody,
+                `${tempNames.custody}:native-originals`,
+              ]) {
+                try {
+                  indexedDB.deleteDatabase(dbName);
+                } catch {}
+              }
+            }
           } finally {
             keys.signing.fill(0);
             keys.encryption.fill(0);

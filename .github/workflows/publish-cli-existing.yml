@@ -63,6 +63,7 @@ jobs:
       LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
       LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL }}
       SITE_URL: ${{ vars.SITE_URL }}
+      LODY_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud

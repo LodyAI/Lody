@@ -60,6 +60,7 @@ export class LodyWorld extends World {
   reviewFixture: SyntheticReviewRepository | null = null;
   activeAcpEvent: ScriptedAcpEvent | null = null;
   mcpSessionEvent: McpCatalogAcpEvent | null = null;
+  mcpFollowUpSessionEvent: McpCatalogAcpEvent | null = null;
   workResources: WorkSessionResources | null = null;
   sessionForkResources: SessionForkResources | null = null;
   sessionRelationLifecycleResources: SessionRelationLifecycleResources | null = null;

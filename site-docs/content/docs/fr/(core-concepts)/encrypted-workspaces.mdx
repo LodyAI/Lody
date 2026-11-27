@@ -1,0 +1,63 @@
+---
+title: "Espaces de travail chiffrés de bout en bout"
+description: "Guide en langage clair des espaces de travail chiffrés de bout en bout de Lody : qui peut voir le contenu, comment inviter des coéquipiers et ajouter des appareils, et ce qui se passe en cas de perte de vos appareils."
+---
+
+# Espaces de travail chiffrés de bout en bout
+
+Dans un espace de travail chiffré de bout en bout, les conversations, les fichiers et les sorties des agents **ne peuvent être lus que sur les appareils que vous avez autorisés**. Les serveurs de Lody relaient et stockent les données, mais ne voient jamais que des données qu'ils ne peuvent pas lire.
+
+<Callout type="warn">
+Si vous perdez tous vos appareils autorisés et que vous ne disposez d'aucun fichier de récupération, l'espace de travail ne pourra plus jamais être rouvert et Lody ne pourra pas le récupérer. Configurez un fichier de récupération rapidement après avoir créé l'espace de travail.
+</Callout>
+
+## Différences avec un espace de travail standard
+
+| | Espace de travail standard | Espace de travail chiffré de bout en bout |
+| --- | --- | --- |
+| Qui peut lire le contenu | Les membres ayant accès et les serveurs de Lody | Uniquement les appareils autorisés |
+| Utiliser un nouvel appareil | Se connecter | Se connecter, puis l'approuver depuis un appareil autorisé |
+| Application web | Fonctionne immédiatement | Le navigateur doit d'abord être autorisé |
+| Perte de tous les appareils | Se reconnecter | Nécessite un fichier de récupération ou une clé d'accès (passkey) |
+
+## Tâches courantes
+
+<Steps>
+<Step>
+
+**Reconnaître un espace de travail chiffré** : un cadenas apparaît à côté de son nom. Survolez le cadenas pour afficher une explication.
+
+</Step>
+<Step>
+
+**Inviter un coéquipier** : envoyez une invitation depuis Paramètres › Général › Ouvrir la console de chiffrement › Membres et invitations. Une fois qu'un administrateur l'a approuvée, son appareil reçoit la clé.
+
+</Step>
+<Step>
+
+**L'ouvrir sur un nouvel appareil** : le nouvel appareil envoie automatiquement une demande. Votre ordinateur ou téléphone autorisé affiche une fenêtre d'approbation ; vérifiez que les numéros correspondent sur les deux écrans et choisissez Autoriser.
+
+</Step>
+<Step>
+
+**Comparer avec vos coéquipiers** : sous Code de sécurité et historique, comparez les codes de sécurité pour confirmer que tout le monde voit les mêmes membres et appareils.
+
+</Step>
+<Step>
+
+**Configurer la récupération** : sous Récupération, enregistrez un fichier de récupération ou ajoutez une clé d'accès (passkey) afin de pouvoir continuer à ouvrir l'espace de travail en cas de perte de tous vos appareils.
+
+</Step>
+</Steps>
+
+## En savoir plus
+
+<Cards>
+  <Card title="Fonctionnement du registre des permissions" href="/fr/docs/encrypted-workspaces-ledger" description="Qui peut ajouter des membres et des appareils, et pourquoi le serveur ne peut ajouter personne discrètement." />
+  <Card title="Ce que prouve le code de sécurité" href="/fr/docs/encrypted-workspaces-security-code" description="Comment le code est calculé et ce que signifie une concordance ou une divergence." />
+</Cards>
+
+## Limites connues
+
+- Dans un navigateur, la sécurité repose sur le fait que le code servi par le site web de Lody n'ait pas été altéré. Si ce point est important pour vous, utilisez l'application de bureau ou mobile.
+- Lorsque le serveur est inaccessible, vos machines peuvent continuer à fonctionner pendant une durée limitée ; l'envoi d'invitations, l'approbation d'appareils et le remplacement de clés attendent que vous soyez de nouveau en ligne.

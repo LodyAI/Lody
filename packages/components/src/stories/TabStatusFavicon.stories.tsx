@@ -65,8 +65,8 @@ function ThemedShowcase({ mode }: { mode: 'light' | 'dark' }) {
         <header style={{ marginBottom: 32 }}>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Tab status favicon</h1>
           <p style={{ fontSize: 13, color: muted, marginTop: 6, marginBottom: 0 }}>
-            <code style={{ fontSize: 12 }}>useTabStatus(status)</code> swaps the document favicon
-            so users can spot unread sessions from the browser tab strip. Web only distinguishes{' '}
+            <code style={{ fontSize: 12 }}>useTabStatus(status)</code> swaps the document favicon so
+            users can spot unread sessions from the browser tab strip. Web only distinguishes{' '}
             <strong>idle</strong> vs <strong>unread</strong>; <code>working</code> and{' '}
             <code>waiting</code> are silent here and surface on the Electron dock badge instead.
           </p>
@@ -188,10 +188,7 @@ function ThemedShowcase({ mode }: { mode: 'light' | 'dark' }) {
               </thead>
               <tbody>
                 {VARIANTS.map((v) => (
-                  <tr
-                    key={v.status}
-                    style={{ borderTop: `1px solid ${border}` }}
-                  >
+                  <tr key={v.status} style={{ borderTop: `1px solid ${border}` }}>
                     <td style={{ padding: '12px 8px', fontWeight: 500 }}>{v.label}</td>
                     {SIZES.map((s) => (
                       <td key={s} style={{ padding: '12px 8px' }}>
@@ -277,19 +274,8 @@ function recolorSvg(svg: string, mode: 'light' | 'dark'): string {
     .replace('.halo { fill: #f5f7fb; }', '.halo { fill: #09090b; }');
 }
 
-function FaviconImg({
-  svg,
-  size,
-  mode,
-}: {
-  svg: string;
-  size: number;
-  mode: 'light' | 'dark';
-}) {
-  const sized = svg.replace(
-    /width="\d+"\s+height="\d+"/,
-    `width="${size}" height="${size}"`
-  );
+function FaviconImg({ svg, size, mode }: { svg: string; size: number; mode: 'light' | 'dark' }) {
+  const sized = svg.replace(/width="\d+"\s+height="\d+"/, `width="${size}" height="${size}"`);
   return (
     <span
       aria-hidden="true"

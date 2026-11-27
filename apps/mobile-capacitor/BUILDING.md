@@ -30,8 +30,8 @@ The Duo entry checks the selected SDK before the standard production build,
 sync and open steps.
 
 The iOS publishing toolchain update selects `xcode-27` and Xcode 27.1 in
-[PR #3888](https://github.com/loro-dev/lody/pull/3888). Nightly iOS uses
-`publish-ios.yml`. See the [implementation note](notes/2026-10-27-iphone-duo.md).
+[PR #3888](https://github.com/loro-dev/lody/pull/3888). Nightly iOS builds the native client with
+[`publish-ios-native.yml`](../../.github/workflows/publish-ios-native.yml). See the [implementation note](notes/2026-10-27-iphone-duo.md).
 
 ## CI release versioning
 

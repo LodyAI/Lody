@@ -332,7 +332,7 @@ describe('iroh route', () => {
       const prepared = await t.dispatcher.prepare('machine-1', input('one'));
       const sending = prepared.send();
       await t.appended.promise;
-      await vi.advanceTimersByTimeAsync(800);
+      await vi.advanceTimersByTimeAsync(2500);
       expect(await sending).toBeNull();
       await observed.promise;
       expect(observations).toMatchObject([

@@ -33,7 +33,6 @@ import {
 } from '../../style/theme-scale.stylex';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 
-
 // Above this many (filtered) options the dropdown list is virtualized — big branch
 // lists can run into the thousands. Small lists render plainly (cheaper, no measuring).
 const PICKER_VIRTUALIZE_THRESHOLD = 40;
@@ -48,7 +47,13 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
-  footer: { paddingInline: themeSpace[3], paddingBlock: themeSpace[2], fontSize: themeFontSize.sm, lineHeight: themeLineHeight.sm, color: themeColors.mutedForeground },
+  footer: {
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
   /** The picker's own column. */
   root: { width: '100%' },
   /** The slot a picker projects its list into. */
@@ -862,7 +867,6 @@ export function MobileInlinePicker<T extends string = string>({
                   onReachEnd();
                 }
               }}
-
             >
               {filteredOptions.length === 0 ? (
                 <div {...stylex.props(styles.empty)}>{emptyText ?? '—'}</div>
@@ -883,9 +887,7 @@ export function MobileInlinePicker<T extends string = string>({
               ) : (
                 filteredOptions.map((opt, index) => renderOption(opt, index))
               )}
-              {footer ? (
-                <div {...stylex.props(styles.footer)}>{footer}</div>
-              ) : null}
+              {footer ? <div {...stylex.props(styles.footer)}>{footer}</div> : null}
             </div>
           </div>
         </motion.div>

@@ -1,0 +1,51 @@
+---
+title: "20260507"
+version: 0.49.0
+date: 2026-05-07
+description: "Lody 0.49.0 新增支援視覺標註的即時 Preview、Codex Goals 與圖片生成、互動式 Claude Code 提問介面、更完善的側邊欄任務管理，以及更豐富的 GitHub PR 工作流程。"
+---
+
+### Agent 工作流程
+
+- 現在可在 Lody 中使用 Codex Goals。使用前請先在 Codex 中執行 `codex features enable goals` 啟用此功能。
+  <img src="/_docs-assets/20260507-goal.png" alt="" />
+- Codex 圖片生成結果現在會直接回傳至目前對話中，讓生成的圖片與提示詞及後續指令並排顯示。
+  <img src="/_docs-assets/20260507-codex-image-gen.png" alt="" />
+- Claude Code 的 AskUserQuestion 提問現在會以原生互動卡片形式呈現，支援單選、多選與自由填寫回答流程。
+  <img src="/_docs-assets/20260507-ask-question.png" alt="" />
+- 為 Claude Code 新增小米 MiMo 預設組態，並支援 Token Plan 設定。
+
+### 遠端預覽與視覺回饋
+
+<img src="/_docs-assets/20260507-preview.png" alt="" />
+
+- 新增 Lody Preview，提供工作階段範圍的本機開發伺服器即時預覽功能。例如，你可以指示 Agent：`Start the Vite dev server and use Lody Preview`。
+- 可透過預覽面板切換桌面、平板與手機可視區域，進行旋轉螢幕、縮放、平移，或在需要時於外部瀏覽器中開啟頁面。
+- 視覺標註功能讓你能點擊預覽畫面中的元素、留下評論，並將附帶參考定位的回饋傳回對話中。
+
+### 側邊欄與任務管理
+
+- 新增「Updated」側邊欄整理模式，依最近更新時間（Today、This week、Older）將 Chat、GitHub Worktree 與本機專案工作階段分組顯示。
+- 工作階段右鍵選單現在支援重新命名、釘選、封存、複製工作階段 URL 與複製目前分支。
+- 釘選的工作階段會固定在清單頂端，方便快速回到長期進行或重要的任務。
+- 在網頁版中，側邊欄任務現在支援滑鼠中鍵點擊與 Cmd/Ctrl 點擊，以在新分頁中開啟。
+
+### 對話與輸入體驗
+
+- 貼上長段文字時，系統會將其收合為行內預留位置區塊，避免佔滿輸入框；點擊該預留位置即可檢視或編輯貼上的內容。
+- 支援將圖片直接拖曳至輸入框中上傳。
+- 在行動裝置上，長按圖片預覽即可開啟系統原生的分享與儲存操作。
+- 檔案預覽現在會自動換行，讓日誌與密集的生成輸出內容更易閱讀。
+
+### GitHub 與 Pull Requests
+
+- 可直接在 PR 面板中將 Draft PR 標記為 Ready for review。
+- 可設定在關聯的 PR 被合併或關閉時，自動封存對應的工作階段。
+- PR 留言、審查操作與合併現在可使用你的個人 GitHub 身分執行，且設定頁面會顯示目前已連結的帳號。
+
+### 修復與穩定性
+
+- 修復本機專案匯入成功後仍誤顯示失敗提示通知的問題。
+- 修復預設 Agent 在首輪對話時偶爾缺少標題生成設定的問題。
+- 修復數項側邊欄顯示問題。
+- 修復行動端下拉式選單可能超出螢幕範圍的問題。

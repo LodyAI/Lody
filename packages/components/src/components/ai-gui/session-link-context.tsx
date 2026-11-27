@@ -33,7 +33,13 @@ const SessionLinkContext = createContext<
 
 const AppActionLinkContext = createContext<((target: AppActionLink) => void) | null>(null);
 
-export function SessionLinkProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+export function SessionLinkProvider({
+  enabled,
+  children,
+}: {
+  enabled: boolean;
+  children: ReactNode;
+}) {
   // Resource links always select their exact target, including in this workspace.
   // Ordinary related-session navigation may instead restore the last active tab.
   return (

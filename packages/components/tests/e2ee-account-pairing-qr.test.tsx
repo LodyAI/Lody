@@ -61,9 +61,12 @@ beforeEach(() => {
   root = createRoot(container);
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.useRealTimers();
+  try {
+    await act(async () => root.unmount());
+    container.remove();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 const text = () => container.textContent ?? '';
 const button = (label: string) => {
@@ -304,14 +307,16 @@ describe('instant QR join and form-factor pairing', () => {
         { pairingString: CODE, requestId: 'request-1', workspaceIds: ['w1', 'w2'] },
       ]);
       expect(text()).toContain('e2ee.instantQr.joining {"device":"Synthetic phone"}');
-      expect(container.querySelector('button')).toBeNull();
+      expect(Array.from(container.querySelectorAll('button')).map((b) => b.textContent)).toEqual([
+        'common.cancel',
+      ]);
       await act(async () => settle!());
       await flush();
       expect(text()).toContain('e2ee.instantQr.joined {"device":"Synthetic phone"}');
       expect(joined).toEqual(['Synthetic phone']);
       await act(async () => root.render(<></>));
       await flush();
-      expect(replay()).not.toBeNull();
+      expect(replay()).toBeNull();
     } finally {
       removeTelemetryScope();
     }
@@ -364,6 +369,49 @@ describe('instant QR join and form-factor pairing', () => {
     expect(offers).toBe(1);
     expect(new Set(approvals.map((input) => JSON.stringify(input))).size).toBe(1);
     expect(approvals).toHaveLength(3);
+  });
+
+  it('surfaces transient retry status during joining and never overwrites awaiting-delivery as expired', async () => {
+    const { E2eeInstantQrApprove } = await import('../src/components/pages/e2ee-instant-qr');
+    const outcomes: ('awaiting-delivery' | 'admitted' | Error)[] = [
+      'awaiting-delivery',
+      new Error('503 Service Unavailable'),
+      'admitted',
+    ];
+    const runtime = {
+      accountPairingCode: async () => ({ pairingString: CODE, expiresAt: NOW + 1_500 }),
+      inspectAccountPairing: async () => preview,
+      approveAccountPairing: async () => {
+        const next = outcomes.shift()!;
+        if (next instanceof Error) throw next;
+        return {
+          workspaces: [
+            { workspaceId: 'w1', outcome: next },
+            { workspaceId: 'w2', outcome: next },
+          ],
+        };
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    const joined: string[] = [];
+    await act(async () =>
+      root.render(<E2eeInstantQrApprove runtime={runtime} onJoined={(d) => joined.push(d)} />)
+    );
+    await flush();
+    await tick(900);
+    await flush();
+    expect(text()).toContain('e2ee.instantQr.joining');
+    expect(container.querySelector('[data-testid="e2ee-instant-qr-retrying"]')).toBeNull();
+    // Advance past offer.expiresAt: awaiting-delivery must keep retrying instead of flipping to expired.
+    await tick(900);
+    await flush();
+    expect(text()).not.toContain('e2ee.instantQr.expired');
+    expect(container.querySelector('[data-testid="e2ee-instant-qr-retrying"]')?.textContent).toBe(
+      'e2ee.instantQr.retrying'
+    );
+    await tick(900);
+    await flush();
+    expect(text()).toContain('e2ee.instantQr.joined');
+    expect(joined).toEqual(['Synthetic phone']);
   });
 
   it('offers a fresh code once the shown one expires, without signing', async () => {
@@ -1216,5 +1264,205 @@ describe('pairing hardening', () => {
     } finally {
       focus.mockRestore();
     }
+  });
+
+  it('lets the approver cancel the camera viewfinder in E2eeAccountPairingApprove', async () => {
+    const restoreCamera = withCamera();
+    try {
+      const runtime = {
+        inspectAccountPairing: async () => preview,
+        approveAccountPairing: async () => ({ workspaces: [] }),
+      };
+      await act(async () => root.render(<E2eeAccountPairingApprove runtime={runtime} />));
+      const scanButton = Array.from(container.querySelectorAll('button')).find((b) =>
+        b.textContent?.includes('e2ee.accountPair.approve.scan')
+      );
+      expect(scanButton).toBeDefined();
+      await act(async () => scanButton!.click());
+      expect(container.querySelector('video')).not.toBeNull();
+      const cancelButton = Array.from(container.querySelectorAll('button')).find((b) =>
+        b.textContent?.includes('common.cancel')
+      );
+      expect(cancelButton).toBeDefined();
+      await act(async () => cancelButton!.click());
+      expect(container.querySelector('video')).toBeNull();
+    } finally {
+      restoreCamera();
+    }
+  });
+
+  it('surfaces Retry sync and Cancel after 15s when syncing stalls without keyFailure', async () => {
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+    });
+    vi.setSystemTime(NOW);
+    const { E2eeAutomaticPairingPage } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    let retried = 0;
+    let backed = 0;
+    const runtime = {
+      automaticPairingState: async () => ({
+        id: 'sync-stall',
+        workspaceId: 'w1',
+        workspaceName: 'Alpha',
+        deviceName: 'Phone',
+        comparisonCode: '123456',
+        phase: 'syncing' as const,
+        expiresAt: NOW + 600_000,
+      }),
+      startAutomaticPairing: async () => {
+        throw new Error('unexpected');
+      },
+      cancelAutomaticPairing: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingPage
+          runtime={runtime}
+          workspaceId="w1"
+          onJoined={() => {}}
+          onBack={() => {
+            backed += 1;
+          }}
+          onRetryKeys={() => {
+            retried += 1;
+          }}
+        />
+      )
+    );
+    await flush();
+    expect(container.querySelector('[data-testid="e2ee-sync-timeout"]')).toBeNull();
+    await tick(15_000);
+    await flush();
+    const timeoutBox = container.querySelector('[data-testid="e2ee-sync-timeout"]');
+    expect(timeoutBox).not.toBeNull();
+    const retryBtn = Array.from(timeoutBox!.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('e2ee.auto.syncing.retry')
+    );
+    const cancelBtn = Array.from(timeoutBox!.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('common.cancel')
+    );
+    await act(async () => retryBtn!.click());
+    expect(retried).toBe(1);
+    expect(container.querySelector('[data-testid="e2ee-sync-timeout"]')).toBeNull();
+    await tick(15_000);
+    await flush();
+    const cancelAfterRetry = Array.from(
+      container.querySelector('[data-testid="e2ee-sync-timeout"]')!.querySelectorAll('button')
+    ).find((b) => b.textContent?.includes('common.cancel'));
+    await act(async () => cancelAfterRetry!.click());
+    expect(backed).toBe(1);
+  });
+
+  it('shows the 5s keep-open guidance before the 15s sync timeout in E2eeAutomaticPairingPage', async () => {
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+    });
+    vi.setSystemTime(NOW);
+    try {
+      const { E2eeAutomaticPairingPage } =
+        await import('../src/components/pages/e2ee-automatic-pairing');
+      const runtime = {
+        automaticPairingState: async () => ({
+          id: 'sync-step',
+          workspaceId: 'w1',
+          workspaceName: 'Alpha',
+          deviceName: 'Phone',
+          comparisonCode: '123456',
+          phase: 'syncing' as const,
+          expiresAt: NOW + 600_000,
+        }),
+        startAutomaticPairing: async () => {
+          throw new Error('unexpected');
+        },
+        cancelAutomaticPairing: async () => {},
+      } as unknown as E2eeWorkspaceRuntime;
+      await act(async () =>
+        root.render(
+          <E2eeAutomaticPairingPage
+            runtime={runtime}
+            workspaceId="w1"
+            onJoined={() => {}}
+            onBack={() => {}}
+          />
+        )
+      );
+      await flush();
+      expect(container.textContent).toContain('e2ee.auto.syncing.help');
+      await tick(5_000);
+      await flush();
+      expect(container.textContent).toContain('e2ee.auto.syncing.keepOpen');
+      expect(container.querySelector('[data-testid="e2ee-sync-timeout"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('wakes instant QR approval immediately on subscribeAccountPairingApproval without waiting for poll', async () => {
+    const { E2eeInstantQrApprove } = await import('../src/components/pages/e2ee-instant-qr');
+    let onSignal: (() => void) | undefined;
+    let unsubscribed = false;
+    let submitted = false;
+    const lookupId = 'ab'.repeat(16);
+    const runtime = {
+      accountPairingCode: async () => ({
+        pairingString: CODE,
+        expiresAt: NOW + 600_000,
+        lookupId,
+      }),
+      subscribeAccountPairingApproval: (id: string, changed: () => void) => {
+        expect(id).toBe(lookupId);
+        onSignal = changed;
+        return () => {
+          unsubscribed = true;
+        };
+      },
+      inspectAccountPairing: async () => (submitted ? preview : null),
+      approveAccountPairing: async () => ({
+        workspaces: [{ workspaceId: 'w1', outcome: 'admitted' }],
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const joined: string[] = [];
+    await act(async () =>
+      root.render(<E2eeInstantQrApprove runtime={runtime} onJoined={(d) => joined.push(d)} />)
+    );
+    await flush();
+    expect(onSignal).toBeDefined();
+    submitted = true;
+    await act(async () => onSignal!());
+    await flush();
+    expect(joined).toEqual(['Synthetic phone']);
+    expect(unsubscribed).toBe(true);
+  });
+
+  it('approver discovers a post-reveal accountPairing submission even when subscribeAutomaticPairing stays quiet', async () => {
+    const { E2eeAutomaticPairingInbox } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    let submitted = false;
+    let unsubscribed = false;
+    const runtime = {
+      subscribeAutomaticPairing: () => () => {
+        unsubscribed = true;
+      },
+      pendingAutomaticPairing: async () => (submitted ? [review] : []),
+      approveAutomaticPairing: async () => ({ outcome: 'approved' as const }),
+      declineAutomaticPairing: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingInbox runtime={runtime}>
+          <div>host</div>
+        </E2eeAutomaticPairingInbox>
+      )
+    );
+    await flush();
+    expect(document.querySelector('[data-testid="e2ee-approval-code"]')).toBeNull();
+    submitted = true;
+    await tick(2_000);
+    await flush();
+    expect(document.querySelector('[data-testid="e2ee-approval-code"]')).not.toBeNull();
+    await act(async () => root.unmount());
+    expect(unsubscribed).toBe(true);
+    root = createRoot(container);
   });
 });

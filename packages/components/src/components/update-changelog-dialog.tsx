@@ -6,6 +6,7 @@ import { text } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 
 /** Release notes read as a column of prose: wider than the default panel. */
 const PANEL_WIDTH = '576px';
@@ -30,7 +31,7 @@ function formatReleaseDate(isoDate: string, language: string | undefined): strin
   const parsed = new Date(isoDate);
   if (Number.isNaN(parsed.getTime())) return null;
   try {
-    return new Intl.DateTimeFormat(language === 'zh_CN' ? 'zh-CN' : 'en-US', {
+    return new Intl.DateTimeFormat(toIntlLocaleOrEn(language), {
       dateStyle: 'medium',
       timeZone: 'UTC',
     }).format(parsed);

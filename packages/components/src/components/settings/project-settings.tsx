@@ -1,4 +1,13 @@
-import { control, corner, duration, ease, radius, radius as sharedRadius, space, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  radius,
+  radius as sharedRadius,
+  space,
+  text as uiText,
+} from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -6,8 +15,8 @@ import * as stylex from '@stylexjs/stylex';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import type { TFunction } from 'i18next';
 import { formatDistanceToNow, type Locale } from 'date-fns';
-import { enUS } from 'date-fns/locale/en-US';
-import { zhCN } from 'date-fns/locale/zh-CN';
+import { getDateFnsLocale } from '@/lib/date-fns-locale';
+import { getSiteLocalizedUrl } from '@/lib/lody-urls';
 import {
   AlertCircle,
   BrushCleaning,
@@ -2125,7 +2134,7 @@ function ConversationsPage({
   | 'onHistorySelectionChange'
 >) {
   const { t, i18n } = useTranslation();
-  const localeObj: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const localeObj: Locale = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
   const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
   const states = row.historyImports.filter((state) => state.canSync || state.catalog);
   const [providerKey, setProviderKey] = useState<string | null>(states[0]?.providerKey ?? null);
@@ -2889,9 +2898,7 @@ function scriptSetsEphemeralEnv(shell: WorktreeSetupShell, script: string): bool
 }
 
 function getWorktreeScriptEnvDocsUrl(language: string | undefined): string {
-  const isChinese = language?.toLowerCase().startsWith('zh') ?? false;
-  const path = isChinese ? '/zh/docs/worktrees' : '/docs/worktrees';
-  return `https://lody.ai${path}#available-environment-variables`;
+  return `${getSiteLocalizedUrl('/docs/worktrees', language, 'https://lody.ai')}#available-environment-variables`;
 }
 
 export function WorktreeSetupEditor({
@@ -3111,7 +3118,7 @@ export function ProjectHistoryImportPanel({
   onHistorySelectionChange,
 }: ProjectHistoryImportPanelProps) {
   const { t, i18n } = useTranslation();
-  const localeObj: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const localeObj: Locale = getDateFnsLocale(i18n.resolvedLanguage ?? i18n.language);
   const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
   const providerLabel = state.providerLabel ?? getHistoryProviderLabel(state.provider);
   const catalogSessions = state.catalog?.sessions ?? [];

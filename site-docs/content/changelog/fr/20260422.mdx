@@ -1,0 +1,50 @@
+---
+title: "20260422"
+version: 0.45.0
+date: 2026-04-22
+description: "Ajout du mode Codex Fast, de la sélection du niveau de réflexion Claude, des paramètres d'agent par machine, d'outils de workflow PR, d'actions par balayage sur mobile et d'améliorations de la recherche."
+---
+
+### Expérience avec les agents
+
+- Ajout d'un bouton rapide pour le mode Codex Fast
+- Ajout de la sélection du niveau de réflexion Claude
+  <img src="/_docs-assets/fast-think.png" alt="" />
+- Amélioration des cartes de demande d'autorisation : les boutons longs peuvent passer à la ligne, les commandes longues peuvent être dépliées pour en afficher tout le contenu et il est plus facile de vérifier ce que l'Agent s'apprête à exécuter avant d'approuver
+
+### Nouveaux paramètres de machine et d'agent
+
+- Les configurations d'agents sont désormais gérées par machine. Lorsque vous changez de machine, Lody n'affiche que les Agents disponibles sur celle-ci, vous évitant ainsi de sélectionner une configuration impossible à exécuter
+- Les paramètres adoptent désormais une disposition liste des machines + détail de la machine, permettant de consulter le statut en ligne, la version du CLI et l'état de partage
+
+### Workflow GitHub PR intégré
+
+- Cliquez sur le badge PR en haut d'une session pour ouvrir le panneau PR dans Lody et consulter le titre, la description, la branche, la CI, les commentaires et les revues
+- Commentez les PR, fusionnez-les et supprimez les branches après fusion directement dans Lody
+  <img src="/_docs-assets/PR-panel.png" alt="" />
+
+### Expérience mobile
+
+- Configurez le comportement de la touche Entrée sur les claviers mobiles : envoyer le message ou insérer un saut de ligne
+  <img width="400px" src="/_docs-assets/20260422-keyboard-option.png" />
+- La liste des sessions prend en charge le balayage vers la gauche pour archiver ; la liste des archives prend en charge le balayage vers la gauche pour restaurer ou supprimer définitivement
+- Lors de l'ouverture d'une session archivée, le menu supérieur affiche désormais correctement Restaurer et Supprimer définitivement au lieu d'Archiver à nouveau
+  <img width="400px" src="/_docs-assets/mobile-swipe.png" />
+
+### Recherche dans les conversations et messages en file d'attente
+
+- Refonte de la barre de recherche dans la conversation avec un affichage plus clair du nombre de résultats, des états vides et des boutons précédent/suivant
+- Correction de blocages ponctuels lors du saut vers les résultats de recherche dans les longues sessions
+- Plusieurs messages en file d'attente n'occupent plus tout l'écran ; leur hauteur est plafonnée et la liste peut défiler
+
+### Gestion de l'équipe et des invitations
+
+- Les invitations en attente s'actualisent désormais correctement après un changement de Workspace
+- Les administrateurs peuvent désormais annuler les invitations d'équipe en attente
+
+### Autres correctifs
+
+- Correction d'échecs ponctuels de connexion avec les jetons CLI générés par le frontend
+- L'ordre des dépôts dans la barre latérale ne saute plus de manière intempestive suite aux changements de visibilité des machines ou aux variations de synchronisation
+- Le navigateur revalide l'état de connexion lors du retour depuis l'arrière-plan, de la reprise du focus ou du retour en ligne
+- La création de session et l'envoi de tâches réessaient désormais automatiquement lorsque la synchronisation accuse un léger retard, réduisant les cas où les nouvelles tâches restent bloquées

@@ -1,5 +1,6 @@
 import { hostname, type as osType, release as osRelease } from 'node:os';
 import { getLodyCLIVersion } from '@/utils';
+import { syncAccountUsageSharing } from '@lody/shared/node/usage-sharing';
 import { makeInlineVersionReadHead, sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas';
 import { StreamsClient } from '@loro-dev/streams-client';
 import {
@@ -38,6 +39,8 @@ import {
   LoroStreamsTokenPorts,
   deriveConvexSiteUrl,
   normalizeBaseUrl,
+  RoostCloudHistoryRequestError,
+  roostCloudHistoryGrantSchema,
 } from '@lody/shared';
 import {
   resolveRuntimeArtifactsBaseUrl,
@@ -811,6 +814,21 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
   );
   const serverBaseUrl = normalizeBaseUrl(options.serverBaseUrl);
   const subscriptionClient = new ConvexClient(authBaseUrl);
+  const stopUsageSharingSync = subscriptionClient.onUpdate(
+    api.analytics.getUsageSharingForCliToken,
+    { cliToken: options.token },
+    (enabled: boolean | null) => {
+      if (typeof enabled !== 'boolean') return;
+      try {
+        syncAccountUsageSharing(enabled);
+      } catch {
+        // Keep current local state if disk write fails.
+      }
+    },
+    () => {
+      // Older backends without the CLI query or transient outages leave local state unchanged.
+    }
+  );
   const notificationService = new NotificationService({
     convexUrl: authBaseUrl,
     cliToken: options.token,
@@ -837,6 +855,19 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     logger: options.logger,
   });
   const billing = createCloudBillingPort({ token: options.token });
+  const requestRoostHistory = async (operation: string, request: object, signal: AbortSignal) => {
+    const response = await getCliHttpFetch({ logger: options.logger })(
+      new URL(`/api/session-history/roost-${operation}`, authSiteUrl),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${options.token}` },
+        body: JSON.stringify(request),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+      }
+    );
+    if (!response.ok) throw new RoostCloudHistoryRequestError(response.status);
+    return response;
+  };
 
   return {
     kind: 'cloud',
@@ -844,6 +875,18 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     sessionSharing: createCloudSessionSharingPort(options),
     identity: options.identity,
     access: {
+      roostHistory: {
+        async uploadGrant(request, signal) {
+          const response = await requestRoostHistory('write-grant', request, signal);
+          return roostCloudHistoryGrantSchema.parse(await response.json());
+        },
+        async publish(request, signal) {
+          await requestRoostHistory('publish', request, signal);
+        },
+        async unpublish(request, signal) {
+          await requestRoostHistory('unpublish', request, signal);
+        },
+      },
       verifySessionHistoryRead: async (request) => {
         const response = await getCliHttpFetch({ logger: options.logger })(
           new URL(
@@ -1050,6 +1093,7 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
       baseUrl: resolveRuntimeArtifactsBaseUrl(options.runtimeArtifactsBaseUrl),
     },
     dispose: async () => {
+      stopUsageSharingSync();
       await githubTokenManagers.shutdownAll();
       await streamsTokens.closeLegacy();
       await subscriptionClient.close();

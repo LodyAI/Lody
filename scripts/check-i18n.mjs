@@ -21,6 +21,12 @@ const scanDirs = [path.join(repoRoot, 'packages', 'components', 'src')];
 const translationFiles = [
   { lang: 'en', path: path.join(repoRoot, 'locales', 'en.json') },
   { lang: 'zh_CN', path: path.join(repoRoot, 'locales', 'zh_CN.json') },
+  { lang: 'zh_Hant', path: path.join(repoRoot, 'locales', 'zh_Hant.json') },
+  { lang: 'ja', path: path.join(repoRoot, 'locales', 'ja.json') },
+  { lang: 'ko', path: path.join(repoRoot, 'locales', 'ko.json') },
+  { lang: 'es', path: path.join(repoRoot, 'locales', 'es.json') },
+  { lang: 'fr', path: path.join(repoRoot, 'locales', 'fr.json') },
+  { lang: 'ru', path: path.join(repoRoot, 'locales', 'ru.json') },
 ];
 
 // File extensions to scan
@@ -112,6 +118,50 @@ function getTranslationValue(obj, keyPath) {
   return current;
 }
 
+// Keys where `referral-settings-pure.tsx` supplies both `{{discount}}` (e.g. "20% off")
+// and `{{rate}}` (e.g. "8 折" in Chinese), so either token satisfies parity.
+const DISCOUNT_OR_RATE_KEYS = new Set([
+  'referral.retainedCheckout',
+  'referral.retainedCheckoutYearly',
+  'referral.description',
+  'referral.discount',
+  'referral.shareTitle',
+  'referral.perkDiscount',
+  'referral.offerBadge',
+  'referral.offerYearlyBadge',
+  'referral.offerYearly',
+  'billing.promoYearlyOfferBadge',
+  'billing.promoYearlyExtraBadge',
+  'billing.promoMonthlyOfferBadge',
+  'billing.promoOfferYearly',
+  'billing.promoRetainedYearly',
+  'billing.switchPromoDiscountWithPercent',
+  'workspace.invite.seat.promoNoteUntil',
+  'workspace.invite.seat.promoNoteYearlyUntil',
+  'sidebar.promoBanner.descriptionBoth',
+  'sidebar.promoBanner.descriptionYearly',
+  'sidebar.promoBanner.descriptionMonthly',
+  'sidebar.promoBanner.descriptionUpgrade',
+]);
+
+/**
+ * Extract sorted unique `{{placeholder}}` tokens from a translation string.
+ */
+function extractPlaceholders(value, key) {
+  if (typeof value !== 'string') return [];
+  const matches = value.match(/\{\{[^}]+\}\}/g);
+  if (!matches) return [];
+  const normalized = DISCOUNT_OR_RATE_KEYS.has(key)
+    ? matches.map((token) => {
+        if (token === '{{rate}}') return '{{discount}}';
+        if (token === '{{combinedRate}}') return '{{combinedDiscount}}';
+        if (token === '{{monthlyRate}}') return '{{monthlyDiscount}}';
+        return token;
+      })
+    : matches;
+  return [...new Set(normalized)].sort();
+}
+
 /**
  * Get all keys from a nested object as dot-notation paths
  */
@@ -173,6 +223,8 @@ async function main() {
   // Check for missing keys in each language
   let hasErrors = false;
   const missingByLang = new Map();
+  const placeholderMismatchesByLang = new Map();
+  const enTranslations = translations.get('en');
 
   for (const [lang, translationData] of translations) {
     const missing = [];
@@ -188,27 +240,65 @@ async function main() {
       hasErrors = true;
       missingByLang.set(lang, missing);
     }
+
+    if (lang !== 'en' && enTranslations) {
+      const mismatches = [];
+      for (const [key, enValue] of Object.entries(enTranslations)) {
+        if (typeof enValue !== 'string') continue;
+        const localizedValue = getTranslationValue(translationData, key);
+        if (typeof localizedValue !== 'string') continue;
+        const expected = extractPlaceholders(enValue, key);
+        const actual = extractPlaceholders(localizedValue, key);
+        if (
+          expected.length !== actual.length ||
+          expected.some((token, index) => token !== actual[index])
+        ) {
+          mismatches.push({ key, expected, actual });
+        }
+      }
+      if (mismatches.length > 0) {
+        hasErrors = true;
+        placeholderMismatchesByLang.set(lang, mismatches);
+      }
+    }
   }
 
   // Report results
   if (hasErrors) {
-    console.log('❌ Missing translations found:\n');
+    if (missingByLang.size > 0) {
+      console.log('❌ Missing translations found:\n');
 
-    for (const [lang, missing] of missingByLang) {
-      console.log(`\n  ${lang} (${missing.length} missing):`);
-      console.log('  ' + '─'.repeat(50));
+      for (const [lang, missing] of missingByLang) {
+        console.log(`\n  ${lang} (${missing.length} missing):`);
+        console.log('  ' + '─'.repeat(50));
 
-      for (const { key, file, line } of missing) {
-        const relativeFile = path.relative(repoRoot, file);
-        console.log(`    • ${key}`);
-        console.log(`      └─ ${relativeFile}:${line}`);
+        for (const { key, file, line } of missing) {
+          const relativeFile = path.relative(repoRoot, file);
+          console.log(`    • ${key}`);
+          console.log(`      └─ ${relativeFile}:${line}`);
+        }
+      }
+    }
+
+    if (placeholderMismatchesByLang.size > 0) {
+      console.log('\n❌ Placeholder mismatches found (vs en.json):\n');
+
+      for (const [lang, mismatches] of placeholderMismatchesByLang) {
+        console.log(`\n  ${lang} (${mismatches.length} mismatched):`);
+        console.log('  ' + '─'.repeat(50));
+
+        for (const { key, expected, actual } of mismatches) {
+          console.log(`    • ${key}`);
+          console.log(`      expected: ${expected.join(', ') || '(none)'}`);
+          console.log(`      actual:   ${actual.join(', ') || '(none)'}`);
+        }
       }
     }
 
     console.log('\n');
     process.exit(1);
   } else {
-    console.log('✅ All translation keys are present in all languages!\n');
+    console.log('✅ All translation keys and placeholders match across all languages!\n');
     process.exit(0);
   }
 }

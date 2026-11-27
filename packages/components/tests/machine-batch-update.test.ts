@@ -57,6 +57,7 @@ describe('one-click update plan covers only the requester’s own machines', () 
         }),
         machine({ id: 'old-protocol', supportsManagedUpdates: false }),
         machine({ id: 'unprobed', lifecycle: null }),
+        machine({ id: 'unreachable', lifecycle: null, probeFailed: true }),
       ],
       { stable: '1.1.0' }
     );
@@ -69,6 +70,7 @@ describe('one-click update plan covers only the requester’s own machines', () 
       ['install', 'unsupported', 'install'],
       ['old-protocol', 'unsupported', 'install'],
       ['unprobed', 'unsupported', 'unknown'],
+      ['unreachable', 'unsupported', 'unreachable'],
     ]);
     expect(plan[0]).toMatchObject({
       currentVersion: '1.0.0',

@@ -7,6 +7,7 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
 - Encrypted sends refuse a host-verified machine withdrawal before any write. [Gate](../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#sender-withdrawal-gate).
 - Retry immutable Roost input; absent receipts stay unknown. Cache/refresh keeps
   all input. Resolve owner routing per call.
+- Roost machine fallback, including after replica quota exhaustion, requires fresh owner authorization. Streams refusal ends that read route.
 
 - Markdown caches hold bounded raw ASTs per grammar; clone per use; skip streams.
 
@@ -36,8 +37,8 @@ shells supply `window.__LODY_CLIPBOARD__` (Android WebView denies the web API).
   copies its V2 tokens into plain DOM, never React/StyleX/Tailwind.
 - Crash screens never reload/restart/reset themselves. `resetKeys` must not clear a captured
   error; the copyable fallback stays until the user presses a recovery button.
-- A cloud query throws into render and keeps throwing: an optional surface owns an inline
-  `ErrorBoundary`, so a backend failure degrades locally.
+- Cloud queries never throw backend errors into render; surfaces that need explicit
+  failure/retry UI read `useCloudQueryState` instead of relying on an `ErrorBoundary`.
 - `lib/clear-local-cache.ts` owns `restartIntoCacheClear` (recoverable `lody*` caches,
   still signed in; reloads one window) and `startHardReset` (full wipe/sign-out,
   host-native first, own confirmation). Defer deletes to next boot; clear synchronous
@@ -92,7 +93,6 @@ shells supply `window.__LODY_CLIPBOARD__` (Android WebView denies the web API).
   Protected/local blobs never persist; hidden diffs cancel paging.
 - Turn diffs require the CLI-local store. Cross-render permits release
   only on settlement.
-
 
 - Preview and More-menu shell actions share `useSessionFileActions`. Only Electron
   on the session's own machine may invoke them; explicit local absolute artifact

@@ -1,21 +1,59 @@
-import { productWindows } from './window-state'
+import { getCompanionWindowOwner, productWindows } from './window-state'
 import { requestRendererReload } from './renderer-recovery'
 import { app, BrowserWindow, Menu, shell } from 'electron'
 import { closeFocusedTabOrWindow } from './close-focused-tab-or-window'
 import type { AppUpdaterService } from './services/app-updater-service'
+import {
+  normalizeSupportedLanguage,
+  toSiteLocalePrefix,
+  type SupportedLanguage
+} from '@lody/shared/language'
 import en from '../../../../locales/en.json'
-import zhCN from '../../../../locales/zh_CN.json'
 
-type SupportedLocale = 'en' | 'zh_CN'
+type SupportedLocale = SupportedLanguage
 
-const localeResources: Record<SupportedLocale, Record<string, string>> = {
-  en: en as Record<string, string>,
-  zh_CN: zhCN as Record<string, string>
+const localeResources: Partial<Record<SupportedLocale, Record<string, string>>> = {
+  en: en as Record<string, string>
+}
+
+const DEFERRED_LOCALE_LOADERS: Record<
+  Exclude<SupportedLocale, 'en'>,
+  () => Promise<{ default: Record<string, string> }>
+> = {
+  zh_CN: () =>
+    import('../../../../locales/zh_CN.json') as Promise<{ default: Record<string, string> }>,
+  zh_Hant: () =>
+    import('../../../../locales/zh_Hant.json') as Promise<{ default: Record<string, string> }>,
+  ja: () => import('../../../../locales/ja.json') as Promise<{ default: Record<string, string> }>,
+  ko: () => import('../../../../locales/ko.json') as Promise<{ default: Record<string, string> }>,
+  es: () => import('../../../../locales/es.json') as Promise<{ default: Record<string, string> }>,
+  fr: () => import('../../../../locales/fr.json') as Promise<{ default: Record<string, string> }>,
+  ru: () => import('../../../../locales/ru.json') as Promise<{ default: Record<string, string> }>
+}
+
+const localeLoadPromises = new Map<SupportedLocale, Promise<void>>()
+
+function ensureMenuLocaleLoaded(locale: SupportedLocale): Promise<void> {
+  if (localeResources[locale]) {
+    return Promise.resolve()
+  }
+  let pending = localeLoadPromises.get(locale)
+  if (!pending) {
+    pending = (async () => {
+      const loader = locale === 'en' ? undefined : DEFERRED_LOCALE_LOADERS[locale]
+      if (!loader) return
+      const mod = await loader()
+      localeResources[locale] = mod.default
+    })()
+    localeLoadPromises.set(locale, pending)
+    pending.catch(() => localeLoadPromises.delete(locale))
+  }
+  return pending
 }
 
 function t(locale: SupportedLocale, key: string, vars?: Record<string, string>): string {
-  const resources = localeResources[locale] ?? localeResources.en
-  let value = resources[key] ?? localeResources.en[key] ?? key
+  const resources = localeResources[locale] ?? localeResources.en!
+  let value = resources[key] ?? localeResources.en![key] ?? key
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
       value = value.replace(`{{${k}}}`, v)
@@ -31,6 +69,7 @@ type SetupApplicationMenuOptions = {
 }
 
 let currentLocale: SupportedLocale = 'en'
+let latestMenuLocaleRequest = 0
 let menuOptions: SetupApplicationMenuOptions | null = null
 
 function sendMenuAction(action: string): void {
@@ -41,7 +80,7 @@ function sendMenuAction(action: string): void {
   if (!window || window.isDestroyed()) {
     window = menuOptions.openOrFocusMainWindow()
   }
-  const contents = window.webContents
+  const contents = (getCompanionWindowOwner(window) ?? window).webContents
   if (contents.isDestroyed()) {
     return
   }
@@ -64,7 +103,9 @@ function handleCloseFocusedTabOrWindow(targetWindow?: Electron.BaseWindow): void
   closeFocusedTabOrWindow({
     focused,
     mainWindow:
-      focused && productWindows.has(focused) ? focused : (menuOptions?.getMainWindow() ?? null),
+      focused && productWindows.has(focused) && !getCompanionWindowOwner(focused)
+        ? focused
+        : (menuOptions?.getMainWindow() ?? null),
     sendCloseCurrentTabOrWindow: () => sendMenuAction('close-current-tab-or-window')
   })
 }
@@ -248,7 +289,7 @@ function buildAndSetMenu(): void {
         {
           label: t(locale, 'menu.documentation'),
           click: () => {
-            void shell.openExternal('https://lody.ai/docs')
+            void shell.openExternal(`https://lody.ai${toSiteLocalePrefix(locale)}/docs`)
           }
         },
         {
@@ -276,17 +317,28 @@ export function setupApplicationMenu(options: SetupApplicationMenuOptions): void
  * without owning a second copy of the locale state.
  */
 export function translateMenu(key: string, fallback: string): string {
-  const resources = localeResources[currentLocale] ?? localeResources.en
-  return resources[key] ?? localeResources.en[key] ?? fallback
+  const resources = localeResources[currentLocale] ?? localeResources.en!
+  return resources[key] ?? localeResources.en![key] ?? fallback
 }
 
 export function setMenuLanguage(locale: string): void {
-  if (locale === 'en' || locale === 'zh_CN') {
-    currentLocale = locale
-  } else {
-    currentLocale = 'en'
+  const requestId = ++latestMenuLocaleRequest
+  const nextLocale = normalizeSupportedLanguage(locale) ?? 'en'
+  currentLocale = nextLocale
+  if (localeResources[nextLocale]) {
+    buildAndSetMenu()
+    return
   }
   buildAndSetMenu()
+  void ensureMenuLocaleLoaded(nextLocale)
+    .then(() => {
+      if (requestId === latestMenuLocaleRequest) {
+        buildAndSetMenu()
+      }
+    })
+    .catch((error: unknown) => {
+      console.warn(`[menu] Failed to load locale ${nextLocale}:`, error)
+    })
 }
 
 export function translateAppText(key: string): string {

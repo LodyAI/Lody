@@ -1,0 +1,32 @@
+---
+title: "20260915"
+version: 0.94.0
+date: 2026-09-15
+description: "Se agregaron el uso compartido de sesiones en modo de solo lectura y los Atajos de prompt, junto con mejoras en conversaciones largas, proveedores ACP, recuperación local y colaboración entre dispositivos."
+---
+
+Versión 0.94.0
+
+### ✨ Nuevas funciones
+
+- Comparte sesiones y sesiones secundarias seleccionadas mediante enlaces de solo lectura que pueden verse sin iniciar sesión.
+- Gestiona más fácilmente los elementos compartidos publicados: consulta el estado de uso compartido, explora las sesiones secundarias compartidas, redimensiona la barra lateral de uso compartido y regresa a la conversación de origen.
+- Crea, edita, elimina y comparte Atajos de prompt, e invócalos desde el menú `/` con variables y ámbitos de contexto.
+- Se agregó Bub como proveedor ACP integrado.
+- Lee y restaura conversaciones largas por ventanas para reducir la espera al abrir sesiones extensas.
+- Restablece la caché local de la aplicación de escritorio desde la CLI cuando la aplicación no pueda abrirse con normalidad.
+- Comparte archivos desde una conversación mediante el flujo nativo para compartir del sistema.
+
+### 🐛 Correcciones y mejoras
+
+- Se mejoró la carga de la página compartida, la lectura del historial comprimido, la navegación y la recuperación para que una solicitud fallida ya no bloquee toda la conversación.
+- Se corrigieron los mensajes de inicio de sesión en la página compartida, los conectores del árbol de conversación, la jerarquía de títulos y el diseño de la barra lateral.
+- Se mejoró la recuperación de sesiones, la sincronización del historial, la recuperación de compactaciones interrumpidas y el manejo de sesiones archivadas.
+- Se corrigieron las rutas de sesión en Windows, los worktrees archivados, la navegación de proyectos en máquinas compartidas y la confirmación de cuenta al iniciar sesión en el escritorio.
+- Se mejoró la entrada de prompts con borradores por espacio de trabajo, el enfoque al editar mensajes en cola, el estado de las pestañas del terminal y avisos claros al pegar contenido demasiado grande.
+- Se mejoró la compatibilidad con ACP, los valores predeterminados de Grok, el comportamiento de DeepSeek Harness y la contabilidad de uso del agente integrado.
+- Se muestra la duración de ejecución del agente en dispositivos móviles y se mejoraron los controles de tamaño de fuente y la disposición de archivos adjuntos con múltiples imágenes.
+- Se corrigió la recuperación del proceso de pago después de que expiren las suscripciones de regalo.
+- Se corrigieron las páginas de vista previa que fallaban al cargar cuando faltaban datos de anotación opcionales.
+- Se mantienen los menús dentro de ventanas pequeñas y áreas seguras, y se corrigió la superposición de entradas en el archivo en macOS.
+- Agradecimientos a los colaboradores externos @gu18168, @EYHN, @UniversePeak, @Astro-Han, @lawvs, @VeraPyuyi y @liuxiaocs7 por las mejoras en el comportamiento de ACP, la recuperación de sesiones, los controles de tareas, el manejo de entrada, la compatibilidad del entorno de ejecución y la interfaz de escritorio.

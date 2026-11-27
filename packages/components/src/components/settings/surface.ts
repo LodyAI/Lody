@@ -1,5 +1,14 @@
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { control, corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+  text,
+} from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { settingsMaterial as material } from './material.stylex';
 import { settingsType as type } from './type.stylex';

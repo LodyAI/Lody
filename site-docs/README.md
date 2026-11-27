@@ -21,6 +21,9 @@ builds to `site-docs/out/client`. Binding rules live in
 ## Component responsibilities
 
 - `components/landing.tsx` — landing copy, nav, and footer.
+- `components/promo-banner.tsx` and `components/use-public-promo.ts` — narrow
+  dismissible promotional strip below the fixed landing nav and shared client fetch
+  for `/api/billing/public-promo`.
 - `components/landing-hero-download.tsx` and `components/landing-cta-section.tsx` —
   platform-aware download and Web App links on the landing page; unknown platforms
   link to all downloads.
@@ -72,8 +75,14 @@ Chromium. There is no second legacy site tree.
 
 ## Local development
 
-The shared head in `src/routes/__root.tsx` loads Microsoft Clarity project
-`z359h8fnzs` asynchronously on all public-site pages, alongside Google Analytics.
+The shared head in `src/routes/__root.tsx` configures Google Analytics with
+Consent Mode v2: `analytics_storage` defaults to `'denied'` for EEA/UK/CH
+regions and `'granted'` elsewhere (all advertising storage stays `'denied'`),
+with stored `'granted'` / `'denied'` decisions overriding defaults after
+`window.load`. `CookieConsentBanner` auto-prompts only in European consent
+regions (preferring an edge-set `lody-consent-region` cookie with `eea`,
+`other`, or an ISO-2 country code, falling back to European IANA time zones)
+and remains openable from the footer in all regions.
 
 The dev server runs on port 3002. Use
 `pnpm --filter @lody/site-docs preview:static` to emulate the static host.

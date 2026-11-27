@@ -1552,7 +1552,7 @@ void test('concurrent mailbox status calls coalesce via batchStatus while single
 })
 
 void test('E2EE cloud HTTP client recovers from transient 502/503/504 gateway blips with bounded backoff without masking 401/403/409/429/500/560 or e2ee_* refusals', async () => {
-  // 1. Recovers after 1 and 2 transient 502/503/504 responses using [60, 150] ms delays without burning token cache.
+  // 1. Recovers after transient 502/503/504 responses using [100, 300] ms delays without burning token cache.
   {
     const delays = []
     let minted = 0
@@ -1582,11 +1582,11 @@ void test('E2EE cloud HTTP client recovers from transient 502/503/504 gateway bl
       )
     )
     assert.equal(attempts, 3)
-    assert.deepEqual(delays, [60, 150])
+    assert.deepEqual(delays, [100, 300])
     assert.equal(minted, 1)
   }
 
-  // 2. Exhausting 3 consecutive 503 attempts surfaces unavailable and drops cached token.
+  // 2. Exhausting 4 consecutive 504 attempts surfaces unavailable and drops cached token.
   {
     const delays = []
     let minted = 0
@@ -1597,7 +1597,7 @@ void test('E2EE cloud HTTP client recovers from transient 502/503/504 gateway bl
           const client = yield* build(
             async () => {
               attempts++
-              if (attempts <= 3) return new Response('bad gateway', { status: 504 })
+              if (attempts <= 4) return new Response('bad gateway', { status: 504 })
               return response({ ...target, status: 'NeedsEnvelope', revision: 0 })
             },
             {
@@ -1611,8 +1611,8 @@ void test('E2EE cloud HTTP client recovers from transient 502/503/504 gateway bl
           const failed = yield* Effect.result(client.mailbox(access).status(target))
           assert.equal(failed._tag, 'Failure')
           assert.equal(failed.failure.reason, 'unavailable')
-          assert.equal(attempts, 3)
-          assert.deepEqual(delays, [60, 150])
+          assert.equal(attempts, 4)
+          assert.deepEqual(delays, [100, 300, 800])
           // Next call mints a fresh token and succeeds.
           const recovered = yield* client.mailbox(access).status(target)
           assert.equal(recovered.status, 'NeedsEnvelope')

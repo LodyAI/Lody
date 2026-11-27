@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
+import { normalizeSupportedLanguage, type SupportedLanguage } from '@lody/shared/language';
 import { allActiveSessionsAtom } from '@/atoms/doc-meta';
 import { iosLiveActivitiesEnabledAtom, userAtom } from '@/atoms';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -99,25 +100,84 @@ function getLiveActivityBridge(): LodyLiveActivityBridge | null {
   return bridge;
 }
 
+const COMPACT_UPDATED_AT: Record<
+  SupportedLanguage,
+  {
+    now: string;
+    minutes: (n: number) => string;
+    hours: (n: number) => string;
+    days: (n: number) => string;
+  }
+> = {
+  en: {
+    now: 'now',
+    minutes: (n) => `${n}m`,
+    hours: (n) => `${n}h`,
+    days: (n) => `${n}d`,
+  },
+  zh_CN: {
+    now: '刚刚',
+    minutes: (n) => `${n}分钟前`,
+    hours: (n) => `${n}小时前`,
+    days: (n) => `${n}天前`,
+  },
+  zh_Hant: {
+    now: '剛剛',
+    minutes: (n) => `${n}分鐘前`,
+    hours: (n) => `${n}小時前`,
+    days: (n) => `${n}天前`,
+  },
+  ja: {
+    now: 'たった今',
+    minutes: (n) => `${n}分前`,
+    hours: (n) => `${n}時間前`,
+    days: (n) => `${n}日前`,
+  },
+  ko: {
+    now: '방금',
+    minutes: (n) => `${n}분 전`,
+    hours: (n) => `${n}시간 전`,
+    days: (n) => `${n}일 전`,
+  },
+  es: {
+    now: 'ahora',
+    minutes: (n) => `${n} min`,
+    hours: (n) => `${n} h`,
+    days: (n) => `${n} d`,
+  },
+  fr: {
+    now: 'à l’instant',
+    minutes: (n) => `${n} min`,
+    hours: (n) => `${n} h`,
+    days: (n) => `${n} j`,
+  },
+  ru: {
+    now: 'сейчас',
+    minutes: (n) => `${n} мин`,
+    hours: (n) => `${n} ч`,
+    days: (n) => `${n} д`,
+  },
+};
+
 function formatCompactUpdatedAt(value: number, nowMs: number, language: string): string {
   if (!Number.isFinite(value) || value <= 0) return '';
   const elapsedMs = Math.max(0, nowMs - value);
   const minute = 60_000;
   const hour = 60 * minute;
   const day = 24 * hour;
-  const isChinese = language.startsWith('zh');
+  const formatter = COMPACT_UPDATED_AT[normalizeSupportedLanguage(language) ?? 'en'];
 
-  if (elapsedMs < minute) return isChinese ? '刚刚' : 'now';
+  if (elapsedMs < minute) return formatter.now;
   if (elapsedMs < hour) {
     const minutes = Math.max(1, Math.floor(elapsedMs / minute));
-    return isChinese ? `${minutes}分钟前` : `${minutes}m`;
+    return formatter.minutes(minutes);
   }
   if (elapsedMs < day) {
     const hours = Math.max(1, Math.floor(elapsedMs / hour));
-    return isChinese ? `${hours}小时前` : `${hours}h`;
+    return formatter.hours(hours);
   }
   const days = Math.max(1, Math.floor(elapsedMs / day));
-  return isChinese ? `${days}天前` : `${days}d`;
+  return formatter.days(days);
 }
 
 /**

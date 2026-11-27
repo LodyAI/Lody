@@ -8,6 +8,7 @@ import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 import jsQR from 'jsqr';
 import QRCode from 'qrcode';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { getSiteLocalizedUrl } from '@/lib/lody-urls';
 import { openExternalUrl } from '@/lib/native-browser';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy, ScanLine, X } from 'lucide-react';
@@ -213,7 +214,7 @@ function ResultAlert(props: { result: DialogResult }) {
   );
 }
 
-export type CameraState = 'idle' | 'starting' | 'scanning' | 'unavailable';
+export type CameraState = 'idle' | 'starting' | 'scanning' | 'denied' | 'unavailable';
 
 /** Decode passes at most this often (~14 fps): enough to scan, light on a phone. */
 const SCAN_INTERVAL_MS = 70;
@@ -352,10 +353,16 @@ export function useQrCamera(active: boolean, onCode: (text: string) => void) {
           setState('scanning');
           frame = requestAnimationFrame(tick);
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           opening = false;
-          // Denied, absent or busy: reading the code by eye still works.
-          if (!stopped) setState('unavailable');
+          if (stopped) return;
+          const name = (error as { name?: unknown } | null)?.name;
+          // Denied vs absent/busy: reading the code by eye still works in both cases.
+          setState(
+            name === 'NotAllowedError' || name === 'PermissionDeniedError'
+              ? 'denied'
+              : 'unavailable'
+          );
         });
     };
     const restart = () => {
@@ -444,8 +451,14 @@ function VerifyDialog(props: {
                     {t('e2ee.verify.startCamera')}
                   </Button>
                 ))}
-              {state === 'unavailable' && (
-                <p {...stylex.props(styles.footnote)}>{t('e2ee.verify.cameraUnavailable')}</p>
+              {(state === 'denied' || state === 'unavailable') && (
+                <p {...stylex.props(styles.footnote)}>
+                  {t(
+                    state === 'denied'
+                      ? 'e2ee.verify.cameraDenied'
+                      : 'e2ee.verify.cameraUnavailable'
+                  )}
+                </p>
               )}
               <div {...stylex.props(styles.manual)}>
                 <p {...stylex.props(styles.hint)}>{t('e2ee.verify.manualHint')}</p>
@@ -488,10 +501,11 @@ function VerifyDialog(props: {
 
 /** Public docs section that explains how the security code works. */
 export function securityCodeDocsUrl(language: string | undefined): string {
-  const path = language?.toLowerCase().startsWith('zh')
-    ? '/zh/docs/encrypted-workspaces-security-code'
-    : '/docs/encrypted-workspaces-security-code';
-  return `https://lody.ai${path}`;
+  return getSiteLocalizedUrl(
+    '/docs/encrypted-workspaces-security-code',
+    language,
+    'https://lody.ai'
+  );
 }
 
 /** The ledger's verification code: what members compare out of band. */

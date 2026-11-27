@@ -1,0 +1,131 @@
+---
+title: "Compatibilidad con funciones de ACP y extensiones"
+description: "Matriz de compatibilidad para los proveedores ACP integrados en Lody: capacidades estándar de ACP más las funciones de extensión de Lody que cada adaptador de proveedor negocia a través de acp-extension-core."
+---
+
+# Compatibilidad con funciones de ACP y extensiones
+
+Esta página está dirigida a quienes provienen de Codex, Claude Code u otro agente ACP y quieren saber
+qué capacidades se mantienen. Explica qué es ACP, cómo lo extiende Lody y qué admite cada proveedor
+integrado. Si aún no has conectado un entorno de ejecución, comienza por
+[Si vienes de Codex o Claude Code](/es/docs/from-codex-claude-code) o [Configuración de agentes](/es/docs/quickstart).
+
+## Qué es ACP
+
+[Agent Client Protocol](https://agentclientprotocol.com/) (ACP) es un protocolo abierto entre un
+cliente —la aplicación que usas— y un agente que realiza el trabajo. Lody es un cliente ACP. Inicia el
+servidor ACP del proveedor, negocia las capacidades durante `initialize` y luego intercambia prompts,
+actualizaciones en streaming, llamadas a herramientas, solicitudes de permisos y eventos del ciclo de
+vida de la sesión a través de esa misma conexión.
+
+ACP cubre el núcleo común, por lo que dos agentes ACP pueden diferir en funciones opcionales:
+imágenes, contexto incrustado, reanudación o bifurcación de sesiones, transportes MCP, solicitudes
+de información adicional (*elicitation*) y más. Por eso Lody negocia las capacidades en lugar de
+asumirlas. La base común funciona para todos los proveedores integrados: prompts de texto,
+actualizaciones en streaming, llamadas a herramientas, solicitudes de permisos, cancelación y las
+devoluciones de llamada de sistema de archivos y terminal de Lody.
+
+## Cómo extiende Lody a ACP
+
+Las capacidades propias de Lody viven en [`acp-extension-core`](https://github.com/LodyAI/acp-extension-core),
+un contrato independiente del proveedor sobre ACP v1. Funciones como los eventos de subagentes en
+streaming, el conteo de uso, los límites de frecuencia, los objetivos duraderos y la compactación de
+contexto necesitan una descripción compartida y estable, por lo que cada una se versiona y se anuncia
+de forma independiente bajo `_meta.lody`:
+
+- el agente anuncia lo que implementa en `InitializeResponse.agentCapabilities._meta.lody`;
+- el cliente anuncia sus propias funciones en `InitializeRequest.clientCapabilities._meta.lody`;
+- la ausencia de una clave significa que el par no admite esa función, y admitir una función nunca
+  implica admitir otra.
+
+Los adaptadores públicos `acp-extension-*` traducen cada entorno de ejecución a este contrato, de modo
+que el cliente de Lody lee la misma estructura sin importar qué proveedor haya detrás de la conexión.
+Un agente ACP personalizado o del registro puede implementar las mismas claves. Consulta el
+[catálogo de capacidades](https://github.com/LodyAI/acp-extension-core#capability-catalog) para ver los
+payloads exactos.
+
+## Compatibilidad de un vistazo
+
+La tabla combina las capacidades estándar de ACP (con el prefijo `ACP:`) con las capacidades de
+extensión de Lody (con el prefijo `Lody:`). Los nueve proveedores comparten la base común de ACP
+descrita arriba; solo las capacidades opcionales siguientes varían según el proveedor. Los nombres de
+los proveedores enlazan al repositorio del entorno de ejecución o del adaptador.
+
+| Proveedor            | ACP: imagen | ACP: contexto incrustado | ACP: carga | ACP: reanudación | ACP: bifurcación | ACP: directorios extra | ACP: MCP | ACP: cierre de sesión | ACP: elicitation | Lody: eventos de subagente | Lody: título de sesión | Lody: uso | Lody: límites de frecuencia | Lody: bifurcar en turno | Lody: redirección | Lody: tareas | Lody: subagentes | Lody: objetivo | Lody: compactación |
+| -------------------- | ----------- | ------------------------ | ---------- | ---------------- | ---------------- | ---------------------- | -------- | --------------------- | ---------------- | -------------------------- | ---------------------- | --------- | --------------------------- | ----------------------- | ----------------- | ------------ | ---------------- | -------------- | ------------------ |
+| <a href="https://github.com/LodyAI/acp-extension-claude" target="_blank" rel="noreferrer"><strong>Claude Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-codex" target="_blank" rel="noreferrer"><strong>Codex</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-grok" target="_blank" rel="noreferrer"><strong>Grok</strong></a> | — | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓³ | — | — | — |
+| <a href="https://github.com/LodyAI/acp-extension-kimi" target="_blank" rel="noreferrer"><strong>Kimi Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ◐⁴ | ✓ | ✓ | ✓ | — | ✓¹ | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-devin" target="_blank" rel="noreferrer"><strong>Devin</strong></a> | ✓ | ✓ | ✓ | — | — | ✓ | HTTP+SSE | — | ✓ | ✓ | — | — | — | — | — | — | — | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-pi" target="_blank" rel="noreferrer"><strong>Pi</strong></a> | ✓ | ✓ | ✓ | ✓ | — | — | — | — | ✓ | ✓ | — | ✓ | — | — | ✓ | — | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-dsh" target="_blank" rel="noreferrer"><strong>DeepSeek Harness</strong></a> | ◐⁵ | — | ✓ | ✓ | ✓ | — | HTTP | — | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓¹ | ✓ | ✓ | ✓ |
+| <a href="https://github.com/bubbuild/bub" target="_blank" rel="noreferrer"><strong>Bub</strong></a> | — | — | ✓ | ✓ | — | — | HTTP+SSE | — | ✓ | — | — | — | — | — | ✓ | — | — | — | — |
+| <a href="https://github.com/arcships/dimcode" target="_blank" rel="noreferrer"><strong>Dimcode</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+Leyenda:
+
+- **✓** — el proveedor declara la capacidad (para ACP estándar, la anuncia en `initialize`).
+- **◐** — declarada parcialmente; consulta las notas siguientes.
+- **—** — no declarada por el proveedor.
+
+### Referencia de capacidades de extensión
+
+Las columnas `Lody:` describen lo que declara el proveedor. Estas son las capacidades del lado del
+proveedor detrás de cada columna:
+
+- **eventos de subagente** — el adaptador transmite instantáneas, progreso y salida de agentes hijos en
+  `_lody/subagents/event`.
+- **título de sesión** — el adaptador genera el título y lo envía como un `session_info_update`
+  estándar etiquetado con `_meta.lody.titleSource`.
+- **uso** — contabilidad de contexto y tokens en el `usage_update` estándar, con totales por modelo.
+- **límites de frecuencia** — instantáneas de cuota en `_lody/rate_limits/update`, con una consulta
+  opcional `_lody/rate_limits/get`.
+- **bifurcar en turno** — `session/fork` puede indicar el turno histórico desde el cual bifurcar.
+- **redirección** — se pueden inyectar indicaciones en un turno en curso mediante `_lody/session/steer`
+  o `_meta.lody.steer`.
+- **tareas** — trabajo en segundo plano o programado notificado en el ciclo de vida normal de llamadas
+  a herramientas con `_meta.lody.task`.
+- **subagentes** — ciclo de vida de subagentes, además de consultas opcionales de listado, cancelación
+  y salida.
+- **objetivo** — un objetivo de sesión duradero que persiste más allá de un solo prompt, con acciones de
+  definir, pausar, reanudar y limpiar.
+- **compactación** — compactación de contexto y reintentos notificados como un ciclo de vida de
+  herramienta con `_meta.lody.activity`.
+
+Notas:
+
+1. **Tareas:** Claude Code, Codex, Kimi Code y DeepSeek Harness declaran tareas en segundo plano; Grok
+   declara tareas programadas. Ninguno declara ambas.
+2. **Subagentes:** Claude Code y Codex declaran únicamente el ciclo de vida, no las consultas de
+   listado, cancelación o salida.
+3. **Las tareas de Grok** son únicamente tareas programadas.
+4. **El título de sesión de Kimi Code** se anuncia solo cuando el motor de Kimi instalado admite su
+   función de títulos; de lo contrario, Lody genera el título por sí mismo.
+5. **La entrada de imágenes de DeepSeek Harness** depende del modelo seleccionado. El adaptador activa
+   la capacidad solo cuando el modelo activo declara entrada de imágenes.
+6. **MCP de Dimcode:** Dimcode anuncia Streamable HTTP y SSE, pero indica que MCP por stdio no es
+   compatible.
+
+En la columna `ACP: MCP`, `HTTP+SSE` significa que el proveedor anuncia ambos transportes y `HTTP`
+significa que anuncia únicamente HTTP. MCP por stdio es la base habitual de ACP; Dimcode es la
+excepción indicada en la nota 6. Las columnas de ACP estándar de `Devin` y `Grok` reflejan sus entornos
+de ejecución oficiales, mientras que las columnas de Lody muestran lo que añade el proxy de
+compatibilidad de Lody. `Bub` y `Dimcode` son servidores ACP externos iniciados por Lody; sus filas
+reflejan lo que esos servidores declaran por sí mismos, incluidas las extensiones de Lody que
+implementan.
+
+La información de compatibilidad anterior refleja las declaraciones de capacidades distribuidas con los
+adaptadores de Lody y los servidores ACP externos. Lody lee el resultado negociado al iniciar la sesión,
+por lo que una actualización de proveedor puede cambiar lo que aparece en la aplicación antes de que
+esta página se actualice. Para una comparación independiente y versionada de implementaciones estándar
+de ACP, consulta [ACP Wall](https://github.com/wibus-wee/acp-wall).
+
+## Siguiente
+
+<Cards>
+  <Card href="/es/docs/from-codex-claude-code" title="Si vienes de Codex o Claude Code" />
+  <Card href="/es/docs/quickstart" title="Configuración de agentes" />
+  <Card href="/es/docs/cli-runtimes" title="Tipos de entornos de ejecución CLI" />
+  <Card href="/es/docs/concepts" title="Conceptos y glosario" />
+</Cards>

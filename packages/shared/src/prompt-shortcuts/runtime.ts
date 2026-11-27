@@ -1,30 +1,19 @@
 import {
-  getShortcutIndexStreamId,
   getWorkspaceShortcutBodyStreamId,
   getWorkspaceShortcutIndexStreamId,
-  type ShortcutAccessDomain,
-  type ShortcutResource,
+  type WorkspaceShortcutResource,
 } from './access';
 import { InFlightDedupe } from '../in-flight-dedupe';
 import { PromptShortcutCatalog, type PromptShortcutIndexEntry } from './catalog';
 import { PromptShortcutDocument } from './document';
-import {
-  LocalShortcutStore,
-  type ShortcutLocalRecord,
-  type ShortcutDirectoryEntry,
-} from './local-store';
+import { LocalShortcutStore, type ShortcutLocalRecord } from './local-store';
 import { PromptShortcutError, type PromptShortcut } from './model';
-import { ShortcutSyncTransportError, type ShortcutSyncLease } from './sync';
+import { type ShortcutSyncLease } from './sync';
 import { ShortcutLifetime } from './lifetime';
 
-export type { ShortcutDirectoryEntry } from './local-store';
 export type ShortcutPublicationPort = {
   canWrite?: () => boolean;
-  acquire(resource: ShortcutResource, write: boolean): Promise<ShortcutSyncLease>;
-  /** Optional Phase 1 legacy Convex revocation when deleting an unmigrated legacy shortcut. */
-  revokeLegacy?(
-    entry: PromptShortcutIndexEntry & { visibility: 'private' | 'workspace' }
-  ): Promise<void>;
+  acquire(resource: WorkspaceShortcutResource, write: boolean): Promise<ShortcutSyncLease>;
   dispose(): Promise<void>;
 };
 export type ShortcutRuntimeSnapshot = {
@@ -41,20 +30,16 @@ export class PromptShortcutRuntime {
   private listeners = new Set<() => void>();
   private workspaceEntries = new Map<string, PromptShortcutIndexEntry>();
   private workspaceDeletedIds = new Set<string>();
-  private legacyEntries: PromptShortcutIndexEntry[] = [];
-  private directory: readonly ShortcutDirectoryEntry[] = [];
-  private directoryVersion = 0;
   private tasks = new Set<Promise<unknown>>();
   private flushing: Promise<void> | null = null;
   private errors: Record<string, unknown> = {};
   private snapshot: ShortcutRuntimeSnapshot;
   private workspaceIndex: {
     catalog: PromptShortcutCatalog;
+    write: boolean;
     close(): Promise<void>;
   } | null = null;
   private openingWorkspaceIndex: Promise<void> | null = null;
-  private syncedLegacySignatures = new Map<string, string>();
-  private openingLegacyIndexes = new Map<string, Promise<void>>();
   private readonly bodyReads = new InFlightDedupe<string, PromptShortcut>();
   private readonly warmBodies = new Set<string>();
   private prefetchTail: Promise<void> = Promise.resolve();
@@ -64,8 +49,6 @@ export class PromptShortcutRuntime {
     private readonly remote?: ShortcutPublicationPort
   ) {
     const cached = store.discovery();
-    this.directory = cached.directory;
-    this.legacyEntries = cached.entries;
     for (const entry of cached.workspaceEntries ?? []) {
       if (entry.workspaceId === this.workspaceId) this.workspaceEntries.set(entry.id, entry);
     }
@@ -111,55 +94,25 @@ export class PromptShortcutRuntime {
     return task;
   }
 
-  private authorizedLegacy(entry: PromptShortcutIndexEntry) {
-    return (
-      entry.workspaceId === this.workspaceId &&
-      !this.workspaceEntries.has(entry.id) &&
-      !this.workspaceDeletedIds.has(entry.id) &&
-      this.directory.some(
-        (row) =>
-          row.shortcutId === entry.id &&
-          !row.deleted &&
-          row.bodyDocId === entry.bodyDocId &&
-          row.ownerUserId === entry.ownerUserId &&
-          row.revision === entry.revision &&
-          (row.visibility === undefined ||
-            row.visibility === 'workspace' ||
-            row.ownerUserId === this.userId)
-      )
-    );
-  }
-
   private authorized(entry: PromptShortcutIndexEntry) {
     if (entry.workspaceId !== this.workspaceId || this.workspaceDeletedIds.has(entry.id))
       return false;
     const workspaceEntry = this.workspaceEntries.get(entry.id);
-    if (workspaceEntry) {
-      return (
-        workspaceEntry.bodyDocId === entry.bodyDocId &&
-        workspaceEntry.ownerUserId === entry.ownerUserId &&
-        workspaceEntry.revision === entry.revision
-      );
-    }
-    return this.authorizedLegacy(entry);
+    if (!workspaceEntry) return false;
+    return (
+      workspaceEntry.bodyDocId === entry.bodyDocId &&
+      workspaceEntry.ownerUserId === entry.ownerUserId &&
+      workspaceEntry.revision === entry.revision
+    );
   }
 
   private isRemotelyDeleted(shortcutId: string) {
-    if (this.workspaceDeletedIds.has(shortcutId)) return true;
-    if (this.workspaceEntries.has(shortcutId)) return false;
-    return this.directory.some((item) => item.shortcutId === shortcutId && item.deleted);
+    return this.workspaceDeletedIds.has(shortcutId);
   }
 
   private publish() {
     if (this.disposed) return;
     const entries = new Map<string, PromptShortcutIndexEntry>();
-    // Legacy entries first so workspace-index entries always take precedence on both id and slug.
-    const workspaceSlugs = new Set([...this.workspaceEntries.values()].map((entry) => entry.slug));
-    for (const entry of this.legacyEntries) {
-      if (this.authorizedLegacy(entry) && !workspaceSlugs.has(entry.slug)) {
-        entries.set(entry.id, entry);
-      }
-    }
     for (const [id, entry] of this.workspaceEntries) {
       if (!this.workspaceDeletedIds.has(id)) entries.set(id, entry);
     }
@@ -187,20 +140,6 @@ export class PromptShortcutRuntime {
     for (const listener of this.listeners) listener();
   }
 
-  private wantsLegacyIndex(domain: ShortcutAccessDomain) {
-    return (
-      !this.disposed &&
-      this.directory.some(
-        (row) =>
-          !row.deleted &&
-          !this.workspaceEntries.has(row.shortcutId) &&
-          !this.workspaceDeletedIds.has(row.shortcutId) &&
-          row.ownerUserId === domain.ownerUserId &&
-          (row.visibility ?? 'workspace') === domain.visibility
-      )
-    );
-  }
-
   private refreshIndexes() {
     if (this.disposed) return;
     try {
@@ -211,11 +150,8 @@ export class PromptShortcutRuntime {
           .filter((entry) => entry.workspaceId === this.workspaceId);
         this.workspaceDeletedIds = deleted;
         this.workspaceEntries = new Map(active.map((entry) => [entry.id, entry]));
-        void this.store
-          .applyRemoteDeletions(this.directory, this.workspaceDeletedIds)
-          .catch(() => undefined);
+        void this.store.applyRemoteDeletions(this.workspaceDeletedIds).catch(() => undefined);
       }
-      this.legacyEntries = this.legacyEntries.filter((entry) => this.authorizedLegacy(entry));
       void this.cacheDiscovery().catch(() => undefined);
       this.publish();
     } catch (error) {
@@ -228,8 +164,6 @@ export class PromptShortcutRuntime {
     return this.track(
       this.store
         .cacheDiscovery({
-          directory: [...this.directory],
-          entries: this.legacyEntries.filter((entry) => this.authorizedLegacy(entry)),
           workspaceEntries: [...this.workspaceEntries.values()],
           workspaceDeletedIds: [...this.workspaceDeletedIds],
         })
@@ -267,170 +201,60 @@ export class PromptShortcutRuntime {
     );
   }
 
-  private openWorkspaceIndex(): Promise<void> {
-    if (this.workspaceIndex) return Promise.resolve();
-    if (this.openingWorkspaceIndex) return this.openingWorkspaceIndex;
-    const id = getWorkspaceShortcutIndexStreamId(this.workspaceId);
-    const next = (async () => {
-      const sync = await this.remote!.acquire(
-        { kind: 'workspace-index', workspaceId: this.workspaceId },
-        this.canWrite
-      );
-      let releaseReplica: (() => Promise<void>) | undefined;
-      let unsubscribe: (() => void) | undefined;
-      let retained = false;
-      try {
-        const lease = await this.store.repo.acquireFlockDoc(id);
-        releaseReplica = () => lease.release();
-        const catalog = new PromptShortcutCatalog(lease.flock);
-        unsubscribe = lease.flock.subscribe(() => this.refreshIndexes());
-        await sync.join();
-        if (this.disposed) return;
-        this.workspaceIndex = {
-          catalog,
-          close: async () => {
-            unsubscribe?.();
-            await sync.release();
-            await lease.release();
-          },
-        };
-        retained = true;
-        this.refreshIndexes();
-      } finally {
-        if (!retained) {
-          unsubscribe?.();
-          await sync.release();
-          await releaseReplica?.();
-        }
-      }
-    })().finally(() => {
-      this.openingWorkspaceIndex = null;
-    });
-    this.openingWorkspaceIndex = next;
-    return next;
-  }
-
-  private async syncLegacyIndexOnce(
-    domain: ShortcutAccessDomain,
-    signature: string
-  ): Promise<void> {
-    const id = getShortcutIndexStreamId(domain);
+  private async openWorkspaceIndex(): Promise<void> {
     while (!this.disposed) {
-      if (this.syncedLegacySignatures.get(id) === signature) return;
-      if (!this.wantsLegacyIndex(domain)) return;
-      const opening = this.openingLegacyIndexes.get(id);
-      if (opening) {
-        await opening.catch(() => undefined);
+      const desiredWrite = this.canWrite;
+      if (this.workspaceIndex && this.workspaceIndex.write === desiredWrite) return;
+      if (this.openingWorkspaceIndex) {
+        await this.openingWorkspaceIndex.catch(() => undefined);
         continue;
       }
       const next = (async () => {
-        const sync = await this.remote!.acquire({ kind: 'index', domain }, false);
+        const previous = this.workspaceIndex;
+        const id = getWorkspaceShortcutIndexStreamId(this.workspaceId);
+        const sync = await this.remote!.acquire(
+          { kind: 'workspace-index', workspaceId: this.workspaceId },
+          desiredWrite
+        );
+        let releaseReplica: (() => Promise<void>) | undefined;
+        let unsubscribe: (() => void) | undefined;
+        let retained = false;
         try {
           const lease = await this.store.repo.acquireFlockDoc(id);
-          try {
-            const catalog = new PromptShortcutCatalog(lease.flock);
-            await sync.sync();
-            if (!this.wantsLegacyIndex(domain)) return;
-            const fetched = catalog
-              .list()
-              .filter(
-                (entry) =>
-                  entry.workspaceId === domain.workspaceId &&
-                  entry.ownerUserId === domain.ownerUserId
-              );
-            this.legacyEntries = [
-              ...new Map(
-                [...this.legacyEntries, ...fetched]
-                  .filter((entry) => this.authorizedLegacy(entry))
-                  .map((entry) => [entry.id, entry])
-              ).values(),
-            ];
-            this.syncedLegacySignatures.set(id, signature);
-            this.refreshIndexes();
-          } finally {
-            await lease.release();
+          releaseReplica = () => lease.release();
+          const catalog = new PromptShortcutCatalog(lease.flock);
+          unsubscribe = lease.flock.subscribe(() => this.refreshIndexes());
+          await sync.join();
+          if (this.disposed) return;
+          this.workspaceIndex = {
+            catalog,
+            write: desiredWrite,
+            close: async () => {
+              unsubscribe?.();
+              await sync.release();
+              await lease.release();
+            },
+          };
+          retained = true;
+          if (previous) {
+            await previous.close();
           }
+          this.refreshIndexes();
         } finally {
-          await sync.release();
+          if (!retained) {
+            unsubscribe?.();
+            await sync.release();
+            await releaseReplica?.();
+          }
         }
       })().finally(() => {
-        if (this.openingLegacyIndexes.get(id) === next) {
-          this.openingLegacyIndexes.delete(id);
+        if (this.openingWorkspaceIndex === next) {
+          this.openingWorkspaceIndex = null;
         }
       });
-      this.openingLegacyIndexes.set(id, next);
+      this.openingWorkspaceIndex = next;
       await next;
-      return;
     }
-  }
-
-  /**
-   * Phase 1 legacy fallback directory: fetches read-only legacy `shortcut-index:*` streams
-   * via one-shot `sync()` ONLY for rows that have not yet landed (or been tombstoned) in
-   * `{workspaceId}:shortcut-index`.
-   */
-  setDirectory(rows: readonly ShortcutDirectoryEntry[]): Promise<void> {
-    this.assertActive();
-    this.directory = rows;
-    const version = ++this.directoryVersion;
-    this.publish();
-    if (!this.remote) return Promise.resolve();
-    return this.track(
-      (async () => {
-        if (typeof this.store.repo?.acquireFlockDoc === 'function') {
-          await this.openWorkspaceIndex();
-        }
-        await this.store.applyRemoteDeletions(rows, this.workspaceDeletedIds);
-        await this.cacheDiscovery();
-        const domains = new Map<string, { domain: ShortcutAccessDomain; tokens: string[] }>();
-        for (const row of rows) {
-          if (
-            row.deleted ||
-            this.workspaceEntries.has(row.shortcutId) ||
-            this.workspaceDeletedIds.has(row.shortcutId) ||
-            !(
-              row.visibility === undefined ||
-              row.visibility === 'workspace' ||
-              row.ownerUserId === this.userId
-            )
-          ) {
-            continue;
-          }
-          const domain: ShortcutAccessDomain = {
-            workspaceId: this.workspaceId,
-            ownerUserId: row.ownerUserId,
-            visibility: row.visibility ?? 'workspace',
-          };
-          const id = getShortcutIndexStreamId(domain);
-          let entry = domains.get(id);
-          if (!entry) {
-            entry = { domain, tokens: [] };
-            domains.set(id, entry);
-          }
-          entry.tokens.push(`${row.shortcutId}:${row.revision}:${row.bodyDocId}`);
-        }
-        for (const id of this.syncedLegacySignatures.keys()) {
-          if (!domains.has(id)) {
-            this.syncedLegacySignatures.delete(id);
-          }
-        }
-        for (const { domain, tokens } of domains.values()) {
-          this.assertActive();
-          if (version !== this.directoryVersion) return;
-          const signature = tokens.sort().join('\0');
-          await this.syncLegacyIndexOnce(domain, signature);
-        }
-        if (!this.disposed && version === this.directoryVersion) {
-          delete this.errors.directory;
-          this.refreshIndexes();
-        }
-      })().catch((error) => {
-        if (!this.disposed && version === this.directoryVersion) {
-          this.errors.directory = error;
-          this.publish();
-        }
-      })
-    );
   }
 
   private bodyKey(entry: PromptShortcutIndexEntry): string {
@@ -469,8 +293,7 @@ export class PromptShortcutRuntime {
               )
                 throw error;
             }
-            // Primary read: `{workspaceId}:shortcut:{bodyDocId}` via workspace token.
-            let syncedFromWorkspace = false;
+            // Read `{workspaceId}:shortcut:{bodyDocId}` via workspace token.
             const workspaceSync = await this.remote.acquire(
               {
                 kind: 'workspace-body',
@@ -481,29 +304,8 @@ export class PromptShortcutRuntime {
             );
             try {
               await workspaceSync.sync();
-              syncedFromWorkspace = true;
-            } catch (error) {
-              if (
-                !(
-                  error instanceof ShortcutSyncTransportError && error.code === 'stream_not_found'
-                ) ||
-                !this.authorizedLegacy(entry)
-              ) {
-                throw error;
-              }
             } finally {
               await workspaceSync.release();
-            }
-            if (!syncedFromWorkspace) {
-              const legacySync = await this.remote.acquire(
-                { kind: 'body', bodyDocId: entry.bodyDocId },
-                false
-              );
-              try {
-                await legacySync.sync();
-              } finally {
-                await legacySync.release();
-              }
             }
             this.assertActive();
             if (!this.authorized(entry))
@@ -632,13 +434,13 @@ export class PromptShortcutRuntime {
   }
 
   async retry(): Promise<void> {
-    this.syncedLegacySignatures.clear();
     await this.start();
     await this.flush();
-    if (this.remote) await this.setDirectory(this.directory);
   }
 
   private async mutateWorkspaceIndex(mutate: (catalog: PromptShortcutCatalog) => void) {
+    this.assertWritable();
+    await this.openWorkspaceIndex();
     this.assertWritable();
     const sync = await this.remote!.acquire(
       { kind: 'workspace-index', workspaceId: this.workspaceId },
@@ -666,19 +468,8 @@ export class PromptShortcutRuntime {
     const { entry, published } = record;
     if (record.operation === 'delete') {
       await this.mutateWorkspaceIndex((catalog) => catalog.remove(entry.id, entry.revision));
-      const legacyRow = this.directory.find((row) => row.shortcutId === entry.id && !row.deleted);
-      if (legacyRow && remote.revokeLegacy) {
-        await this.lifetime.wait(
-          remote.revokeLegacy({
-            ...entry,
-            visibility: legacyRow.visibility ?? 'workspace',
-          })
-        );
-      }
       this.workspaceDeletedIds.add(entry.id);
       this.workspaceEntries.delete(entry.id);
-      this.directory = this.directory.filter((row) => row.shortcutId !== entry.id);
-      this.legacyEntries = this.legacyEntries.filter((row) => row.id !== entry.id);
       await this.cacheDiscovery();
       return;
     }
@@ -715,7 +506,6 @@ export class PromptShortcutRuntime {
       throw new PromptShortcutError('conflict', 'Shortcut was deleted remotely');
     await this.mutateWorkspaceIndex((catalog) => catalog.put(entry));
     this.workspaceEntries.set(entry.id, entry);
-    this.legacyEntries = this.legacyEntries.filter((row) => row.id !== entry.id);
     await this.cacheDiscovery();
   }
 
@@ -728,7 +518,6 @@ export class PromptShortcutRuntime {
     await Promise.allSettled([...this.tasks]);
     await this.workspaceIndex?.close();
     this.workspaceIndex = null;
-    this.syncedLegacySignatures.clear();
     await this.store.dispose();
   }
 }

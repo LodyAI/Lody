@@ -1,0 +1,97 @@
+---
+title: "Connecter Magpie"
+description: "Importez les fournisseurs Magpie sur un serveur en une seule commande pour Claude, Codex, Pi et d'autres agents."
+---
+
+# Connecter Magpie
+
+Magpie se connecte aux fournisseurs de modèles. Lody crée les configurations d'agent. Conservez les clés API en amont dans Magpie ; vous n'avez pas besoin de les copier dans Lody.
+
+## Avant de commencer
+
+- Exécutez Magpie et le démon Lody sur le **même serveur**, avec au moins un modèle activé dans Magpie.
+- Connectez-vous à Lody et reliez le serveur à votre espace de travail. Voir [Connexion CLI](/fr/docs/cli#commandes-principales).
+- Utilisez une CLI Lody qui prend en charge `import-magpie`. Ces commandes utilisent des espaces de travail cloud, et non le mode local uniquement OSS.
+
+Sur le serveur, vérifiez la prise en charge de la commande, démarrez le démon et recherchez votre espace de travail :
+
+```bash
+lody agent-config import-magpie --help
+lody daemon start
+lody workspace list
+```
+
+Ignorez le démarrage du démon s'il est déjà en cours d'exécution. Remplacez `my-team` ci-dessous par l'identifiant, le nom ou le slug de votre espace de travail.
+
+## Importer tous les fournisseurs
+
+```bash
+lody agent-config import-magpie --workspace my-team --json
+```
+
+Par défaut, cela se connecte à `http://127.0.0.1:3425` et importe sept fournisseurs :
+
+| Valeur de `--targets` | Nom de la configuration |
+| --- | --- |
+| `claude` | Claude-magpie |
+| `codex` | Codex-magpie |
+| `pi` | Pi-magpie |
+| `dsh` | DSH-magpie |
+| `kimi` | Kimi Code-magpie |
+| `grok` | Grok-magpie |
+| `bub` | Bub-magpie |
+
+La commande importe uniquement vers la **machine qui l'exécute**. Il n'existe pas d'option `--machine`. `127.0.0.1` désigne ce serveur, et non votre ordinateur.
+Bub nécessite une commande `bub acp` et un plugin ACP préinstallés.
+
+### Sélectionner des agents
+
+Séparez les cibles par des virgules. Par exemple, pour importer uniquement Pi et Codex :
+
+```bash
+lody agent-config import-magpie --workspace my-team --targets pi,codex --json
+```
+
+### Utiliser un autre port ou un lien d'importation
+
+Pour un autre port Magpie, transmettez l'URL racine de la passerelle sans `/v1` :
+
+```bash
+lody agent-config import-magpie --workspace my-team --gateway http://127.0.0.1:4000 --json
+```
+
+Si vous disposez d'un lien d'importation Magpie, transmettez le lien complet :
+
+```bash
+lody agent-config import-magpie --workspace my-team --link 'lody://provider/import?v=1&data=…' --json
+```
+
+Utilisez `--link` ou `--gateway`, mais pas les deux. Avec un lien, toutes les cibles proposées par ce lien sont sélectionnées par défaut ; `--targets` permet uniquement de choisir parmi elles.
+La passerelle doit utiliser une adresse de bouclage HTTP locale : `127.0.0.1`, `localhost` ou `[::1]`.
+
+## Lire le résultat
+
+Le tableau JSON `providers` contient l'`agentConfigId` et le `status` de chaque cible :
+
+| Statut | Signification |
+| --- | --- |
+| `queued` | La configuration est enregistrée ; le démon installera ou vérifiera l'environnement d'exécution |
+| `preparing-runtime` / `verifying` | Une configuration existante est en cours de préparation ou de vérification |
+| `awaiting-auth` | Une configuration existante nécessite une authentification |
+| `created` | La configuration est enregistrée ; les requêtes aux modèles ne sont pas encore vérifiées |
+| `existing` | Une configuration pour cette passerelle et ce type d'agent existe déjà et est conservée |
+
+Suivez la progression de la configuration sur la page **Fournisseurs** de Lody. Une fois prêt, sélectionnez ce fournisseur sur le serveur lors de la création d'une session.
+Une importation réussie ne prouve pas que l'inférence en amont fonctionne. Envoyez un message pour la vérifier.
+
+`synced: false` signifie que la configuration est enregistrée localement, mais que la synchronisation avec l'espace de travail n'est pas confirmée. Rétablissez la connectivité et relancez l'importation.
+
+Des importations répétées conservent les configurations existantes et relancent les configurations en échec avec leur configuration d'origine.
+Si Pi n'est pas pris en charge, mettez à jour Lody sur le serveur et redémarrez son démon, ou excluez `pi` avec `--targets`.
+
+## Mettre à jour les modèles et la configuration
+
+Gérez les modèles dans Magpie. Lody lit le dernier catalogue lors des lancements suivants ; les sessions en cours ne se mettent pas à jour automatiquement.
+Lody gère la configuration native générée. Les modifications manuelles peuvent être écrasées au lancement suivant.
+
+Sur ordinateur, l'ouverture d'un lien d'importation Magpie existant affiche une boîte de dialogue de confirmation et effectue l'importation sur cet ordinateur. Pour importer sur un serveur, exécutez les commandes ci-dessus sur le serveur.

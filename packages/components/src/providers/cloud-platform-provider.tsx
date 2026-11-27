@@ -1,5 +1,6 @@
 import { assertGithubWorkspaceAccess } from '@/lib/github-workspace-admission';
 import i18next from 'i18next';
+import { normalizeSupportedLanguage } from '@lody/shared/language';
 import { Effect } from 'effect';
 import { makeAutomaticPairingRuntime } from '@lody/e2ee-client/automatic-pairing';
 import { E2eeAutomaticPairingInbox } from '@/components/pages/e2ee-automatic-pairing';
@@ -22,7 +23,6 @@ import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import {
   getTelemetryRouteTarget,
   installWorkspaceTelemetryScope,
-  postHogPrivacy,
   suspendWorkspaceTelemetry,
 } from '@/lib/posthog-privacy';
 import {
@@ -121,7 +121,6 @@ export function CloudPlatformProvider({
   const atomStore = useStore();
   const telemetryLive = useRef({ session, hasAuthenticatedConvex });
   telemetryLive.current = { session, hasAuthenticatedConvex };
-  useLayoutEffect(() => postHogPrivacy.sync());
   useEffect(() => {
     const uninstall = installWorkspaceTelemetryScope(() => {
       const live = telemetryLive.current;
@@ -141,7 +140,7 @@ export function CloudPlatformProvider({
       const target = getTelemetryRouteTarget();
       if (
         identity.status !== 'authenticated' ||
-        live.session.data?.user.id !== identity.user.id ||
+        live.session.data?.user?.id !== identity.user.id ||
         organization.activeOrganization.id !== mode?.workspaceId ||
         ('contentMode' in organization.activeOrganization &&
           organization.activeOrganization.contentMode !== undefined &&
@@ -168,42 +167,31 @@ export function CloudPlatformProvider({
         return null;
       return JSON.stringify([identity.user.id, mode.workspaceId, target]);
     });
-    const refresh = () => postHogPrivacy.sync();
-    const unsubscribes = [
-      sessionStore.subscribe(refresh),
-      workspacesStore.subscribe(refresh),
-      atomStore.sub(userAtom, refresh),
-      atomStore.sub(workspaceContentModeAtom, refresh),
-      atomStore.sub(currentWorkspaceIdAtom, refresh),
-      atomStore.sub(currentWorkspaceSlugAtom, refresh),
-    ];
-    return () => {
-      uninstall();
-      for (const unsubscribe of unsubscribes) unsubscribe();
-    };
+    return uninstall;
   }, [atomStore, sessionStore, workspacesStore]);
-  const [uninstallGitHubTokenPort] = useState(() =>
-    installGitHubTokenPort(
-      createCloudGitHubTokenPort((workspaceId) =>
-        assertGithubWorkspaceAccess(
-          {
-            workspaceId,
-            platformKind: 'cloud',
-            mode: atomStore.get(workspaceContentModeAtom),
-            runtime: atomStore.get(activeWorkspaceRuntimeAtom),
-            accountId: atomStore.get(userAtom)?.id ?? null,
-            currentWorkspaceId: atomStore.get(currentWorkspaceIdAtom),
-            routeSlug: atomStore.get(currentWorkspaceSlugAtom),
-            workspacesState: workspacesStore.get(),
-          },
-          'github:getOperationAccessTokenByRepoNameForClient'
+  useLayoutEffect(
+    () =>
+      installGitHubTokenPort(
+        createCloudGitHubTokenPort((workspaceId) =>
+          assertGithubWorkspaceAccess(
+            {
+              workspaceId,
+              platformKind: 'cloud',
+              mode: atomStore.get(workspaceContentModeAtom),
+              runtime: atomStore.get(activeWorkspaceRuntimeAtom),
+              accountId: atomStore.get(userAtom)?.id ?? null,
+              currentWorkspaceId: atomStore.get(currentWorkspaceIdAtom),
+              routeSlug: atomStore.get(currentWorkspaceSlugAtom),
+              workspacesState: workspacesStore.get(),
+            },
+            'github:getOperationAccessTokenByRepoNameForClient'
+          )
         )
-      )
-    )
+      ),
+    [atomStore, workspacesStore]
   );
   const [uninstallCloudHttpPort] = useState(() => installCloudHttpPort(CLOUD_HTTP_PORT));
 
-  useEffect(() => uninstallGitHubTokenPort, [uninstallGitHubTokenPort]);
   useEffect(() => uninstallCloudHttpPort, [uninstallCloudHttpPort]);
 
   useEffect(() => {
@@ -409,6 +397,18 @@ export function CloudPlatformProvider({
         describe: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.describe, request),
         history: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.history, request),
       },
+      onWorkspaceCreated: (workspace) => {
+        const current = workspacesStore.get();
+        if (
+          current.status !== 'ready' ||
+          current.workspaces.some((item) => item.id === workspace.id)
+        )
+          return;
+        workspacesStore.set({
+          ...current,
+          workspaces: [...current.workspaces, toWorkspaceSummary(workspace, 'owner')],
+        });
+      },
       refreshWorkspaces: async () => {
         await readOrganization().refetchOrganizations();
       },
@@ -463,7 +463,8 @@ export function CloudPlatformProvider({
         void getIpcServices()
           ?.notifications.showDevicePairingRequest({
             requestId: id,
-            language: i18next.resolvedLanguage?.startsWith('zh') ? 'zh' : 'en',
+            language:
+              normalizeSupportedLanguage(i18next.resolvedLanguage ?? i18next.language) ?? 'en',
           })
           .catch(() => {});
       },
@@ -489,7 +490,7 @@ export function CloudPlatformProvider({
     electron,
     sessionStore,
     workspacesStore,
-    session.data?.user.id,
+    session.data?.user?.id,
   ]);
   useEffect(() => () => automaticPairing?.disposeAutomaticPairing(), [automaticPairing]);
   const e2eeWorkspaces = useMemo(
@@ -518,10 +519,52 @@ export function CloudPlatformProvider({
                       changed
                     )
                   : () => {},
+              ...(baseE2eeWorkspaces.runtime.accountApproval
+                ? {
+                    // A hint only: the host still reads and verifies pending requests itself.
+                    subscribePendingMemberRequests: (workspaceId: string, changed: () => void) => {
+                      const openApproval = baseE2eeWorkspaces.runtime?.accountApproval;
+                      if (!openApproval || !workspaceId) return () => {};
+                      const owner = sessionStore.get();
+                      const accountId = owner.status === 'authenticated' ? owner.user.id : null;
+                      let disposed = false;
+                      let unsubscribe: (() => void) | undefined;
+                      void (async () => {
+                        let approvalSession:
+                          | Awaited<ReturnType<NonNullable<typeof openApproval>>>
+                          | undefined;
+                        try {
+                          approvalSession = await openApproval(workspaceId);
+                          const access = await approvalSession.access();
+                          if (disposed) return;
+                          const current = sessionStore.get();
+                          if (
+                            accountId !== null &&
+                            (current.status !== 'authenticated' || current.user.id !== accountId)
+                          )
+                            return;
+                          unsubscribe = cloudClient.subscribe(
+                            cloudOperations.e2eeMembers.pending,
+                            access,
+                            changed
+                          );
+                        } catch {
+                          /* Untrusted wakeup hint; callers keep their polling fallback. */
+                        } finally {
+                          await approvalSession?.release().catch(() => {});
+                        }
+                      })();
+                      return () => {
+                        disposed = true;
+                        unsubscribe?.();
+                      };
+                    },
+                  }
+                : {}),
             },
           }
         : baseE2eeWorkspaces,
-    [automaticPairing, baseE2eeWorkspaces, cloudClient]
+    [automaticPairing, baseE2eeWorkspaces, cloudClient, sessionStore]
   );
 
   const sessionAccess = useMemo(
@@ -630,12 +673,9 @@ export function CloudPlatformProvider({
 
   return (
     <PlatformContext.Provider value={provider}>
-      <CloudWorkspaceBridge
-        organizationRef={organizationRef}
-        workspacesStore={workspacesStore}
-      />
+      <CloudWorkspaceBridge organizationRef={organizationRef} workspacesStore={workspacesStore} />
       <E2eeAutomaticPairingInbox
-        key={session.data?.user.id ?? 'signed-out'}
+        key={session.data?.user?.id ?? 'signed-out'}
         runtime={e2eeWorkspaces.runtime}
       >
         {children}

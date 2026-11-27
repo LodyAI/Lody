@@ -21,7 +21,8 @@ import { toast } from '@/lib/toast';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
 import { sessionMetaCountAtom } from '@/atoms/doc-meta';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { useCloudMutation, useCloudQuery, useCloudQueryState } from '@lody/platform/react';
+import { Button } from '@lody/ui/button';
 import { isElectronRenderer } from '@/lib/electron';
 import { useAppCapability } from '@/lib/app-platform';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -99,9 +100,16 @@ function CloudBillingSettings() {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const localSessionCount = useAtomValue(sessionMetaCountAtom);
-  const fetchedOverview = useCloudQuery(
+  const [promoRefreshKey, refreshPromoPolicy] = useState(0);
+  const {
+    data: fetchedOverview,
+    error: overviewError,
+    retry: retryOverview,
+  } = useCloudQueryState(
     cloudOperations.billing.getBillingOverview,
-    workspaceId ? { workspaceId } : 'skip'
+    workspaceId
+      ? { workspaceId, ...(promoRefreshKey > 0 ? { policyRefreshKey: promoRefreshKey } : {}) }
+      : 'skip'
   );
   const overviewScope = workspaceId && authSessionId ? `${authSessionId}:${workspaceId}` : null;
   // Count visits, not reactive overview refreshes or StrictMode effect replay.
@@ -491,6 +499,14 @@ function CloudBillingSettings() {
     ),
     refreshPolicy
   );
+  useReferralPolicyRefresh(
+    Math.min(
+      overview?.pricing.promo?.nextChangeAt ?? Infinity,
+      overview?.pricing.promo?.policy?.nextChangeAt ?? Infinity,
+      overview?.pricing.promo?.retained?.expiresAt ?? Infinity
+    ),
+    refreshPromoPolicy
+  );
 
   // Credit pays toward the first subscription; members never see the Checkout.
   const dismissLead = useCloudMutation(cloudOperations.referrals.dismissLead);
@@ -769,6 +785,26 @@ function CloudBillingSettings() {
 
   return (
     <>
+      {overviewError && fetchedOverview === undefined && (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            marginBottom: 12,
+            padding: '8px 12px',
+            borderRadius: 8,
+            border: '1px solid var(--border, rgba(128, 128, 128, 0.25))',
+          }}
+        >
+          <span>{t('common.tryAgain')}</span>
+          <Button size="small" variant="ghost" onClick={retryOverview}>
+            {t('common.retry', 'Retry')}
+          </Button>
+        </div>
+      )}
       <BillingSettingsView
         overview={overview}
         sessionCount={localSessionCount}

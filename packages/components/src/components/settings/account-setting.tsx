@@ -1,4 +1,5 @@
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
+import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,6 +13,7 @@ import { useRouter } from '@tanstack/react-router';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import { isE2eeActionTimeoutError } from '../../providers/cloud-e2ee-workspaces';
 import {
   deleteAccountWorkspace,
   hasEncryptedContentMode,
@@ -165,9 +167,21 @@ function CloudAccountSettings({
   const refreshAdmissionBilling = useCloudAction(
     cloudOperations.billing.purchaseWorkspaceMemberSeat
   );
+  const [seatPolicyRefreshKey, refreshSeatPolicy] = useState(0);
   const seatInvitePreview = useCloudQuery(
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
-    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
+    activeOrganizationId && !encrypted
+      ? {
+          workspaceId: activeOrganizationId,
+          ...(seatPolicyRefreshKey > 0 ? { policyRefreshKey: seatPolicyRefreshKey } : {}),
+        }
+      : 'skip'
+  );
+  useReferralPolicyRefresh(
+    seatInvitePreview?.status === 'billed'
+      ? (seatInvitePreview.policyNextChangeAt ?? seatInvitePreview.promoEndsAt)
+      : undefined,
+    refreshSeatPolicy
   );
   // Not skipped for encrypted workspaces: the subscription guard on deletion still applies.
   const billingOverview = useCloudQuery(
@@ -685,7 +699,9 @@ function CloudAccountSettings({
     } catch (error) {
       console.error('Failed to delete workspace:', error);
       toast.error(t('common.error'), {
-        description: t('common.tryAgain'),
+        description: isE2eeActionTimeoutError(error)
+          ? t('e2ee.delete.timeout')
+          : t('common.tryAgain'),
       });
     }
   };
@@ -819,10 +835,10 @@ function CloudAccountSettings({
       workspaceJoinRequestsSlot={
         encrypted &&
         encryptedTeamManagement &&
-        platform.e2eeWorkspaces?.runtime &&
-        currentUserId ? (
+        currentUserId &&
+        (platform.e2eeWorkspaces?.runtime || role === 'owner' || role === 'admin') ? (
           <E2eeTeamSettingsHost
-            runtime={platform.e2eeWorkspaces.runtime}
+            runtime={platform.e2eeWorkspaces?.runtime}
             workspaceId={activeOrganization.id}
             accountId={currentUserId}
             onOpenBilling={openAdmissionBilling}

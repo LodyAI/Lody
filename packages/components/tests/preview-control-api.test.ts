@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PreviewControlIntent } from '@lody/shared';
+import type { PreviewControlIntent, RoostCloudHistoryTarget } from '@lody/shared';
 import { installCloudHttpPort } from '../src/lib/cloud-http-port';
-import { mintPreviewControlProof } from '../src/lib/preview-control-api';
+import {
+  getRoostCloudHistoryReadGrant,
+  mintPreviewControlProof,
+} from '../src/lib/preview-control-api';
 import { mintAutomationControlProof } from '../src/lib/automation-control-api';
 
 const intent: PreviewControlIntent = {
@@ -115,4 +118,27 @@ it('validates simulator intents locally and diagnoses an older authorization ser
     mintPreviewControlProof({ ...simulator, runtimeNonce: 'invalid' }, 'session')
   ).rejects.toThrow();
   expect(calls).toHaveLength(1);
+});
+
+it('reads Roost history through the owner when the backend has no cloud read-grant route', async () => {
+  uninstall = installCloudHttpPort({ authBaseUrl: 'https://auth.test', serverBaseUrl: null });
+  const target: RoostCloudHistoryTarget = {
+    workspaceId: 'workspace' as RoostCloudHistoryTarget['workspaceId'],
+    machineId: 'machine',
+    sessionId: 'session' as RoostCloudHistoryTarget['sessionId'],
+  };
+  const signal = new AbortController().signal;
+  vi.stubGlobal('fetch', async (url: URL) => {
+    expect(url.href).toBe('https://auth.test/api/session-history/roost-read-grant');
+    return new Response('No matching routes found', { status: 404 });
+  });
+  expect(await getRoostCloudHistoryReadGrant(target, 'session', signal)).toEqual({
+    state: 'owner-required',
+  });
+  vi.stubGlobal('fetch', async () => Response.json({ error: 'forbidden' }, { status: 403 }));
+  await expect(getRoostCloudHistoryReadGrant(target, 'session', signal)).rejects.toMatchObject({
+    name: 'RoostCloudHistoryRequestError',
+    status: 403,
+    retryable: false,
+  });
 });

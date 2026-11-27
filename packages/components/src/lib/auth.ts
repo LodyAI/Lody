@@ -21,21 +21,82 @@ type BetterAuthClientPlugin = NonNullable<BetterAuthClientOptions['plugins']>[nu
 type CreateLodyAuthClientOptions<Plugins extends BetterAuthClientPlugin[]> = {
   additionalPlugins?: Plugins;
   disableDefaultFetchPlugins?: boolean;
+  disableCrossDomain?: boolean;
+};
+
+const sessionSignalPlugin = () => ({
+  id: 'lody-session-signal',
+  getActions: (_$fetch: unknown, $store: { notify: (signal: string) => void }) => ({
+    updateSession: () => {
+      $store.notify('$sessionSignal');
+    },
+  }),
+});
+
+const isEmailSignInRequest = (requestUrl: unknown, responseUrl?: unknown): boolean => {
+  const candidate =
+    requestUrl instanceof URL
+      ? requestUrl.href
+      : typeof requestUrl === 'string' && requestUrl.length > 0
+        ? requestUrl
+        : typeof responseUrl === 'string' && responseUrl.length > 0
+          ? responseUrl
+          : '';
+  if (!candidate) return false;
+  try {
+    return new URL(candidate, 'http://localhost').pathname.endsWith('/sign-in/email');
+  } catch {
+    return candidate.includes('/sign-in/email');
+  }
+};
+
+/**
+ * `/sign-in/email` passes `callbackURL` pointing at `/email-verified?...` so Better Auth's
+ * `sendOnSignIn` verification email lands on the verified page for unverified users. For already
+ * verified users, Better Auth echoes `{ redirect: true, url: callbackURL }`, which would make its
+ * built-in `redirectPlugin` race `window.location.href = '/email-verified'` against LoginPage's
+ * own post-sign-in navigation. Runs in `fetchOptions.plugins` (before `redirectPlugin`).
+ */
+export const suppressEmailSignInRedirectFetchPlugin = {
+  id: 'lody-suppress-email-sign-in-redirect',
+  name: 'Suppress email sign-in auto redirect',
+  hooks: {
+    onSuccess(context: {
+      request?: { url?: unknown };
+      response?: { url?: unknown };
+      data?: unknown;
+    }) {
+      if (
+        isEmailSignInRequest(context.request?.url, context.response?.url) &&
+        context.data &&
+        typeof context.data === 'object' &&
+        'redirect' in context.data
+      ) {
+        (context.data as { redirect?: boolean }).redirect = false;
+      }
+    },
+  },
 };
 
 const createBaseLodyAuthClient = <const Plugins extends BetterAuthClientPlugin[] = []>(
   options: CreateLodyAuthClientOptions<Plugins> = {}
 ) => {
   const additionalPlugins = options.additionalPlugins ?? [];
+  const crossDomainPlugin = options.disableCrossDomain
+    ? (sessionSignalPlugin() as unknown as ReturnType<typeof crossDomainClient>)
+    : crossDomainClient();
 
   const client = createAuthClient({
     baseURL: import.meta.env.VITE_CONVEX_SITE_URL,
     plugins: [
       organizationClient(),
       convexClient(),
-      crossDomainClient(),
+      crossDomainPlugin,
       ...additionalPlugins,
     ] as const,
+    fetchOptions: {
+      plugins: [suppressEmailSignInRedirectFetchPlugin],
+    },
     disableDefaultFetchPlugins: options.disableDefaultFetchPlugins || false,
   });
   return client;

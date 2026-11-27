@@ -1,25 +1,35 @@
 'use client';
 
 import { SiteAnchor } from '@site/components/site-anchor';
+import type { SiteLocale } from '@site/src/site-pages/shared';
 
 /**
- * Public pricing page (`/price`, `/zh/price`).
+ * Public pricing page (`/price` and localized equivalents).
  *
  * Content and structure were ported from the retired VitePress site. Styles
  * live in `app/pricing.css`.
  *
- * Public Plus uses standard list pricing: $96 yearly or $10 monthly per seat.
+ * Prerendered HTML displays standard list pricing ($96 yearly or $10 monthly per
+ * seat); client mount progressively overlays active time-bound first-period
+ * promotions returned by `/api/billing/public-promo`.
  */
 
 import '@site/app/pricing.css';
+import {
+  computeDiscountedPlusPricing,
+  formatPublicPromoBadge,
+  formatPublicPromoNote,
+  resolvePublicPromoName,
+  type PublicPromoActive,
+} from '@site/lib/public-promo';
 import NumberFlow from '@number-flow/react';
 import { useState, type CSSProperties, type ReactNode } from 'react';
 
-import { founderCallUrl } from '@site/lib/founder-call';
-
 import { LandingEffects } from './landing-interactions';
+import { PRICING_COPY, type FeatureSection, type PricingPlan } from './pricing-copy';
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
+import { usePublicPromo } from './use-public-promo';
 
 /** Spring-ish easing matched to pricing card motion tokens. */
 const PRICE_NUMBER_TIMING = {
@@ -32,498 +42,19 @@ const PRICE_OPACITY_TIMING = {
   easing: 'ease-out',
 } as const;
 
-export type PricingLocale = 'en' | 'zh';
+export type PricingLocale = SiteLocale;
 
 type BillingCycle = 'yearly' | 'monthly';
-type PlanId = 'free' | 'plus' | 'enterprise';
-type PlanTone = 'calm' | 'bright' | 'deep';
-
-type PlanFeature = string | { label: string; href: string };
-
-type PricingPlan = {
-  id: PlanId;
-  name: string;
-  eyebrow: string;
-  yearly: string;
-  monthly: string;
-  prefix: string;
-  unit: string;
-  yearlyNote: string;
-  monthlyNote: string;
-  description: string;
-  featured?: boolean;
-  cta: string;
-  href: string;
-  /** Optional low-key link under the primary CTA (e.g. book a founder call). */
-  secondaryCta?: { label: string; href: string };
-  tone: PlanTone;
-  features: readonly PlanFeature[];
-};
-
-type FeatureAvailability = boolean | string;
-
-type FeatureSection = {
-  title: string;
-  rows: readonly {
-    feature: string;
-    availability: readonly FeatureAvailability[];
-  }[];
-};
-
-type PricingCopy = {
-  kicker: string;
-  title: string;
-  lead: string;
-  leadEmphasis: string;
-  leadRest: string;
-  billing: {
-    yearly: string;
-    monthly: string;
-    save: string;
-    toggleLabel: string;
-  };
-  plansLabel: string;
-  featuresLabel: string;
-  faqLabel: string;
-  featuresHeading: string;
-  featuresLeadPrefix: string;
-  featuresLeadRest: string;
-  comparisonFeatureLabel: string;
-  comparisonColumns: readonly string[];
-  faqHeading: string;
-  faqLead: string;
-  finePrint: string;
-  plans: readonly PricingPlan[];
-  featureSections: readonly FeatureSection[];
-  faqs: readonly {
-    question: string;
-    answer: string;
-  }[];
-};
-
-/** Standard Plus list prices per seat per month. */
-const REGULAR_PLUS_YEARLY = '8';
-const REGULAR_PLUS_MONTHLY = '10';
-
-const copy = {
-  en: {
-    kicker: 'Pricing',
-    title: 'Bring every agent run into one team workspace.',
-    lead: 'Start free. Upgrade a workspace when unlimited sessions and shared team operations become how your team ships.',
-    leadEmphasis: 'Start free.',
-    leadRest:
-      'Upgrade a workspace when unlimited sessions and shared team operations become how your team ships.',
-    billing: {
-      yearly: 'Yearly',
-      monthly: 'Monthly',
-      save: 'Save 20%',
-      toggleLabel: 'Toggle yearly or monthly billing',
-    },
-    plansLabel: 'Pricing plans',
-    featuresLabel: 'All features',
-    faqLabel: 'Frequently asked questions',
-    featuresHeading: 'Everything that comes with every plan.',
-    featuresLeadPrefix: 'A workspace built around real multi-agent work:',
-    featuresLeadRest:
-      'parallel runs, isolated worktrees, shared context, and clean handoff from prompt to PR.',
-    comparisonFeatureLabel: 'Features',
-    comparisonColumns: ['Free', 'Plus', 'Enterprise'],
-    faqHeading: 'Questions before upgrading.',
-    faqLead: '',
-    finePrint: 'Prices in USD. Yearly billing is one upfront charge per seat for 12 months.',
-    plans: [
-      {
-        id: 'free',
-        name: 'Free',
-        eyebrow: 'Explore',
-        yearly: '0',
-        monthly: '0',
-        prefix: '$',
-        unit: '',
-        yearlyNote: 'Free forever',
-        monthlyNote: 'Free forever',
-        description: 'Run real agents in a small workspace footprint. Always free.',
-        cta: 'Get started',
-        href: '/download',
-        tone: 'calm',
-        features: [
-          '2 workspaces',
-          '200 sessions per workspace',
-          '30 turns per session',
-          'Up to 3 team members',
-          'Mobile access',
-          '40+ agent support, BYOK',
-          'Multi-device management',
-          { label: 'More features', href: '#included-features' },
-        ],
-      },
-      {
-        id: 'plus',
-        name: 'Plus',
-        eyebrow: 'Most teams choose',
-        yearly: REGULAR_PLUS_YEARLY,
-        monthly: REGULAR_PLUS_MONTHLY,
-        prefix: '$',
-        unit: '/ seat / month',
-        yearlyNote: 'Billed yearly',
-        monthlyNote: 'Billed monthly',
-        description:
-          'For teams that keep one Lody workspace open all day and want fewer coordination gaps.',
-        featured: true,
-        cta: 'Upgrade in web app',
-        href: '/login',
-        tone: 'bright',
-        features: [
-          'Unlimited conversations',
-          'Unlimited turns per conversation',
-          'Unlimited team members',
-          'Seat billing for accepted members in this workspace',
-          'End-to-end encryption (coming soon)',
-        ],
-      },
-      {
-        id: 'enterprise',
-        name: 'Enterprise',
-        eyebrow: 'Custom',
-        yearly: 'Custom',
-        monthly: 'Custom',
-        prefix: '',
-        unit: '',
-        yearlyNote: 'Procurement and security review',
-        monthlyNote: 'Procurement and security review',
-        description: 'For organizations with contracts, governance, and deployment requirements.',
-        cta: 'Contact us',
-        href: 'mailto:sales@lody.ai',
-        secondaryCta: { label: 'Book a founder call', href: founderCallUrl('pricing') },
-        tone: 'deep',
-        features: [
-          'Custom contracts and invoicing',
-          'Security and procurement support',
-          'SSO and access controls',
-          'Deployment and rollout guidance',
-          'Dedicated support channel',
-        ],
-      },
-    ],
-    featureSections: [
-      {
-        title: 'Workspace and team',
-        rows: [
-          { feature: 'Workspaces', availability: ['2', 'Unlimited', 'Unlimited'] },
-          {
-            feature: 'Sessions per workspace',
-            availability: ['Up to 200', 'Unlimited', 'Unlimited'],
-          },
-          {
-            feature: 'Turns per session',
-            availability: ['Up to 30', 'Unlimited', 'Unlimited'],
-          },
-          {
-            feature: 'Team members',
-            availability: ['Up to 3', 'Unlimited', 'Unlimited'],
-          },
-          {
-            feature: 'Private conversations and private projects',
-            availability: [true, true, true],
-          },
-          { feature: 'Shared agents, skills, and context', availability: [true, true, true] },
-          { feature: 'Shared team machines when enabled', availability: [true, true, true] },
-        ],
-      },
-      {
-        title: 'Mobile and remote',
-        rows: [
-          { feature: 'Native iOS and Android apps', availability: [true, true, true] },
-          {
-            feature: 'Push notifications and iOS Live Activities',
-            availability: [true, true, true],
-          },
-          { feature: 'Mobile diff review and approvals', availability: [true, true, true] },
-          {
-            feature: 'Responsive preview with visual annotations',
-            availability: [true, true, true],
-          },
-          {
-            feature: 'Image input and arbitrary file attachments',
-            availability: [true, true, true],
-          },
-        ],
-      },
-      {
-        title: 'Agent runtimes',
-        rows: [
-          {
-            feature: 'Claude Code, Codex, OpenCode, Kimi, and 40+ coding agents',
-            availability: [true, true, true],
-          },
-          { feature: 'Custom ACP agents', availability: [true, true, true] },
-          { feature: 'BYOK with your own agent accounts', availability: [true, true, true] },
-          { feature: 'Slash commands, modes, and model options', availability: [true, true, true] },
-        ],
-      },
-      {
-        title: 'GitHub and PRs',
-        rows: [
-          { feature: 'Repository, issue, and PR context', availability: [true, true, true] },
-          { feature: 'Automatic PR binding and CI status sync', availability: [true, true, true] },
-          {
-            feature: 'PR panel for comments, reviews, and merges',
-            availability: [true, true, true],
-          },
-          { feature: 'Sync diff comments to GitHub Review', availability: [true, true, true] },
-        ],
-      },
-    ],
-    faqs: [
-      {
-        question: 'Do you charge for AI tokens?',
-        answer:
-          'No. Lody only charges for the collaboration workspace. You keep using your own Claude Code, Codex, or model-provider account at zero markup.',
-      },
-      {
-        question: 'How are new members billed?',
-        answer:
-          'Invitations are free. When someone joins a Plus workspace, they use an empty paid seat at no extra cost. Otherwise, a new seat is added and prorated daily from their join date. They can start using Plus immediately.',
-      },
-      {
-        question: 'When do you collect the extra charge?',
-        answer:
-          'Not immediately. On monthly plans, the next renewal includes next month’s seats plus this month’s prorated additions. On yearly plans, additions are charged on the next monthly anniversary of your subscription, covering the time from joining to annual renewal.',
-      },
-      {
-        question: 'What happens when a member leaves?',
-        answer:
-          'Removal or departure does not refund the current term or cancel charges already incurred. The empty seat can be reused at no extra cost until renewal. Your seat count decreases at the next monthly or annual renewal.',
-      },
-      {
-        question: 'What if I added someone by mistake?',
-        answer:
-          'Remove them, then contact contact@lody.ai within 3 days of the invoice date for a refund of their prorated seat charge.',
-      },
-      {
-        question: 'Does canceling or deleting a workspace cancel outstanding charges?',
-        answer:
-          'No. Charges already incurred are still due on the original billing date. Deleting a workspace does not bring that date forward.',
-      },
-      {
-        question: 'Can we start free and upgrade later?',
-        answer:
-          'Yes. Free is built for real evaluation. Upgrade the moment the workspace or session limits become the bottleneck — your data and sessions stay put.',
-      },
-      {
-        question: 'Can I switch between monthly and yearly billing?',
-        answer:
-          'Yes. You can change the billing cadence at any time. The new billing period starts immediately, with unused time credited by Stripe.',
-      },
-      {
-        question: 'When should we contact you?',
-        answer:
-          'Choose Enterprise if you need procurement support, security review, custom terms, or rollout planning for a larger organization. Email us at contact@lody.ai.',
-      },
-    ],
-  },
-  zh: {
-    kicker: '价格',
-    title: '让你的团队和 Agent 一起协作',
-    lead: '免费开始。当某个 workspace 需要无限 session 和稳定协作流程时，再升级到按席位付费。',
-    leadEmphasis: '免费开始。',
-    leadRest: '当某个 workspace 需要无限 session 和稳定协作流程时，再升级到按席位付费。',
-    billing: {
-      yearly: '年付',
-      monthly: '月付',
-      save: '省 20%',
-      toggleLabel: '切换年付或月付',
-    },
-    plansLabel: '价格方案',
-    featuresLabel: '全部功能',
-    faqLabel: '常见问题',
-    featuresHeading: '每个方案都包含的能力。',
-    featuresLeadPrefix: '围绕真实的多 Agent 协作设计：',
-    featuresLeadRest: '并行执行、隔离 worktree、共享上下文，以及从 prompt 到 PR 的清晰交接。',
-    comparisonFeatureLabel: '功能',
-    comparisonColumns: ['免费版', 'Plus', '企业版'],
-    faqHeading: '升级前可能会问的问题。',
-    faqLead: '',
-    finePrint: '价格以美元计算。年付为按席位一次性支付 12 个月费用。',
-    plans: [
-      {
-        id: 'free',
-        name: '免费版',
-        eyebrow: '探索',
-        yearly: '0',
-        monthly: '0',
-        prefix: '$',
-        unit: '',
-        yearlyNote: '永久免费',
-        monthlyNote: '永久免费',
-        description: '在小型 workspace 中用真实 Agent 试用 Lody，永久免费。',
-        cta: '开始使用',
-        href: '/zh/download',
-        tone: 'calm',
-        features: [
-          '2 个 workspace',
-          '每个 workspace 200 条 session',
-          '每个 session 30 轮对话',
-          '最多 3 名团队成员',
-          '移动端访问',
-          '40+ Agent 支持，BYOK',
-          '多设备管理',
-          { label: '更多功能', href: '#included-features' },
-        ],
-      },
-      {
-        id: 'plus',
-        name: 'Plus',
-        eyebrow: '多数团队选择',
-        yearly: REGULAR_PLUS_YEARLY,
-        monthly: REGULAR_PLUS_MONTHLY,
-        prefix: '$',
-        unit: '/ 席位 / 月',
-        yearlyNote: '按年计费',
-        monthlyNote: '按月计费',
-        description: '把一个 Lody workspace 作为日常协作入口的团队，减少沟通断层。',
-        featured: true,
-        cta: '在 Web 应用中升级',
-        href: '/login',
-        tone: 'bright',
-        features: [
-          '无限对话数量',
-          '无限对话轮次',
-          '团队成员不限',
-          '只按当前 workspace 已接受成员计 seat',
-          '端到端加密（即将到来）',
-        ],
-      },
-      {
-        id: 'enterprise',
-        name: '企业版',
-        eyebrow: '定制',
-        yearly: '定制',
-        monthly: '定制',
-        prefix: '',
-        unit: '',
-        yearlyNote: '采购及安全审查',
-        monthlyNote: '采购及安全审查',
-        description: '为有合同、治理、安全审查和部署需求的组织设计。',
-        cta: '联系我们',
-        href: 'mailto:sales@lody.ai',
-        secondaryCta: { label: '和创始人聊聊', href: founderCallUrl('pricing') },
-        tone: 'deep',
-        features: [
-          '定制合同与发票',
-          '安全与采购支持',
-          'SSO 与访问控制',
-          '部署与落地指导',
-          '专属支持渠道',
-        ],
-      },
-    ],
-    featureSections: [
-      {
-        title: '工作区与团队',
-        rows: [
-          { feature: 'workspace 数量', availability: ['2 个', '不限', '不限'] },
-          {
-            feature: '每个 workspace 的 session 对话',
-            availability: ['最多 200 个', '不限', '不限'],
-          },
-          {
-            feature: '每个 session 的对话轮次',
-            availability: ['最多 30 轮', '不限', '不限'],
-          },
-          { feature: '团队成员', availability: ['最多 3 人', '不限', '不限'] },
-          { feature: '私人对话与私人项目', availability: [true, true, true] },
-          { feature: '共享 Agents、Skills 与上下文', availability: [true, true, true] },
-          { feature: '按需共享团队机器', availability: [true, true, true] },
-        ],
-      },
-      {
-        title: '移动与远端',
-        rows: [
-          { feature: 'iOS 与 Android 原生应用', availability: [true, true, true] },
-          { feature: '推送通知与 iOS 实时活动', availability: [true, true, true] },
-          { feature: '移动端 diff review 与审批', availability: [true, true, true] },
-          { feature: '响应式预览与视觉标注', availability: [true, true, true] },
-          { feature: '图像输入与任意文件附件', availability: [true, true, true] },
-        ],
-      },
-      {
-        title: 'Agent 运行时',
-        rows: [
-          {
-            feature: '支持 Claude Code、Codex、OpenCode、Kimi 等 40+ Coding Agents',
-            availability: [true, true, true],
-          },
-          { feature: '自定义 ACP Agent', availability: [true, true, true] },
-          { feature: 'BYOK，继续使用自己的 Agent 账号', availability: [true, true, true] },
-          { feature: '斜杠命令、模式与模型选项', availability: [true, true, true] },
-        ],
-      },
-      {
-        title: 'GitHub 与 PR',
-        rows: [
-          { feature: '仓库、Issue 与 PR 上下文', availability: [true, true, true] },
-          { feature: '自动绑定 PR，同步 CI 状态', availability: [true, true, true] },
-          { feature: 'PR 面板查看评论、Review 与合并', availability: [true, true, true] },
-          { feature: 'Diff 评论同步到 GitHub Review', availability: [true, true, true] },
-        ],
-      },
-    ],
-    faqs: [
-      {
-        question: 'Lody 会对 AI token 收费吗？',
-        answer:
-          '不会。Lody 只对协作 workspace 收费。你继续使用自己的 Claude Code、Codex 或模型供应商账号，零加价。',
-      },
-      {
-        question: '新增成员怎么收费？',
-        answer:
-          '邀请不收费，成员实际加入 Plus 工作区后才计费。有空闲的付费席位就免费复用；没有则新增一个席位，从加入当天按天折算。加入后即可使用 Plus。',
-      },
-      {
-        question: '新增席位什么时候扣款？',
-        answer:
-          '不会立即扣款。月付：下次续费合并收取下个月的席位费和本月新增的折算费。年付：在下一个月度账单日（订阅日期对应的每月日期），收取加入日至年度到期的折算费。',
-      },
-      {
-        question: '成员被移除或退出后呢？',
-        answer:
-          '本期不退款，已产生的费用仍需支付。空出的席位本期内可免费换人，到下次月度或年度续费时才减少席位数。',
-      },
-      {
-        question: '误加了成员怎么办？',
-        answer: '先移除成员，再于账单日起 3 天内联系 contact@lody.ai，可退还该成员的席位折算费。',
-      },
-      {
-        question: '取消续费或删除工作区后，还要付费吗？',
-        answer: '已产生的费用仍按原账单日收取，删除工作区不会提前扣款。',
-      },
-      {
-        question: '可以先免费试用，之后再升级吗？',
-        answer:
-          '可以。免费版适合用真实工作流评估。当 workspace 或 session 限制开始成为瓶颈时再升级，数据与 session 不会受影响。',
-      },
-      {
-        question: '可以在月付和年付之间切换吗？',
-        answer: '可以。计费周期随时可切换，新周期立即开始，未使用的原周期金额由 Stripe 抵扣。',
-      },
-      {
-        question: '什么时候应该联系我们？',
-        answer:
-          '如果你需要采购支持、安全审查、定制条款或大型组织 rollout 规划，建议选择企业版并联系我们。请发邮件至 contact@lody.ai。',
-      },
-    ],
-  },
-} satisfies Record<PricingLocale, PricingCopy>;
 
 export function PricingPage({ locale }: { locale: PricingLocale }) {
-  const page = copy[locale];
+  const page = PRICING_COPY[locale];
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('yearly');
+  const promo = usePublicPromo();
   const isYearly = billingCycle === 'yearly';
   return (
     <div className="landing-page-root marketing-shell">
       <LandingEffects />
-      <SiteNav locale={locale} languageHref={locale === 'zh' ? '/price' : '/zh/price'} />
+      <SiteNav locale={locale} />
       <main className="landing pricing-page" data-billing={billingCycle}>
         <div aria-hidden="true" className="pricing-ambient">
           <span className="pricing-ambient-orb pricing-ambient-orb-1" />
@@ -575,7 +106,9 @@ export function PricingPage({ locale }: { locale: PricingLocale }) {
               <PricingCard
                 isYearly={isYearly}
                 key={plan.id}
+                locale={locale}
                 plan={plan}
+                promo={plan.id === 'plus' ? promo : null}
                 style={{ '--card-index': String(index) } as CSSProperties}
               />
             ))}
@@ -618,7 +151,11 @@ export function PricingPage({ locale }: { locale: PricingLocale }) {
               </div>
 
               {page.featureSections.map((section) => (
-                <FeatureSectionBlock key={section.title} section={section} />
+                <FeatureSectionBlock
+                  includedLabel={page.includedLabel}
+                  key={section.title}
+                  section={section}
+                />
               ))}
             </div>
           </div>
@@ -654,7 +191,13 @@ export function PricingPage({ locale }: { locale: PricingLocale }) {
   );
 }
 
-function FeatureSectionBlock({ section }: { section: FeatureSection }) {
+function FeatureSectionBlock({
+  section,
+  includedLabel,
+}: {
+  section: FeatureSection;
+  includedLabel: string;
+}) {
   return (
     <>
       <div className="pricing-feature-section-row" role="row">
@@ -674,7 +217,7 @@ function FeatureSectionBlock({ section }: { section: FeatureSection }) {
               role="cell"
             >
               {value === true ? (
-                <span className="pricing-feature-check" aria-label="Included">
+                <span className="pricing-feature-check" aria-label={includedLabel}>
                   <CheckIcon />
                 </span>
               ) : (
@@ -690,17 +233,50 @@ function FeatureSectionBlock({ section }: { section: FeatureSection }) {
 
 function PricingCard({
   isYearly,
+  locale,
   plan,
+  promo,
   style,
 }: {
   isYearly: boolean;
+  locale: PricingLocale;
   plan: PricingPlan;
+  promo: PublicPromoActive | null;
   style: CSSProperties;
 }) {
-  const currentPrice = isYearly ? plan.yearly : plan.monthly;
-  const note = isYearly ? plan.yearlyNote : plan.monthlyNote;
-  const numericPrice =
-    isNumeric(plan.yearly) && isNumeric(plan.monthly) ? Number(currentPrice) : null;
+  const regularPrice = isYearly ? plan.yearly : plan.monthly;
+  const promoPricing = promo ? computeDiscountedPlusPricing(promo) : null;
+  const activePromoPercent = promoPricing
+    ? isYearly
+      ? promoPricing.yearlyPercent
+      : promoPricing.monthlyPercent
+    : 0;
+  const discountedNumeric =
+    activePromoPercent > 0 && promoPricing
+      ? isYearly
+        ? promoPricing.yearlyPerMonth
+        : promoPricing.monthlyPerMonth
+      : null;
+  const baseNumeric =
+    isNumeric(plan.yearly) && isNumeric(plan.monthly) ? Number(regularPrice) : null;
+  const numericPrice = discountedNumeric ?? baseNumeric;
+  const currentPriceLabel =
+    numericPrice !== null
+      ? Number.isInteger(numericPrice)
+        ? String(numericPrice)
+        : numericPrice.toFixed(2)
+      : regularPrice;
+  const promoNote =
+    promo && activePromoPercent > 0 ? formatPublicPromoNote({ isYearly, promo, locale }) : null;
+  const note = promoNote ?? (isYearly ? plan.yearlyNote : plan.monthlyNote);
+  const customPromoName =
+    promo && activePromoPercent > 0 ? resolvePublicPromoName(promo, locale) : null;
+  const promoBadge =
+    activePromoPercent > 0
+      ? customPromoName
+        ? `${customPromoName} · ${formatPublicPromoBadge(activePromoPercent, locale, { isYearly })}`
+        : formatPublicPromoBadge(activePromoPercent, locale, { isYearly })
+      : null;
   const isMailto = plan.href.startsWith('mailto:');
   return (
     <article
@@ -722,6 +298,7 @@ function PricingCard({
           aria-hidden={plan.featured ? undefined : true}
         >
           {plan.featured ? plan.eyebrow : ''}
+          {promoBadge ? <span className="pricing-promo-badge">{promoBadge}</span> : null}
         </span>
         <h2 className="pricing-plan-name">{plan.name}</h2>
         <p className="pricing-plan-desc">{plan.description}</p>
@@ -731,9 +308,13 @@ function PricingCard({
         {plan.prefix ? <span className="pricing-price-prefix">{plan.prefix}</span> : null}
         {numericPrice !== null ? (
           <NumberFlow
-            aria-label={`${currentPrice}${plan.unit}`}
+            aria-label={`${currentPriceLabel}${plan.unit}`}
             className="pricing-price-value"
-            format={{ useGrouping: false }}
+            format={{
+              useGrouping: false,
+              minimumFractionDigits: Number.isInteger(numericPrice) ? 0 : 2,
+              maximumFractionDigits: Number.isInteger(numericPrice) ? 0 : 2,
+            }}
             opacityTiming={PRICE_OPACITY_TIMING}
             spinTiming={PRICE_NUMBER_TIMING}
             transformTiming={PRICE_NUMBER_TIMING}
@@ -741,8 +322,14 @@ function PricingCard({
             willChange
           />
         ) : (
-          <span className="pricing-price-custom">{currentPrice}</span>
+          <span className="pricing-price-custom">{regularPrice}</span>
         )}
+        {discountedNumeric !== null ? (
+          <s className="pricing-price-strike">
+            {plan.prefix}
+            {regularPrice}
+          </s>
+        ) : null}
         {plan.unit ? <span className="pricing-price-unit">{plan.unit}</span> : null}
       </div>
 

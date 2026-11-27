@@ -13,21 +13,6 @@ import { CompactSection } from '../compact-layout';
 import { E2eeWorkspaceConsole } from '@/components/pages/e2ee-workspace-console';
 import { E2eeConsoleSection, type E2eeConsoleTab } from '@/components/pages/e2ee-console-section';
 
-const KNOWN_ERRORS = [
-  'restart-required',
-  'local-history-recovery-required',
-  'trusted-pin-unavailable',
-  'rotation_candidate_unavailable',
-  'management_conflict',
-  'management_unauthorized',
-  'management_operator_required',
-  'custody_unavailable',
-  'missing-binding',
-  'account_unavailable',
-  'not_open',
-  'account_mismatch',
-];
-
 function SecuritySettings({
   scope,
   consoleTab,
@@ -45,7 +30,7 @@ function SecuritySettings({
   addDevice: boolean;
 }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<unknown>();
   const recoveryReady = useWorkspaceRecoveryReady(
     consoleTab === null ? undefined : scope.workspaceId,
     scope.accountId
@@ -70,11 +55,7 @@ function SecuritySettings({
       await work();
       succeeded = true;
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : '';
-      setError(
-        KNOWN_ERRORS.map((code) => `e2ee_${code}`).find((code) => message.includes(code)) ??
-          'e2ee_management_retry'
-      );
+      setError(cause ?? 'e2ee_management_retry');
     } finally {
       try {
         await scope.state.refetch();
@@ -88,7 +69,7 @@ function SecuritySettings({
   const panelState = {
     state: scope.state.data,
     busy,
-    error: error ?? (scope.state.isError ? 'e2ee_management_retry' : undefined),
+    error: error ?? scope.state.error,
   };
   const retry = () => {
     void perform(async () => {
@@ -161,13 +142,13 @@ function SecuritySettings({
                         machines={machines}
                         onRetry={retry}
                         onUpdate={update}
-                        onRevoke={(key, confirmation) => {
-                          void perform(async () => {
+                        onRevoke={(key, confirmation) =>
+                          perform(async () => {
                             if (!scope.native?.revokeDevice)
                               throw new Error('e2ee_management_unauthorized');
                             await scope.native.revokeDevice(scope.workspaceId!, key, confirmation);
-                          });
-                        }}
+                          })
+                        }
                       />
                     </E2eeConsoleSection>
                     {RecoverySection && (

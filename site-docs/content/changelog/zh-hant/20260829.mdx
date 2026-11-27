@@ -1,0 +1,22 @@
+---
+title: "20260829"
+version: 0.88.1
+date: 2026-08-29
+description: "新增依專案範圍篩選的工作階段 @ 提及功能，並規定須先選擇執行裝置才能選擇 Agent；同時修復子分頁訊息送達、面板重疊、新手引導資料隔離、終端機環境變數外洩與翻譯缺漏問題。"
+---
+
+版本 0.88.1
+
+### ✨ 新功能
+
+- `@` 提及選單中的工作階段結果現在預設顯示目前專案的內容，並在需要時支援暫時切換至所有專案，讓相關工作階段更容易查找（[#109](https://github.com/LodyAI/Lody/pull/109)）。
+- 桌面端現在需要先選擇執行裝置，才能進一步選擇 Agent，並在整個流程中提供更清楚的引導（[#151](https://github.com/LodyAI/Lody/pull/151)）。
+
+### 🐛 修復與改進
+
+- 修復子分頁中的第一則訊息可能遺失、持續卡在「同步中」，或導致分頁無法關閉的問題（[#141](https://github.com/LodyAI/Lody/pull/141)）。
+- 修復側邊對話與檔案或 Diff 預覽之間互相重疊的問題（[#135](https://github.com/LodyAI/Lody/pull/135)）。
+- 改善桌面端新手引導流程的資料隔離，確保示範不會意外存取真實的工作區資料（[#136](https://github.com/LodyAI/Lody/pull/136)）。
+- 專案終端機不再繼承 Electron 啟動與憑證代理所使用的內部環境變數（[#122](https://github.com/LodyAI/Lody/pull/122)）。
+- 補全目標狀態、任務儲存與 Windows Git 診斷等項目的中英文翻譯，並恢復遺失的 Agent 名稱（[#59](https://github.com/LodyAI/Lody/pull/59)）。
+- 感謝 [@27Aaron](https://github.com/27Aaron)、[@ImSingee](https://github.com/ImSingee) 與 [@natsustan](https://github.com/natsustan) 對本版本的公開貢獻。

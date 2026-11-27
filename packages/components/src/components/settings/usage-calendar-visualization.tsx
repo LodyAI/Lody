@@ -310,7 +310,7 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     fontSize: '15px',
     fontWeight: 400,
-    lineHeight: 1,
+    lineHeight: 1.25,
     fontVariantNumeric: 'tabular-nums',
     letterSpacing: '-0.025em',
     color: 'hsl(var(--foreground))',

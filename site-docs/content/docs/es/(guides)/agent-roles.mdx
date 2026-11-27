@@ -1,0 +1,111 @@
+---
+title: "Roles de agente"
+description: "Guarda una configuración de agente, modelo, razonamiento, permisos e instrucción predeterminada como un rol con nombre que puedes elegir con un clic o mencionar con @."
+---
+
+# Roles de agente
+
+Un **rol de agente** empaqueta *cómo* usas un agente: la máquina y la
+[Configuración de agente](/es/docs/quickstart) en las que se ejecuta, el modelo y el nivel de razonamiento, el modo de permisos y una
+instrucción predeterminada opcional. Asígnale un emoji y un nombre, y todas esas opciones se convierten en un solo clic.
+
+Un rol no es un proveedor nuevo ni un agente en ejecución. No almacena claves de API ni selecciones de MCP;
+eso permanece en la Configuración de agente.
+
+## Crear un rol
+
+Dos puntos de entrada, un único editor:
+
+- **Configuración** → **Roles de agente** → el botón `+`.
+- La fila **Rol** en la configuración de ejecución del redactor → **Nuevo rol con la configuración**. Esta opción se abre
+  precargada con lo que estás a punto de ejecutar, que es la forma más rápida de guardar una configuración que acabas de
+  ajustar.
+
+Elige la máquina y la configuración de agente, luego el modelo, el nivel de razonamiento y el permiso que ese agente publica,
+y opcionalmente una instrucción predeterminada. Un rol nuevo es privado para ti hasta que activas
+**Compartir con el espacio de trabajo**.
+
+## Pedir a un agente que cree o actualice un rol
+
+En una conversación activa de Lody, pide al agente que cree un rol o actualice el nombre,
+la descripción o la instrucción predeterminada de un rol de tu propiedad. El agente usa
+la acción `create` o `update` de `lody_agent_role` para mostrar una tarjeta de revisión.
+Revisa los campos propuestos y haz clic en **Guardar** para aplicarlos, o descarta la tarjeta.
+
+Los roles nuevos creados de este modo son privados, vinculan la máquina y la Configuración de agente especificadas
+y usan la configuración de ejecución predeterminada de ese agente. Las actualizaciones conservan los campos que no
+pediste cambiar. El modelo, los permisos, el uso compartido y otros ajustes siguen siendo editables en Configuración.
+También puedes enviar las mismas propuestas a través de la [CLI](/es/docs/cli#crear-y-actualizar-roles-de-agente),
+usando parámetros directos o un archivo JSON.
+
+## Usar un rol al iniciar una conversación
+
+La configuración de ejecución del redactor tiene una fila **Rol** encima de **Agente**, porque un rol responde a todas las
+filas que están debajo de una sola vez.
+
+- En escritorio, abre el botón de configuración de ejecución en el pie del redactor y pasa el cursor sobre **Rol**: la lista aparece
+  junto a un panel que indica exactamente qué ejecuta el rol resaltado.
+- En móvil, abre la hoja de configuración de ejecución; **Rol** es la primera fila.
+
+Elige uno y las filas que están debajo cambian para coincidir. El pie del redactor muestra entonces el emoji y el
+nombre del rol, con sus valores al lado en texto más pequeño. Los roles con los que hayas iniciado un chat también
+aparecen en **Usados recientemente**.
+
+**Ninguno** borra el nombre, no la configuración: los valores que estableció el rol ahora son tuyos, así que al quitar el
+rol se conservan.
+
+El pie de página muestra el nombre de un rol solo mientras la configuración siga siendo la de ese rol. Cambia el modelo manualmente
+y el nombre desaparece: el pie nunca afirma un rol que no corresponde a lo que se va a ejecutar.
+
+Una pestaña secundaria en blanco dentro de otra conversación sigue estas mismas reglas para conversaciones nuevas. Su máquina
+y su directorio de trabajo permanecen vinculados a la sesión principal, pero su lista de Roles incluye todos los roles de
+esa máquina, de todos los tipos de agente. Al elegir uno, el borrador cambia a la configuración de agente del rol y
+congela su configuración de ejecución, instrucción y procedencia cuando envías el primer mensaje.
+
+## Usar un rol dentro de una conversación
+
+Una vez creada una conversación, ya está ejecutando un agente en una máquina y un rol no puede moverla
+allí. Por eso, la fila **Rol** dentro de una conversación:
+
+- ofrece únicamente roles vinculados a un agente del **mismo tipo**, cuyos valores de modelo, razonamiento y permiso
+  ese agente entiende, y
+- aplica solo esa configuración de ejecución: la instrucción predeterminada del rol no se añade a una
+  conversación que ya está en curso.
+
+Todas las filas siguen siendo editables después.
+
+## Mencionar un rol
+
+Escribe `@` y elige un rol en **Roles de agente** para pedirle al agente actual que inicie una *nueva* conversación
+con él:
+
+```text
+@code-reviewer check the diff on this branch and report anything that breaks
+```
+
+La nueva conversación se inicia en la máquina y la configuración de agente del rol con su modelo, razonamiento,
+permiso e instrucción predeterminada ya aplicados. Lo que el rol indicaba en el momento en que enviaste el
+mensaje queda congelado en esa solicitud, por lo que editar o eliminar el rol después no puede cambiar el trabajo
+que ya fue aceptado.
+
+Qué roles puedes mencionar depende de dónde te encuentres: un proyecto local o un chat normal ofrece roles en
+esa misma máquina, mientras que un proyecto de GitHub también puede acceder a roles en tus otras máquinas autorizadas,
+porque la nueva conversación clona el repositorio por sí misma. Consulta [Menciones](/es/docs/mention) para conocer los
+demás tipos de menciones.
+
+## Uso compartido
+
+Un rol es privado hasta que lo compartes. **Compartir con el espacio de trabajo** lo hace visible, mencionable y
+ejecutable para todos los miembros. Sigue ejecutándose en su propia máquina, por lo que los miembros necesitan acceso a esa máquina.
+
+Privado significa que otros miembros no pueden descubrirlo, mencionarlo ni ejecutarlo a través de Lody. No es cifrado,
+razón por la cual un rol no almacena ningún secreto en primer lugar.
+
+## Cuándo no puede ejecutarse un rol
+
+Un rol vincula exactamente una máquina y una configuración de agente, y nunca sustituye otra de forma silenciosa. Si su
+máquina se desconecta o se elimina su configuración de agente, el rol sigue apareciendo en la lista —en Configuración y en el
+selector— marcado con el motivo exacto, y no puede seleccionarse hasta que lo corrijas.
+
+Editar un rol solo afecta al uso posterior. Las conversaciones que ya se iniciaron a partir de él siguen ejecutándose como
+estaban.

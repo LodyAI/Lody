@@ -51,7 +51,8 @@ import {
 } from '@lody/shared';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
 import { SessionAutomationAuthority } from '@/session/session-automation-authority';
-import type { SessionFileRoot } from '@lody/shared';
+import { isWorktreeSessionMeta, type SessionFileRoot } from '@lody/shared';
+import type { CodeCollabAllChangesPolicy } from '@/lib/code-collab/file-index-scan-core';
 import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
 import { resolveSessionFilePath } from '@lody/shared';
@@ -85,7 +86,8 @@ import {
   handleMemoryProviderRequest,
   handleRelayedMemoryProviderRequest,
 } from './memory-providers';
-import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
+import { formatAgentSenderHeader, formatHumanSenderHeader, readMessageAuthor } from '@lody/shared';
+import { HumanSpeakerTracker } from '@/session/human-speaker-tracker';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
 import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
@@ -979,6 +981,7 @@ export class MessageHandler {
   private androidEmulatorService: AndroidEmulatorService;
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
+  private readonly humanSpeakers = new HumanSpeakerTracker();
   private sessionForkService: SessionForkService;
   private sessionEditAndResendService: SessionEditAndResendService;
   private operationCoordinator: LodyOperationCoordinator;
@@ -1065,7 +1068,9 @@ export class MessageHandler {
   private readonly preferredBaseBranch = this.configuredBaseBranch ?? 'main';
 
   /** Unlike `resolveGitHubProjectBranch`, never assumes `main` for a missing base. */
-  private resolveDiffBaseBranch(meta: SessionMeta | undefined): string | undefined {
+  private resolveDiffBaseBranch(
+    meta: { readonly baseBranch?: string; readonly project?: unknown } | undefined
+  ): string | undefined {
     return (
       meta?.baseBranch?.trim() || getProjectRefBranch(meta?.project) || this.configuredBaseBranch
     );
@@ -2755,10 +2760,13 @@ export class MessageHandler {
   }
 
   /**
-   * Provenance header for an agent-authored input. Best effort: any read failure
-   * omits the header and the turn proceeds with its unchanged text.
+   * Sender header for an input. An agent-authored input always names its source
+   * Session. A human input is labelled only when its sender differs from the
+   * previous human sender in this Session, so a single-user Session stays
+   * unchanged. Best effort: any read failure omits the header and the turn
+   * proceeds with its unchanged text.
    */
-  private async readAgentSenderHeader(
+  private async readSenderHeader(
     sessionId: SessionId,
     userTurnId: string | undefined
   ): Promise<string | undefined> {
@@ -2769,12 +2777,19 @@ export class MessageHandler {
       const input = await backend.history.readTurn(userTurnId);
       if (input.state !== 'ready' || input.turn.role !== 'user') return undefined;
       const author = readMessageAuthor(input.turn.author);
-      if (author?.kind !== 'agent') return undefined;
-      const source = await this.workspaceDocument.repo
-        .getDocMeta(getSessionRoomId(author.sessionId as SessionId))
-        .catch(() => undefined);
-      const title = (source?.meta as SessionMeta | undefined)?.title;
-      return formatAgentSenderHeader(author, title);
+      if (author?.kind === 'agent') {
+        const source = await this.workspaceDocument.repo
+          .getDocMeta(getSessionRoomId(author.sessionId as SessionId))
+          .catch(() => undefined);
+        const title = (source?.meta as SessionMeta | undefined)?.title;
+        return formatAgentSenderHeader(author, title);
+      }
+      if (author?.kind === 'system') return undefined;
+      const speakerId = (author?.userId ?? input.turn.userId)?.trim();
+      if (!speakerId) return undefined;
+      return this.humanSpeakers.changed(sessionId, userTurnId, speakerId, this.userId)
+        ? formatHumanSenderHeader(author?.name)
+        : undefined;
     } catch (error) {
       this.logger.warn(
         `[${sessionId}] Omitting sender provenance for ${userTurnId}: ${formatErrorMessage(error)}`
@@ -2927,7 +2942,7 @@ export class MessageHandler {
     });
 
     // Build the full text prompt: comment references first, then user text
-    const senderHeader = await this.readAgentSenderHeader(args.sessionId, args.userTurnId);
+    const senderHeader = await this.readSenderHeader(args.sessionId, args.userTurnId);
     const allTextParts = [
       ...(senderHeader ? [senderHeader] : []),
       ...commentRefTexts,
@@ -4802,6 +4817,7 @@ export class MessageHandler {
 
     this.sessionManager.on('onNativeWorkChanged', (sessionId, work) => {
       this.sessionActivePresence.native.setNativeWork(sessionId, work);
+      if (work === null) this.automationSessionAuthority?.notifyNativeIdle(sessionId);
     });
 
     this.sessionManager.on('onSessionTitleUpdate', (sessionId, title) => {
@@ -7729,14 +7745,27 @@ export class MessageHandler {
                 : 'permission_denied',
             message: 'Session file root is unavailable.',
           };
-        const allChangesBaseBranch = this.resolveDiffBaseBranch(ownerMeta);
+        const ownerScope =
+          ownerMeta ?? this.sessionManager.getSession(ownerSessionId)?.getExecutionScope?.();
+        const isWorktreeWorkspace =
+          rootId === 'main' &&
+          (ownerScope === undefined ? true : isWorktreeSessionMeta(ownerScope));
+        const diffBaseBranch = isWorktreeWorkspace
+          ? this.resolveDiffBaseBranch(ownerScope)
+          : undefined;
+        const allChanges: CodeCollabAllChangesPolicy = isWorktreeWorkspace
+          ? {
+              scope: 'branch',
+              ...(diffBaseBranch === undefined ? {} : { baseBranch: diffBaseBranch }),
+            }
+          : { scope: 'uncommitted' };
         return {
           ok: true,
           ownerSessionId,
           workspaceRoot: selected.absolutePath,
           fileRoots,
           projectRun: rootId === 'main' ? ownerMeta?.projectRun : undefined,
-          ...(allChangesBaseBranch === undefined ? {} : { allChangesBaseBranch }),
+          allChanges,
         };
       }
       if (resolved.error === 'session_not_found') {
@@ -9207,6 +9236,8 @@ export class MessageHandler {
       if (backend.kind !== 'roost') {
         throw new Error(`Session ${sessionId} does not use Roost history.`);
       }
+      if (query.kind === 'readLatestPage')
+        this.workspaceDocument.prioritizeRoostCloudHistory(sessionId);
       const catchupSignal = signal
         ? AbortSignal.any([signal, this.historyOwnerAbort.signal])
         : this.historyOwnerAbort.signal;
@@ -12983,16 +13014,16 @@ export class MessageHandler {
   }
 
   /**
-   * Work the native agent does outside Lody's turns (a background shell, or a
-   * model turn it started itself). GC must not stop such a session as idle.
+   * Native agent work outside Lody turns, shared by GC and automation settlement:
+   * Core `sessionActivity` v1 is authoritative (no update yet = idle); agents
+   * without it fall back to `lateActivity`'s passive 30s pulse.
    */
   getNativeWork(sessionId: SessionId): NativeAgentWork {
     const session = this.sessionManager.getSession(sessionId);
     if (!session || session.hasLiveAgentProcess?.() === false) return null;
-    return (
-      session.agentClient?.getNativeWork() ??
-      (this.sessionActivePresence.native.hasLateActivity(sessionId) ? 'running' : null)
-    );
+    const client = session.agentClient;
+    if (client?.reportsSessionActivity()) return client.getNativeWork();
+    return this.sessionActivePresence.native.hasLateActivity(sessionId) ? 'running' : null;
   }
 
   /**
@@ -13081,11 +13112,7 @@ export class MessageHandler {
         this.hasSessionActivePresence(sessionId) ||
         this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
       hasGoal: (sessionId) => this.hasActiveGoal(sessionId),
-      nativeActivity: (sessionId) => {
-        const session = this.sessionManager.getSession(sessionId);
-        if (!session || session.hasLiveAgentProcess?.() === false) return 'idle';
-        return session.agentClient ? session.agentClient.getNativeActivityObservation() : 'idle';
-      },
+      nativeActivity: (sessionId) => this.getNativeWork(sessionId) ?? 'idle',
       author: (sessionId) =>
         this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,
       canEdit: (sessionId, userId) => this.verifyAutomationEditAccess(sessionId, userId),

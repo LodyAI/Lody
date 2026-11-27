@@ -1,0 +1,23 @@
+---
+title: "20260919-0.97.1"
+version: 0.97.1
+date: 2026-09-19
+description: "Perfecciona la interfaz de escritorio, las pestañas y la cola, y corrige la dirección de agentes, la recuperación del inicio de sesión en Windows y más."
+---
+
+Versión 0.97.1
+
+### 🐛 Correcciones y mejoras
+
+- Corrige un error por el que el agente se detenía de forma forzada unos 5 segundos después de enviar un mensaje de guía al Claude integrado.
+- Corrige el fallo de inicio de sesión en escritorio en Windows cuando ya no se puede descifrar el almacén de credenciales del sistema (por ejemplo, tras restaurar una máquina bajo una nueva cuenta): ahora se recupera automáticamente e informa de un motivo más claro si falla.
+- Restaura el entorno de ejecución integrado de Devin.
+- Al cerrar varias pestañas seguidas, las pestañas restantes mantienen su ancho para que el siguiente botón de cierre permanezca bajo el cursor (como en Chromium).
+- Cerrar una pestaña que nunca tuvo mensajes ahora la elimina en lugar de dejar una sesión invisible; cerrar una pestaña ya no muestra una notificación emergente (toast) y una pestaña única ya no muestra botón de cierre.
+- Mientras un agente trabaja, la conversación muestra una etiqueta de actividad con efecto de brillo y el tiempo transcurrido.
+- Cuando se completa una Operation de mensaje, muestra a qué Session llegó y presenta el resultado como una tarjeta de respuesta recibida; permite abrir la respuesta completa en un cuadro de diálogo.
+- El comando completo de una tarea en segundo plano se puede abrir en un cuadro de diálogo.
+- El encabezado del selector de espacios de trabajo muestra el espacio de trabajo actual.
+- Los mensajes en cola se muestran alineados al ras del compositor y sus imágenes se abren en el visor de imágenes.
+- Los archivos editados sin estadísticas de líneas ahora muestran una etiqueta en lugar de una estadística vacía.
+- Mejoras de diseño en escritorio: barra superior en macOS alineada con los botones de ventana, contraste de bloques de código en modo claro, capas de superficie al pasar el cursor y en configuración, disposición de grupos de proyectos en la barra lateral, barra de búsqueda dentro de la conversación y tamaño del código multilínea ajustado al cuerpo de la conversación.

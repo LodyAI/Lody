@@ -31,6 +31,8 @@ export interface AcceptInvitationPageProps {
   onSwitchAccount?: () => void;
   onVerifyEmail?: () => void;
   onAccept?: () => void;
+  onOpenWorkspace?: () => void;
+  onRetry?: () => void;
   onBackHome?: () => void;
 }
 
@@ -60,6 +62,8 @@ export function AcceptInvitationPage({
   onSwitchAccount,
   onVerifyEmail,
   onAccept,
+  onOpenWorkspace,
+  onRetry,
   onBackHome,
 }: AcceptInvitationPageProps) {
   const { t } = useTranslation();
@@ -118,6 +122,11 @@ export function AcceptInvitationPage({
                 {t('invite.billing.retry')}
               </Button>
             )}
+            {state === 'error' && onRetry && (
+              <Button size="large" onClick={onRetry}>
+                {t('common.retry', 'Retry')}
+              </Button>
+            )}
             <Button size="large" variant="secondary" onClick={onBackHome}>
               {t('invite.error.backButton', 'Back to home')}
             </Button>
@@ -141,6 +150,13 @@ export function AcceptInvitationPage({
             defaults="Welcome to <strong>{{workspace}}</strong> — taking you there now…"
             components={{ strong: <span {...stylex.props(styles.emphasis)} /> }}
           />
+        }
+        actions={
+          onOpenWorkspace ? (
+            <Button size="large" onClick={onOpenWorkspace}>
+              {t('invite.success.openWorkspace', 'Open workspace')}
+            </Button>
+          ) : undefined
         }
       />
     );
