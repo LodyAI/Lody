@@ -2072,9 +2072,12 @@ export class LodyFleet {
       };
     }
 
-    const pendingStart = this.startInFlight.get(message.request.workspaceId);
-    if (pendingStart) {
-      await pendingStart;
+    const isLocalTarget = message.request.machineId === this.machineId;
+    if (isLocalTarget) {
+      const pendingStart = this.startInFlight.get(message.request.workspaceId);
+      if (pendingStart) {
+        await pendingStart;
+      }
     }
 
     const runtime = this.runtimes.get(message.request.workspaceId);
@@ -2094,7 +2097,7 @@ export class LodyFleet {
       };
     }
 
-    if (message.request.machineId === this.machineId) {
+    if (isLocalTarget) {
       return await runtime.lody.dispatchLocalMachineRpc(message.request, signal);
     }
 
