@@ -387,9 +387,22 @@ export function personalEntry(options: PersonalEntryOptions) {
       if (source && typeof source !== 'function' && Result.isFailure(verifyPersonalOffer(source)))
         throw fail('invalid-input');
       observe();
-      const accountId = await execute(resolveAccount(live));
+      const accountId =
+        live() && session.get().status !== 'loading'
+          ? identity()
+          : await execute(resolveAccount(live));
       if (!live()) throw fail('closed');
       if (!accountId) throw fail('scope-mismatch');
+      const id = key(accountId, workspaceId);
+      if (source === undefined) {
+        const active = records.get(id);
+        if (active && !active.retired) {
+          const runtime = await active.ready;
+          check(accountId);
+          if (active.retired) throw fail('closed');
+          return { entry: active, runtime, accountId };
+        }
+      }
       // An offer derived from the account is derived from this resolved one, never from an
       // earlier synchronous read that an account switch may have overtaken.
       const supplied = typeof source === 'function' ? source(accountId) : source;
@@ -399,7 +412,6 @@ export function personalEntry(options: PersonalEntryOptions) {
       if (supplied) assertPersonalEntryOffer(saved, supplied);
       const offer = supplied ?? saved?.offer;
       if (!offer) throw fail('approval-required');
-      const id = key(accountId, workspaceId);
       let previous = records.get(id);
       if (previous && (previous.retired || !sameOffer(previous.offer, offer))) {
         await retire(previous);

@@ -282,8 +282,11 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       yield* Effect.fromResult(assertPersonalAdmission(p.binding, request, approval.view));
       return approval;
     });
-  const loadApproval = (p: PreparedPersonalIdentity) =>
-    withIdentity(p, (identity) =>
+  const loadApproval = (
+    p: PreparedPersonalIdentity,
+    preopened?: Effect.Success<ReturnType<typeof openPreparedIdentity>>
+  ) => {
+    const body = (identity: Effect.Success<ReturnType<typeof openPreparedIdentity>>) =>
       Effect.gen(function* () {
         const row = yield* pairings.load(key(p, 'approval'));
         if (!row) return yield* fail('approval-required');
@@ -340,8 +343,9 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
             proof.map((page) => encode(page))
           );
         return qualified;
-      })
-    );
+      });
+    return preopened ? Effect.scoped(body(preopened)) : withIdentity(p, body);
+  };
   const exchangeOriginal = (p: PreparedPersonalIdentity, action: PersonalExchange['action']) =>
     withIdentity(p, (identity) =>
       Effect.gen(function* () {
@@ -603,21 +607,6 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       }
       if (current.phase !== 'ready') return yield* prepare(base);
       return yield* prepare(own ?? base);
-    });
-  /** Opening a retained account-pairing offer: an approved replacement candidate is
-   * opened (and activated); otherwise the identity it was requested under. */
-  const accountOpen = (offer: PersonalPairingOffer, existingOnly: boolean) =>
-    Effect.gen(function* () {
-      const retainedOrNew = (selected: PersonalPairingOffer) =>
-        existingOnly ? prepareRetained(selected) : prepare(selected);
-      const current = yield* installations.read();
-      if (!current || current.phase !== 'ready') return yield* retainedOrNew(offer);
-      const { own, candidate } = yield* accountOriginals(current);
-      if (candidate) {
-        const p = yield* prepare(candidate, true, true);
-        if (yield* pairings.load(key(p, 'approval'))) return p;
-      }
-      return yield* retainedOrNew(own ?? offer);
     });
   /** Account pairing: verify an invitation for the given endorser against this
    * device's prepared identity, and retain it as the approval original. */
@@ -1127,19 +1116,78 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     open: (offer: PersonalPairingOffer, replacement = false, existingOnly = false) =>
       run(
         Effect.gen(function* () {
-          // A member join's replacement identity opens, and is activated, from its offer.
-          const p =
+          const identityScope = yield* Scope.fork(owner);
+          let handedOff = false;
+          return yield* Effect.gen(function* () {
+            const prepareScoped = (
+              selected: PersonalPairingOffer,
+              isReplacement = false,
+              onlyExisting = false
+            ) =>
+              preparePersonalIdentityWithOpened(selected, isReplacement, onlyExisting).pipe(
+                Effect.provide(base),
+                Scope.provide(identityScope)
+              );
+            const prepareRetainedScoped = (selected: PersonalPairingOffer) =>
+              prepareScoped(selected, false, true).pipe(
+                Effect.catchIf(
+                  (error) => (error as { code?: string }).code === 'conflict',
+                  () => prepareScoped(selected, true, true)
+                )
+              );
+            const accountOpenScoped = (selected: PersonalPairingOffer, onlyExisting: boolean) =>
+              Effect.gen(function* () {
+                const retainedOrNew = (target: PersonalPairingOffer) =>
+                  onlyExisting ? prepareRetainedScoped(target) : prepareScoped(target);
+                const current = yield* installations.read();
+                if (!current || current.phase !== 'ready') return yield* retainedOrNew(selected);
+                const { own, candidate } = yield* accountOriginals(current);
+                if (candidate) {
+                  const result = yield* prepareScoped(candidate, true, true);
+                  if (yield* pairings.load(key(result.prepared, 'approval'))) return result;
+                }
+                return yield* retainedOrNew(own ?? selected);
+              });
+            // A member join's replacement identity opens, and is activated, from its offer.
+            const { prepared: p, opened } =
               !replacement && offer.endorser === ACCOUNT_PAIRING_ENDORSER
-                ? yield* accountOpen(offer, existingOnly)
+                ? yield* accountOpenScoped(offer, existingOnly)
                 : existingOnly && !replacement
-                  ? yield* prepareRetained(offer)
-                  : yield* prepare(offer, replacement, existingOnly),
-            approval = yield* loadApproval(p);
-          yield* activateReplacement(p, approval);
-          yield* guard;
-          return yield* Scope.provide(
-            openPersonalSession({ ...p, replacing: null }, approval).pipe(Effect.provide(base)),
-            owner
+                  ? yield* prepareRetainedScoped(offer)
+                  : yield* prepareScoped(offer, replacement, existingOnly);
+            const approval = yield* loadApproval(p, opened);
+            if (p.replacing) {
+              yield* Scope.close(identityScope, Exit.void);
+              handedOff = true;
+              yield* activateReplacement(p, approval);
+              yield* guard;
+              return yield* Scope.provide(
+                openPersonalSession({ ...p, replacing: null }, approval).pipe(Effect.provide(base)),
+                owner
+              );
+            }
+            yield* guard;
+            if (!opened) {
+              yield* Scope.close(identityScope, Exit.void);
+              handedOff = true;
+            } else {
+              handedOff = true;
+            }
+            return yield* Scope.provide(
+              openPersonalSession(
+                { ...p, replacing: null },
+                approval,
+                [],
+                opened ? { identity: opened, scope: identityScope } : undefined
+              ).pipe(Effect.provide(base)),
+              owner
+            );
+          }).pipe(
+            Effect.onExit((exit) =>
+              !handedOff || Exit.isFailure(exit)
+                ? Scope.close(identityScope, Exit.void).pipe(Effect.orDie)
+                : Effect.void
+            )
           );
         })
       ),

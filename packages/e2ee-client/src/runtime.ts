@@ -1022,23 +1022,41 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
       return run(
         Effect.fromResult(captured).pipe(
           Effect.flatMap((input) =>
-            withSession(
-              id,
-              (session) =>
+            Effect.gen(function* () {
+              const lease = yield* active(id);
+              const descriptor = yield* room(input.room);
+              const work = classified(
+                lease.session,
                 Effect.gen(function* () {
-                  const descriptor = yield* room(input.room),
-                    document = yield* session.document(descriptor.resource, descriptor.model);
-                  return yield* document.open(input).pipe(
-                    Effect.catchIf(
-                      (error): error is ContentError =>
-                        error instanceof ContentError &&
-                        (error.code === 'missing-read-key' || error.code === 'unauthorized'),
-                      (original) => keyPending(session, descriptor.model, input, original)
-                    )
+                  const document = yield* lease.session.document(
+                    descriptor.resource,
+                    descriptor.model
                   );
-                }),
-              (bytes) => bytes.fill(0)
-            )
+                  return yield* document.open(input);
+                }).pipe(
+                  Effect.catchIf(
+                    (error): error is ContentError =>
+                      error instanceof ContentError &&
+                      (error.code === 'missing-read-key' || error.code === 'unauthorized'),
+                    (original) => keyPending(lease.session, descriptor.model, input, original)
+                  )
+                )
+              );
+              return yield* Effect.acquireUseRelease(
+                work,
+                (value) =>
+                  Effect.gen(function* () {
+                    yield* guard(workspaceId);
+                    if (entry !== lease || lease.closing || !lease.readers.size)
+                      return yield* fail('closed');
+                    return value;
+                  }),
+                (value, outcome) =>
+                  Effect.sync(() => {
+                    if (Exit.isFailure(outcome)) value.fill(0);
+                  })
+              );
+            })
           )
         )
       );

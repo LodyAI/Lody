@@ -55,6 +55,7 @@ import {
   LedgerSync,
   LedgerLog,
   LedgerPinStore,
+  LedgerFeedInvalidation,
   SubmissionJournal,
   LedgerViewSource,
   LedgerViewSourceError,
@@ -105,11 +106,23 @@ type TurnSyncCell = {
 const TurnSyncRef = Context.Reference<TurnSyncCell | null>('@lody/e2ee-client/TurnSyncRef', {
   defaultValue: () => null,
 });
+type ReadCycleCell = {
+  installationChecked: boolean;
+  view: import('@lody/e2ee-core').LedgerView | null;
+  version: number;
+};
+const ReadCycleRef = Context.Reference<ReadCycleCell | null>('@lody/e2ee-client/ReadCycleRef', {
+  defaultValue: () => null,
+});
 /** Private composition. Product callers receive narrow operations, never signer/credential/core services. */
 export const openPersonalSession = Effect.fnUntraced(function* (
   prepared: PreparedPersonalIdentity,
   approval: PersonalApproval,
-  recovered: readonly (readonly [number, Bytes.EpochKey])[] = []
+  recovered: readonly (readonly [number, Bytes.EpochKey])[] = [],
+  preopened?: {
+    readonly identity: Effect.Success<ReturnType<typeof openPreparedIdentity>>;
+    readonly scope: Scope.Closeable;
+  }
 ) {
   const platform = yield* PersonalHostPlatform,
     installation = yield* ClientInstallationStore;
@@ -117,13 +130,21 @@ export const openPersonalSession = Effect.fnUntraced(function* (
   const owner = yield* Scope.fork(parent),
     operationsScope = yield* Scope.fork(parent);
   let closed = false;
+  let invalidationVersion = 0;
+  let onInvalidateKeys: (() => void) | undefined;
+  const invalidateKeyCache = () => {
+    invalidationVersion++;
+    onInvalidateKeys?.();
+  };
   const close = yield* Effect.cached(
     Effect.uninterruptible(
       Effect.gen(function* () {
         closed = true;
+        invalidateKeyCache();
         const exits = [
           yield* Effect.exit(Scope.close(operationsScope, Exit.void)),
           yield* Effect.exit(Scope.close(owner, Exit.void)),
+          ...(preopened ? [yield* Effect.exit(Scope.close(preopened.scope, Exit.void))] : []),
         ];
         const reasons = exits.flatMap((e) => (Exit.isFailure(e) ? e.cause.reasons : []));
         if (reasons.length) yield* Effect.failCause(Cause.fromReasons(reasons));
@@ -132,28 +153,64 @@ export const openPersonalSession = Effect.fnUntraced(function* (
   );
   yield* Effect.addFinalizer(() => close.pipe(Effect.orDie));
   const guard = Effect.gen(function* () {
-    if (closed) return yield* fail('closed');
+    if (closed) {
+      invalidateKeyCache();
+      return yield* fail('closed');
+    }
+    const cell = yield* ReadCycleRef;
+    if (cell && cell.installationChecked && cell.version === invalidationVersion) return undefined;
     const current = yield* installation.read();
-    if (!current || current.phase !== 'ready' || !sameBinding(current.binding, prepared.binding))
+    if (!current || current.phase !== 'ready' || !sameBinding(current.binding, prepared.binding)) {
+      invalidateKeyCache();
       return yield* fail('identity-lost');
+    }
+    if (cell && cell.version === invalidationVersion) cell.installationChecked = true;
     return undefined;
   });
   const work = Effect.gen(function* () {
     yield* guard;
     const { custody } = yield* acquirePersonalCustody(prepared);
-    const { device, credential, request } = yield* openPreparedIdentity(prepared, custody);
+    const { device, credential, request } = preopened
+      ? preopened.identity
+      : yield* openPreparedIdentity(prepared, custody);
     yield* Effect.fromResult(assertPersonalAdmission(prepared.binding, request, approval.view));
     const identity = Layer.merge(
       Layer.succeed(DeviceIdentity, { signer: device, encryptionKeyPair: device.encryption }),
       Layer.succeed(WorkspaceScope, { genesis: prepared.binding.genesis })
     );
-    const rawControl = yield* Layer.build(platform.control(prepared.binding, credential, approval));
+    const rawControl = yield* Layer.build(
+      platform
+        .control(prepared.binding, credential, approval)
+        .pipe(
+          Layer.provide(Layer.succeed(LedgerFeedInvalidation, { invalidate: invalidateKeyCache }))
+        )
+    );
     // Keep only owned ports: an adapter cannot replace the host's signer or verifier through an extra Layer output.
     const rawSync = Context.get(rawControl, LedgerSync),
       rawLog = Context.get(rawControl, LedgerLog);
+    let lastObservedHead: Bytes.RecordHash | null = null;
+    let lastObservedLength = -1;
+    const noteFeedState = (state: import('@lody/e2ee-core').LedgerFeedState) => {
+      if (
+        lastObservedLength !== -1 &&
+        (state.view.length !== lastObservedLength ||
+          !lastObservedHead ||
+          !state.view.head.equals(lastObservedHead))
+      ) {
+        invalidateKeyCache();
+      }
+      lastObservedLength = state.view.length;
+      lastObservedHead = state.view.head;
+      return state;
+    };
     const sync = Object.freeze({
-      current: rawSync.current.bind(rawSync),
-      ingest: rawSync.ingest?.bind(rawSync),
+      current: () => rawSync.current().pipe(Effect.map(noteFeedState)),
+      ingest: rawSync.ingest
+        ? (
+            page: Parameters<NonNullable<typeof rawSync.ingest>>[0],
+            checkpoint: Parameters<NonNullable<typeof rawSync.ingest>>[1]
+          ) => rawSync.ingest!(page, checkpoint).pipe(Effect.map(noteFeedState))
+        : undefined,
       refresh: () =>
         Effect.gen(function* () {
           const cell = yield* TurnSyncRef;
@@ -164,10 +221,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               local.success.view.length === cell.current.length &&
               local.success.view.head.equals(cell.current.head)
             )
-              return local.success;
+              return noteFeedState(local.success);
             cell.current = null;
           }
-          const refreshed = yield* rawSync.refresh();
+          const refreshed = noteFeedState(yield* rawSync.refresh());
           if (cell) cell.current = { length: refreshed.view.length, head: refreshed.view.head };
           return refreshed;
         }),
@@ -268,8 +325,19 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       Layer.provideMerge(Layer.mergeAll(identity, controlPorts, source))
     );
     const controlServices = yield* Layer.build(controlLayer);
-    const verified = Context.get(controlServices, VerifiedLedger),
+    const rawVerified = Context.get(controlServices, VerifiedLedger),
       control = Context.get(controlServices, WorkspaceControl);
+    const verified: VerifiedLedger['Service'] = VerifiedLedger.of({
+      ...rawVerified,
+      current: () =>
+        Effect.gen(function* () {
+          const cell = yield* ReadCycleRef;
+          if (cell && cell.view && cell.version === invalidationVersion) return cell.view;
+          const view = yield* rawVerified.current();
+          if (cell && cell.version === invalidationVersion) cell.view = view;
+          return view;
+        }),
+    });
     const ledger = Effect.fnUntraced(function* () {
       yield* guard;
       const view = yield* verified.current();
@@ -279,7 +347,9 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     });
     const admitted = Effect.fnUntraced(function* () {
       const view = yield* ledger();
-      yield* Effect.fromResult(assertPersonalAdmission(prepared.binding, request, view));
+      yield* Effect.fromResult(assertPersonalAdmission(prepared.binding, request, view)).pipe(
+        Effect.tapError(() => Effect.sync(invalidateKeyCache))
+      );
       return view;
     });
     const submission = Context.get(controlServices, LedgerSubmission);
@@ -343,62 +413,73 @@ export const openPersonalSession = Effect.fnUntraced(function* (
     let maintenance: Effect.Success<ReturnType<typeof makePersonalKeyMaintenance>> | undefined;
     const keySerial = yield* Semaphore.make(1);
     const keys = () =>
-      keySerial
-        .withPermit(
-          Effect.uninterruptibleMask((restore) =>
-            Effect.gen(function* () {
-              yield* restore(admitted());
-              if (keyServices) return keyServices;
-              const child = yield* Scope.fork(owner);
-              const rawResult = yield* Effect.exit(
-                restore(
-                  Scope.provide(
-                    Layer.build(
-                      platform
-                        .keys(prepared.binding, credential)
-                        .pipe(Layer.provide(Layer.succeedContext(controlServices)))
+      keyServices
+        ? Effect.succeed(keyServices)
+        : keySerial
+            .withPermit(
+              Effect.uninterruptibleMask((restore) =>
+                Effect.gen(function* () {
+                  yield* restore(admitted());
+                  if (keyServices) return keyServices;
+                  const child = yield* Scope.fork(owner);
+                  const rawResult = yield* Effect.exit(
+                    restore(
+                      Scope.provide(
+                        Layer.build(
+                          platform
+                            .keys(prepared.binding, credential)
+                            .pipe(Layer.provide(Layer.succeedContext(controlServices)))
+                        ),
+                        child
+                      )
+                    )
+                  );
+                  if (Exit.isFailure(rawResult)) {
+                    yield* Scope.close(child, rawResult);
+                    return yield* Effect.failCause(rawResult.cause);
+                  }
+                  const rawPorts = rawResult.value;
+                  const ports = Layer.succeedContext(
+                    Context.pick(
+                      InstalledKeyStore,
+                      ReceiveJournal,
+                      RepairJournal,
+                      DistributionJournal,
+                      DeliveryOutbox,
+                      EpochCandidateStore,
+                      KeyMailbox,
+                      EpochStagingStore,
+                      EpochPublicationSource
+                    )(rawPorts)
+                  );
+                  const keyControlServices = Context.add(controlServices, VerifiedLedger, verified);
+                  const all = keyLayer.pipe(
+                    Layer.provideMerge(ports),
+                    Layer.provideMerge(
+                      clientKeyProtectors.pipe(
+                        Layer.provide(Layer.succeed(ClientKeyCustody, custody))
+                      )
                     ),
-                    child
-                  )
-                )
-              );
-              if (Exit.isFailure(rawResult)) {
-                yield* Scope.close(child, rawResult);
-                return yield* Effect.failCause(rawResult.cause);
-              }
-              const rawPorts = rawResult.value;
-              const ports = Layer.succeedContext(
-                Context.pick(
-                  InstalledKeyStore,
-                  ReceiveJournal,
-                  RepairJournal,
-                  DistributionJournal,
-                  DeliveryOutbox,
-                  EpochCandidateStore,
-                  KeyMailbox,
-                  EpochStagingStore,
-                  EpochPublicationSource
-                )(rawPorts)
-              );
-              const all = keyLayer.pipe(
-                Layer.provideMerge(ports),
-                Layer.provideMerge(
-                  clientKeyProtectors.pipe(Layer.provide(Layer.succeed(ClientKeyCustody, custody)))
-                ),
-                Layer.provide(Layer.succeedContext(controlServices))
-              );
-              const result = yield* Effect.exit(restore(Scope.provide(Layer.build(all), child)));
-              if (Exit.isFailure(result)) {
-                yield* Scope.close(child, result);
-                return yield* Effect.failCause(result.cause);
-              }
-              maintenance = yield* makePersonalKeyMaintenance().pipe(Effect.provide(result.value));
-              keyServices = result.value;
-              return keyServices;
-            })
-          )
-        )
-        .pipe(Scope.provide(owner));
+                    Layer.provide(Layer.succeedContext(keyControlServices))
+                  );
+                  const result = yield* Effect.exit(
+                    restore(Scope.provide(Layer.build(all), child))
+                  );
+                  if (Exit.isFailure(result)) {
+                    yield* Scope.close(child, result);
+                    return yield* Effect.failCause(result.cause);
+                  }
+                  maintenance = yield* makePersonalKeyMaintenance().pipe(
+                    Effect.provide(result.value)
+                  );
+                  const historyKeys = Context.get(result.value, InstalledEpochHistory);
+                  onInvalidateKeys = () => historyKeys.invalidate?.();
+                  keyServices = result.value;
+                  return keyServices;
+                })
+              )
+            )
+            .pipe(Scope.provide(owner));
     const withKeys = <A, E>(use: (context: Context.Context<Keys>) => Effect.Effect<A, E>) =>
       Effect.gen(function* () {
         const ctx = yield* keys();
@@ -642,31 +723,45 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           const pendingRecipients = new Set<string>();
           const page = yield* Effect.result(journal.pending(null, 100));
           if (Result.isSuccess(page)) {
-            for (const taskId of page.success.ids) {
-              const task = yield* Effect.result(journal.load(taskId));
+            const loadedTasks = yield* Effect.forEach(
+              page.success.ids,
+              (taskId) => Effect.result(journal.load(taskId)),
+              { concurrency: 8 }
+            );
+            for (const task of loadedTasks) {
               if (Result.isSuccess(task) && task.success && task.success.epoch === epoch)
                 pendingRecipients.add(task.success.recipient);
             }
           }
+          const candidates: { readonly recipient: string; readonly membershipId: string }[] = [];
+          for (const [recipient, entry] of state.devices.entries()) {
+            if (recipient === selfHex || entry.kind === 'recovery') continue;
+            const membershipId = toHex(entry.membershipId.toBytes());
+            if (membershipId === selfMembership || !state.members.has(membershipId)) continue;
+            if (epoch === 0 && membershipId === ownerMembership) continue;
+            if (
+              confirmedDeliveredDevices.get(recipient) === epoch &&
+              !pendingRecipients.has(recipient)
+            )
+              continue;
+            candidates.push({ recipient, membershipId });
+          }
+          const evidences = yield* Effect.forEach(
+            candidates,
+            (candidate) =>
+              keyDeliveryEvidence(candidate.recipient).pipe(
+                Effect.map((evidence) => ({ ...candidate, evidence }))
+              ),
+            { concurrency: 8 }
+          );
           const items: {
             readonly requestId: string;
             readonly device: string;
             readonly code: string;
           }[] = [];
           const seen = new Set<string>();
-          for (const [recipient, entry] of state.devices.entries()) {
-            if (recipient === selfHex || entry.kind === 'recovery') continue;
-            const membershipId = toHex(entry.membershipId.toBytes());
-            if (membershipId === selfMembership || !state.members.has(membershipId)) continue;
-            if (epoch === 0 && membershipId === ownerMembership) continue;
-            if (seen.has(membershipId)) continue;
-            if (
-              confirmedDeliveredDevices.get(recipient) === epoch &&
-              !pendingRecipients.has(recipient)
-            )
-              continue;
-            const evidence = yield* keyDeliveryEvidence(recipient);
-            if (evidence === 'delivered') continue;
+          for (const { recipient, membershipId, evidence } of evidences) {
+            if (seen.has(membershipId) || evidence === 'delivered') continue;
             if (evidence === 'e2ee_key_not_sent' || pendingRecipients.has(recipient)) {
               seen.add(membershipId);
               items.push({ requestId: membershipId, device: recipient, code: evidence });
@@ -757,13 +852,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       resource: string,
       model: 'loro' | 'flock',
       epoch: number | 'current'
-    ) =>
-      documentSerial.withPermit(
+    ) => {
+      const id = JSON.stringify([resource, model, epoch]);
+      const retained = documents.get(id);
+      if (retained) return Effect.succeed(retained);
+      return documentSerial.withPermit(
         Effect.gen(function* () {
           yield* admitted();
-          const id = JSON.stringify([resource, model, epoch]);
-          const retained = documents.get(id);
-          if (retained) return retained;
+          const existing = documents.get(id);
+          if (existing) return existing;
           const binding = yield* Scope.provide(
             makeStreamsUpdateBinding({
               genesis: prepared.binding.genesis,
@@ -787,19 +884,50 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           return binding;
         })
       );
+    };
+    const withReadCycle = <A, E>(effect: Effect.Effect<A, E>) =>
+      Effect.suspend(() =>
+        Effect.provideService(effect, ReadCycleRef, {
+          installationChecked: false,
+          view: null,
+          version: invalidationVersion,
+        })
+      );
+    const documentWrappers = new Map<
+      string,
+      Readonly<{
+        seal: (
+          input: Parameters<Document['seal']>[0]
+        ) => Effect.Effect<Effect.Success<ReturnType<Document['seal']>>, unknown>;
+        open: (
+          input: Parameters<Document['open']>[0]
+        ) => Effect.Effect<Effect.Success<ReturnType<Document['open']>>, unknown>;
+        openAuthenticated: (
+          input: Parameters<Document['openAuthenticated']>[0]
+        ) => Effect.Effect<Effect.Success<ReturnType<Document['openAuthenticated']>>, unknown>;
+      }>
+    >();
     const document = Effect.fnUntraced(function* (
       resource: string,
       model: 'loro' | 'flock',
       epoch: number | 'current' = 'current'
     ) {
+      if (closed) return yield* fail('closed');
+      const id = JSON.stringify([resource, model, epoch]);
+      const cached = documentWrappers.get(id);
+      if (cached) return cached;
       const original = yield* documentBinding(resource, model, epoch);
-      return Object.freeze({
+      const wrapper = Object.freeze({
         seal: (input: Parameters<typeof original.seal>[0]) => run(original.seal(input)),
         open: (input: Parameters<typeof original.open>[0]) =>
-          run(original.open(input), (plaintext) => plaintext.fill(0)),
+          withReadCycle(run(original.open(input), (plaintext) => plaintext.fill(0))),
         openAuthenticated: (input: Parameters<typeof original.openAuthenticated>[0]) =>
-          run(original.openAuthenticated(input), (opened) => opened.plaintext.fill(0)),
+          withReadCycle(
+            run(original.openAuthenticated(input), (opened) => opened.plaintext.fill(0))
+          ),
       });
+      documentWrappers.set(id, wrapper);
+      return wrapper;
     });
     let irohEndpoint: PersonalIrohEndpoint | undefined;
     const irohSerial = yield* Semaphore.make(1);
@@ -1595,7 +1723,11 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         resource: string,
         model: 'loro' | 'flock',
         writeEpoch: number | 'current' = 'current'
-      ) => run(document(resource, model, writeEpoch)),
+      ) => {
+        if (closed) return Effect.fail(fail('closed'));
+        const cached = documentWrappers.get(JSON.stringify([resource, model, writeEpoch]));
+        return cached ? Effect.succeed(cached) : run(document(resource, model, writeEpoch));
+      },
       execute: (command: LedgerCommand) => run(management(command)),
       resume: () =>
         run(

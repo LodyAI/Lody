@@ -599,6 +599,23 @@ export function makePersonalCloudNetwork(
               previous.checkpoint.length !== base.length ||
               previous.checkpoint.headHash !== hex(base.head.toBytes())
             ) {
+              if (
+                inline &&
+                inline.workspaceId === scope.workspaceId &&
+                inline.genesisHash === genesisHash &&
+                inline.startIndex === base.length &&
+                inline.nextCursor === null &&
+                inline.startIndex + inline.recordsHex.length === inline.checkpoint.length
+              ) {
+                const page = inline;
+                return {
+                  records: page.recordsHex.map(raw),
+                  checkpoint: {
+                    length: page.checkpoint.length,
+                    head: Result.getOrThrow(Bytes.recordHash(raw(page.checkpoint.headHash))),
+                  },
+                };
+              }
               const pages = yield* fallback((bound) => allHistory(bound.credential), credential);
               const records = pages.flatMap((page) => page.recordsHex.map(raw));
               if (
