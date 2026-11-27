@@ -633,21 +633,21 @@ export function BillingSettingsView({
   const selectedOfferKey =
     interval === 'year' ? overview.pricing.yearlyOfferKey : overview.pricing.monthlyOfferKey;
   const promoOffer = overview.pricing.promo ?? null;
-  const promoPercent = !selectedOfferKey && !canScheduleAfterGift
-    ? (interval === 'year'
-        ? (promoOffer?.yearlyDiscountPercent ?? 0)
-        : (promoOffer?.monthlyDiscountPercent ?? 0))
+  const promoPercent = !selectedOfferKey
+    ? interval === 'year'
+      ? (promoOffer?.yearlyDiscountPercent ?? 0)
+      : (promoOffer?.monthlyDiscountPercent ?? 0)
     : 0;
   const retainedPromoPercent =
-    !selectedOfferKey &&
-    !canScheduleAfterGift &&
-    promoOffer?.retained?.interval === interval
+    !selectedOfferKey && promoOffer?.retained?.interval === interval
       ? promoOffer.retained.discountPercent
       : 0;
   const effectivePromoPercent = promoPercent > 0 ? promoPercent : retainedPromoPercent;
-  const referralPercent = referralOffer ? (referralOffer.policy?.discountPercent ?? 10) : 0;
+  const referralPercent =
+    referralOffer && !canScheduleAfterGift ? (referralOffer.policy?.discountPercent ?? 10) : 0;
   const showPromoOffer =
-    effectivePromoPercent > 0 && (!referralOffer || effectivePromoPercent > referralPercent);
+    effectivePromoPercent > 0 &&
+    (canScheduleAfterGift || !referralOffer || effectivePromoPercent > referralPercent);
   const showReferralOffer =
     Boolean(referralOffer) && !selectedOfferKey && !canScheduleAfterGift && !showPromoOffer;
   // Checkout takes one discount: credit pays toward a first payment with no other offer.

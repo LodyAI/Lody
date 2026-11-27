@@ -13,7 +13,7 @@ Translation: current
 
 `@lody/cloud-api` 在 `Pricing` 上新增可选的 `PromoCheckoutOffer`，在 `previewSubscriptionIntervalChange` 上新增 `promoKind`（`early_bird_forever` 或 `campaign_once`）与 `promoDiscountPercent`，并在 `SeatInvitePreviewSchema` 的 `billed` 分支新增 `promoDiscountPercent`、`promoEndsAt`、`regularProratedAmount` 与 `policyNextChangeAt`。`getBillingOverview`、`getMyNewWorkspacePricing` 与 `getWorkspaceSeatInvitePreview` 接受可选的 `policyRefreshKey`，客户端在值为 `0` 时省略该字段，保证前后端按任意顺序滚动发布均可兼容。客户端不接收 Coupon ID，也不在本地计算升级差额折算。
 
-创建工作区与账单页复用[推荐活动展示](2026-10-23-referral-campaign-display.zh.md)的边界刷新机制，同时追踪推荐与促销的 `nextChangeAt` 及保留 Checkout 的过期时间。当推荐归因与首单促销同时存在时，界面展示更高的买方折扣（`max(promo, referral)`，相同时保留推荐提示），并在百分比折扣生效时隐藏推荐余额抵扣预览，推荐人返现归因仍由服务端独立维护。月转年确认弹窗将单次净差额促销（`campaign_once`，明确提示下期按每席位每年 $96 标准价续费）与历史永久早鸟账户区分展示；成员邀请提示在 `promoEndsAt` 前展示当期折后按日计费金额与划线的原价按日金额。
+创建工作区与账单页复用[推荐活动展示](2026-10-23-referral-campaign-display.zh.md)的边界刷新机制，同时追踪推荐与促销的 `nextChangeAt` 及保留 Checkout 的过期时间。首期促销优惠同样展示在赠送期结束后续订预约卡片（`canScheduleAfterGift`）上，而推荐折扣不适用于赠送续订设置。当推荐归因与首单促销在普通新订场景同时存在时，界面展示更高的买方折扣（`max(promo, referral)`，相同时保留推荐提示），并在百分比折扣生效时隐藏推荐余额抵扣预览，推荐人返现归因仍由服务端独立维护。月转年确认弹窗将单次净差额促销（`campaign_once`，明确提示下期按每席位每年 $96 标准价续费）与历史永久早鸟账户区分展示；成员邀请提示在 `promoEndsAt` 前展示当期折后按日计费金额与划线的原价按日金额。
 
 公开官网延续[移除固定年付早鸟展示](../simplification/2026-10-01-end-yearly-early-bird.zh.md)的约束，预渲染 HTML 仅输出标准目录价（年付折合每月 $8，月付 $10）。`/price` 在挂载后、首页在首屏空闲且位于 `OptionalEnhancement` 边界内时，由 `use-public-promo.ts` 请求只读接口 `GET /api/billing/public-promo`（静态托管未同源代理 `/api/*` 时通过 `VITE_CONVEX_SITE_URL` 解析），在全部 8 种站点语言下渲染固定 `64px` 导航栏下方的窄横幅及 Plus 卡片活动价，并通过 `serverNow` 时钟偏移计算本地到期定时器，在 `endsAt` 到达瞬间自动恢复标准价而无需等待缓存重验证。
 

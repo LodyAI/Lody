@@ -228,6 +228,46 @@ describe('campaign checkout display', () => {
     );
     expect(container.textContent).toContain('Switch to yearly');
     expect(container.textContent).toContain('20% off');
+
+    // Gift-period workspace scheduling post-gift renewal (`canScheduleAfterGift`)
+    // surfaces the promotional first-period discount even when a referral prop exists.
+    await act(async () =>
+      root.render(
+        <BillingSettingsView
+          {...baseProps}
+          overview={{
+            ...OPTIMISTIC_BILLING_OVERVIEW,
+            billingAccountId: 'ba_gift',
+            canManageBilling: true,
+            giftStackingSupported: true,
+            scheduleManaged: true,
+            effectivePlanTier: 'plus',
+            entitlementSource: 'stripe_gift',
+            subscriptionStatus: 'active',
+            billingInterval: 'month',
+            giftEndsAt: Date.now() + 30 * 86_400_000,
+            autoRenewAfterGift: false,
+            canResumeAfterGift: false,
+            pricing: {
+              ...OPTIMISTIC_BILLING_OVERVIEW.pricing,
+              promo: {
+                policy: promoPolicy,
+                monthlyDiscountPercent: 20,
+                yearlyDiscountPercent: 25,
+              },
+            },
+          }}
+          referralOffer={{
+            policy: { campaignId: 'ref-25', discountPercent: 25, rewardPercent: 25 },
+            onRemove: () => {},
+          }}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Subscribe after gift');
+    expect(container.textContent).toContain('Promotional discount');
+    expect(container.textContent).toContain('$72');
+    expect(container.textContent).not.toContain('Referral discount');
   });
 });
 
