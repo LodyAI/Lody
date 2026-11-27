@@ -361,23 +361,31 @@ export class InstalledEpochHistory extends Context.Service<
           return yield* fail('closed');
         }
         if (startGeneration !== cacheGeneration) {
-          const rechecked = yield* Effect.result(installed.check(epoch));
-          if (Result.isFailure(rechecked)) {
-            disposeEpochKey(key);
-            if (
-              rechecked.failure.reason === 'unauthorized' ||
-              rechecked.failure.reason === 'rollback' ||
-              rechecked.failure.reason === 'closed'
-            )
+          for (let attempt = 0; ; attempt++) {
+            const stable = cacheGeneration;
+            const rechecked = yield* Effect.result(installed.check(epoch));
+            if (Result.isFailure(rechecked)) {
+              disposeEpochKey(key);
+              if (
+                rechecked.failure.reason === 'unauthorized' ||
+                rechecked.failure.reason === 'rollback' ||
+                rechecked.failure.reason === 'closed'
+              )
+                wipeCache();
+              return yield* rechecked.failure;
+            }
+            if (gate.isClosed()) {
+              disposeEpochKey(key);
               wipeCache();
-            return yield* rechecked.failure;
+              return yield* fail('closed');
+            }
+            if (cacheGeneration === stable) return key;
+            if (attempt >= 15) {
+              disposeEpochKey(key);
+              wipeCache();
+              return yield* fail('unauthorized');
+            }
           }
-          if (gate.isClosed()) {
-            disposeEpochKey(key);
-            wipeCache();
-            return yield* fail('closed');
-          }
-          return key;
         }
         putCached(startGeneration, view, epoch, key);
         return key;
@@ -501,8 +509,18 @@ export class InstalledEpochHistory extends Context.Service<
                   const latestView = yield* current();
                   const latestState = internalViewState(latestView);
                   if (!latestState || epoch > latestState.epoch.number) return yield* retry.failure;
-                  yield* recover(latestView, epoch + 1);
+                  const latestHead = latestView.head.toBytes();
+                  if (
+                    cachedLength !== latestView.length ||
+                    !cachedHead ||
+                    !bytesEqual(cachedHead, latestHead)
+                  ) {
+                    wipeCache();
+                    cachedHead = latestHead;
+                    cachedLength = latestView.length;
+                  }
                   const recoveredGeneration = cacheGeneration;
+                  yield* recover(latestView, epoch + 1);
                   const recovered = yield* installed.read(epoch);
                   return yield* finalizeRead(recoveredGeneration, latestView, epoch, recovered);
                 })
