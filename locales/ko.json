@@ -2370,8 +2370,6 @@
   "sessions.tabWaitingForSync": "이 대화가 동기화되기를 기다리는 중…",
   "sessions.contentSync.updating": "동기화 중",
   "sessions.contentSync.loadingConversation": "대화 불러오는 중",
-  "sessions.historySync.machine": "대상 컴퓨터에서 가져온 기록",
-  "sessions.historySync.streams": "Lody Streams에서 가져온 기록",
   "sessions.historySync.checking": "클라우드 기록 확인 중",
   "sessions.historySync.ownerRequired": "대상 컴퓨터에서 기록 접근 권한을 확인해야 합니다",
   "sessions.historySync.pending": "클라우드에 기록이 게시되기를 기다리는 중",

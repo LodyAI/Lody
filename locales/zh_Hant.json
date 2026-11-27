@@ -2370,8 +2370,6 @@
   "sessions.tabWaitingForSync": "正在等待此對話同步…",
   "sessions.contentSync.updating": "正在同步",
   "sessions.contentSync.loadingConversation": "正在載入對話",
-  "sessions.historySync.machine": "歷史來自目標電腦",
-  "sessions.historySync.streams": "歷史來自 Lody Streams",
   "sessions.historySync.checking": "正在確認雲端歷史",
   "sessions.historySync.ownerRequired": "需要目標電腦確認歷史讀取權限",
   "sessions.historySync.pending": "等待發布雲端歷史",

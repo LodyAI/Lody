@@ -25,12 +25,17 @@ const styles = stylex.create({
   },
 });
 
+/** Healthy history (idle/ready, current version) has nothing to report. */
+export function hasRoostHistorySyncNotice(state: RoostHistorySyncState | undefined) {
+  if (!state) return false;
+  return (
+    (state.phase !== 'idle' && state.phase !== 'ready') ||
+    (state.source === 'streams' && !!state.newerVersionPending)
+  );
+}
+
 export function RoostHistorySyncIndicator({ state }: { state: RoostHistorySyncState }) {
   const { t } = useTranslation();
-  const source =
-    state.source === 'machine'
-      ? t('sessions.historySync.machine', 'History from the target machine')
-      : t('sessions.historySync.streams', 'History from Lody Streams');
   let detail;
   switch (state.phase) {
     case 'checking':
@@ -67,11 +72,12 @@ export function RoostHistorySyncIndicator({ state }: { state: RoostHistorySyncSt
             });
       break;
   }
+  if (!hasRoostHistorySyncNotice(state)) return null;
+  const showingPrevious = state.source === 'streams' && state.newerVersionPending;
   return (
     <div {...stylex.props(styles.root, styles.history)} role="status">
-      <span>{source}</span>
       {detail && <span>{detail}</span>}
-      {state.source === 'streams' && state.newerVersionPending && (
+      {showingPrevious && (
         <span>
           {t(
             'sessions.historySync.previous',

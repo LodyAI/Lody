@@ -2370,8 +2370,6 @@
   "sessions.tabWaitingForSync": "Esperando a que se sincronice esta conversación…",
   "sessions.contentSync.updating": "Sincronizando",
   "sessions.contentSync.loadingConversation": "Cargando conversación",
-  "sessions.historySync.machine": "Historial del equipo de destino",
-  "sessions.historySync.streams": "Historial de Lody Streams",
   "sessions.historySync.checking": "Comprobando el historial en la nube",
   "sessions.historySync.ownerRequired": "El equipo de destino debe confirmar el acceso a este historial",
   "sessions.historySync.pending": "Esperando a que el historial se publique en la nube",
