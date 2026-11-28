@@ -13069,8 +13069,6 @@ export class MessageHandler {
       currentUserId: userId,
       liveSessionStatuses,
     });
-    // Keep content-state comfortably under APNs's 4096-byte total payload budget
-    // (leaving headroom for aps envelope/attributes/headers) even with CJK titles.
     const maxContentStateBytes = 3200;
     const boundedItems = [...items];
     while (

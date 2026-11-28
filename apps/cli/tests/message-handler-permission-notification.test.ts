@@ -876,7 +876,6 @@ describe('MessageHandler Live Activity summary sync', () => {
           title: 'Long running task',
           createdAt: new Date(now - 600_000).toISOString(),
           status: SessionStatusFactory.running(),
-          // Older than the 180s durable heartbeat TTL; presence keeps it alive.
           lastRunningSeen: now - 600_000,
         }),
       ],
@@ -926,7 +925,6 @@ describe('MessageHandler Live Activity summary sync', () => {
           status: SessionStatusFactory.running(),
           updatedAt: now,
         },
-        // Lingering finalizing presence on a session whose durable meta is already idle.
         [`session:${finishedId}`]: {
           kind: 'session',
           sessionId: finishedId,
