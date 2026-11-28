@@ -7,6 +7,7 @@ import {
   type CSSProperties,
 } from 'react';
 
+import { adoptAmbientAnimations } from '@/lib/ambient-motion';
 import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { useResolvedTheme } from '@/theme-provider';
@@ -324,6 +325,7 @@ export function WorkingGrid({
           }
         }
       }
+      adoptAmbientAnimations(animations);
       return () => {
         animations.forEach((animation) => animation.cancel());
       };
@@ -375,6 +377,9 @@ export function WorkingGrid({
       }
     }
 
+    // Created by script, so they fire no `animationstart`: hand them to the
+    // unfocused-window frame budget ourselves.
+    adoptAmbientAnimations(animations);
     return () => {
       animations.forEach((animation) => animation.cancel());
     };
