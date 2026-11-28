@@ -32,3 +32,42 @@ jobs:
       - run: pnpm --filter lody prepare:acp-adapters
       # Preserve Darwin-only branches previously executed by the private Mac check.
       - run: pnpm test:ci
+
+  mobile-ios-smoke:
+    name: Mobile iOS Simulator startup smoke
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      CI: true
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: '22.23.4'
+      - name: Install mobile dependencies
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+        run: pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile
+      - name: Ensure CocoaPods
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v pod >/dev/null 2>&1 || brew install cocoapods
+      - name: Run iOS Simulator startup smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @lody/mobile-capacitor run test:smoke:ios -- \
+            --artifact-dir "${RUNNER_TEMP}/ios-simulator-smoke"
+      - name: Upload iOS Simulator smoke diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-ios-smoke-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/ios-simulator-smoke
+          if-no-files-found: ignore

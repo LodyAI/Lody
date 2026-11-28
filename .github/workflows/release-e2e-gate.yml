@@ -137,6 +137,123 @@ jobs:
           set -euo pipefail
           xvfb-run -a node .github/scripts/cloud-electron-smoke.mjs
 
+  mobile-ios-smoke:
+    name: Mobile iOS Simulator startup smoke
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      NODE_VERSION: '22.23.4'
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - name: Checkout LodyAI/Lody
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install mobile dependencies
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+
+      - name: Ensure CocoaPods
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v pod >/dev/null 2>&1 || brew install cocoapods
+
+      - name: Run iOS Simulator startup smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack pnpm --filter @lody/mobile-capacitor run test:smoke:ios -- \
+            --artifact-dir "${RUNNER_TEMP}/ios-simulator-smoke"
+
+      - name: Upload iOS Simulator smoke diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-gate-ios-smoke-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/ios-simulator-smoke
+          if-no-files-found: ignore
+
+  mobile-android-smoke:
+    name: Mobile Android Emulator startup smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      NODE_VERSION: '22.23.4'
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - name: Checkout LodyAI/Lody
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+
+      - name: Setup Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            apps/mobile-capacitor/android/**/*.gradle*
+            apps/mobile-capacitor/android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Install mobile dependencies
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+
+      - name: Prepare Android Emulator AVD
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm
+          fi
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
+          echo "no" | avdmanager create avd --force -n lody-smoke -k "system-images;android-35;google_apis;x86_64"
+
+      - name: Run Android Emulator startup smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack pnpm --filter @lody/mobile-capacitor run test:smoke:android -- \
+            --avd lody-smoke \
+            --artifact-dir "${RUNNER_TEMP}/android-emulator-smoke"
+
+      - name: Upload Android Emulator smoke diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-gate-android-smoke-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/android-emulator-smoke
+          if-no-files-found: ignore
+
   selfhost-cloud:
     name: Self-host Cloud Electron E2E
     runs-on: ubuntu-24.04

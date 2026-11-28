@@ -1538,6 +1538,21 @@ jobs:
           set -euo pipefail
           node apps/mobile-capacitor/scripts/set-app-icon.mjs ios stable
           pnpm --filter @lody/mobile-capacitor exec cap sync ios
+      - name: Run iOS Simulator startup smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/mobile-capacitor/scripts/test-ios-simulator-smoke.mjs \
+            --skip-build \
+            --skip-sync \
+            --artifact-dir "${RUNNER_TEMP}/ios-simulator-smoke"
+      - name: Upload iOS Simulator smoke diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-simulator-smoke-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/ios-simulator-smoke
+          if-no-files-found: ignore
       - name: Configure manual code signing
         working-directory: apps/mobile-capacitor/ios/App
         shell: bash

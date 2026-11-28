@@ -31,7 +31,16 @@ let cachedPreferences: Promise<CapacitorPreferencesLike> | null = null;
 
 function defaultGetPreferences(): Promise<CapacitorPreferencesLike> {
   if (!cachedPreferences) {
-    cachedPreferences = import('@capacitor/preferences').then((mod) => mod.Preferences);
+    cachedPreferences = import('@capacitor/preferences')
+      .then((mod) => ({
+        get: (options: { key: string }) => mod.Preferences.get(options),
+        set: (options: { key: string; value: string }) => mod.Preferences.set(options),
+        remove: (options: { key: string }) => mod.Preferences.remove(options),
+      }))
+      .catch((error: unknown) => {
+        cachedPreferences = null;
+        throw error;
+      });
   }
   return cachedPreferences;
 }

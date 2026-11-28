@@ -106,6 +106,31 @@ Android includes the Kotlin plugin source and JNI libraries only when both
 generated directories exist. Builds without bindings, or without a
 `VITE_IROH_RELAYS` configuration, keep encrypted Streams RPC.
 
+## Native startup smoke tests
+
+Run cold-startup smoke tests on a real iOS Simulator or Android Emulator to verify that
+the production web bundle, Capacitor native plugin bridge, and Better Auth session probe
+converge to `/login` with zero uncaught errors or unhandled rejections:
+
+```sh
+pnpm --filter @lody/mobile-capacitor run test:smoke:ios
+pnpm --filter @lody/mobile-capacitor run test:smoke:android
+```
+
+Both commands run offline against an ephemeral `127.0.0.1` stub server without mutating
+`apps/mobile-capacitor/dist` or tracked native files. Useful flags:
+
+- `--skip-build` / `--skip-sync` reuse an already-built `dist/` and synced native project.
+- `--udid <udid>` (iOS) or `--serial <adb-serial>` / `--avd <name>` (Android) targets a
+  specific simulator or emulator instead of creating/selecting one automatically.
+- `--artifact-dir <dir>` saves a failure screenshot, WebView diagnostics JSON, and
+  Android `logcat` excerpt when startup fails.
+
+In CI, both iOS Simulator and Android Emulator smoke jobs run in `release-e2e-gate.yml`,
+`upload-mobile-ios-to-app-store-connect` (`release-clients.yml`) and `publish-ios.yml`
+gate App Store archiving on the synced iOS Simulator smoke test, and
+`macos-product-tests.yml` runs the iOS Simulator smoke job on pushes to `main`.
+
 ## iOS Simulator widget checks
 
 - The native logo and surface/status colours live in
