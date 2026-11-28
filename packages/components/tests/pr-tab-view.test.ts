@@ -15,6 +15,7 @@ import {
   type PrTabViewData,
   type PrTabViewState,
 } from '../src/components/sessions/pr-tab-view';
+import { PrLinkProvider, type PrLinkTarget } from '../src/components/ai-gui/pr-link-context';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
 const testI18n = createTestI18n();
@@ -148,6 +149,78 @@ describe('PrTabView refresh button', () => {
       'https://github.com/loro-dev/lody/pull/41',
     ]);
     expect(stack?.textContent).toContain('Merge this stack on GitHub.');
+  });
+
+  it('opens stacked PR layers in the PR panel on primary click and leaves modifier clicks external', () => {
+    const opened: PrLinkTarget[] = [];
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    flushSync(() => {
+      root?.render(
+        withTestI18n(
+          createElement(
+            PrLinkProvider,
+            { onOpenPrTab: (target) => opened.push(target) },
+            createElement(PrTabView, {
+              repoFullName: 'loro-dev/lody',
+              prNumber: 42,
+              state: 'ready',
+              data: {
+                ...data,
+                pullRequest: {
+                  ...pullRequest,
+                  stack: {
+                    number: 7,
+                    position: 2,
+                    size: 2,
+                    baseRef: 'main',
+                    pullRequests: [
+                      {
+                        number: 41,
+                        title: 'Foundation',
+                        state: 'closed',
+                        draft: false,
+                        merged: true,
+                      },
+                      { number: 42, title: 'Feature', state: 'open', draft: false, merged: false },
+                    ],
+                  },
+                },
+              },
+            })
+          ),
+          testI18n
+        )
+      );
+    });
+
+    const foundationLink = container.querySelector<HTMLAnchorElement>(
+      'a[aria-label="Merged: Foundation #41"]'
+    )!;
+    const modEvent = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      metaKey: true,
+    });
+    flushSync(() => {
+      foundationLink.dispatchEvent(modEvent);
+    });
+    expect(modEvent.defaultPrevented).toBe(false);
+    expect(opened).toEqual([]);
+
+    const primaryEvent = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    flushSync(() => {
+      foundationLink.dispatchEvent(primaryEvent);
+    });
+    expect(primaryEvent.defaultPrevented).toBe(true);
+    expect(opened).toEqual([{ repoFullName: 'loro-dev/lody', prNumber: 41 }]);
   });
 
   it('keeps the top refresh button clickable while the initial load is spinning', () => {

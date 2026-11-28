@@ -86,7 +86,7 @@ export function useGitHubPrDiff(input: {
   }, [commits, input.baseRef, input.baseSha, input.headSha, input.selection]);
 
   const refresh = useCallback(async () => {
-    if (!enabled || !identity.repositoryId || !identity.repoFullName || !input.prNumber) return;
+    if (!enabled || !identity.repoFullName || !input.prNumber) return;
     const targetKey = requestKey;
     const existing = inFlightRef.current.get(targetKey);
     if (existing) return existing;
@@ -163,13 +163,7 @@ export function useGitHubPrDiff(input: {
 
   const loadFile = useCallback(
     async (file: GitHubPullRequestFile) => {
-      if (
-        !enabled ||
-        !range ||
-        !identity.repositoryId ||
-        !identity.repoFullName ||
-        !input.workspaceId
-      ) {
+      if (!enabled || !range || !identity.repoFullName || !input.workspaceId) {
         return;
       }
       const path = file.path;

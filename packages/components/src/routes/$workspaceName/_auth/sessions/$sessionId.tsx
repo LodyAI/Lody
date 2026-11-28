@@ -10,11 +10,14 @@ const SessionDetail = lazy(() => import('@/components/sessions/session-detail'))
 import { useIsMobile } from '@/hooks/use-mobile';
 import { readStoredLastActiveTabState } from '@/lib/session-draft-tabs';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
+import { parsePrRepoSearchParam } from '@/components/sessions/pr-tab-target';
 
 export type SessionDetailSearch = {
   tab?: string;
   /** When set, opens the PR sidebar tab (desktop) or full-screen PR view (mobile). */
   pr?: number;
+  /** Optional `owner/repo` pairing for `?pr=<number>` when viewing any repository's PR. */
+  prRepo?: string;
   /** When true, opens the full-screen Browser view on mobile. */
   browser?: boolean;
   /** When true, opens the full-screen iOS Simulator view on mobile. */
@@ -53,6 +56,7 @@ const SessionDetailRoute = () => {
           sessionId={sessionId as SessionId}
           urlTab={search.tab}
           urlPrNumber={search.pr}
+          urlPrRepo={search.prRepo}
           urlBrowser={search.browser}
           urlSimulator={search.simulator}
         />
@@ -82,12 +86,16 @@ const parseBrowserFlag = (value: unknown): boolean | undefined => {
 };
 
 export const Route = createFileRoute('/$workspaceName/_auth/sessions/$sessionId')({
-  validateSearch: (search: Record<string, unknown>): SessionDetailSearch => ({
-    tab: typeof search.tab === 'string' ? search.tab : undefined,
-    pr: parsePrNumber(search.pr),
-    browser: parseBrowserFlag(search.browser),
-    simulator: parseBrowserFlag(search.simulator),
-  }),
+  validateSearch: (search: Record<string, unknown>): SessionDetailSearch => {
+    const pr = parsePrNumber(search.pr);
+    return {
+      tab: typeof search.tab === 'string' ? search.tab : undefined,
+      pr,
+      prRepo: pr !== undefined ? parsePrRepoSearchParam(search.prRepo) : undefined,
+      browser: parseBrowserFlag(search.browser),
+      simulator: parseBrowserFlag(search.simulator),
+    };
+  },
   /* Entry-scoped last-active-tab restoration. An ABSENT `?tab` means "no
      explicit choice" (external entries: sidebar rows, notifications, pasted
      URLs) and is filled in from the per-session last-active store as ONE

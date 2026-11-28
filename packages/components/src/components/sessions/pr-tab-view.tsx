@@ -59,6 +59,7 @@ import { PrChangesView } from './pr-changes-view';
 import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
 import type { PrCommitSelection } from '@/lib/github-pr-diff';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { usePrLinkInterceptor } from '@/components/ai-gui/pr-link-context';
 
 /** The tab's own width, not the window's: the PR tab lives in a resizable side panel. */
 const NARROW = '@container pr-tab (width < 420px)';
@@ -1935,6 +1936,44 @@ function resolveMergeKind(pr: GitHubPullRequestDetails): MergeKind {
   return 'ready';
 }
 
+function PrStackLink({
+  href,
+  isCurrent,
+  ariaLabel,
+  children,
+}: {
+  href: string;
+  isCurrent: boolean;
+  ariaLabel: string;
+  children: React.ReactNode;
+}) {
+  const prHandler = usePrLinkInterceptor(href);
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (event.button !== 0) return;
+      if (!prHandler) return;
+      event.preventDefault();
+      prHandler();
+    },
+    [prHandler]
+  );
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      aria-current={isCurrent ? 'page' : undefined}
+      aria-label={ariaLabel}
+      onClick={handleClick}
+      {...stylex.props(styles.stackLink, isCurrent && styles.stackCurrent)}
+    >
+      {children}
+    </a>
+  );
+}
+
 export const PrTabView = memo(function PrTabView({
   repoFullName,
   prNumber,
@@ -2071,16 +2110,10 @@ export const PrTabView = memo(function PrTabView({
                         const statusLabel = t(meta.labelKey, meta.labelFallback);
                         return (
                           <li key={entry.number} {...stylex.props(styles.stackRow)}>
-                            <a
+                            <PrStackLink
                               href={`https://github.com/${repoFullName}/pull/${entry.number}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              aria-current={entry.number === pr.number ? 'page' : undefined}
-                              aria-label={`${statusLabel}: ${entry.title} #${entry.number}`}
-                              {...stylex.props(
-                                styles.stackLink,
-                                entry.number === pr.number && styles.stackCurrent
-                              )}
+                              isCurrent={entry.number === pr.number}
+                              ariaLabel={`${statusLabel}: ${entry.title} #${entry.number}`}
                             >
                               <Icon
                                 {...stylex.props(styles.stackIcon, statusStyle)}
@@ -2091,7 +2124,7 @@ export const PrTabView = memo(function PrTabView({
                                 {entry.title}
                                 <span {...stylex.props(styles.stackNumber)}>#{entry.number}</span>
                               </span>
-                            </a>
+                            </PrStackLink>
                           </li>
                         );
                       })}

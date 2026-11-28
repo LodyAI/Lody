@@ -2,44 +2,92 @@
 
 import { createContext, useContext, useMemo } from 'react';
 
+export interface PrLinkTarget {
+  repoFullName: string;
+  prNumber: number;
+}
+
 export interface PrLinkContextValue {
-  /** Canonical PR URL to match against outgoing hyperlinks. */
-  prUrl: string;
-  /** Callback to invoke when the user clicks a link that matches `prUrl`. */
-  onOpenPrTab: () => void;
+  /** Callback to invoke when the user clicks any valid GitHub pull request link. */
+  onOpenPrTab: (target: PrLinkTarget) => void;
 }
 
 const PrLinkContext = createContext<PrLinkContextValue | null>(null);
 
-function normalizePrUrl(url: string): string {
-  return url.trim().replace(/\/+$/, '').toLowerCase();
+const GITHUB_PR_SEGMENT_PATTERN = /^[\w.-]+$/;
+
+/**
+ * Parse a GitHub pull request URL (`https://github.com/<owner>/<repo>/pull/<number>`,
+ * optionally `http:`, `www.github.com`, sub-pages like `/files` or `/commits`,
+ * query parameters, or fragments). Non-PR GitHub pages, other hosts, traversal
+ * segments (`.` / `..`), and malformed numbers return `null`.
+ */
+export function parseGitHubPrLinkTarget(href: string | undefined): PrLinkTarget | null {
+  if (!href) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(href.trim());
+  } catch {
+    return null;
+  }
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol !== 'https:' && protocol !== 'http:') return null;
+  const host = parsed.hostname.toLowerCase();
+  if (host !== 'github.com' && host !== 'www.github.com') return null;
+
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  if (segments.length < 4) return null;
+  const [owner, repo, section, rawNumber] = segments;
+  if (
+    !owner ||
+    !repo ||
+    owner === '.' ||
+    owner === '..' ||
+    repo === '.' ||
+    repo === '..' ||
+    !GITHUB_PR_SEGMENT_PATTERN.test(owner) ||
+    !GITHUB_PR_SEGMENT_PATTERN.test(repo)
+  ) {
+    return null;
+  }
+  if (section?.toLowerCase() !== 'pull') return null;
+  if (!rawNumber || !/^\d+$/.test(rawNumber)) return null;
+  const prNumber = Number(rawNumber);
+  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) return null;
+
+  return {
+    repoFullName: `${owner}/${repo}`,
+    prNumber,
+  };
 }
 
 export function PrLinkProvider({
-  prUrl,
   onOpenPrTab,
   children,
 }: {
-  prUrl?: string | null;
-  onOpenPrTab?: () => void;
+  onOpenPrTab?: (target: PrLinkTarget) => void;
   children: React.ReactNode;
 }) {
   const value = useMemo<PrLinkContextValue | null>(() => {
-    if (!prUrl || !onOpenPrTab) return null;
-    return { prUrl: normalizePrUrl(prUrl), onOpenPrTab };
-  }, [onOpenPrTab, prUrl]);
+    if (!onOpenPrTab) return null;
+    return { onOpenPrTab };
+  }, [onOpenPrTab]);
   return <PrLinkContext.Provider value={value}>{children}</PrLinkContext.Provider>;
 }
 
 /**
- * Returns a handler for the supplied href if it points at the active session's
- * Pull Request URL, otherwise returns `null`. Consumers typically call the
- * handler from a link `onClick`, preventing the default external navigation.
+ * Returns a handler for the supplied href when it points at a valid GitHub
+ * pull request URL and an enclosing `PrLinkProvider` can open the in-app PR
+ * panel; otherwise returns `null`. Consumers call the handler from a primary
+ * unmodified link click, preventing the default external navigation.
  */
 export function usePrLinkInterceptor(href: string | undefined): (() => void) | null {
   const ctx = useContext(PrLinkContext);
-  if (!ctx || !href) return null;
-  const normalized = normalizePrUrl(href);
-  if (normalized === ctx.prUrl) return ctx.onOpenPrTab;
-  return null;
+  const target = parseGitHubPrLinkTarget(href);
+  const repoFullName = target?.repoFullName;
+  const prNumber = target?.prNumber;
+  return useMemo(() => {
+    if (!ctx || !repoFullName || prNumber == null) return null;
+    return () => ctx.onOpenPrTab({ repoFullName, prNumber });
+  }, [ctx, prNumber, repoFullName]);
 }

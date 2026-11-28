@@ -140,6 +140,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
     id: SessionId;
     tab?: string;
     pr?: number;
+    prRepo?: string;
     browser?: boolean;
     simulator?: boolean;
   } | null>(null);
@@ -148,6 +149,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
       id: sessionId,
       tab: sessionSearch?.tab,
       pr: sessionSearch?.pr,
+      prRepo: sessionSearch?.prRepo,
       browser: sessionSearch?.browser,
       simulator: sessionSearch?.simulator,
     };
@@ -229,6 +231,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
                      otherwise an open Browser/PR stays on top of Home for the
                      exit animation and flashes a few frames. */
                   urlPrNumber={open ? rendered.pr : undefined}
+                  urlPrRepo={open ? rendered.prRepo : undefined}
                   urlBrowser={open ? rendered.browser : false}
                   urlSimulator={open ? rendered.simulator : false}
                   onMobileBack={handleClose}
