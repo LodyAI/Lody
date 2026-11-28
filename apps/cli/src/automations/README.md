@@ -6,6 +6,12 @@ Agent exits and across daemon restarts. `false` keeps waiting;
 registering Session. Workspace identifies the daemon/storage owner; it does not
 replace the Session as the continuation target.
 
+Automations perceive state transitions; time-triggered work belongs to Schedules. The
+[Session automation events Spec](../../../../specs/session-automation-events.md) (draft) defines the
+event-perception boundary, slot supersession and causal-depth contract, and the
+[event perception design note](../../../../.agents/notes/proposed/architecture/2026-11-28-session-automation-event-perception.md)
+records the rationale and rejected alternatives behind it.
+
 | Boundary            | Owner                                                                                                                                               | Responsibility                                                                                |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Public API          | [condition contracts](../../../../packages/shared/src/automations/conditions.ts), [control](../../../../packages/shared/src/automations/control.ts) | Registration, result, inspection, cancellation and Session feature settings                   |
