@@ -1,13 +1,16 @@
-# Core OTA publisher
+# Core OTA
 
 Standalone Node ESM publisher for the [Core OTA intent](../../../../specs/portable-desktop-ota.zh.md).
 Requires a Node version with native `node:zlib` zstd support and the repository's supported security floor.
 
-| Entry | Contract |
-| --- | --- |
-| `protocol.mjs` | Canonical serialization, SHA-256, strict schema validation and Ed25519 authentication |
-| `build.mjs` | Directory snapshot to signed complete target and immutable objects pack |
-| `protocol.test.mjs` | Real crypto, filesystem and zstd boundary tests |
+| Entry               | Contract                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `protocol.mjs`      | Canonical serialization, SHA-256, strict schema validation and Ed25519 authentication |
+| `build.mjs`         | Directory snapshot to signed complete target and immutable objects pack               |
+| `protocol.test.mjs` | Real crypto, filesystem and zstd boundary tests                                       |
+| `download.mjs`      | Bounded Range planning, dictionary fallback and complete snapshot staging             |
+| `activation.mjs`    | ABI-scoped release adoption, durable pointers and attempt-bound health                |
+| `bootstrap.mjs`     | Installed metadata admission and verified external entry selection                    |
 
 Run from the repository root:
 
@@ -16,7 +19,7 @@ node apps/electron/scripts/core-ota/build.mjs --input /build/core --output /buil
 node --test apps/electron/scripts/core-ota/protocol.test.mjs
 ```
 
-The output directory must be outside input. Files are created exclusively; use a fresh output directory for each attempt. A failed write can leave unpublished pack files. No upload, feed advancement or network operation occurs. Keep input immutable while building; concurrent modification is unsupported. The caller owns release-ID immutability, sequence allocation and publication ordering.
+The output directory must be outside input. New files are created exclusively; retries accept identical bytes and reject conflicting artifacts. A failed write can leave unpublished pack files. No upload, feed advancement or network operation occurs. Keep input immutable while building; concurrent modification is unsupported. The caller owns release-ID immutability, sequence allocation and publication ordering.
 
 `buildRelease({input, output, release, seq, channel, platform, arch, hostAbi, keyFile})` returns `{manifest, packs}`; each returned pack is `{path, bytes: Buffer}`. Library callers may supply an Ed25519 `privateKey` instead of `keyFile`. CLI keys are PEM files. Diagnostics never print key material.
 
@@ -31,3 +34,19 @@ Limits are 100,000 files/patches, 256 MiB per target/frame, 64 packs, 8 GiB per 
 Consumers must authenticate before use, enforce channel/platform/architecture/exact Host ABI and sequence policy, verify compressed hash before bounded decompression, then target size/hash. Full-pack downloads additionally verify pack hash. Signature validity alone does not provide freshness, anti-rollback persistence, safe staging or activation. HTTP Range, installation, rollback and signed installer behavior belong to the runtime and are not verified by these publisher tests.
 
 Optional `--previous-input /build/previous` (`previousInput` in the library) compares matching relative paths. Changed targets use `zstdCompressSync(target, {dictionary: base})`; patches are retained only when they save more than 256 bytes and exact bounded dictionary replay matches the target. Missing previous files omit that patch. Invalid previous file types and escaping links fail the build. All target objects retain dictionary-free full frames. Identical existing output bytes are accepted on retry; different bytes fail rather than overwrite immutable artifacts.
+
+## Transfer and activation
+
+`stageRelease({manifest, publicKey, hostAbi, channel, platform, arch, baseUrl, storeRoot, localRoots, fetchImpl, signal})` authenticates applicability before work and returns `{directory, manifest, stats}`. The directory contains only target files; the manifest is returned separately. The transfer planner compares mixed dictionary/object ranges, complete-object ranges and full packs using compressed bytes and request latency. Local content is hashed before reuse. Each downloaded frame and decoded object is verified; HTTP 200 fallback verifies the full pack. Transfers retain at most 512 MiB of content/range buffers and fail when the budget cannot accommodate a target. Persistent byte resume is unavailable.
+
+`openActivation({root, installed, publicKey, lease})` requires the installed Host's exclusive process lease. `adoptStaged({directory, manifest})` verifies the source, copies and verifies the complete snapshot, flushes and seals it, publishes it, and persists `staged`. `begin()` promotes only on the next launch and records an attempt before external execution. `acknowledge({releaseId, attemptId})` accepts only that attempt. A later process rejects an interrupted attempt and verifies the retained candidate before using it; builtin remains the final fallback. Pointer replacement syncs both file and directory. Filesystem flush guarantees still depend on the platform.
+
+The namespace includes product, channel, platform, architecture and Host ABI. The owner is the installed application's single-instance lock, not a PID file or time-based takeover. These modules assume a same-user store; permissions and repeated verification do not isolate downloaded code from another malicious process with the same user rights.
+
+Run the owning behavioral suites:
+
+```sh
+node --test apps/electron/scripts/core-ota/*.test.mjs
+```
+
+They exercise signed dictionary replay, real loopback HTTP ranges, skipped releases, content reuse, tampering, cancellation, concurrent snapshot publication, durable process restart and stale health rejection. They do not establish packaged Electron execution, signed installer behavior, production publication, power-loss recovery or complete specification conformance.
