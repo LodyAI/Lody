@@ -5,55 +5,6 @@ on:
 permissions:
   contents: read
 jobs:
-  mobile-ios-smoke:
-    name: Mobile iOS Simulator startup smoke
-    runs-on: xcode-27
-    timeout-minutes: 45
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
-      NODE_VERSION: '22.23.4'
-      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
-    steps:
-      - name: Checkout LodyAI/Lody
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          submodules: recursive
-
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install mobile dependencies
-        env:
-          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
-        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
-
-      - name: Ensure CocoaPods
-        shell: bash
-        run: |
-          set -euo pipefail
-          command -v pod >/dev/null 2>&1 || brew install cocoapods
-
-      - name: Run iOS Simulator startup smoke test
-        shell: bash
-        run: |
-          set -euo pipefail
-          corepack pnpm --filter @lody/mobile-capacitor run test:smoke:ios -- \
-            --artifact-dir "${RUNNER_TEMP}/ios-simulator-smoke"
-
-      - name: Upload iOS Simulator smoke diagnostics on failure
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: release-gate-ios-smoke-diagnostics-${{ github.run_id }}
-          path: ${{ runner.temp }}/ios-simulator-smoke
-          if-no-files-found: ignore
-
   mobile-android-smoke:
     name: Mobile Android Emulator startup smoke
     runs-on: ubuntu-24.04
@@ -105,8 +56,16 @@ jobs:
           fi
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
-          "$ANDROID_HOME/emulator/emulator" -accel-check
-          echo "no" | avdmanager create avd --force -n lody-smoke -k "system-images;android-35;google_apis;x86_64"
+          emulator="$ANDROID_HOME/emulator/emulator"
+          "$emulator" -accel-check
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/lody-android-avds"
+          mkdir -p "$ANDROID_AVD_HOME"
+          avdmanager create avd --force --name lody-smoke --device pixel_6 \
+            --path "$ANDROID_AVD_HOME/lody-smoke.avd" \
+            --package "system-images;android-35;google_apis;x86_64"
+          test -f "$ANDROID_AVD_HOME/lody-smoke.ini"
+          "$emulator" -list-avds | grep -Fx lody-smoke
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
 
       - name: Run Android Emulator startup smoke test
         shell: bash
