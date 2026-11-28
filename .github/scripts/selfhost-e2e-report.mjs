@@ -3,6 +3,36 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildFeishuCardPayload, sendFeishuAlert } from './feishu-alert.mjs';
 
+const MOBILE_IOS_PHASES = [
+  ['Ensuring selfhost stack (', 'start-selfhost'],
+  ['Provisioning verified synthetic account', 'provision-account'],
+  ['Creating ephemeral simulator ', 'prepare-simulator'],
+  ['Booting simulator ', 'prepare-simulator'],
+  ['Preparing mobile iOS test-build for ', 'build-app'],
+  ['Reusing built simulator app at ', 'build-app'],
+  ['Installing scratch App.app and seeding Preferences', 'install-app'],
+  ['Launching ai.lody.mobile on simulator', 'verify-auth'],
+  ['PASS (', 'cleanup'],
+];
+const MOBILE_IOS_LOG_PREFIX = '[mobile-ios-auth-smoke] ';
+
+function readMobileIosPhase(logPath) {
+  let log;
+  try {
+    log = readFileSync(logPath, 'utf8');
+  } catch {
+    return 'unavailable';
+  }
+  let phase = 'prepare-run';
+  for (const line of log.split(/\r?\n/u)) {
+    if (!line.startsWith(MOBILE_IOS_LOG_PREFIX)) continue;
+    const message = line.slice(MOBILE_IOS_LOG_PREFIX.length);
+    const match = MOBILE_IOS_PHASES.find(([marker]) => message.startsWith(marker));
+    if (match) phase = match[1];
+  }
+  return phase;
+}
+
 export function findLatestVerifySummary(selfhostDir) {
   const baseDir = join(selfhostDir, 'local-stack', '.state', 'verify-release');
   if (!existsSync(baseDir)) return null;
@@ -102,6 +132,10 @@ async function main() {
   console.log(formatPublicStatusLine(report, exitCode));
 
   if (passed) return;
+
+  if (process.env.SELFHOST_SUITE_LABEL === 'selfhost-mobile-ios-smoke') {
+    console.log(`[selfhost-e2e] mobile-ios-phase=${readMobileIosPhase(logPath)}`);
+  }
 
   const webhookUrl = process.env.FEISHU_ALERT_WEBHOOK_URL;
   if (webhookUrl) {
