@@ -4055,6 +4055,8 @@
   "settings.general.preventSleep.label": "Evitar suspensión",
   "settings.general.sessions.codeOnlyLineChanges.helper": "El conteo de líneas en la barra lateral omite documentación, pruebas y configuración de desarrollo.",
   "settings.general.sessions.codeOnlyLineChanges.label": "Mostrar solo cambios en líneas de código",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.helper": "En los protocolos que no admiten la dirección durante la ejecución, cancela el turno activo y envía tu mensaje en lugar de esperar a que termine.",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.label": "Forzar la interrupción y enviar si no se admite la dirección",
   "settings.general.sessions.queuedMessageBehavior.guide": "Dirigir",
   "settings.general.sessions.queuedMessageBehavior.helper": "Para los mensajes que envías mientras el agente está trabajando.",
   "settings.general.sessions.queuedMessageBehavior.label": "Comportamiento de mensajes en cola",

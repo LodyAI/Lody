@@ -132,6 +132,7 @@ import {
 import { queueTask } from './message-queue/queue-task';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import {
+  isNativeSteerKnownUnsupported,
   MessageQueueDisplay,
   type ScheduledQueueItem,
   shouldRequestNativeQueueSteer,
@@ -214,6 +215,7 @@ import {
   currentWorkspaceSlugAtom,
   getAllAgentConfigAtom,
   queuedMessageBehaviorAtom,
+  steerForceInterruptAtom,
   userAtom,
 } from '@/atoms';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
@@ -2964,6 +2966,8 @@ export const SessionChatInterface = memo(
       : undefined;
     const nativeSteerAvailable =
       !rpcReason && shouldRequestNativeQueueSteer(capabilityAuthority, steerCapability);
+    const isSteerKnownUnsupported =
+      !rpcReason && isNativeSteerKnownUnsupported(capabilityAuthority, steerCapability);
     const { selectedModeId, selectedModelId, configOptionValues } =
       useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
         cliType: session.cliType,
@@ -3384,6 +3388,7 @@ export const SessionChatInterface = memo(
     const lastSearchAnalyticsKeyRef = useRef<string | null>(null);
 
     const queuedMessageBehavior = useAtomValue(queuedMessageBehaviorAtom);
+    const steerForceInterrupt = useAtomValue(steerForceInterruptAtom);
     const {
       markSessionRead,
       requestSessionCancel,
@@ -5039,12 +5044,53 @@ export const SessionChatInterface = memo(
     }, []);
 
     const guideHistoryEntry = useCallback(
-      async (userTurnId: string, expectedTurnId: string): Promise<boolean> => {
-        return await requestSessionSteer(session.id, expectedTurnId, userTurnId, {
+      async (
+        userTurnId: string,
+        expectedTurnId: string,
+        options?: { forceInterruptOnUnsupported?: boolean }
+      ): Promise<boolean> => {
+        let unsupportedTriggered = false;
+        const applied = await requestSessionSteer(session.id, expectedTurnId, userTurnId, {
           machineId: session.machineId,
+          onUnsupported: options?.forceInterruptOnUnsupported
+            ? () => {
+                unsupportedTriggered = true;
+              }
+            : undefined,
         });
+        if (!applied && unsupportedTriggered) {
+          setInputActionState('ready');
+          pendingUserInterruptRef.current = true;
+          try {
+            await requestSessionCancel(session.id, expectedTurnId, { interrupt: true });
+            captureSessionEvent('session/guide_force_interrupt_succeeded', {
+              user_turn_id: userTurnId,
+              expected_turn_id: expectedTurnId,
+            });
+          } catch (error) {
+            console.error('Failed to interrupt active turn after unsupported steer', error);
+            pendingUserInterruptRef.current = false;
+            captureSessionEvent('session/guide_force_interrupt_failed', {
+              user_turn_id: userTurnId,
+              expected_turn_id: expectedTurnId,
+              error_name: error instanceof Error ? error.name : typeof error,
+              error_message: getErrorMessage(error),
+            });
+            toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
+              description: getErrorMessage(error),
+            });
+          }
+        }
+        return applied;
       },
-      [requestSessionSteer, session.id, session.machineId]
+      [
+        captureSessionEvent,
+        requestSessionCancel,
+        requestSessionSteer,
+        session.id,
+        session.machineId,
+        t,
+      ]
     );
 
     const enqueueInputBlocks = useCallback(
@@ -5055,7 +5101,9 @@ export const SessionChatInterface = memo(
           createHistory?: boolean;
           existingUserTurnId?: string;
           requestDispatch?: boolean;
+          interruptTurnId?: string;
           guideExpectedTurnId?: string;
+          forceInterruptOnUnsupported?: boolean;
           modeIdOverride?: string | null;
           modelIdOverride?: string | null;
           configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
@@ -5099,6 +5147,7 @@ export const SessionChatInterface = memo(
 
           const onAccepted = captureRunConfigForSend(inputConfig);
           let userTurnId = options?.existingUserTurnId?.trim() || null;
+          let acceptedState: 'written' | 'pending' | undefined;
           if (!userTurnId && options?.createHistory) {
             const pendingHistoryEntry = buildDraftUserHistoryEntry(
               {
@@ -5117,13 +5166,16 @@ export const SessionChatInterface = memo(
             if (!guardNewBillableTurn()) {
               return false;
             }
-            const { entry: historyEntry } = await addSessionHistory(pendingHistoryEntry, {
+            const { entry: historyEntry, accepted } = await addSessionHistory(pendingHistoryEntry, {
               dispatch: options?.requestDispatch === true,
+              interruptTurnId: options?.interruptTurnId,
               guideExpectedTurnId: options?.guideExpectedTurnId,
+              forceInterruptOnUnsupported: options?.forceInterruptOnUnsupported,
               attachments: options?.attachments,
               onAccepted,
             });
             userTurnId = historyEntry.id;
+            acceptedState = accepted;
             touchSessionActivity(session.id).catch((err: unknown) => {
               console.warn('Failed to update session lastMessageAt/lastReadAt', err);
             });
@@ -5139,6 +5191,29 @@ export const SessionChatInterface = memo(
           // Track CRDT sync to server for this message
           if (userTurnId) {
             trackMessageSend(userTurnId);
+          }
+          if (options?.interruptTurnId && acceptedState !== 'pending') {
+            setInputActionState('ready');
+            pendingUserInterruptRef.current = true;
+            try {
+              await requestSessionCancel(session.id, options.interruptTurnId, { interrupt: true });
+              captureSessionEvent('session/message_interrupt_and_queue_requested', {
+                active_assistant_turn_id: options.interruptTurnId,
+                user_turn_id: userTurnId,
+              });
+            } catch (error) {
+              console.error('Failed to interrupt active turn for follow-up', error);
+              pendingUserInterruptRef.current = false;
+              captureSessionEvent('session/message_interrupt_and_queue_failed', {
+                active_assistant_turn_id: options.interruptTurnId,
+                user_turn_id: userTurnId,
+                error_name: error instanceof Error ? error.name : typeof error,
+                error_message: getErrorMessage(error),
+              });
+              toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
+                description: getErrorMessage(error),
+              });
+            }
           }
           if (options?.requestDispatch && userTurnId) {
             void requestSessionDispatch(session.id, userTurnId, {
@@ -5158,7 +5233,9 @@ export const SessionChatInterface = memo(
               toast.error(t('sessions.sendError'), { description: getErrorMessage(err) });
             });
           } else if (options?.guideExpectedTurnId && userTurnId) {
-            void guideHistoryEntry(userTurnId, options.guideExpectedTurnId)
+            void guideHistoryEntry(userTurnId, options.guideExpectedTurnId, {
+              forceInterruptOnUnsupported: options.forceInterruptOnUnsupported,
+            })
               .then((applied) => {
                 captureSessionEvent('session/message_guide_result', {
                   user_turn_id: userTurnId,
@@ -5198,6 +5275,7 @@ export const SessionChatInterface = memo(
         sessionConversationConfig.memory,
         mcpSelection.selectedIds,
         repoFullName,
+        requestSessionCancel,
         requestSessionDispatch,
         anchorChatToMessage,
         selectedModeId,
@@ -5411,6 +5489,8 @@ export const SessionChatInterface = memo(
           hasUnfinishedAssistantTurn: activeAssistantTurnId != null,
           queuedMessageBehavior,
           nativeSteerAvailable,
+          steerForceInterrupt,
+          isSteerKnownUnsupported,
         });
         const startedAtMs = getPerformanceNowMs();
         const inputSummary = summarizeInputBlocksForAnalytics(normalized);
@@ -5462,10 +5542,40 @@ export const SessionChatInterface = memo(
           return accepted;
         }
 
+        if (submitRoute.type === 'interrupt_and_queue' && activeAssistantTurnId) {
+          const accepted = await enqueueInputBlocks(normalized, {
+            createHistory: true,
+            requestDispatch: true,
+            interruptTurnId: activeAssistantTurnId,
+            modeIdOverride: turnModeId,
+            modelIdOverride: turnModelId,
+            configOptionValuesOverride: turnConfigOptionValues,
+            agentRole: options?.agentRole,
+            attachments: options?.attachments,
+            mcpServerIds: options?.mcpServerIds,
+          });
+          captureSessionEvent(
+            accepted
+              ? 'session/message_interrupt_and_queue_dispatched'
+              : 'session/message_submit_failed',
+            {
+              ...inputSummary,
+              submit_route: 'interrupt_and_queue',
+              active_assistant_turn_id: activeAssistantTurnId,
+              duration_ms: getDurationSinceMs(startedAtMs),
+            }
+          );
+          return accepted;
+        }
+
         if (submitRoute.type === 'guide' && activeAssistantTurnId) {
           const accepted = await enqueueInputBlocks(normalized, {
             createHistory: true,
             guideExpectedTurnId: activeAssistantTurnId,
+            forceInterruptOnUnsupported:
+              queuedMessageBehavior === 'guide' &&
+              options?.invertSubmitBehavior !== true &&
+              steerForceInterrupt,
             modeIdOverride: turnModeId,
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
@@ -5532,12 +5642,15 @@ export const SessionChatInterface = memo(
         isExternalHistoryRefreshing,
         isArchivedSession,
         isAgentBusy,
+        isSteerKnownUnsupported,
         queueInputBlocks,
         queuedMessageBehavior,
         nativeSteerAvailable,
         sessionDocReady,
         selectedModeId,
         selectedModelId,
+        steerForceInterrupt,
+        t,
       ]
     );
 

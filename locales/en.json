@@ -4056,6 +4056,8 @@
   "settings.general.preventSleep.label": "Prevent sleep",
   "settings.general.sessions.codeOnlyLineChanges.helper": "Sidebar line counts skip docs, tests, and dev config.",
   "settings.general.sessions.codeOnlyLineChanges.label": "Show code-only line changes",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.helper": "For protocols that do not support mid-run steering, cancel the active turn and send your message instead of waiting for it to finish.",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.label": "Force interrupt and send when steering isn't supported",
   "settings.general.sessions.queuedMessageBehavior.guide": "Steer",
   "settings.general.sessions.queuedMessageBehavior.helper": "For messages you send while the agent is working.",
   "settings.general.sessions.queuedMessageBehavior.label": "Queued message behavior",

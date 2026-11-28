@@ -4055,6 +4055,8 @@
   "settings.general.preventSleep.label": "防止進入睡眠",
   "settings.general.sessions.codeOnlyLineChanges.helper": "側邊欄的行數變更統計將略過文件、測試與開發設定檔。",
   "settings.general.sessions.codeOnlyLineChanges.label": "僅顯示程式碼行數變更",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.helper": "當協定不支援執行中引導時，強制中斷目前任務並發送新訊息，而不是等待目前任務完成。",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.label": "不支援引導時強制中斷目前任務並發送",
   "settings.general.sessions.queuedMessageBehavior.guide": "引導",
   "settings.general.sessions.queuedMessageBehavior.helper": "設定在 Agent 運作期間傳送訊息時的處理方式。",
   "settings.general.sessions.queuedMessageBehavior.label": "佇列訊息行為",

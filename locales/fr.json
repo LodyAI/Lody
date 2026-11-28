@@ -4055,6 +4055,8 @@
   "settings.general.preventSleep.label": "Empêcher la mise en veille",
   "settings.general.sessions.codeOnlyLineChanges.helper": "Le décompte des lignes dans la barre latérale ignore la documentation, les tests et la configuration de développement.",
   "settings.general.sessions.codeOnlyLineChanges.label": "Afficher uniquement les lignes de code modifiées",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.helper": "Pour les protocoles ne prenant pas en charge le guidage en cours d'exécution, annule le tour actif et envoie votre message au lieu d'attendre sa fin.",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.label": "Forcer l'interruption et envoyer si le guidage n'est pas pris en charge",
   "settings.general.sessions.queuedMessageBehavior.guide": "Orienter",
   "settings.general.sessions.queuedMessageBehavior.helper": "Pour les messages envoyés pendant que l'agent travaille.",
   "settings.general.sessions.queuedMessageBehavior.label": "Comportement des messages en file d'attente",

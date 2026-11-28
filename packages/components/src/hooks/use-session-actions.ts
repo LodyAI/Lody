@@ -240,7 +240,9 @@ export type SessionActions = {
     history: Omit<SessionHistoryInput, 'id'>,
     options?: {
       dispatch?: boolean;
+      interruptTurnId?: string;
       guideExpectedTurnId?: string;
+      forceInterruptOnUnsupported?: boolean;
       attachments?: SessionAttachmentDraft[];
       onAccepted?: () => void;
     }
@@ -264,7 +266,7 @@ export type SessionActions = {
     sessionId: SessionId,
     expectedTurnId: string,
     userTurnId: string,
-    options?: { machineId?: MachineId | null }
+    options?: { machineId?: MachineId | null; onUnsupported?: () => void }
   ) => Promise<boolean>;
   /**
    * Run a goal action through the agent's control extension.

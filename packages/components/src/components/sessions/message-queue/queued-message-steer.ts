@@ -7,6 +7,13 @@ export function shouldRequestNativeQueueSteer(
   return authority === 'authoritative' && capability?.acknowledgedSteer === true;
 }
 
+export function isNativeSteerKnownUnsupported(
+  authority: AcpCapabilityAuthority,
+  capability: Pick<AcpCapabilityCacheEntry, 'acknowledgedSteer'> | undefined
+): boolean {
+  return authority === 'authoritative' && capability?.acknowledgedSteer === false;
+}
+
 /**
  * The first row always offers Steer: without native steering it falls back to
  * interrupt-and-send, which is only meaningful for the item the queue drains

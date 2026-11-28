@@ -4055,6 +4055,8 @@
   "settings.general.preventSleep.label": "Предотвращать переход в спящий режим",
   "settings.general.sessions.codeOnlyLineChanges.helper": "Счётчик строк в боковой панели не учитывает документацию, тесты и dev-конфигурацию.",
   "settings.general.sessions.codeOnlyLineChanges.label": "Показывать изменения строк только в коде",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.helper": "Для протоколов без поддержки управления во время выполнения отменяет текущий шаг и сразу отправляет сообщение вместо ожидания завершения.",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.label": "Принудительно прерывать и отправлять, если управление не поддерживается",
   "settings.general.sessions.queuedMessageBehavior.guide": "Направлять",
   "settings.general.sessions.queuedMessageBehavior.helper": "Для сообщений, отправленных во время работы агента.",
   "settings.general.sessions.queuedMessageBehavior.label": "Поведение сообщений в очереди",

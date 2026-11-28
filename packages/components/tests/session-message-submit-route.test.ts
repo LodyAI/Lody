@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { shouldRequestNativeQueueSteer } from '../src/components/sessions/message-queue/queued-message-steer';
+import {
+  isNativeSteerKnownUnsupported,
+  shouldRequestNativeQueueSteer,
+} from '../src/components/sessions/message-queue/queued-message-steer';
 import { resolveSessionMessageSubmitRoute } from '../src/components/sessions/session-message-submit-route';
 
 const resolve = (overrides: Partial<Parameters<typeof resolveSessionMessageSubmitRoute>[0]> = {}) =>
@@ -116,5 +119,91 @@ describe('resolveSessionMessageSubmitRoute', () => {
         queuedMessageBehavior: 'guide',
       })
     ).toEqual({ type: 'direct_dispatch' });
+  });
+
+  it('routes default guide to interrupt_and_queue when force interrupt is enabled and steer is known unsupported', () => {
+    expect(
+      resolve({
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+        queuedMessageBehavior: 'guide',
+        nativeSteerAvailable: false,
+        steerForceInterrupt: true,
+        isSteerKnownUnsupported: isNativeSteerKnownUnsupported('authoritative', {
+          acknowledgedSteer: false,
+        }),
+      })
+    ).toEqual({ type: 'interrupt_and_queue' });
+  });
+
+  it.each([
+    ['authoritative', undefined],
+    ['authoritative', {}],
+    ['provisional', { acknowledgedSteer: false }],
+    ['unavailable', { acknowledgedSteer: false }],
+  ] as const)(
+    'does not force interrupt when steer capability is not authoritatively unsupported (%s %o)',
+    (authority, capability) => {
+      expect(isNativeSteerKnownUnsupported(authority, capability)).toBe(false);
+      expect(
+        resolve({
+          isPromptBusy: true,
+          hasUnfinishedAssistantTurn: true,
+          queuedMessageBehavior: 'guide',
+          nativeSteerAvailable: false,
+          steerForceInterrupt: true,
+          isSteerKnownUnsupported: isNativeSteerKnownUnsupported(authority, capability),
+        })
+      ).toEqual({ type: 'queue', reason: 'prompt_busy' });
+    }
+  );
+
+  it('ignores steerForceInterrupt in queue mode, inverted submissions, and explicit forceQueue', () => {
+    expect(
+      resolve({
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+        queuedMessageBehavior: 'queue',
+        nativeSteerAvailable: false,
+        steerForceInterrupt: true,
+        isSteerKnownUnsupported: true,
+      })
+    ).toEqual({ type: 'queue', reason: 'prompt_busy' });
+
+    expect(
+      resolve({
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+        queuedMessageBehavior: 'queue',
+        invertBehavior: true,
+        nativeSteerAvailable: false,
+        steerForceInterrupt: true,
+        isSteerKnownUnsupported: true,
+      })
+    ).toEqual({ type: 'queue', reason: 'prompt_busy' });
+
+    expect(
+      resolve({
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+        queuedMessageBehavior: 'guide',
+        invertBehavior: true,
+        nativeSteerAvailable: false,
+        steerForceInterrupt: true,
+        isSteerKnownUnsupported: true,
+      })
+    ).toEqual({ type: 'queue', reason: 'prompt_busy' });
+
+    expect(
+      resolve({
+        forceQueue: true,
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+        queuedMessageBehavior: 'guide',
+        nativeSteerAvailable: false,
+        steerForceInterrupt: true,
+        isSteerKnownUnsupported: true,
+      })
+    ).toEqual({ type: 'queue', reason: 'forced' });
   });
 });

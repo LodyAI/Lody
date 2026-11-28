@@ -4055,6 +4055,8 @@
   "settings.general.preventSleep.label": "スリープを防止",
   "settings.general.sessions.codeOnlyLineChanges.helper": "サイドバーの行数カウントからドキュメント、テスト、開発用設定を除外します。",
   "settings.general.sessions.codeOnlyLineChanges.label": "コードのみの変更行数を表示",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.helper": "実行中のステアリングに対応していないプロトコルの場合、完了を待たずに現在のターンを中断して新しいメッセージを送信します。",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.label": "ステアリング非対応時は現在のタスクを強制中断して送信",
   "settings.general.sessions.queuedMessageBehavior.guide": "誘導",
   "settings.general.sessions.queuedMessageBehavior.helper": "エージェントの作業中に送信したメッセージの扱いです。",
   "settings.general.sessions.queuedMessageBehavior.label": "送信待ちメッセージの動作",

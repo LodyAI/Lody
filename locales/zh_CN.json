@@ -4056,6 +4056,8 @@
   "settings.general.preventSleep.label": "禁止休眠",
   "settings.general.sessions.codeOnlyLineChanges.helper": "侧边栏的行数统计不计文档、测试和开发配置。",
   "settings.general.sessions.codeOnlyLineChanges.label": "仅展示代码行变更",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.helper": "当协议不支持运行中引导时，强制打断当前任务并发送新消息，而不是等待当前任务完成。",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.label": "不支持引导时强制打断当前任务并发送",
   "settings.general.sessions.queuedMessageBehavior.guide": "引导",
   "settings.general.sessions.queuedMessageBehavior.helper": "Agent 工作时发送的消息如何处理。",
   "settings.general.sessions.queuedMessageBehavior.label": "排队消息行为",

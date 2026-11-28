@@ -15,6 +15,7 @@ import {
   mobileKeyboardActionAtom,
   queuedMessageBehaviorAtom,
   sessionSidebarCodeChangesOnlyAtom,
+  steerForceInterruptAtom,
   userAtom,
 } from '@/atoms';
 import {
@@ -107,6 +108,7 @@ export function MobileGeneralSettings() {
     sessionSidebarCodeChangesOnlyAtom
   );
   const [queuedMessageBehavior, setQueuedMessageBehavior] = useAtom(queuedMessageBehaviorAtom);
+  const [steerForceInterrupt, setSteerForceInterrupt] = useAtom(steerForceInterruptAtom);
   const [preventSleepEnabled, setPreventSleepEnabled] = useState(true);
   const clearCache = useClearCache();
   const isMobile = useIsMobile();
@@ -710,6 +712,28 @@ export function MobileGeneralSettings() {
                     xstyle={styles.queuedBehavior}
                   />
                 </MobileSettingsRow>
+                {queuedMessageBehavior === 'guide' ? (
+                  <MobileSettingsRow
+                    label={t(
+                      'settings.general.sessions.queuedMessageBehavior.forceInterrupt.label',
+                      "Force interrupt and send when steering isn't supported"
+                    )}
+                    helper={t(
+                      'settings.general.sessions.queuedMessageBehavior.forceInterrupt.helper',
+                      'For protocols that do not support mid-run steering, cancel the active turn and send your message instead of waiting for it to finish.'
+                    )}
+                  >
+                    <Switch
+                      id="steer-force-interrupt-toggle"
+                      aria-label={t(
+                        'settings.general.sessions.queuedMessageBehavior.forceInterrupt.label',
+                        "Force interrupt and send when steering isn't supported"
+                      )}
+                      checked={steerForceInterrupt}
+                      onCheckedChange={setSteerForceInterrupt}
+                    />
+                  </MobileSettingsRow>
+                ) : null}
                 <MobileSettingsRow
                   label={t(
                     'settings.general.sessions.codeOnlyLineChanges.label',
