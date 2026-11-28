@@ -68,11 +68,13 @@ export type UseSessionDocResult = {
     history: Omit<SessionHistoryInput, 'id'> & { id?: string },
     options?: {
       dispatch?: boolean;
+      interruptTurnId?: string;
       guideExpectedTurnId?: string;
+      forceInterruptOnUnsupported?: boolean;
       attachments?: SessionAttachmentDraft[];
       onAccepted?: () => void;
     }
-  ) => Promise<{ entry: SessionHistory }>;
+  ) => Promise<{ entry: SessionHistory; accepted?: 'written' | 'pending' }>;
   pushMessageQueue: (
     item: PushMessageQueueInput,
     options?: { onAccepted?: () => void }
@@ -312,7 +314,9 @@ export function useSessionDoc(
       item: Omit<SessionHistoryInput, 'id'> & { id?: string },
       writeOptions?: {
         dispatch?: boolean;
+        interruptTurnId?: string;
         guideExpectedTurnId?: string;
+        forceInterruptOnUnsupported?: boolean;
         attachments?: SessionAttachmentDraft[];
         onAccepted?: () => void;
       }
@@ -322,19 +326,32 @@ export function useSessionDoc(
       }
       const entry = { ...item, id: item.id ?? uuidv4() } as SessionHistory;
       if (entry.role === 'user') {
-        await acceptSessionUserTurn(
+        const accepted = await acceptSessionUserTurn(
           runtime,
           sessionId,
           entry,
           writeOptions?.guideExpectedTurnId
-            ? { kind: 'guide', expectedTurnId: writeOptions.guideExpectedTurnId }
-            : { kind: writeOptions?.dispatch ? 'dispatch' : 'history' },
+            ? {
+                kind: 'guide',
+                expectedTurnId: writeOptions.guideExpectedTurnId,
+                ...(writeOptions.forceInterruptOnUnsupported
+                  ? { forceInterruptOnUnsupported: true }
+                  : {}),
+              }
+            : writeOptions?.dispatch
+              ? {
+                  kind: 'dispatch',
+                  ...(writeOptions.interruptTurnId
+                    ? { interruptTurnId: writeOptions.interruptTurnId }
+                    : {}),
+                }
+              : { kind: 'history' },
           undefined,
           undefined,
           writeOptions?.attachments,
           writeOptions?.onAccepted
         );
-        return { entry };
+        return { entry, accepted };
       }
       if (writeOptions?.dispatch) {
         const inputConfig = normalizeSessionTurnInputConfig(entry.inputConfig);

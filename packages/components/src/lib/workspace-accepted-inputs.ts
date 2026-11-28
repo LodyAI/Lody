@@ -18,6 +18,7 @@ import { assertProtectedAttachmentReferences } from './encrypted-session-attachm
 import { encryptedLocalInstance, type E2eeLocalDataIdentity } from './e2ee-local-data';
 import {
   deliverUserTurn,
+  interruptActiveTurnForFollowUp,
   prepareSignedIntent,
   prepareUserTurnWrite,
   persistHumanInputReceipt,
@@ -165,6 +166,15 @@ export function createWorkspaceAcceptedInputs(args: {
       if (send.delivery.kind !== 'guide') args.onDelivered?.(send.sessionId, send.id);
     },
     deliver: async (send, signal, receipt) => {
+      if (send.delivery.kind === 'dispatch' && send.delivery.interruptTurnId) {
+        throwIfSendAborted(signal);
+        await interruptActiveTurnForFollowUp(
+          args.runtimeForDelivery?.(signal) ?? runtime,
+          send.sessionId,
+          send.delivery.interruptTurnId,
+          send.targetMachineId ?? null
+        );
+      }
       if (send.delivery.kind === 'dispatch' && receipt.dispatchHandled) return undefined;
       await validateTarget(send);
       throwIfSendAborted(signal);

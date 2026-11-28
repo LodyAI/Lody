@@ -248,7 +248,9 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     history: Omit<SessionHistoryInput, 'id'>,
     options?: {
       dispatch?: boolean;
+      interruptTurnId?: string;
       guideExpectedTurnId?: string;
+      forceInterruptOnUnsupported?: boolean;
       attachments?: SessionAttachmentDraft[];
       onAccepted?: () => void;
     }
@@ -297,8 +299,17 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
         sessionId,
         entry,
         options?.guideExpectedTurnId
-          ? { kind: 'guide', expectedTurnId: options.guideExpectedTurnId }
-          : { kind: options?.dispatch ? 'dispatch' : 'history' },
+          ? {
+              kind: 'guide',
+              expectedTurnId: options.guideExpectedTurnId,
+              ...(options.forceInterruptOnUnsupported ? { forceInterruptOnUnsupported: true } : {}),
+            }
+          : options?.dispatch
+            ? {
+                kind: 'dispatch',
+                ...(options.interruptTurnId ? { interruptTurnId: options.interruptTurnId } : {}),
+              }
+            : { kind: 'history' },
         undefined,
         undefined,
         options?.attachments,

@@ -240,7 +240,9 @@ export type SessionActions = {
     history: Omit<SessionHistoryInput, 'id'>,
     options?: {
       dispatch?: boolean;
+      interruptTurnId?: string;
       guideExpectedTurnId?: string;
+      forceInterruptOnUnsupported?: boolean;
       attachments?: SessionAttachmentDraft[];
       onAccepted?: () => void;
     }

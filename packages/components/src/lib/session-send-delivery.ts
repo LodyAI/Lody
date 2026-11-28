@@ -1,10 +1,14 @@
 import { requestFailureCode } from './e2ee-actionable-failure';
 import {
+  getMachineRoomId,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   isSessionHistoryStatusAwaitingStart,
   isSessionHistoryPendingForDispatch,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  machineSupportsProtocolCapability,
   normalizeSessionTurnInputConfig,
+  OPERATION_INBOX_PROTOCOL_VERSION,
   queuedInputEvidence,
   type MachineId,
   type MessageQueueItem,
@@ -34,8 +38,8 @@ const log = debug('lody:session-send');
 export type SessionSendDelivery =
   | { kind: 'history' }
   | { kind: 'queue' }
-  | { kind: 'dispatch' }
-  | { kind: 'guide'; expectedTurnId: string };
+  | { kind: 'dispatch'; interruptTurnId?: string }
+  | { kind: 'guide'; expectedTurnId: string; forceInterruptOnUnsupported?: boolean };
 
 export type UserTurnSend = {
   sessionId: SessionId;
@@ -63,7 +67,11 @@ export type SessionSendRuntime = Pick<
 } & Partial<
     Pick<
       WorkspaceRuntime,
-      'isMachineRpcUnreachable' | 'contentMode' | 'prepareEncryptedDispatch' | 'attachmentToken'
+      | 'isMachineRpcUnreachable'
+      | 'contentMode'
+      | 'prepareEncryptedDispatch'
+      | 'attachmentToken'
+      | 'requestSessionCancel'
     >
   >;
 
@@ -586,6 +594,49 @@ export async function steerUserTurn(
   return false;
 }
 
+/**
+ * Cancel an active assistant turn with `{ interrupt: true }` semantics (no Stop
+ * identity, no Inbox pause) so a freshly written follow-up runs next.
+ */
+export async function interruptActiveTurnForFollowUp(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  turnId: string,
+  machineId?: MachineId | null
+): Promise<void> {
+  const roomId = getSessionRoomId(sessionId);
+  const existing = await runtime.repo.getDocMeta(roomId);
+  if (isLoroRepoDocDeleted(existing)) return;
+  const meta = existing?.meta as SessionMeta | undefined;
+  const resolvedMachineId = machineId ?? (meta?.machineId as MachineId | undefined);
+  const machine = resolvedMachineId
+    ? await runtime.repo.getDocMeta(getMachineRoomId(resolvedMachineId))
+    : undefined;
+  const supportsInbox = machineSupportsProtocolCapability(
+    machine?.meta,
+    MACHINE_PROTOCOL_CAPABILITIES.operationInbox,
+    OPERATION_INBOX_PROTOCOL_VERSION
+  );
+  if (resolvedMachineId && runtime.requestSessionCancel) {
+    void runtime
+      .requestSessionCancel(resolvedMachineId, sessionId, turnId, {
+        timeoutMs: 2_000,
+        ...(supportsInbox ? { pauseInbox: false } : {}),
+      })
+      .then((response) => {
+        if (response && !response.success) {
+          log('session interrupt rpc failed for %s/%s: %s', sessionId, turnId, response.error);
+        }
+      })
+      .catch((error) => {
+        log('session interrupt rpc threw for %s/%s: %o', sessionId, turnId, error);
+      });
+  }
+  await runtime.writer.upsertDocMeta(roomId, {
+    lastCanceledTurn: turnId,
+  } as Partial<SessionMeta>);
+}
+
 /** Delivery for a send that was held in memory until its attachments were ready. */
 export async function deliverUserTurn(
   runtime: SessionSendRuntime,
@@ -598,15 +649,37 @@ export async function deliverUserTurn(
   ) => void
 ): Promise<void> {
   if (send.delivery.kind === 'dispatch') {
+    if (send.delivery.interruptTurnId) {
+      await interruptActiveTurnForFollowUp(
+        runtime,
+        send.sessionId,
+        send.delivery.interruptTurnId,
+        send.targetMachineId ?? null
+      );
+    }
     await dispatchUserTurn(runtime, send.sessionId, send.entry.id, {
       machineId: send.targetMachineId ?? null,
     });
   } else if (send.delivery.kind === 'guide') {
-    const { expectedTurnId } = send.delivery;
+    const { expectedTurnId, forceInterruptOnUnsupported } = send.delivery;
     onGuideOutcome?.(send.sessionId, send.entry.id, expectedTurnId, undefined);
+    let unsupportedTriggered = false;
     const applied = await steerUserTurn(runtime, send.sessionId, expectedTurnId, send.entry.id, {
       machineId: send.targetMachineId ?? null,
+      onUnsupported: forceInterruptOnUnsupported
+        ? () => {
+            unsupportedTriggered = true;
+          }
+        : undefined,
     });
+    if (!applied && unsupportedTriggered) {
+      await interruptActiveTurnForFollowUp(
+        runtime,
+        send.sessionId,
+        expectedTurnId,
+        send.targetMachineId ?? null
+      );
+    }
     onGuideOutcome?.(send.sessionId, send.entry.id, expectedTurnId, applied);
   }
 }

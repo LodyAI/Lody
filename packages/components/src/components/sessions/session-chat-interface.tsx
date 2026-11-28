@@ -5147,6 +5147,7 @@ export const SessionChatInterface = memo(
 
           const onAccepted = captureRunConfigForSend(inputConfig);
           let userTurnId = options?.existingUserTurnId?.trim() || null;
+          let acceptedState: 'written' | 'pending' | undefined;
           if (!userTurnId && options?.createHistory) {
             const pendingHistoryEntry = buildDraftUserHistoryEntry(
               {
@@ -5165,13 +5166,16 @@ export const SessionChatInterface = memo(
             if (!guardNewBillableTurn()) {
               return false;
             }
-            const { entry: historyEntry } = await addSessionHistory(pendingHistoryEntry, {
+            const { entry: historyEntry, accepted } = await addSessionHistory(pendingHistoryEntry, {
               dispatch: options?.requestDispatch === true,
+              interruptTurnId: options?.interruptTurnId,
               guideExpectedTurnId: options?.guideExpectedTurnId,
+              forceInterruptOnUnsupported: options?.forceInterruptOnUnsupported,
               attachments: options?.attachments,
               onAccepted,
             });
             userTurnId = historyEntry.id;
+            acceptedState = accepted;
             touchSessionActivity(session.id).catch((err: unknown) => {
               console.warn('Failed to update session lastMessageAt/lastReadAt', err);
             });
@@ -5188,7 +5192,7 @@ export const SessionChatInterface = memo(
           if (userTurnId) {
             trackMessageSend(userTurnId);
           }
-          if (options?.interruptTurnId) {
+          if (options?.interruptTurnId && acceptedState !== 'pending') {
             setInputActionState('ready');
             pendingUserInterruptRef.current = true;
             try {
