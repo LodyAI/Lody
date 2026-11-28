@@ -204,6 +204,9 @@ export async function verifyPreviewTunnelRoundTrip(args: {
 
       if (response.headers.get(PREVIEW_PROXY_RESPONSE_HEADER) === PREVIEW_PROXY_RESPONSE_VERSION) {
         await response.body?.cancel();
+        args.onDiagnostic?.(
+          `${args.mode ?? 'readiness'} host=${gateway.host}; result=ready; ${diagnostic()}`
+        );
         return;
       }
 
@@ -238,6 +241,11 @@ export async function verifyPreviewTunnelRoundTrip(args: {
         `Preview public route round-trip failed for ${initialViewerUrl.host}: HTTP ${response.status} did not return the preview proxy marker.`
       );
     }
+  } catch (error) {
+    args.onDiagnostic?.(
+      `${args.mode ?? 'readiness'} host=${gateway.host}; result=failed; aborted=${signal.aborted}; ${diagnostic()}`
+    );
+    throw error;
   } finally {
     clearTimeout(timeout);
     // A failed registration also cancels any DNS query still running in parallel.
