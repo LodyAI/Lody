@@ -2987,7 +2987,7 @@ export class CodeCollabV2Service {
       kind: 'full',
       resolved,
       forcePublish: false,
-      persistAllChangesDiffStats: false,
+      persistAllChangesDiffStats: true,
       publish: true,
     });
   }

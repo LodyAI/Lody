@@ -37,7 +37,11 @@ File-by-file responsibilities: [README.md](README.md).
   compact aggregate file counts and text add/del `diffStats` from the complete All Changes set before index
   trimming, including uncommitted work even with an associated PR. Statistics reconciliation
   must run when requested even if the index is unchanged. Unknown line counts preserve prior line totals while complete path counts still update; confirmed binary files contribute no text lines.
-  File/diff watcher refreshes stay Flock-only. The injected `observeWorkspaceGit` observer
+  File/diff watcher refreshes publish the file index to Flock and reconcile the
+  aggregate statistics through `WorkspaceGitService.publishDiffStats`; its unchanged-total
+  short circuit means only a changed aggregate writes session metadata
+  ([decision](../../../../../.agents/notes/implemented/architecture/2026-11-21-watch-refresh-diff-stats.md)). The injected
+  `observeWorkspaceGit` observer
   runs only on activation/explicit root refresh, never file watcher or terminal diff refresh;
   it must not gate file snapshots.
 - The whole published file index stays within `CODE_COLLAB_FILE_INDEX_LIMITS`
