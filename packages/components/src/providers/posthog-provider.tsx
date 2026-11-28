@@ -5,19 +5,21 @@ import { userAtom } from '@/atoms';
 import { deferredPostHog, scheduleDeferredPostHogInitialization } from '@/lib/deferred-posthog';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
 import {
+  claimAccountUsageSave,
   clearPostHogLocalStorage,
-  hasPendingUsageOptOut,
-  hasSubmittedAccountOptOut,
-  isAccountUsageSaveInFlight,
-  markAccountOptOutSubmitted,
-  markUsageOptOutPending,
-  rememberAccountUsageSharing,
+  clearSubmittedAccountChoice,
+  hasInFlightAccountUsageSave,
+  hasSubmittedAccountChoice,
+  isEnvUsageSharingDisabledClient,
   pendingAccountChoice,
   readDeviceUsageChoice,
-  writeDeviceUsageSharing,
+  rememberAccountUsageSharing,
   setAccountUsageAllowed,
+  setEnvUsageSharingDisabled,
+  setPendingAccountChoice,
   subscribeUsageSharing,
   syncSdkUsageSharing,
+  writeDeviceUsageSharing,
 } from '@/lib/usage-sharing';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getIpcServices } from '@/lib/electron-ipc-client';
@@ -59,9 +61,21 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
   const [desktopReady, setDesktopReady] = useState(
     () => typeof window !== 'undefined' && !window.__LODY_ELECTRON__
   );
-  const [envDisabled, setEnvDisabled] = useState(false);
+  const envDisabled = useSyncExternalStore(
+    subscribeUsageSharing,
+    isEnvUsageSharingDisabledClient,
+    () => false
+  );
+  const pendingChoice = useSyncExternalStore(
+    subscribeUsageSharing,
+    () => (accountId ? pendingAccountChoice(accountId) : null),
+    () => null
+  );
   useEffect(() => {
-    if (!supported || !window.__LODY_ELECTRON__) return;
+    if (!supported || !window.__LODY_ELECTRON__) {
+      setEnvUsageSharingDisabled(false);
+      return;
+    }
     let live = true;
     const initialChoice = readDeviceUsageChoice();
     const native = getIpcServices();
@@ -75,9 +89,7 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
     ])
       .then(([enabled, disabledByEnv]) => {
         if (!live) return;
-        if (disabledByEnv) {
-          setEnvDisabled(true);
-        }
+        setEnvUsageSharingDisabled(disabledByEnv);
         if (readDeviceUsageChoice() === initialChoice && (enabled === false || disabledByEnv)) {
           writeDeviceUsageSharing(false);
         }
@@ -88,68 +100,56 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
       });
     return () => {
       live = false;
+      setEnvUsageSharingDisabled(false);
     };
   }, [supported]);
 
-  let pendingChoice: boolean | null = null;
-  if (accountId) {
-    try {
-      pendingChoice = pendingAccountChoice(accountId);
-    } catch {
-      pendingChoice = null;
-    }
-  }
-
   const accountLoaded = !accountId || preference === undefined || typeof account === 'boolean';
-  const allowed = accountLoaded && account !== false && pendingChoice !== false;
+  const allowed =
+    pendingChoice === true || (accountLoaded && account !== false && pendingChoice !== false);
   const enabled = supported && allowed && choice !== false && desktopReady && !envDisabled;
   setAccountUsageAllowed(supported && allowed && desktopReady && !envDisabled);
 
   const savePreference = useCloudMutation(cloudOperations.analytics.setUsageSharing);
   useEffect(() => {
     if (!accountId) return;
-    if (window.__LODY_ELECTRON__ && hasPendingUsageOptOut('next-login')) {
-      markUsageOptOutPending(accountId, true);
-      markUsageOptOutPending('next-login', false);
+    if (window.__LODY_ELECTRON__) {
+      const nextLoginChoice = pendingAccountChoice('next-login');
+      if (nextLoginChoice !== null) {
+        if (pendingAccountChoice(accountId) === null) {
+          setPendingAccountChoice(accountId, nextLoginChoice);
+        }
+        setPendingAccountChoice('next-login', null);
+      }
     }
     if (typeof account !== 'boolean') return;
-    let desired: boolean | null;
-    try {
-      desired = pendingAccountChoice(accountId);
-    } catch {
-      return;
-    }
+    const desired = pendingAccountChoice(accountId);
     if (desired === null) return;
     if (account === desired) {
-      markUsageOptOutPending(accountId, false);
-      markAccountOptOutSubmitted(accountId, false);
+      if (!hasInFlightAccountUsageSave(accountId)) {
+        clearSubmittedAccountChoice(accountId);
+        setPendingAccountChoice(accountId, null);
+      }
       return;
     }
-    if (isAccountUsageSaveInFlight(accountId) || hasSubmittedAccountOptOut(accountId)) {
-      return;
-    }
-    void savePreference({ enabled: desired }).catch(() => {});
-  }, [account, accountId, savePreference, choice]);
+    if (hasSubmittedAccountChoice(accountId, desired)) return;
+    const finish = claimAccountUsageSave(accountId, desired);
+    if (!finish) return;
+    void savePreference({ enabled: desired }).then(
+      () => finish(true),
+      () => finish(false)
+    );
+  }, [account, accountId, savePreference, choice, pendingChoice]);
 
   // Keep local client state and Electron main/CLI file synced with the unified account switch.
   useEffect(() => {
     if (!supported || !desktopReady || envDisabled || !accountId || typeof account !== 'boolean')
       return;
-    let desired: boolean | null = null;
-    try {
-      desired = pendingAccountChoice(accountId);
-    } catch {
-      desired = null;
-    }
-    if (desired !== null) return;
+    if (pendingAccountChoice(accountId) !== null || hasInFlightAccountUsageSave(accountId)) return;
 
     if (account === false) {
       if (readDeviceUsageChoice() !== false) {
-        try {
-          writeDeviceUsageSharing(false);
-        } catch {
-          // Local storage unavailable; fail-closed in-memory flag already blocks capture.
-        }
+        writeDeviceUsageSharing(false);
       }
       if (window.__LODY_ELECTRON__) {
         void getIpcServices()
@@ -160,18 +160,14 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
     }
 
     if (readDeviceUsageChoice() === false) {
-      try {
-        writeDeviceUsageSharing(true);
-      } catch {
-        // Ignore storage write failure.
-      }
+      writeDeviceUsageSharing(true);
     }
     if (window.__LODY_ELECTRON__) {
       void getIpcServices()
         ?.app.setUsageSharingEnabled(true)
         .catch(() => {});
     }
-  }, [supported, desktopReady, envDisabled, account, accountId, choice]);
+  }, [supported, desktopReady, envDisabled, account, accountId, choice, pendingChoice]);
 
   useEffect(() => {
     if (!enabled) {

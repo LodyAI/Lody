@@ -92,7 +92,6 @@
   "cookieConsent.accept": "Принять аналитические cookie",
   "settings.general.usageSharing.label": "Делиться данными об использовании приложения",
   "settings.general.usageSharing.helper": "Применяется к вашему аккаунту в десктопном, веб-, мобильном приложении и CLI.",
-  "settings.general.usageSharing.error": "Не удалось сохранить настройку для всех устройств. Повторите попытку.",
   "settings.general.prImages.label": "Автоматически загружать изображения в PR",
   "settings.general.prImages.helper": "Когда отключено, изображения можно загружать по отдельности. Сторонние сайты с изображениями могут видеть ваш IP-адрес.",
   "sessions.prImage.image": "Изображение",

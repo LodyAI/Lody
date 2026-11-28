@@ -92,7 +92,6 @@
   "cookieConsent.accept": "接受分析 Cookie",
   "settings.general.usageSharing.label": "分享应用使用数据",
   "settings.general.usageSharing.helper": "对你的账号在桌面端、Web 端、移动端与 CLI 统一生效。",
-  "settings.general.usageSharing.error": "设置未能在所有位置保存，请重试。",
   "settings.general.prImages.label": "自动加载 PR 图片",
   "settings.general.prImages.helper": "关闭时可逐张加载。图片所在网站可能看到你的 IP 地址。",
   "sessions.prImage.image": "图片",

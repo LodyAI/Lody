@@ -92,7 +92,6 @@
   "cookieConsent.accept": "Accepter les cookies d'analyse",
   "settings.general.usageSharing.label": "Partager les données d'utilisation de l'application",
   "settings.general.usageSharing.helper": "S'applique à votre compte sur les applications de bureau, web, mobile et CLI.",
-  "settings.general.usageSharing.error": "La préférence n'a pas pu être enregistrée partout. Réessayez.",
   "settings.general.prImages.label": "Charger automatiquement les images des PR",
   "settings.general.prImages.helper": "Lorsque cette option est désactivée, chargez les images individuellement. Les sites hébergeant les images peuvent voir votre adresse IP.",
   "sessions.prImage.image": "Image",

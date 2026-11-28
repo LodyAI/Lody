@@ -92,7 +92,6 @@
   "cookieConsent.accept": "Accept analytics cookies",
   "settings.general.usageSharing.label": "Share app usage data",
   "settings.general.usageSharing.helper": "Applies to your account across desktop, web, mobile, and CLI.",
-  "settings.general.usageSharing.error": "The preference could not be saved everywhere. Retry.",
   "settings.general.prImages.label": "Automatically load PR images",
   "settings.general.prImages.helper": "When off, load images individually. Image websites can see your IP address.",
   "sessions.prImage.image": "Image",
