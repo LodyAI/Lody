@@ -5101,6 +5101,7 @@ export const SessionChatInterface = memo(
           createHistory?: boolean;
           existingUserTurnId?: string;
           requestDispatch?: boolean;
+          interruptTurnId?: string;
           guideExpectedTurnId?: string;
           forceInterruptOnUnsupported?: boolean;
           modeIdOverride?: string | null;
@@ -5187,6 +5188,29 @@ export const SessionChatInterface = memo(
           if (userTurnId) {
             trackMessageSend(userTurnId);
           }
+          if (options?.interruptTurnId) {
+            setInputActionState('ready');
+            pendingUserInterruptRef.current = true;
+            try {
+              await requestSessionCancel(session.id, options.interruptTurnId, { interrupt: true });
+              captureSessionEvent('session/message_interrupt_and_queue_requested', {
+                active_assistant_turn_id: options.interruptTurnId,
+                user_turn_id: userTurnId,
+              });
+            } catch (error) {
+              console.error('Failed to interrupt active turn for follow-up', error);
+              pendingUserInterruptRef.current = false;
+              captureSessionEvent('session/message_interrupt_and_queue_failed', {
+                active_assistant_turn_id: options.interruptTurnId,
+                user_turn_id: userTurnId,
+                error_name: error instanceof Error ? error.name : typeof error,
+                error_message: getErrorMessage(error),
+              });
+              toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
+                description: getErrorMessage(error),
+              });
+            }
+          }
           if (options?.requestDispatch && userTurnId) {
             void requestSessionDispatch(session.id, userTurnId, {
               inputConfig,
@@ -5247,6 +5271,7 @@ export const SessionChatInterface = memo(
         sessionConversationConfig.memory,
         mcpSelection.selectedIds,
         repoFullName,
+        requestSessionCancel,
         requestSessionDispatch,
         anchorChatToMessage,
         selectedModeId,
@@ -5514,7 +5539,10 @@ export const SessionChatInterface = memo(
         }
 
         if (submitRoute.type === 'interrupt_and_queue' && activeAssistantTurnId) {
-          const accepted = await queueInputBlocks(normalized, {
+          const accepted = await enqueueInputBlocks(normalized, {
+            createHistory: true,
+            requestDispatch: true,
+            interruptTurnId: activeAssistantTurnId,
             modeIdOverride: turnModeId,
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
@@ -5522,39 +5550,18 @@ export const SessionChatInterface = memo(
             attachments: options?.attachments,
             mcpServerIds: options?.mcpServerIds,
           });
-          if (!accepted) {
-            captureSessionEvent('session/message_submit_failed', {
-              ...inputSummary,
-              submit_route: 'interrupt_and_queue',
-              duration_ms: getDurationSinceMs(startedAtMs),
-            });
-            return false;
-          }
-          setInputActionState('ready');
-          pendingUserInterruptRef.current = true;
-          try {
-            await requestSessionCancel(session.id, activeAssistantTurnId, { interrupt: true });
-            captureSessionEvent('session/message_interrupt_and_queue_requested', {
+          captureSessionEvent(
+            accepted
+              ? 'session/message_interrupt_and_queue_dispatched'
+              : 'session/message_submit_failed',
+            {
               ...inputSummary,
               submit_route: 'interrupt_and_queue',
               active_assistant_turn_id: activeAssistantTurnId,
               duration_ms: getDurationSinceMs(startedAtMs),
-            });
-          } catch (error) {
-            console.error('Failed to interrupt active turn for queued follow-up', error);
-            pendingUserInterruptRef.current = false;
-            captureSessionEvent('session/message_interrupt_and_queue_failed', {
-              ...inputSummary,
-              submit_route: 'interrupt_and_queue',
-              active_assistant_turn_id: activeAssistantTurnId,
-              error_name: error instanceof Error ? error.name : typeof error,
-              error_message: getErrorMessage(error),
-            });
-            toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
-              description: getErrorMessage(error),
-            });
-          }
-          return true;
+            }
+          );
+          return accepted;
         }
 
         if (submitRoute.type === 'guide' && activeAssistantTurnId) {
@@ -5635,7 +5642,6 @@ export const SessionChatInterface = memo(
         queueInputBlocks,
         queuedMessageBehavior,
         nativeSteerAvailable,
-        requestSessionCancel,
         sessionDocReady,
         selectedModeId,
         selectedModelId,
