@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.113.2-next](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.113.1...lody-mobile-v0.113.2-next) (2026-11-28)
+
+
+### Features
+
+* [risk:high] enable E2EE push, live activity and inbox clients ([#3224](https://github.com/LodyAI/Lody/issues/3224)) ([4477241](https://github.com/LodyAI/Lody/commit/4477241aaa8eddc1fed2bacf736793aad8f08a54))
+* **components:** make text unselectable by default outside reading surfaces ([#3076](https://github.com/LodyAI/Lody/issues/3076)) ([acda568](https://github.com/LodyAI/Lody/commit/acda5687460232f0e3b300bf043be604874f5291))
+* **e2ee:** [risk:high] one six-digit path for automatic pairing with workspace choice ([#3485](https://github.com/LodyAI/Lody/issues/3485)) ([c718116](https://github.com/LodyAI/Lody/commit/c718116181ad137d726e9c945f5834a60ffc642a))
+* **e2ee:** [risk:high] support portable remote CLI pairing ([#3220](https://github.com/LodyAI/Lody/issues/3220)) ([a2d065f](https://github.com/LodyAI/Lody/commit/a2d065f20057232fe36707d7bcf6497e82e9509e))
+* **i18n:** add Traditional Chinese, Japanese, Korean, Spanish, French, and Russian localization ([#3392](https://github.com/LodyAI/Lody/issues/3392)) ([8ed7d10](https://github.com/LodyAI/Lody/commit/8ed7d10899b832fc2931db5bebfe8d86d34dd8b8))
+* **memory:** uninstall EverMe from the memory settings ([#3261](https://github.com/LodyAI/Lody/issues/3261)) ([7eeeba2](https://github.com/LodyAI/Lody/commit/7eeeba2af2212d71971d310860b1f7e41aff65c6))
+* migrate Capacitor client and shared E2EE composition ([#3029](https://github.com/LodyAI/Lody/issues/3029)) ([fc07d94](https://github.com/LodyAI/Lody/commit/fc07d94e504c0b7d1b1cc835dee64e913baeba84))
+* **privacy:** minimize telemetry uploads, add regional cookie banner, and unify usage sharing switch ([#3354](https://github.com/LodyAI/Lody/issues/3354)) ([9c7d50a](https://github.com/LodyAI/Lody/commit/9c7d50ac8a21ccc8c0e1bff2d7f97fb4b88e70d2))
+* synchronize agent session archives ([#2281](https://github.com/LodyAI/Lody/issues/2281)) ([a8c4420](https://github.com/LodyAI/Lody/commit/a8c4420732531e73ff87332ef8bf99f51e7c5b12))
+
+
+### Bug Fixes
+
+* [risk:high] repair recovery UI and E2EE RPC boundaries ([#3163](https://github.com/LodyAI/Lody/issues/3163)) ([611c776](https://github.com/LodyAI/Lody/commit/611c776bf1406284254170e402663e5c98a70b7b))
+* [risk:medium] address E2EE GA setup and disclosure gaps ([#3207](https://github.com/LodyAI/Lody/issues/3207)) ([59c9bd7](https://github.com/LodyAI/Lody/commit/59c9bd752df17ff79ae8e559d82143199ddc2c7e))
+* **ci:** build active simulator arch and extend simctl install timeout ([#3544](https://github.com/LodyAI/Lody/issues/3544)) ([970661c](https://github.com/LodyAI/Lody/commit/970661cca165e7982d029f998bdfdedb83ddf7f4))
+* **ci:** repair mobile startup checks for Nightly ([#3530](https://github.com/LodyAI/Lody/issues/3530)) ([141fff2](https://github.com/LodyAI/Lody/commit/141fff2af2a5c400372563c63872aeb72305bbb8))
+* **ci:** separate iOS simulator launch and readiness deadlines ([#3539](https://github.com/LodyAI/Lody/issues/3539)) ([bddd59b](https://github.com/LodyAI/Lody/commit/bddd59b3f2e8f8725a29c770e8eb861258f9e252))
+* **components:** inset side drawers with paddingBottom to prevent Android keyboard flash ([#3258](https://github.com/LodyAI/Lody/issues/3258)) ([51a2008](https://github.com/LodyAI/Lody/commit/51a2008172b188207db1a64488ec547431bbf133))
+* **e2ee:** [risk:high] bind recovery files to the canonical site origin ([#3211](https://github.com/LodyAI/Lody/issues/3211)) ([e752e01](https://github.com/LodyAI/Lody/commit/e752e012aee004efed3ada9324698ea805b62ba5))
+* **e2ee:** gate account recovery entry to encrypted workspaces and align layout ([#3232](https://github.com/LodyAI/Lody/issues/3232)) ([3916e9d](https://github.com/LodyAI/Lody/commit/3916e9d6384089c4031b6ea2841554cf924c188d))
+* **i18n:** clarify E2EE pairing, recovery, and security copy ([#3372](https://github.com/LodyAI/Lody/issues/3372)) ([0d3f0fa](https://github.com/LodyAI/Lody/commit/0d3f0fa9c9bdf4004a8602e658a416e1ca20abc0))
+* **mobile:** [risk:medium] unblock recovery permit, passkey unavailable, deep links and push taps ([#3501](https://github.com/LodyAI/Lody/issues/3501)) ([64d2fa7](https://github.com/LodyAI/Lody/commit/64d2fa7c92e23b294b1d27591b1aa36dbd7ece53))
+* **mobile:** contain E2EE metadata and native resources [risk:high] ([#3162](https://github.com/LodyAI/Lody/issues/3162)) ([507f76b](https://github.com/LodyAI/Lody/commit/507f76b2364047fb02de677d4d807e9b64a7b112))
+* **mobile:** disable crossDomainClient on native and prune expired Capacitor tokens ([#3371](https://github.com/LodyAI/Lody/issues/3371)) ([d5e779d](https://github.com/LodyAI/Lody/commit/d5e779dbd50e63ba3023cc3695edd95594abd48e))
+* **mobile:** document the public StyleX export required by stable builds ([#3256](https://github.com/LodyAI/Lody/issues/3256)) ([831ffd3](https://github.com/LodyAI/Lody/commit/831ffd3de044824fa457fadb9970ae69cadbcaad))
+* **mobile:** resolve @lody/shared/boundary-decode in home-widget test fixture ([#3476](https://github.com/LodyAI/Lody/issues/3476)) ([7e63df8](https://github.com/LodyAI/Lody/commit/7e63df8af98e428af9651210ee6344ccc582ec72))
+* **mobile:** route Android back gesture through layered mobile back transitions ([#3243](https://github.com/LodyAI/Lody/issues/3243)) ([130f2a9](https://github.com/LodyAI/Lody/commit/130f2a9afefb693f5947393709f91a06bed4862c))
+* **mobile:** wait for i18n before the first render ([#3107](https://github.com/LodyAI/Lody/issues/3107)) ([8297dd6](https://github.com/LodyAI/Lody/commit/8297dd65647586e122b3d2247b3884cefa016c93))
+* unblock Capacitor session loading on startup ([#3520](https://github.com/LodyAI/Lody/issues/3520)) ([7aad69b](https://github.com/LodyAI/Lody/commit/7aad69bbc1546cf84c21dfd07f31e7a85e6be22e))
+* validate macOS packaging before merge ([#3210](https://github.com/LodyAI/Lody/issues/3210)) ([42ff871](https://github.com/LodyAI/Lody/commit/42ff871f837b05abcd92be1d99308e0d8c2ae7f9))
+
+
+### Performance
+
+* **release:** [risk:high] move Android release builds to ubuntu-latest and trim mobile Vite build overhead ([#3457](https://github.com/LodyAI/Lody/issues/3457)) ([bb144ef](https://github.com/LodyAI/Lody/commit/bb144ef081a52ac7bf592cbb7ea035c3a45222ea))
+
 ## [0.112.0](https://github.com/loro-dev/lody/compare/lody-mobile-v0.111.1...lody-mobile-v0.112.0) (2026-11-12)
 
 ### Features
