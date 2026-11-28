@@ -90,8 +90,23 @@ export interface HarnessState {
    * `unreachable` is the one that is not about the machine at all: it speaks
    * the store protocols, but only to a client on that machine, and this
    * workspace offers no encrypted plane to ask it from. See `storeUnreachable`.
+   *
+   * `mirrored` is the read-only answer to the same situation: the machine's
+   * daemon published what it read from its Sorbet store into its Machine Flock,
+   * which this client can read, but nothing here can be written back. The lists
+   * are the machine's own descriptors and `mirroredAt` says how old that read is.
    */
-  status: 'loading' | 'ready' | 'error' | 'unsupported' | 'unreachable' | 'no-agent' | 'no-runtime';
+  status:
+    | 'loading'
+    | 'ready'
+    | 'error'
+    | 'unsupported'
+    | 'unreachable'
+    | 'mirrored'
+    | 'no-agent'
+    | 'no-runtime';
+  /** When the machine last read its Sorbet store; null unless `status` is `mirrored`. */
+  mirroredAt: number | null;
   /** Whether the machine spoke `sorbet/host-settings-*` on the last probe. */
   hostSettingsSupported: boolean;
   profile: HarnessConfig;
@@ -130,6 +145,7 @@ const initial = (): HarnessState => ({
   models: [],
   hostSettings: null,
   hostSettingsSupported: false,
+  mirroredAt: null,
   status: 'loading',
   profile: DEFAULT_PROFILE,
   overrides: {},
@@ -159,6 +175,7 @@ function hydrate() {
         models: [],
         hostSettings: null,
         hostSettingsSupported: false,
+        mirroredAt: null,
         status: 'loading',
       };
   } catch {}
@@ -174,6 +191,7 @@ function commit(next: HarnessState) {
       models: _models,
       hostSettings: _hostSettings,
       hostSettingsSupported: _hostSettingsSupported,
+      mirroredAt: _mirroredAt,
       status: _status,
       ...persisted
     } = next;
@@ -205,6 +223,18 @@ export const getHarness = () => state;
  */
 export const storeUnreadable = (s: Pick<HarnessState, 'status'>): boolean =>
   s.status === 'unsupported' || s.status === 'unreachable';
+
+/** The machine's store read through its own mirror rows: readable, never writable. */
+export const storeMirrored = (s: Pick<HarnessState, 'status'>): boolean =>
+  s.status === 'mirrored';
+
+/**
+ * Whether the store's write controls must be drawn disabled. A mirrored view is
+ * the machine's last read, not a channel back to it, so every write — sign-in
+ * included — happens on the machine that owns the store.
+ */
+export const storeLocked = (s: Pick<HarnessState, 'status'>): boolean =>
+  storeUnreadable(s) || storeMirrored(s);
 
 /* ── derived ───────────────────────────────────────────────────────────── */
 
@@ -254,10 +284,21 @@ function reconcileModels(s: HarnessState): HarnessState {
 export const harness = {
   /**
    * The machine's answer to a credentials/providers read. Reconciliation keeps
-   * the model picks pointing at providers that still exist.
+   * the model picks pointing at providers that still exist. Only a `mirrored`
+   * patch keeps a mirror stamp; every other status is a live answer or no answer,
+   * and neither may be aged by an earlier row.
    */
-  applyRemote(patch: Pick<HarnessState, 'credentials' | 'customs' | 'models' | 'status'>) {
-    commit(reconcileModels({ ...state, ...patch }));
+  applyRemote(
+    patch: Pick<HarnessState, 'credentials' | 'customs' | 'models' | 'status'> &
+      Partial<Pick<HarnessState, 'mirroredAt'>>
+  ) {
+    commit(
+      reconcileModels({
+        ...state,
+        mirroredAt: patch.status === 'mirrored' ? (patch.mirroredAt ?? null) : null,
+        ...patch,
+      })
+    );
   },
 
   /**

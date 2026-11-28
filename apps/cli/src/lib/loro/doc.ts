@@ -75,6 +75,8 @@ import {
   isBuiltinAgentType,
   resolveSessionHistoryStatus,
   writeMachineFlockRowToFlock,
+  writeSorbetStoreMirrorToFlock,
+  type SorbetStoreMirror,
   type AcpConfigOptionSummary,
   type AcpCommandSummary,
   type AcpAuthMethodSummary,
@@ -2584,6 +2586,15 @@ export class LoroDocumentManager {
     return this.machine.getAcpCapabilities(configId);
   }
 
+  /** Publishes one read of a machine's Sorbet store to its Flock; see `writeSorbetStoreMirror`. */
+  async writeSorbetStoreMirror(machineId: MachineId, mirror: SorbetStoreMirror): Promise<boolean> {
+    if (!this.machine) {
+      this.machine = this.createMachineDocument(machineId);
+      await this.machine.init();
+    }
+    return await this.machine.writeSorbetStoreMirror(mirror);
+  }
+
   private createMachineDocument(machineId: MachineId): MachineDocument {
     return new MachineDocument(this.repo, this.workspaceId, machineId, (reason) => {
       this.markMachineFlockDocDirty(machineId, { reason });
@@ -4755,5 +4766,25 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
     );
     return flockCapabilities[key];
+  }
+
+  /**
+   * Publishes one read of this machine's Sorbet store to its Flock, so a client
+   * that cannot ask the machine — a browser in a plaintext workspace — can still
+   * draw its Providers. The rows are a mirror of Sorbet's own store, never a
+   * source of truth, and a write here is only reached from a daemon-side read.
+   * Returns whether any row changed.
+   */
+  async writeSorbetStoreMirror(mirror: SorbetStoreMirror): Promise<boolean> {
+    const handle = await this.openMachineFlockDoc();
+    const changed = writeSorbetStoreMirrorToFlock(handle.flock, mirror, getServerNow());
+    if (!changed) return false;
+    await this.repo.flush();
+    if (this.markMachineFlockDirty) {
+      this.markMachineFlockDirty('sorbet-store-mirror');
+    } else {
+      await handle.syncOnce().catch(() => undefined);
+    }
+    return true;
   }
 }

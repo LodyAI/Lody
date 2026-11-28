@@ -736,6 +736,8 @@ export interface MessageHandlerConfig {
       signal?: AbortSignal
     ) => Promise<SorbetHostSettings>;
   };
+  /** Mirrors the machine's Sorbet store into its Flock; runs after every store write. */
+  refreshSorbetStoreMirror?: () => Promise<unknown>;
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {
@@ -987,6 +989,12 @@ export class MessageHandler {
   /** Encrypted workspaces only: claims, derivation origins and agent-control grants. */
   private readonly encryptedExecution?: EncryptedAgentExecution;
   private readonly sorbetCredentials?: MessageHandlerConfig['sorbetCredentials'];
+  /**
+   * Re-reads this machine's Sorbet store into its Machine Flock after a store
+   * write, so a client that cannot ask the machine sees the result without
+   * waiting for the periodic probe.
+   */
+  private readonly refreshSorbetStoreMirror?: () => Promise<unknown>;
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
   private iosSimulatorService: IosSimulatorService;
@@ -3569,6 +3577,7 @@ export class MessageHandler {
   ) {
     this.sessionManager = sessionManager;
     this.sorbetCredentials = config.sorbetCredentials;
+    this.refreshSorbetStoreMirror = config.refreshSorbetStoreMirror;
     this.encryptedAttachments = config.encryptedWorkspace === true;
     // Create a child logger with workspace context for file logging
     this.logger = logger.child({
@@ -8261,6 +8270,17 @@ export class MessageHandler {
     return { ok: true, result };
   }
 
+  /**
+   * Re-reads the store after a write that just succeeded. Fire-and-forget by
+   * design: the write already answered the caller, and a mirror that fails only
+   * means the Flock rows keep the previous read and its older stamp.
+   */
+  private mirrorSorbetStoreAfterWrite(): void {
+    void this.refreshSorbetStoreMirror?.().catch((error: unknown) =>
+      this.logger.warn(`Sorbet store mirror refresh failed: ${String(error)}`)
+    );
+  }
+
   async handleLocalMachineRpc(
     request: LocalMachineRpcRequestValidated,
     signal?: AbortSignal,
@@ -8589,6 +8609,7 @@ export class MessageHandler {
           }
           if (request.method === 'sorbet/credentials-logout') {
             await this.sorbetCredentials.logout(configId, request.params.providerId, signal);
+            this.mirrorSorbetStoreAfterWrite();
             return { type: 'sorbet/credentials-logout' };
           }
           if (request.method === 'sorbet/providers-list') {
@@ -8598,24 +8619,28 @@ export class MessageHandler {
             });
           }
           if (request.method === 'sorbet/providers-create') {
+            const created = await this.sorbetCredentials.createProvider(
+              configId,
+              request.params.provider,
+              signal
+            );
+            this.mirrorSorbetStoreAfterWrite();
             return SorbetProvidersResultSchema.parse({
               type: 'sorbet/providers-create',
-              provider: await this.sorbetCredentials.createProvider(
-                configId,
-                request.params.provider,
-                signal
-              ),
+              provider: created,
             });
           }
           if (request.method === 'sorbet/providers-update') {
+            const updated = await this.sorbetCredentials.updateProvider(
+              configId,
+              request.params.providerId,
+              request.params.provider,
+              signal
+            );
+            this.mirrorSorbetStoreAfterWrite();
             return SorbetProvidersResultSchema.parse({
               type: 'sorbet/providers-update',
-              provider: await this.sorbetCredentials.updateProvider(
-                configId,
-                request.params.providerId,
-                request.params.provider,
-                signal
-              ),
+              provider: updated,
             });
           }
           if (request.method === 'sorbet/providers-delete') {
@@ -8624,6 +8649,7 @@ export class MessageHandler {
               request.params.providerId,
               signal
             );
+            this.mirrorSorbetStoreAfterWrite();
             return { type: 'sorbet/providers-delete' };
           }
           if (request.method === 'sorbet/providers-refresh') {
@@ -8632,6 +8658,7 @@ export class MessageHandler {
               request.params.providerId,
               signal
             );
+            this.mirrorSorbetStoreAfterWrite();
             return { type: 'sorbet/providers-refresh' };
           }
           return SorbetProvidersResultSchema.parse({

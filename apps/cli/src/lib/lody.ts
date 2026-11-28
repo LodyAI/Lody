@@ -7,6 +7,7 @@ import type { AuthorityStamp } from './e2ee/authority-clock';
 import { LoroDocumentManager } from '@/lib/loro/doc';
 import { MachineRuntime } from '@/lib/machine-runtime';
 import { createSorbetCredentialsHandler } from '@/lib/sorbet-credentials';
+import { startSorbetStoreMirrorLoop, type SorbetStoreMirrorLoop } from '@/lib/sorbet-store-mirror';
 import { Logger } from '@/utils/logger';
 import {
   CliType,
@@ -130,6 +131,8 @@ export class Lody {
   private pendingBuiltinAgentConfigRetryCliTypes = new Set<CliType>();
   private builtinAgentConfigRetryAttempt = 0;
   private builtinAgentRegistrationStarted = false;
+  /** Publishes this machine's Sorbet store to its Machine Flock; see `sorbet-store-mirror.ts`. */
+  private readonly sorbetStoreMirror: SorbetStoreMirrorLoop;
 
   static async create(options: LodyOptions): Promise<Lody> {
     const handed = options.encryptedWorkspace;
@@ -390,6 +393,11 @@ export class Lody {
     this.machineId = options.machineId;
     this.machineName = options.machineName;
     this.supportRegistryAgentTypes = options.supportRegistryAgentTypes ?? [];
+    this.sorbetStoreMirror = startSorbetStoreMirrorLoop({
+      document: documentManager,
+      machineId: this.machineId,
+      logger: this.logger,
+    });
     this.runtime = new MachineRuntime({
       sessionManagerFactory: () =>
         new SessionManager(
@@ -404,6 +412,7 @@ export class Lody {
       memoryPressure: options.memoryPressure,
       handlerConfig: {
         sorbetCredentials: createSorbetCredentialsHandler(documentManager, this.machineId),
+        refreshSorbetStoreMirror: () => this.sorbetStoreMirror.refresh(),
         token: this.token,
         encryptedWorkspace: options.contentMode === 'e2ee',
         encryptedExecution: options.contentMode === 'e2ee' ? encryptedExecution : undefined,
@@ -465,6 +474,7 @@ export class Lody {
       (sessionId) => this.runtime.resolveSessionExecutionScope(sessionId)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
+    this.sorbetStoreMirror.start();
   }
 
   async registerAgent(cliTypes: CliType[]): Promise<void> {
@@ -644,6 +654,7 @@ export class Lody {
 
   cleanup = async () => {
     this.cleanedUp = true;
+    this.sorbetStoreMirror.stop();
     if (this.builtinAgentConfigRetryTimer) {
       clearTimeout(this.builtinAgentConfigRetryTimer);
       this.builtinAgentConfigRetryTimer = undefined;
