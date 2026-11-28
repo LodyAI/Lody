@@ -86,7 +86,12 @@ export interface HarnessState {
    * toggles pretend to have; `null` until the machine answers.
    */
   hostSettings: import('@lody/shared/local-machine-rpc').SorbetHostSettings | null;
-  status: 'loading' | 'ready' | 'error' | 'unsupported' | 'no-agent' | 'no-runtime';
+  /**
+   * `unreachable` is the one that is not about the machine at all: it speaks
+   * the store protocols, but only to a client on that machine, and this
+   * workspace offers no encrypted plane to ask it from. See `storeUnreachable`.
+   */
+  status: 'loading' | 'ready' | 'error' | 'unsupported' | 'unreachable' | 'no-agent' | 'no-runtime';
   /** Whether the machine spoke `sorbet/host-settings-*` on the last probe. */
   hostSettingsSupported: boolean;
   profile: HarnessConfig;
@@ -193,6 +198,13 @@ export function useHarness(): HarnessState {
 
 /** Current state, for event handlers. */
 export const getHarness = () => state;
+
+/**
+ * An empty list from a store this client could not reach says nothing about the
+ * machine: no claim of "no connections", and no write.
+ */
+export const storeUnreadable = (s: Pick<HarnessState, 'status'>): boolean =>
+  s.status === 'unsupported' || s.status === 'unreachable';
 
 /* ── derived ───────────────────────────────────────────────────────────── */
 

@@ -6,10 +6,10 @@
  *
  * Setup always writes the shared profile; per-device tweaks live in settings.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Minus, X } from 'lucide-react';
 
 import { useWorkspaceMcpCatalog } from '@/hooks/use-workspace-mcp-catalog';
 
@@ -66,13 +66,12 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
   const { device } = useActiveDevice();
   const current = STEPS[step];
   const [measure, bodyHeight] = useHeight();
+  const foot = useFootShape();
 
+  const connected = Object.keys(state.credentials).length > 0;
+  const answered = state.status === 'ready';
   const canContinue =
-    current.id === 'providers'
-      ? Object.keys(state.credentials).length > 0
-      : current.id === 'review'
-        ? checked
-        : true;
+    current.id === 'providers' ? connected || !answered : current.id === 'review' ? checked : true;
 
   const go = (next: number) => {
     setDir(next > step ? 1 : -1);
@@ -146,7 +145,7 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
       </div>
 
       <main {...stylex.props(s.center)}>
-        <div {...stylex.props(s.card)}>
+        <div ref={foot.card} {...stylex.props(s.card)}>
           <span {...stylex.props(s.corner, s.cornerTopStart)} aria-hidden="true" />
           <span {...stylex.props(s.corner, s.cornerTopEnd)} aria-hidden="true" />
           <span {...stylex.props(s.corner, s.cornerBottomStart)} aria-hidden="true" />
@@ -186,15 +185,31 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
             </div>
           </motion.div>
           <footer {...stylex.props(s.foot)}>
+            <svg {...stylex.props(s.footClipDefs)} aria-hidden="true">
+              <defs>
+                <clipPath id={foot.clipId} clipPathUnits="userSpaceOnUse">
+                  {foot.path ? <path d={foot.path} /> : null}
+                </clipPath>
+              </defs>
+            </svg>
+            <span aria-hidden="true" {...stylex.props(s.footFill, foot.docked && s.footFillAway)} />
+            <span
+              ref={foot.fill}
+              aria-hidden="true"
+              {...stylex.props(s.footFill, !foot.docked && s.footFillAway)}
+              style={foot.path ? { clipPath: `url(#${foot.clipId})` } : undefined}
+            />
             {step > 0 ? (
               <Button variant="ghost" onClick={() => go(step - 1)}>
                 <ArrowLeft size={14} /> Back
               </Button>
             ) : (
               <span {...stylex.props(s.footHint)}>
-                {Object.keys(state.credentials).length
+                {connected
                   ? `${Object.keys(state.credentials).length} connected`
-                  : 'Connect one to continue'}
+                  : answered
+                    ? 'Connect one to continue'
+                    : 'This app cannot read this machine’s connections'}
               </span>
             )}
             <Button variant="primary" onClick={advance} disabled={!canContinue}>
@@ -222,23 +237,106 @@ function useHeight() {
 }
 
 /**
- * What the review step can actually confirm from data the page already has:
- * nothing here is simulated, so a failed check stays failed.
+ * The footer's two outlines: `docked` once the bar rests on the card's bottom
+ * edge, and the path that clips it to the card's own bottom corners.
+ *
+ * The card is the bar's containing block, so "resting" is exactly "the bar's
+ * bottom edge is the card's": while a step is taller than the pane, its farthest
+ * stuck position leaves the card's bottom below the scrollport. The corner radius
+ * is read from the card rather than repeated, so the bar's outline cannot drift
+ * from the card's, and the box is re-measured because a step change animates the
+ * card's height while the pane scrolls the bar against it.
  */
-function useSetupChecks() {
+function useFootShape() {
+  const card = useRef<HTMLDivElement | null>(null);
+  const fill = useRef<HTMLSpanElement | null>(null);
+  const [docked, setDocked] = useState(false);
+  const [box, setBox] = useState<{ w: number; h: number; r: number } | null>(null);
+  const clipId = `setup-foot-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+
+  useLayoutEffect(() => {
+    const dock = () => {
+      const cardEl = card.current;
+      const fillEl = fill.current;
+      if (!cardEl || !fillEl) return;
+      const gap = cardEl.getBoundingClientRect().bottom - fillEl.getBoundingClientRect().bottom;
+      setDocked(gap <= 0.5);
+    };
+    const shape = () => {
+      const cardEl = card.current;
+      const fillEl = fill.current;
+      if (!cardEl || !fillEl) return;
+      const rect = fillEl.getBoundingClientRect();
+      const r = Number.parseFloat(getComputedStyle(cardEl).borderBottomLeftRadius);
+      setBox(Number.isFinite(r) ? { w: rect.width, h: rect.height, r } : null);
+    };
+    dock();
+    shape();
+    const observer = new ResizeObserver(() => {
+      shape();
+      dock();
+    });
+    if (card.current) observer.observe(card.current);
+    if (fill.current) observer.observe(fill.current);
+    window.addEventListener('scroll', dock, { capture: true, passive: true });
+    window.addEventListener('resize', dock);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('scroll', dock, true);
+      window.removeEventListener('resize', dock);
+    };
+  }, []);
+
+  return { card, fill, docked, clipId, path: box ? footClipPath(box) : null };
+}
+
+/**
+ * The bar's outline: square at the top and sides, the card's corner arc at the
+ * bottom. Coordinates are the bar's own box, which is what the `<clipPath>`
+ * reads them in; `2` places of a pixel keep the path stable across scrolls.
+ */
+function footClipPath({ w, h, r }: { w: number; h: number; r: number }) {
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+  if (!radius) return `M0 0H${round(w)}V${round(h)}H0Z`;
+  return [
+    'M0 0',
+    `H${round(w)}`,
+    `V${round(h - radius)}`,
+    `A${round(radius)} ${round(radius)} 0 0 1 ${round(w - radius)} ${round(h)}`,
+    `H${round(radius)}`,
+    `A${round(radius)} ${round(radius)} 0 0 1 0 ${round(h - radius)}`,
+    'Z',
+  ].join('');
+}
+
+/**
+ * What the review step can confirm from data the page has. A check the harness
+ * could not read is `unknown`, never a failure: the machine may be set up
+ * behind a store this app cannot reach.
+ */
+type SetupCheck = { label: string; ok: boolean; unknown?: boolean };
+
+function useSetupChecks(): SetupCheck[] {
   const state = useHarness();
   const { device } = useActiveDevice();
   const target = useSorbetTarget();
   const capabilities = useDeviceCapabilities();
   const { synced } = useWorkspaceMcpCatalog();
+  const answered = state.status === 'ready';
   return [
     { label: 'Device online', ok: device?.status === 'online' },
     { label: 'Lody Agent set up on this device', ok: !!target },
-    {
-      label: 'A provider is connected',
-      ok: Object.keys(state.credentials).length > 0,
-    },
-    { label: 'Models available', ok: capabilities.models.length > 0 },
+    answered
+      ? { label: 'A provider is connected', ok: Object.keys(state.credentials).length > 0 }
+      : {
+          label: 'Provider connections readable from this app',
+          ok: false,
+          unknown: true,
+        },
+    answered
+      ? { label: 'Models available', ok: capabilities.models.length > 0 }
+      : { label: 'Models readable from this app', ok: false, unknown: true },
     { label: 'Workspace MCP servers read', ok: synced },
   ];
 }
@@ -274,17 +372,23 @@ function Review({
     ...PROVIDERS.filter((p) => state.credentials[p.id]).map((p) => p.name),
     ...state.customs.filter((c) => state.credentials[c.id]).map((c) => c.name),
   ];
+  const providersValue = providers.length
+    ? providers.join(', ')
+    : state.status === 'ready'
+      ? 'None connected'
+      : 'Not readable from this app';
   const modelName = (id: string | undefined) =>
     capabilities.models.find((m) => m.id === id)?.name ?? id ?? 'Agent default';
   const effort = capabilities.effortOption?.options.find(
     (option) => option.value === defaults.values.effort
   )?.name;
   const attached = servers.filter((server) => server.enabledByDefault === true).length;
-  const failed = checks.filter((check) => !check.ok).length;
+  const failed = checks.filter((check) => !check.ok && !check.unknown).length;
+  const unknown = checks.filter((check) => check.unknown === true).length;
   const done = at >= checks.length;
 
   const rows = [
-    { step: 0, label: 'Providers', value: providers.join(', ') || 'None connected' },
+    { step: 0, label: 'Providers', value: providersValue },
     {
       step: 1,
       label: 'Models',
@@ -321,7 +425,7 @@ function Review({
         ))}
       </dl>
 
-      <div {...stylex.props(panel.checks, done && !failed && panel.checksDone)}>
+      <div {...stylex.props(panel.checks, done && !failed && !unknown && panel.checksDone)}>
         <div {...stylex.props(panel.checksHead)}>
           {!done ? (
             <>
@@ -331,6 +435,8 @@ function Review({
             <>
               {failed} to fix on {deviceName ?? 'your device'}
             </>
+          ) : unknown ? (
+            <>Checked what this app can see on {deviceName ?? 'your device'}</>
           ) : (
             <>
               <span {...stylex.props(panel.checksOk)}>
@@ -347,11 +453,14 @@ function Review({
           {checks.map((check, index) => {
             const shown = index < at;
             const ok = shown && check.ok;
+            const unknown = shown && !check.ok && check.unknown === true;
             return (
               <li key={check.label} {...stylex.props(panel.checkRow, ok && panel.checkRowDone)}>
                 <span {...stylex.props(panel.checkIcon, ok && panel.checkIconDone)}>
                   {ok ? (
                     <DrawnCheck size={10} />
+                  ) : unknown ? (
+                    <Minus size={10} />
                   ) : shown ? (
                     <X size={10} />
                   ) : index === at ? (

@@ -26,6 +26,7 @@ import {
 } from 'react';
 import {
   machineSupportsProtocolCapability,
+  SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
   SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION,
   SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION,
@@ -66,6 +67,9 @@ const isSorbetConfig = (config: Pick<AgentConfigMeta, 'cliType' | 'agentType'>) 
  *   ready        — credentials and endpoints are what the machine reported
  *   error        — a read failed; the drawn lists are empty, not stale
  *   unsupported  — the machine speaks neither store protocol (older daemon)
+ *   unreachable  — the machine speaks the store only to a client on that
+ *                  machine, and this workspace has no encrypted plane; an
+ *                  unaskable store is not an empty one
  *   no-agent     — no Sorbet config exists on this machine yet
  *   no-runtime   — the workspace runtime is gone, so nothing can be asked
  */
@@ -74,6 +78,7 @@ export type SorbetStatus =
   | 'ready'
   | 'error'
   | 'unsupported'
+  | 'unreachable'
   | 'no-agent'
   | 'no-runtime';
 
@@ -91,21 +96,37 @@ export function useHarnessMachine() {
 }
 
 /**
- * Whether the machine answers the two Sorbet store protocols. The local
- * daemon uses the direct capability; anything else goes over the encrypted
- * plane, so the remote variant must be present.
+ * Which channel can reach the machine's Sorbet store. A daemon publishes the
+ * `Remote` capabilities only from an encrypted workspace, so their absence is
+ * that workspace's shape, not an old daemon — the distinction `unsupported`
+ * alone used to erase, telling a plaintext browser to update a current daemon.
  */
-export function supportsSorbetStores(machine: MachineViewMeta, localMachineId: MachineId | null) {
-  const local = machine.id === localMachineId;
-  const supports = (capability: 'sorbetCredentials' | 'sorbetProviders') =>
-    machineSupportsProtocolCapability(machine, local ? capability : `${capability}Remote`, 1);
-  return (
+export type SorbetStoreAccess = 'store' | 'outdated' | 'needs-encryption';
+
+/** The wire version this store operation needs, on either channel. */
+const storeProtocolVersion = (capability: 'sorbetCredentials' | 'sorbetProviders') =>
+  capability === 'sorbetProviders'
+    ? SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION
+    : SORBET_CREDENTIALS_PROTOCOL_VERSION;
+
+/** Whether the machine serves both store protocols over one channel. */
+function servesStore(machine: MachineViewMeta, local: boolean): boolean {
+  const over = (capability: 'sorbetCredentials' | 'sorbetProviders') =>
     machineSupportsProtocolCapability(
       machine,
-      local ? 'sorbetProviders' : 'sorbetProvidersRemote',
-      SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION
-    ) && supports('sorbetCredentials')
-  );
+      local ? capability : `${capability}Remote`,
+      storeProtocolVersion(capability)
+    );
+  return over('sorbetProviders') && over('sorbetCredentials');
+}
+
+export function sorbetStoreAccess(
+  machine: MachineViewMeta,
+  localMachineId: MachineId | null
+): SorbetStoreAccess {
+  const local = machine.id === localMachineId;
+  if (servesStore(machine, local)) return 'store';
+  return !local && servesStore(machine, true) ? 'needs-encryption' : 'outdated';
 }
 
 /** Whether the machine can edit a stored endpoint in place (`sorbet/providers-update`). */
@@ -203,7 +224,7 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
   );
   const target: SorbetTarget | null =
     machineId && config ? { machineId, configId: config.id, config } : null;
-  const supported = !!machine && supportsSorbetStores(machine, localMachineId);
+  const access = machine ? sorbetStoreAccess(machine, localMachineId) : null;
 
   useEffect(() => {
     const current = ++generation.current;
@@ -218,8 +239,11 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
       harness.applyRemote({ ...empty, status: 'loading' });
       return;
     }
-    if (!machine || !supported) {
-      harness.applyRemote({ ...empty, status: 'unsupported' });
+    if (!machine || access !== 'store') {
+      harness.applyRemote({
+        ...empty,
+        status: access === 'needs-encryption' ? 'unreachable' : 'unsupported',
+      });
       return;
     }
     if (!target) {
@@ -304,7 +328,7 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
     return () => {
       generation.current++;
     };
-  }, [runtime, target?.machineId, target?.configId, supported, isLoading, version]);
+  }, [runtime, target?.machineId, target?.configId, access, isLoading, version]);
 
   const reread = useCallback(() => setVersion((value) => value + 1), []);
 

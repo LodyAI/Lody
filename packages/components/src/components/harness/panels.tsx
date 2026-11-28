@@ -62,7 +62,13 @@ import { parts } from './parts';
 import { panelStyles as ps } from './panels.styles';
 import { settingsStyles as page } from './settings.styles';
 import { sorbet, supportsSorbetEndpointEdit, useHarnessMachine, useSorbetTarget } from './sorbet';
-import { useHarness, type Scope, type CustomProvider, type EndpointProtocol } from './store';
+import {
+  storeUnreadable,
+  useHarness,
+  type Scope,
+  type CustomProvider,
+  type EndpointProtocol,
+} from './store';
 import { ENDPOINT_PROTOCOLS, PROTOCOL_LABEL } from './endpoint-models';
 
 /** A titled section: its name, what it is for, and the block under it. */
@@ -120,6 +126,7 @@ const PROVIDER_GROUPS: { kind: ProviderKind; label: string; hint: string }[] = [
 export function ProvidersPanel() {
   const state = useHarness();
   const [adding, setAdding] = useState(false);
+  const unreadable = storeUnreadable(state);
 
   return (
     <div {...stylex.props(parts.panel)}>
@@ -134,7 +141,17 @@ export function ProvidersPanel() {
               <span {...stylex.props(ps.plugroupHint)}>{group.hint}</span>
               {group.kind === 'custom' ? (
                 <span style={{ marginInlineStart: 'auto' }}>
-                  <Button size="sm" variant="ghost" onClick={() => setAdding(true)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={unreadable}
+                    title={
+                      unreadable
+                        ? 'This machine’s connections cannot be read from this app.'
+                        : undefined
+                    }
+                    onClick={() => setAdding(true)}
+                  >
                     <Plus size={13} /> Add endpoint
                   </Button>
                 </span>
@@ -156,7 +173,9 @@ export function ProvidersPanel() {
               ) : null}
               {group.kind === 'custom' && !customs.length && !adding ? (
                 <div {...stylex.props(parts.emptyInline)}>
-                  No endpoints yet. Add one when your gateway speaks the OpenAI or Anthropic API.
+                  {unreadable
+                    ? 'Endpoints on this machine cannot be read from this app.'
+                    : 'No endpoints yet. Add one when your gateway speaks the OpenAI or Anthropic API.'}
                 </div>
               ) : null}
             </div>
@@ -660,6 +679,7 @@ function DefaultsStatus({ defaults }: { defaults: SessionDefaults }) {
 }
 
 export function ModelsPanel({ scope }: { scope: Scope }) {
+  const { status } = useHarness();
   const capabilities = useDeviceCapabilities();
   const defaults = useSessionDefaults(scope);
   const host = useHostSettings();
@@ -691,7 +711,9 @@ export function ModelsPanel({ scope }: { scope: Scope }) {
     return (
       <div {...stylex.props(parts.panel)}>
         <div {...stylex.props(parts.emptyInline)}>
-          Connect a provider first — the models it offers will show up here.
+          {storeUnreadable({ status })
+            ? 'Models on this machine cannot be read from this app.'
+            : 'Connect a provider first — the models it offers will show up here.'}
         </div>
       </div>
     );
