@@ -133,8 +133,9 @@ In CI, both iOS Simulator and Android Emulator smoke jobs run in `release-e2e-ga
 gate App Store archiving on the synced iOS Simulator smoke test, and
 `macos-product-tests.yml` runs the iOS Simulator smoke job on pushes to `main`.
 The iOS smoke jobs use the publishing toolchain on `xcode-27`. The Android
-release gate checks VM acceleration before building the app. The smoke script
-starts its AVD without Quick Boot snapshots and streams emulator output into the
+release gate checks VM acceleration and verifies that the emulator can find the
+AVD in the job's temporary directory before building the app. The smoke script
+starts the AVD without Quick Boot snapshots and streams emulator output into the
 job log so failures before Android starts are visible.
 
 ## iOS Simulator widget checks
