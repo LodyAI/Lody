@@ -13,7 +13,10 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  SMOKE_REVOKED_SESSION_TOKEN,
+  buildAndroidSharedPrefsXml,
   buildPlaceholderBuildEnv,
+  buildRevokedSessionSeed,
   buildSmokeProbeScript,
   collectRedirectOrigins,
   injectSmokeProbeHtml,
@@ -292,7 +295,64 @@ async function main() {
 
     const result = await resultPromise;
     console.log(
-      `[android-emulator-smoke] PASS (platform=${result.snapshot.platform}, route=${result.snapshot.pathname}, authRequests=${result.diagnostics.authRequests.length}, errors=0, unhandledRejections=0)`
+      `[android-emulator-smoke] PASS fresh-cold-start (platform=${result.snapshot.platform}, route=${result.snapshot.pathname}, authRequests=${result.diagnostics.authRequests.length}, errors=0, unhandledRejections=0)`
+    );
+
+    spawnSync(adbPath, ['-s', activeSerial, 'shell', 'am', 'force-stop', PACKAGE_ID], {
+      stdio: 'ignore',
+    });
+    const seed = buildRevokedSessionSeed();
+    const prefsXml = buildAndroidSharedPrefsXml({
+      [seed.cookieKey]: seed.cookieValue,
+      [seed.sessionDataKey]: seed.sessionDataValue,
+    });
+    console.log(
+      '[android-emulator-smoke] Seeding revoked session in native Preferences and relaunching...'
+    );
+    const seedRes = spawnSync(
+      adbPath,
+      [
+        '-s',
+        activeSerial,
+        'shell',
+        'run-as',
+        PACKAGE_ID,
+        'sh',
+        '-c',
+        'mkdir -p shared_prefs && cat > shared_prefs/CapacitorStorage.xml',
+      ],
+      {
+        input: prefsXml,
+        encoding: 'utf8',
+      }
+    );
+    if (seedRes.error) throw seedRes.error;
+    if (seedRes.status !== 0) {
+      throw new Error(
+        `Failed to seed CapacitorStorage.xml via run-as (exit ${seedRes.status}): ${seedRes.stderr || ''}`
+      );
+    }
+
+    stub.resetScenario({
+      name: 'revoked-session-cleanup',
+      expectedBearerToken: SMOKE_REVOKED_SESSION_TOKEN,
+      expectClearedToken: SMOKE_REVOKED_SESSION_TOKEN,
+      timeoutMs: options.timeoutMs,
+    });
+    const revokedResultPromise = stub.waitForResult();
+    runInherited(adbPath, [
+      '-s',
+      activeSerial,
+      'shell',
+      'am',
+      'start',
+      '-W',
+      '-n',
+      LAUNCH_ACTIVITY,
+    ]);
+    const revokedResult = await revokedResultPromise;
+    console.log(
+      `[android-emulator-smoke] PASS revoked-session-cleanup (platform=${revokedResult.snapshot.platform}, route=${revokedResult.snapshot.pathname}, authRequests=${revokedResult.diagnostics.authRequests.length}, clearedRevokedToken=true, errors=0, unhandledRejections=0)`
     );
   } catch (error) {
     const diagnostics = stub ? stub.getDiagnostics() : null;

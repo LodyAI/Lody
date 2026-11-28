@@ -21,7 +21,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  SMOKE_REVOKED_SESSION_TOKEN,
   buildPlaceholderBuildEnv,
+  buildRevokedSessionSeed,
   buildSmokeProbeScript,
   collectRedirectOrigins,
   injectSmokeProbeHtml,
@@ -205,7 +207,56 @@ async function main() {
 
     const result = await resultPromise;
     console.log(
-      `[ios-simulator-smoke] PASS (platform=${result.snapshot.platform}, route=${result.snapshot.pathname}, authRequests=${result.diagnostics.authRequests.length}, errors=0, unhandledRejections=0)`
+      `[ios-simulator-smoke] PASS fresh-cold-start (platform=${result.snapshot.platform}, route=${result.snapshot.pathname}, authRequests=${result.diagnostics.authRequests.length}, errors=0, unhandledRejections=0)`
+    );
+
+    spawnSync('xcrun', ['simctl', 'terminate', activeUdid, BUNDLE_ID], { stdio: 'ignore' });
+    const seed = buildRevokedSessionSeed();
+    const appDataContainer = runCapture('xcrun', [
+      'simctl',
+      'get_app_container',
+      activeUdid,
+      BUNDLE_ID,
+      'data',
+    ]).trim();
+    const appPlistPath = join(appDataContainer, 'Library', 'Preferences', `${BUNDLE_ID}.plist`);
+    console.log(
+      '[ios-simulator-smoke] Seeding revoked session in native Preferences and relaunching...'
+    );
+    runInherited('xcrun', [
+      'simctl',
+      'spawn',
+      activeUdid,
+      'defaults',
+      'write',
+      appPlistPath,
+      `CapacitorStorage.${seed.cookieKey}`,
+      '-string',
+      seed.cookieValue,
+    ]);
+    runInherited('xcrun', [
+      'simctl',
+      'spawn',
+      activeUdid,
+      'defaults',
+      'write',
+      appPlistPath,
+      `CapacitorStorage.${seed.sessionDataKey}`,
+      '-string',
+      seed.sessionDataValue,
+    ]);
+
+    stub.resetScenario({
+      name: 'revoked-session-cleanup',
+      expectedBearerToken: SMOKE_REVOKED_SESSION_TOKEN,
+      expectClearedToken: SMOKE_REVOKED_SESSION_TOKEN,
+      timeoutMs: options.timeoutMs,
+    });
+    const revokedResultPromise = stub.waitForResult();
+    runInherited('xcrun', ['simctl', 'launch', activeUdid, BUNDLE_ID]);
+    const revokedResult = await revokedResultPromise;
+    console.log(
+      `[ios-simulator-smoke] PASS revoked-session-cleanup (platform=${revokedResult.snapshot.platform}, route=${revokedResult.snapshot.pathname}, authRequests=${revokedResult.diagnostics.authRequests.length}, clearedRevokedToken=true, errors=0, unhandledRejections=0)`
     );
   } catch (error) {
     const diagnostics = stub ? stub.getDiagnostics() : null;

@@ -110,7 +110,9 @@ generated directories exist. Builds without bindings, or without a
 
 Run cold-startup smoke tests on a real iOS Simulator or Android Emulator to verify that
 the production web bundle, Capacitor native plugin bridge, and Better Auth session probe
-converge to `/login` with zero uncaught errors or unhandled rejections:
+converge to `/login` with zero uncaught errors or unhandled rejections — across both a
+fresh signed-out cold start and a relaunch with a pre-seeded server-revoked session token
+in native `Preferences` (confirming `Preferences.get/set/remove` cleanup without retry loops):
 
 ```sh
 pnpm --filter @lody/mobile-capacitor run test:smoke:ios

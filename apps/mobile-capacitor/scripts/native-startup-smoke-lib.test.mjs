@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  SMOKE_PRESERVED_COOKIE_KEY,
+  SMOKE_REVOKED_SESSION_TOKEN,
+  buildAndroidSharedPrefsXml,
+  buildRevokedSessionSeed,
   buildSmokeProbeScript,
   collectRedirectOrigins,
   evaluateAuthRequest,
@@ -191,4 +195,65 @@ test('parseSmokeCliArgs parses flags cleanly', () => {
   assert.equal(parsed.udid, 'ABC-123');
   assert.equal(parsed.timeoutMs, 45_000);
   assert.equal(parsed.artifactDir, '/tmp/out');
+});
+
+test('buildRevokedSessionSeed and buildAndroidSharedPrefsXml encode CapacitorStorage entries', () => {
+  const seed = buildRevokedSessionSeed();
+  const parsed = JSON.parse(seed.cookieValue);
+  assert.equal(parsed['__Secure-better-auth.session_token'].value, SMOKE_REVOKED_SESSION_TOKEN);
+  assert.equal(parsed[SMOKE_PRESERVED_COOKIE_KEY].value, 'keep-me');
+  const xml = buildAndroidSharedPrefsXml({
+    [seed.cookieKey]: seed.cookieValue,
+    [seed.sessionDataKey]: seed.sessionDataValue,
+  });
+  assert.ok(xml.includes('name="better-auth_cookie"'));
+  assert.ok(xml.includes('&quot;lody-smoke-revoked-session-token&quot;'));
+});
+
+test('startSmokeStubServer resetScenario verifies revoked bearer token send and native Preferences cleanup', async () => {
+  const stub = await startSmokeStubServer({ expectedPlatform: 'ios', timeoutMs: 5_000 });
+  try {
+    stub.resetScenario({
+      name: 'revoked-session-cleanup',
+      expectedBearerToken: SMOKE_REVOKED_SESSION_TOKEN,
+      expectClearedToken: SMOKE_REVOKED_SESSION_TOKEN,
+      timeoutMs: 5_000,
+    });
+    const resultPromise = stub.waitForResult();
+
+    await fetch(`${stub.origin}/api/auth/get-session`, {
+      headers: {
+        'capacitor-origin': 'lody://',
+        authorization: `Bearer ${SMOKE_REVOKED_SESSION_TOKEN}`,
+      },
+    });
+
+    await fetch(`${stub.origin}/__smoke__/event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'settled',
+        isNative: true,
+        platform: 'ios',
+        booted: true,
+        pathname: '/login',
+        interactiveCount: 3,
+        bodyText: 'Welcome to Lody AI\nSign in with Google\nContinue with email',
+        nativePreferences: {
+          cookie: null,
+          sessionData: 'null',
+        },
+      }),
+    });
+
+    const result = await resultPromise;
+    assert.equal(result.ok, true);
+    assert.equal(result.diagnostics.scenario, 'revoked-session-cleanup');
+    assert.equal(
+      result.diagnostics.authRequests[0].authorization,
+      `Bearer ${SMOKE_REVOKED_SESSION_TOKEN}`
+    );
+  } finally {
+    await stub.close();
+  }
 });

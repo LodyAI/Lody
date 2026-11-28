@@ -58,6 +58,44 @@ export function buildPlaceholderBuildEnv(env = process.env) {
   return next;
 }
 
+export const SMOKE_REVOKED_SESSION_TOKEN = 'lody-smoke-revoked-session-token';
+export const SMOKE_PRESERVED_COOKIE_KEY = 'lody-smoke-unrelated-cookie';
+
+export function buildRevokedSessionSeed() {
+  return {
+    cookieKey: 'better-auth_cookie',
+    cookieValue: JSON.stringify({
+      '__Secure-better-auth.session_token': {
+        value: SMOKE_REVOKED_SESSION_TOKEN,
+        expires: '2099-01-01T00:00:00.000Z',
+      },
+      [SMOKE_PRESERVED_COOKIE_KEY]: {
+        value: 'keep-me',
+      },
+    }),
+    sessionDataKey: 'better-auth_session_data',
+    sessionDataValue: JSON.stringify({
+      session: { id: 'lody-smoke-stale-session' },
+    }),
+  };
+}
+
+export function buildAndroidSharedPrefsXml(entries) {
+  const escapeXml = (str) =>
+    String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  const lines = ['<?xml version="1.0" encoding="utf-8" standalone="yes" ?>', '<map>'];
+  for (const [key, value] of Object.entries(entries)) {
+    lines.push(`    <string name="${escapeXml(key)}">${escapeXml(value)}</string>`);
+  }
+  lines.push('</map>');
+  return `${lines.join('\n')}\n`;
+}
+
 export function buildSmokeProbeScript({ stubOrigin, redirectOrigins = [] }) {
   const configJson = JSON.stringify({ stubOrigin, redirectOrigins });
   return `(function(){
@@ -67,6 +105,7 @@ var redirectSet=new Set(cfg.redirectOrigins||[]);
 var origFetch=typeof window.fetch==='function'?window.fetch.bind(window):null;
 var lastSnapshotKey='';
 var settledSent=false;
+var readingPrefs=false;
 function describeErr(val){
   if(!val)return 'Unknown error';
   if(typeof val==='string')return val;
@@ -135,44 +174,76 @@ function hookBootGuard(){
   };
 }
 hookBootGuard();
-function emitSnapshot(kind){
+function readNativePrefs(cb){
+  var prefs=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.Preferences;
+  if(!prefs||typeof prefs.get!=='function'){
+    cb(null);
+    return;
+  }
+  if(readingPrefs)return;
+  readingPrefs=true;
+  Promise.all([
+    prefs.get({key:'better-auth_cookie'}).catch(function(){return {value:null};}),
+    prefs.get({key:'better-auth_session_data'}).catch(function(){return {value:null};}),
+  ]).then(function(results){
+    readingPrefs=false;
+    cb({
+      cookie:results[0]&&typeof results[0].value==='string'?results[0].value:null,
+      sessionData:results[1]&&typeof results[1].value==='string'?results[1].value:null,
+    });
+  }).catch(function(){
+    readingPrefs=false;
+    cb(null);
+  });
+}
+function collectBaseState(kind){
   hookBootGuard();
   var cap=window.Capacitor;
-  var isNative=Boolean(cap&&typeof cap.isNativePlatform==='function'&&cap.isNativePlatform());
-  var platform=cap&&typeof cap.getPlatform==='function'?String(cap.getPlatform()):'unknown';
-  var booted=Boolean(window.__LODY_BOOT__&&window.__LODY_BOOT__.booted);
-  var pathname=window.location&&window.location.pathname?String(window.location.pathname):'';
-  var bodyText=document.body&&typeof document.body.innerText==='string'?document.body.innerText.trim().slice(0,1200):'';
-  var interactiveCount=document.querySelectorAll('button, input, a').length;
-  var key=[kind,isNative,platform,booted,pathname,interactiveCount,bodyText.slice(0,180)].join('|');
-  if(kind==='snapshot'&&key===lastSnapshotKey)return;
-  lastSnapshotKey=key;
-  sendEvent({
+  return {
     type:kind,
-    isNative:isNative,
-    platform:platform,
-    booted:booted,
-    pathname:pathname,
-    interactiveCount:interactiveCount,
-    bodyText:bodyText,
+    isNative:Boolean(cap&&typeof cap.isNativePlatform==='function'&&cap.isNativePlatform()),
+    platform:cap&&typeof cap.getPlatform==='function'?String(cap.getPlatform()):'unknown',
+    booted:Boolean(window.__LODY_BOOT__&&window.__LODY_BOOT__.booted),
+    pathname:window.location&&window.location.pathname?String(window.location.pathname):'',
+    interactiveCount:document.querySelectorAll('button, input, a').length,
+    bodyText:document.body&&typeof document.body.innerText==='string'?document.body.innerText.trim().slice(0,1200):'',
+  };
+}
+function emitSettled(){
+  var state=collectBaseState('settled');
+  readNativePrefs(function(nativePrefs){
+    if(nativePrefs)state.nativePreferences=nativePrefs;
+    sendEvent(state);
   });
-  if(!settledSent&&kind==='snapshot'&&booted&&pathname.indexOf('/login')===0&&interactiveCount>=1&&bodyText.length>=20){
-    settledSent=true;
-    var rAF=typeof window.requestAnimationFrame==='function'?window.requestAnimationFrame.bind(window):function(cb){setTimeout(cb,16);};
-    rAF(function(){
-      setTimeout(function(){emitSnapshot('settled');},250);
-    });
+}
+function emitSnapshot(){
+  var state=collectBaseState('snapshot');
+  var key=[state.isNative,state.platform,state.booted,state.pathname,state.interactiveCount,state.bodyText.slice(0,180)].join('|');
+  if(key!==lastSnapshotKey){
+    lastSnapshotKey=key;
+    sendEvent(state);
+  }
+  if(state.booted&&state.pathname.indexOf('/login')===0&&state.interactiveCount>=1&&state.bodyText.length>=20){
+    if(!settledSent){
+      settledSent=true;
+      var rAF=typeof window.requestAnimationFrame==='function'?window.requestAnimationFrame.bind(window):function(cb){setTimeout(cb,16);};
+      rAF(function(){
+        setTimeout(emitSettled,250);
+      });
+    }else{
+      emitSettled();
+    }
   }
 }
 sendEvent({type:'probe_loaded',href:String(window.location&&window.location.href||'')});
-var observer=new MutationObserver(function(){emitSnapshot('snapshot');});
+var observer=new MutationObserver(function(){emitSnapshot();});
 if(document.documentElement){
   observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
 }
-window.addEventListener('load',function(){emitSnapshot('snapshot');});
-window.addEventListener('popstate',function(){emitSnapshot('snapshot');});
-window.addEventListener('hashchange',function(){emitSnapshot('snapshot');});
-setInterval(function(){emitSnapshot('snapshot');},250);
+window.addEventListener('load',function(){emitSnapshot();});
+window.addEventListener('popstate',function(){emitSnapshot();});
+window.addEventListener('hashchange',function(){emitSnapshot();});
+setInterval(function(){emitSnapshot();},250);
 })();`;
 }
 
@@ -322,28 +393,70 @@ export function parseSmokeCliArgs(argv) {
   return options;
 }
 
-export async function startSmokeStubServer({ expectedPlatform, timeoutMs = 60_000 } = {}) {
-  const diagnostics = {
-    expectedPlatform,
-    probeLoaded: false,
-    authRequests: [],
-    otherRequests: [],
-    snapshots: [],
-    errors: [],
-    unhandledRejections: [],
-    bootFailures: [],
-  };
+function isRevokedSessionCleanupComplete(snapshot, scenario) {
+  if (!scenario.expectClearedToken) return true;
+  const prefs = snapshot?.nativePreferences;
+  if (!prefs) return false;
+  if (
+    prefs.sessionData !== null &&
+    prefs.sessionData !== undefined &&
+    prefs.sessionData !== 'null'
+  ) {
+    return false;
+  }
+  if (typeof prefs.cookie === 'string' && prefs.cookie.includes(scenario.expectClearedToken)) {
+    return false;
+  }
+  return true;
+}
 
+export async function startSmokeStubServer({ expectedPlatform, timeoutMs = 60_000 } = {}) {
+  let scenario = {
+    name: 'fresh-cold-start',
+    expectedBearerToken: null,
+    expectClearedToken: null,
+    expectPreservedCookieKey: null,
+    timeoutMs,
+  };
+  let diagnostics;
   let settled = false;
   let resolveResult;
   let rejectResult;
   let timeoutTimer = null;
+  let resultPromise;
 
-  const resultPromise = new Promise((resolve, reject) => {
-    resolveResult = resolve;
-    rejectResult = reject;
-  });
-  resultPromise.catch(() => {});
+  function initScenarioState(nextScenario = {}) {
+    if (timeoutTimer) {
+      clearTimeout(timeoutTimer);
+      timeoutTimer = null;
+    }
+    scenario = {
+      name: nextScenario.name ?? 'fresh-cold-start',
+      expectedBearerToken: nextScenario.expectedBearerToken ?? null,
+      expectClearedToken: nextScenario.expectClearedToken ?? null,
+      expectPreservedCookieKey: nextScenario.expectPreservedCookieKey ?? null,
+      timeoutMs: nextScenario.timeoutMs ?? timeoutMs,
+    };
+    diagnostics = {
+      scenario: scenario.name,
+      expectedPlatform,
+      probeLoaded: false,
+      authRequests: [],
+      otherRequests: [],
+      snapshots: [],
+      errors: [],
+      unhandledRejections: [],
+      bootFailures: [],
+    };
+    settled = false;
+    resultPromise = new Promise((resolve, reject) => {
+      resolveResult = resolve;
+      rejectResult = reject;
+    });
+    resultPromise.catch(() => {});
+  }
+
+  initScenarioState();
 
   function finishPass(snapshot) {
     if (settled) return;
@@ -365,23 +478,33 @@ export async function startSmokeStubServer({ expectedPlatform, timeoutMs = 60_00
     rejectResult(error);
   }
 
+  function hasExpectedAuthRequest() {
+    if (diagnostics.authRequests.length < 1) return false;
+    if (!scenario.expectedBearerToken) return true;
+    const expectedHeader = `bearer ${scenario.expectedBearerToken}`.toLowerCase();
+    return diagnostics.authRequests.some(
+      (req) =>
+        typeof req.authorization === 'string' && req.authorization.toLowerCase() === expectedHeader
+    );
+  }
+
   function checkCompletion(eventType) {
     if (settled) return;
     if (diagnostics.errors.length > 0) {
       finishFail(
-        `Uncaught WebView error during ${expectedPlatform} startup: ${diagnostics.errors[0].message}`
+        `Uncaught WebView error during ${expectedPlatform} ${scenario.name}: ${diagnostics.errors[0].message}`
       );
       return;
     }
     if (diagnostics.unhandledRejections.length > 0) {
       finishFail(
-        `Unhandled promise rejection during ${expectedPlatform} startup: ${diagnostics.unhandledRejections[0].message}`
+        `Unhandled promise rejection during ${expectedPlatform} ${scenario.name}: ${diagnostics.unhandledRejections[0].message}`
       );
       return;
     }
     if (diagnostics.bootFailures.length > 0) {
       finishFail(
-        `Boot guard reported startup failure on ${expectedPlatform}: ${diagnostics.bootFailures[0].message}`
+        `Boot guard reported startup failure on ${expectedPlatform} (${scenario.name}): ${diagnostics.bootFailures[0].message}`
       );
       return;
     }
@@ -391,7 +514,7 @@ export async function startSmokeStubServer({ expectedPlatform, timeoutMs = 60_00
       const fatalMarker = findFatalStartupMarker(latest.bodyText);
       if (fatalMarker) {
         finishFail(
-          `Rendered fatal startup error marker "${fatalMarker}" on ${expectedPlatform} at route ${latest.pathname}`
+          `Rendered fatal startup error marker "${fatalMarker}" on ${expectedPlatform} (${scenario.name}) at route ${latest.pathname}`
         );
         return;
       }
@@ -399,8 +522,9 @@ export async function startSmokeStubServer({ expectedPlatform, timeoutMs = 60_00
 
     if (
       eventType === 'settled' &&
-      diagnostics.authRequests.length >= 1 &&
-      isSnapshotLoginReady(latest, expectedPlatform)
+      hasExpectedAuthRequest() &&
+      isSnapshotLoginReady(latest, expectedPlatform) &&
+      isRevokedSessionCleanupComplete(latest, scenario)
     ) {
       finishPass(latest);
     }
@@ -458,6 +582,7 @@ export async function startSmokeStubServer({ expectedPlatform, timeoutMs = 60_00
         method: req.method,
         url: req.url,
         origin: req.headers.origin ?? null,
+        authorization: req.headers.authorization ?? null,
         capacitorOrigin: req.headers['capacitor-origin'] ?? null,
         betterAuthCookie: req.headers['better-auth-cookie'] ?? null,
         ok: check.ok,
@@ -502,17 +627,21 @@ export async function startSmokeStubServer({ expectedPlatform, timeoutMs = 60_00
     port,
     origin,
     getDiagnostics: () => diagnostics,
+    resetScenario(nextScenario = {}) {
+      initScenarioState(nextScenario);
+    },
     waitForResult() {
       if (!timeoutTimer && !settled) {
+        const activeTimeoutMs = scenario.timeoutMs;
         timeoutTimer = setTimeout(() => {
           const latest = diagnostics.snapshots[diagnostics.snapshots.length - 1];
           const detail = latest
-            ? `last snapshot: platform=${latest.platform} isNative=${latest.isNative} booted=${latest.booted} route=${latest.pathname} authRequests=${diagnostics.authRequests.length} body=${JSON.stringify(latest.bodyText?.slice(0, 200))}`
+            ? `last snapshot: platform=${latest.platform} isNative=${latest.isNative} booted=${latest.booted} route=${latest.pathname} authRequests=${diagnostics.authRequests.length} nativePrefs=${JSON.stringify(latest.nativePreferences ?? null)} body=${JSON.stringify(latest.bodyText?.slice(0, 200))}`
             : `probeLoaded=${diagnostics.probeLoaded} authRequests=${diagnostics.authRequests.length} (no snapshots received)`;
           finishFail(
-            `Timed out after ${timeoutMs}ms waiting for ${expectedPlatform} startup (${detail})`
+            `Timed out after ${activeTimeoutMs}ms waiting for ${expectedPlatform} ${scenario.name} (${detail})`
           );
-        }, timeoutMs);
+        }, activeTimeoutMs);
       }
       return resultPromise;
     },
