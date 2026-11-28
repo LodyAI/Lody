@@ -1,5 +1,6 @@
 import {
   deduplicateProjectMembers,
+  getProjectBoundMachineId,
   type MachineId,
   type LocalProjectId,
   type ProjectLocalMemberProbe,
@@ -288,6 +289,32 @@ export function bindProjectGroupToMachine(
     return { ...member, source: { kind: 'local', machineId, localProjectId } as const };
   });
   return changed ? { ...value, members } : value;
+}
+
+/**
+ * The normalized names a draft's own name must avoid: those of the other
+ * projects offered wherever it is. A project with folders on one machine is
+ * offered only there, so each machine may hold a project of the same name;
+ * one that runs anywhere, or whose folders conflict, meets every other.
+ */
+export function collectTakenProjectGroupNames(
+  projects: readonly Pick<WorkspaceProject, 'id' | 'name' | 'members'>[],
+  draft: Pick<ProjectGroupFormValue, 'members'>,
+  ownId: ProjectId | null
+): Set<string> {
+  const machineOf = (members: readonly Pick<ProjectMember, 'source'>[]) => {
+    const bound = getProjectBoundMachineId(members);
+    return bound === 'conflict' ? null : bound;
+  };
+  const own = machineOf(draft.members);
+  const taken = new Set<string>();
+  for (const project of projects) {
+    if (project.id === ownId) continue;
+    const other = machineOf(project.members);
+    if (own && other && own !== other) continue;
+    taken.add(normalizeProjectGroupName(project.name));
+  }
+  return taken;
 }
 
 /** A name for a new project from its first member, unless one was typed. */

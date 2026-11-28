@@ -13,6 +13,7 @@ import {
   applyDetectedProjectSubmodules,
   buildProjectGroupFormValue,
   buildWorkspaceProjectFromForm,
+  collectTakenProjectGroupNames,
   EMPTY_PROJECT_GROUP_FORM_VALUE,
   removeProjectGroupMember,
   retainProjectGroupScope,
@@ -314,6 +315,68 @@ describe('direct folder drafts', () => {
       true
     );
     expect(suggestProjectGroupName({ ...value, name: '' }, labelOf, taken)).toBe('web 2');
+  });
+  it('lets each machine hold a project of a name, but not one offered beside it', () => {
+    const on = (machineId: string, id: string): ProjectMemberSource => ({
+      kind: 'local',
+      machineId: machineId as MachineId,
+      localProjectId: id as LocalProjectId,
+    });
+    const project = (id: string, name: string, sources: ProjectMemberSource[]) => ({
+      id: id as ProjectId,
+      name,
+      members: sources.map((source, index) => ({ id: `p${index}` as ProjectMemberId, source })),
+    });
+    const projects = [
+      project('a', 'cluster-api-provider', [on('devpod', 'capi'), on('devpod', 'kit')]),
+      project('b', 'Portable', [github('acme/web'), github('acme/api')]),
+      project('c', 'Mixed', [on('devpod', 'x'), on('m3mac', 'y')]),
+    ];
+    const createId = ids();
+    let mac = addProjectGroupMember(
+      { ...EMPTY_PROJECT_GROUP_FORM_VALUE, name: ' Cluster-API-Provider ' },
+      on('m3mac', 'capi'),
+      'capi',
+      createId
+    );
+    mac = addProjectGroupMember(mac, on('m3mac', 'kit'), 'kit', createId);
+    // The devpod project is never offered on m3mac, so its name is free there.
+    const takenOnMac = collectTakenProjectGroupNames(projects, mac, null);
+    expect(validateProjectGroupForm(mac, undefined, takenOnMac).valid).toBe(true);
+    // Projects offered on every machine still collide.
+    expect(
+      validateProjectGroupForm({ ...mac, name: 'portable' }, undefined, takenOnMac).errors
+    ).toEqual(['name_taken']);
+    expect(
+      validateProjectGroupForm({ ...mac, name: 'mixed' }, undefined, takenOnMac).errors
+    ).toEqual(['name_taken']);
+
+    const devpod = {
+      ...mac,
+      members: mac.members.map((member) => ({
+        ...member,
+        source: { ...member.source, machineId: 'devpod' as MachineId },
+      })),
+    };
+    expect(
+      validateProjectGroupForm(
+        devpod,
+        undefined,
+        collectTakenProjectGroupNames(projects, devpod, null)
+      ).errors
+    ).toEqual(['name_taken']);
+    // Editing a project never collides with its own name.
+    expect(collectTakenProjectGroupNames(projects, devpod, 'a' as ProjectId)).not.toContain(
+      'cluster-api-provider'
+    );
+
+    // A project that runs anywhere is offered beside the devpod one.
+    const anywhere = threeRepos();
+    expect(
+      collectTakenProjectGroupNames(projects, anywhere, null).has(
+        normalizeProjectGroupName('cluster-api-provider')
+      )
+    ).toBe(true);
   });
   it('binds folders to the machine they were chosen on, leaving clones portable', () => {
     const createId = ids();
