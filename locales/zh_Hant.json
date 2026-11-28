@@ -92,7 +92,6 @@
   "cookieConsent.accept": "接受分析 Cookie",
   "settings.general.usageSharing.label": "分享應用程式使用資料",
   "settings.general.usageSharing.helper": "適用於你帳號下的桌面版、網頁版、行動版與 CLI。",
-  "settings.general.usageSharing.error": "無法在所有位置儲存設定，請重試。",
   "settings.general.prImages.label": "自動載入 PR 圖片",
   "settings.general.prImages.helper": "關閉時可逐張載入圖片。圖片所在的網站可能會看到你的 IP 位址。",
   "sessions.prImage.image": "圖片",

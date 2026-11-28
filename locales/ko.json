@@ -92,7 +92,6 @@
   "cookieConsent.accept": "분석 쿠키 허용",
   "settings.general.usageSharing.label": "앱 사용 데이터 공유",
   "settings.general.usageSharing.helper": "데스크톱, 웹, 모바일 및 CLI 전반의 계정에 적용됩니다.",
-  "settings.general.usageSharing.error": "설정을 모든 곳에 저장할 수 없습니다. 다시 시도하세요.",
   "settings.general.prImages.label": "PR 이미지 자동 불러오기",
   "settings.general.prImages.helper": "끄면 이미지를 개별적으로 불러옵니다. 이미지 호스팅 웹사이트에서 사용자의 IP 주소를 확인할 수 있습니다.",
   "sessions.prImage.image": "이미지",

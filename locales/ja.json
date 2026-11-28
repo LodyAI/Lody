@@ -92,7 +92,6 @@
   "cookieConsent.accept": "分析用 Cookie を許可",
   "settings.general.usageSharing.label": "アプリの使用状況データを共有",
   "settings.general.usageSharing.helper": "デスクトップ、Web、モバイル、CLI のアカウント全体に適用されます。",
-  "settings.general.usageSharing.error": "一部の環境に設定を保存できませんでした。再試行してください。",
   "settings.general.prImages.label": "PR の画像を自動的に読み込む",
   "settings.general.prImages.helper": "オフの場合、画像は個別に読み込みます。画像ホスティングサイト側にあなたの IP アドレスが通知される場合があります。",
   "sessions.prImage.image": "画像",
