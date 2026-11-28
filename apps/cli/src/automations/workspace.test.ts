@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -310,12 +311,27 @@ describe('Automation control authority', () => {
         intervalMs: 30000,
       },
       'session-a',
-      { sessionId: 'session-a', turnId: 'source-12' }
+      { sessionId: 'session-a', turnId: 'source-12', depth: 12 }
     )) as { id: string };
     expect(host.ledger.wait(exact.id)?.causal).toMatchObject({
       depth: 12,
       sessionId: 'session-a',
       turnId: 'source-12',
+    });
+    const wired = (await host.command(
+      {
+        type: 'register',
+        sessionId: 'session-a',
+        program,
+        key: 'wired',
+        intervalMs: 30000,
+      },
+      'session-a',
+      { sessionId: 'session-a', turnId: 'unsynced-turn', depth: 14 }
+    )) as { id: string };
+    expect(host.ledger.wait(wired.id)?.causal).toMatchObject({
+      depth: 14,
+      turnId: 'unsynced-turn',
     });
     await doc.sessionData.commands.appendTurn({
       id: 'wake-16',
@@ -369,6 +385,85 @@ describe('Automation control authority', () => {
     expect(listed.map((wait) => wait.id)).toEqual([registered.id]);
     expect(host.ledger.wait(completed.id)?.state).toBe('matched');
   });
+  it.skipIf(process.platform === 'win32')(
+    'passes the enclosing Session as the causal requester from the CLI',
+    async () => {
+      const root = mkdtempSync(path.join('/tmp', 'lody-cli-'));
+      roots.push(root);
+      vi.stubEnv('LODY_DATA_DIR', root);
+      const catalog = {
+        version: 1,
+        identity: { userId: 'user' },
+        machine: { machineId: 'machine' },
+        workspaces: [
+          {
+            workspaceId: 'workspace',
+            name: 'Workspace',
+            slug: 'workspace',
+            role: 'owner',
+            state: 'active',
+            cachedAt: Date.now(),
+          },
+        ],
+        sessions: [],
+      };
+      writeFileSync(path.join(root, 'workspace-catalog.json'), `${JSON.stringify(catalog)}\n`, {
+        mode: 0o600,
+      });
+      const requests: string[] = [];
+      const server = http.createServer((request, response) => {
+        void (async () => {
+          const chunks: Buffer[] = [];
+          for await (const chunk of request) chunks.push(Buffer.from(chunk));
+          requests.push(Buffer.concat(chunks).toString('utf8'));
+          response
+            .writeHead(200, { 'Content-Type': 'application/json' })
+            .end(JSON.stringify({ ok: true, result: {} }));
+        })();
+      });
+      mkdirSync(path.join(root, 'run'), { recursive: true, mode: 0o700 });
+      const socketPath = path.join(root, 'run', 'control.sock');
+      writeFileSync(
+        path.join(root, 'run', 'daemon.json'),
+        JSON.stringify({
+          pid: process.pid,
+          socketPath,
+          controlSocketPath: socketPath,
+          version: 'test',
+          startedAt: new Date().toISOString(),
+        }),
+        { mode: 0o600 }
+      );
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(socketPath, resolve);
+      });
+      try {
+        vi.stubEnv('LODY_SESSION_ID', 'session-enclosing');
+        vi.stubEnv('LODY_AUTH_URL', '');
+        const { loadEnv } = await import('@/utils/const');
+        loadEnv();
+        const { sendAutomationCommand } = await import('./control/client');
+        await sendAutomationCommand({ type: 'list', sessionId: 'session-target' });
+        expect(requests).toHaveLength(1);
+        const body = JSON.parse(requests[0] ?? '{}') as {
+          requesterSessionId?: string;
+          command?: { sessionId?: string };
+        };
+        expect(body.requesterSessionId).toBe('session-enclosing');
+        expect(body.command?.sessionId).toBe('session-target');
+        requests.length = 0;
+        vi.stubEnv('LODY_SESSION_ID', '');
+        await sendAutomationCommand({ type: 'list', sessionId: 'session-target' });
+        const outside = JSON.parse(requests[0] ?? '{}') as { requesterSessionId?: string };
+        expect(outside.requesterSessionId).toBeUndefined();
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        );
+      }
+    }
+  );
   it('executes a registered condition in the Session workspace', async () => {
     const host = await workspaceFixture({
       id: 'session-a',

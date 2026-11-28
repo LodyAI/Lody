@@ -16,7 +16,7 @@ export async function sendDaemonAutomationCommand(
     machineId: string;
     workspaceId: string;
     requesterSessionId?: string;
-    source?: { sessionId: string; turnId: string };
+    source?: { sessionId: string; turnId: string; depth: number };
     socketPath?: string;
   }
 ): Promise<unknown> {
@@ -40,12 +40,14 @@ export async function sendAutomationCommand(
   command: AutomationCommand,
   selector?: string
 ): Promise<unknown> {
+  const requesterSessionId = process.env.LODY_SESSION_ID || undefined;
   if (LODY_AUTH_URL) {
     const auth = getAuthContextOrThrow('automation');
     const workspace = await resolveWorkspaceOrThrow(auth, selector);
     return sendDaemonAutomationCommand(command, {
       machineId: auth.machineId,
       workspaceId: workspace.id,
+      requesterSessionId,
     });
   }
   const catalog = await Effect.runPromise(makeLocalWorkspaceCatalog().read());
@@ -63,5 +65,6 @@ export async function sendAutomationCommand(
   return sendDaemonAutomationCommand(command, {
     machineId: catalog.machine.machineId,
     workspaceId: candidate.workspaceId,
+    requesterSessionId,
   });
 }

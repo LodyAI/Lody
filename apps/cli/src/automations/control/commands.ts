@@ -136,9 +136,11 @@ export function createAutomationController(deps: AutomationControlDeps) {
    */
   const resolveCausalOrigin = async (
     requesterSessionId: string | undefined,
-    source?: { sessionId: string; turnId: string }
+    source?: { sessionId: string; turnId: string; depth: number }
   ): Promise<AutomationCausalOrigin> => {
-    const exact = source ? await turnDepth(source.sessionId, source.turnId) : undefined;
+    const exact = source
+      ? { depth: source.depth, sessionId: source.sessionId, turnId: source.turnId }
+      : undefined;
     if (!requesterSessionId) return exact ?? { depth: 0 };
     const inFlight = await (async () => {
       try {
@@ -157,7 +159,7 @@ export function createAutomationController(deps: AutomationControlDeps) {
     command: AutomationCommand,
     principal: string,
     requesterSessionId?: string,
-    source?: { sessionId: string; turnId: string }
+    source?: { sessionId: string; turnId: string; depth: number }
   ) {
     const runtime = yield* Automations;
     const managedRuns = yield* ManagedRunsService;
@@ -327,7 +329,7 @@ export function createAutomationController(deps: AutomationControlDeps) {
     command: AutomationCommand,
     principal: string,
     requesterSessionId?: string,
-    source?: { sessionId: string; turnId: string }
+    source?: { sessionId: string; turnId: string; depth: number }
   ): Promise<unknown> =>
     deps.runEffect(executeEffect(command, principal, requesterSessionId, source));
 

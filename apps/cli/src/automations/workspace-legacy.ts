@@ -409,7 +409,7 @@ export async function createAutomationWorkspaceLegacy(options: {
       command: (
         input: AutomationCommand,
         requesterSessionId?: string,
-        source?: { sessionId: string; turnId: string }
+        source?: { sessionId: string; turnId: string; depth: number }
       ): Promise<unknown> =>
         ownedCall(async () => {
           const command = automationCommandSchema.parse(input);

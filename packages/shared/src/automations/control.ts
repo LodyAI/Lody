@@ -39,7 +39,7 @@ export const automationControlRequestSchema = z
     workspaceId: id,
     requesterSessionId: id.optional(),
     source: z
-      .object({ sessionId: id, turnId: id })
+      .object({ sessionId: id, turnId: id, depth: z.number().int().nonnegative() })
       .strict()
       .optional(),
     command: automationCommandSchema,

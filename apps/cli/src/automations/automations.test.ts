@@ -3318,6 +3318,72 @@ describe('Slot supersession and retirement', () => {
     );
   });
 
+  it('keeps the supersession fence reason when runtime cancel converges the withdrawal', async () => {
+    const { ledger } = fixture();
+    const cancelled: Array<{ state: string; reason?: string }> = [];
+    const first = ledger.registerWait(
+      { program: '() => false', intervalMs: 1000 },
+      'session',
+      'user',
+      0
+    );
+    ledger.updateWait(first.wait.id, 'waiting', { state: 'checking' }, 1);
+    const matched = required(ledger.finishWait(first.wait, { resumeText: 'Continue' }, 2));
+    const receiptId = required(matched.invocationId);
+    const receipt = required(ledger.receipt(receiptId));
+    ledger.update(receipt.id, receipt.state, { state: 'queued' }, 3);
+    const second = ledger.registerWait(
+      { program: '() => true', intervalMs: 1000 },
+      'session',
+      'user',
+      4
+    );
+    expect(second.superseded.map((wait) => wait.id)).toEqual([first.wait.id]);
+    expect(ledger.receipt(receiptId)).toMatchObject({
+      state: 'cancelling',
+      reason: 'guard:slot_superseded',
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* Automations;
+          yield* runtime.cancel(receiptId);
+          expect(cancelled).toEqual([{ state: 'cancelling', reason: 'guard:slot_superseded' }]);
+          expect(ledger.receipt(receiptId)).toMatchObject({
+            state: 'superseded',
+            reason: 'guard:slot_superseded',
+          });
+        }).pipe(
+          Effect.provide(
+            Automations.layer(ledger).pipe(
+              Layer.provide(
+                Layer.succeed(AutomationHost, {
+                  evaluate: () => Effect.succeed(false),
+                  authorize: () => Effect.succeed({ value: 'yes', reason: 'authorized' }),
+                  condition: () => Effect.succeed({ value: 'yes', reason: 'current' }),
+                  prepare: (receipt) =>
+                    Effect.succeed({
+                      state: 'resolved' as const,
+                      sessionId: receipt.sessionId,
+                      prepared: {},
+                    }),
+                  submit: () => Effect.succeed({ state: 'queued' as const }),
+                  reconcile: () => Effect.succeed({ state: 'queued' as const }),
+                  cancel: (receipt) =>
+                    Effect.sync(() => {
+                      cancelled.push({ state: receipt.state, reason: receipt.reason });
+                      return { state: 'superseded' as const };
+                    }),
+                  report: () => Effect.void,
+                })
+              )
+            )
+          )
+        )
+      )
+    );
+  });
+
   it('fails a result produced without any observation on first evaluation', async () => {
     const { ledger } = fixture();
     const { wait } = ledger.registerWait(

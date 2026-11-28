@@ -406,10 +406,13 @@ export class Automations extends Context.Service<
             if (!receipt) return;
             if (IN_FLIGHT_STATES.has(receipt.state) || receipt.state === 'cancelling') {
               // Revoke admission before awaiting the owner; this fence survives restart.
-              const fenced = yield* persist(receipt, {
-                state: 'cancelling',
-                reason: 'user_cancel_requested',
-              });
+              const fenced =
+                receipt.state === 'cancelling'
+                  ? receipt
+                  : yield* persist(receipt, {
+                      state: 'cancelling',
+                      reason: 'user_cancel_requested',
+                    });
               if (fenced) {
                 // Join this invocation only; an unrelated provider read cannot delay Stop.
                 const running = active.get(id);
