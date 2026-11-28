@@ -2,6 +2,8 @@ import { Clock, Effect } from 'effect';
 import { randomUUID } from 'node:crypto';
 import {
   getSessionRoomId,
+  LODY_MAX_CHAIN_DEPTH,
+  normalizeSessionTurnInputConfig,
   type MachineId,
   type RpcSecretPublicKey,
   type SessionId,
@@ -11,6 +13,7 @@ import {
   remoteAutomationIntentSchema,
   remoteAutomationOperationSchema,
   remoteAutomationProofSchema,
+  type AutomationCausalOrigin,
   type AutomationCommand,
   type AutomationProgramContext,
   type AutomationWait,
@@ -19,6 +22,7 @@ import {
   type RemoteAutomationProof,
 } from '@lody/shared/automations';
 import type { Lody } from '@/lib/lody';
+import { createSessionBackend } from '@/session/session-backend';
 import type { SessionAutomationAuthority } from '@/session/session-automation-authority';
 import type { AutomationLedger } from '../storage/ledger';
 import { Automations } from '../runtime/engine';
@@ -105,10 +109,55 @@ export function createAutomationController(deps: AutomationControlDeps) {
     return { context: { sessionId, workspaceId, now: Date.now() }, meta };
   };
 
+  const turnDepth = async (
+    sessionId: string,
+    turnId: string
+  ): Promise<AutomationCausalOrigin | undefined> => {
+    try {
+      const doc = await lody.documentManager.getOrCreateSessionDoc(sessionId as SessionId);
+      const read = await (await createSessionBackend(doc)).readTurn(turnId);
+      if (read.state !== 'ready') return undefined;
+      return {
+        depth: normalizeSessionTurnInputConfig(read.turn.inputConfig)?.chainDepth ?? 0,
+        sessionId,
+        turnId,
+      };
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
+   * Freeze the causal origin of a registration. An exact provenance turn wins; an
+   * in-flight turn on the requester Session is the CLI-attribution fallback, and
+   * anything else is a human/external root at depth 0. Provenance never lowers the
+   * frozen depth below the in-flight fallback, since the registration is at least
+   * caused by whatever turn currently drives the requester Session.
+   */
+  const resolveCausalOrigin = async (
+    requesterSessionId: string | undefined,
+    source?: { sessionId: string; turnId: string }
+  ): Promise<AutomationCausalOrigin> => {
+    const exact = source ? await turnDepth(source.sessionId, source.turnId) : undefined;
+    if (!requesterSessionId) return exact ?? { depth: 0 };
+    const inFlight = await (async () => {
+      try {
+        const read = await readSessionMeta(lody.documentManager, requesterSessionId as SessionId);
+        if (read.status !== 'ok' || !read.meta.processingUserMsgId) return undefined;
+        return turnDepth(requesterSessionId, read.meta.processingUserMsgId);
+      } catch {
+        return undefined;
+      }
+    })();
+    if (exact && inFlight) return { ...exact, depth: Math.max(exact.depth, inFlight.depth) };
+    return exact ?? inFlight ?? { depth: 0 };
+  };
+
   const executeEffect = Effect.fn('Automations.command')(function* (
     command: AutomationCommand,
     principal: string,
-    requesterSessionId?: string
+    requesterSessionId?: string,
+    source?: { sessionId: string; turnId: string }
   ) {
     const runtime = yield* Automations;
     const managedRuns = yield* ManagedRunsService;
@@ -134,8 +183,21 @@ export function createAutomationController(deps: AutomationControlDeps) {
           true
         );
         if (deps.isClosing()) return yield* Effect.fail(new Error('AUTOMATION_OWNER_CLOSING'));
+        const causal = yield* promise(() => resolveCausalOrigin(requesterSessionId, source));
+        if (causal.depth >= LODY_MAX_CHAIN_DEPTH)
+          return yield* Effect.fail(
+            new Error(
+              `CHAIN_DEPTH_EXCEEDED: registrations from a machine-caused input at depth ${causal.depth} are rejected; report the remaining work to the user instead.`
+            )
+          );
         const { type: _type, sessionId: _session, ...registration } = command;
-        const { wait, superseded } = ledger.registerWait(registration, sessionId, principal, now);
+        const { wait, superseded } = ledger.registerWait(
+          registration,
+          sessionId,
+          principal,
+          now,
+          causal
+        );
         for (const old of superseded) {
           yield* runtime.cancel(old.invocationId ?? old.id).pipe(Effect.ignore);
         }
@@ -143,15 +205,12 @@ export function createAutomationController(deps: AutomationControlDeps) {
         return {
           ...publicWait(ledger, wait),
           supersededIds: superseded.map((old) => old.id),
-          activeWaits: ledger
-            .waits(undefined, sessionId)
-            .filter((item) => ['waiting', 'checking', 'matched'].includes(item.state))
-            .map((item) => ({
-              id: item.id,
-              key: item.key ?? null,
-              state: item.state,
-              reason: item.reason ?? null,
-            })),
+          activeWaits: liveWaits(undefined, sessionId).map((item) => ({
+            id: item.id,
+            key: item.key ?? null,
+            state: item.state,
+            reason: item.reason ?? null,
+          })),
         };
       }
       case 'run': {
@@ -162,8 +221,15 @@ export function createAutomationController(deps: AutomationControlDeps) {
         if (!root) return yield* Effect.fail(new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE'));
         yield* resolveAutomationCwd(root, command.cwd);
         if (deps.isClosing()) return yield* Effect.fail(new Error('AUTOMATION_OWNER_CLOSING'));
+        const causal = yield* promise(() => resolveCausalOrigin(requesterSessionId, source));
+        if (causal.depth >= LODY_MAX_CHAIN_DEPTH)
+          return yield* Effect.fail(
+            new Error(
+              `CHAIN_DEPTH_EXCEEDED: registrations from a machine-caused input at depth ${causal.depth} are rejected; report the remaining work to the user instead.`
+            )
+          );
         const { type: _type, sessionId: _session, ...run } = command;
-        const wait = ledger.registerRun(run, sessionId, principal, managedRunLogs, now);
+        const wait = ledger.registerRun(run, sessionId, principal, managedRunLogs, now, causal);
         yield* runtime.wake;
         return publicWait(ledger, wait);
       }
@@ -260,8 +326,10 @@ export function createAutomationController(deps: AutomationControlDeps) {
   const execute = (
     command: AutomationCommand,
     principal: string,
-    requesterSessionId?: string
-  ): Promise<unknown> => deps.runEffect(executeEffect(command, principal, requesterSessionId));
+    requesterSessionId?: string,
+    source?: { sessionId: string; turnId: string }
+  ): Promise<unknown> =>
+    deps.runEffect(executeEffect(command, principal, requesterSessionId, source));
 
   return {
     sessionContext,

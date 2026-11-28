@@ -2,6 +2,7 @@ import {
   getCurrentPullRequestsByRepository,
   getSessionRoomId,
   isLoroRepoDocDeleted,
+  LODY_MAX_CHAIN_DEPTH,
   parseGitHubPullRequestUrl,
   resolveSessionPullRequests,
   type AgentConfigId,
@@ -44,6 +45,7 @@ export const compactActionSchema = sessionActionSchema
   .strict();
 
 const durableSessionDenials: ReadonlySet<string> = new Set([
+  'chain_depth_exceeded',
   'invocation_revoked',
   'authorization_revoked',
   'target_not_granted',
@@ -443,6 +445,8 @@ export async function authorizeAutomationReceipt(
   let sessionId: string;
   let unavailableFails = false;
   if (action.kind === 'agent.invoke') {
+    if ((receipt.causal?.depth ?? 0) + 1 > LODY_MAX_CHAIN_DEPTH)
+      return { value: 'no', reason: 'chain_depth_exceeded', terminalState: 'failed' };
     const invocation = automationInvocationSchema.parse(action.parameters);
     const work =
       invocation.input.kind === 'pending_work' ? ledger.work(invocation.input.ref) : undefined;

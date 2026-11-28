@@ -39,6 +39,12 @@ neither of which is information. The wait fails at that evaluation rather than
 completing. An evaluation that observes and answers `false` costs no agent
 wake at all, so observation polling stays with the Host.
 
+This is a misuse guard, not a consent proof: a program can observe without
+depending on the observation. The primitive is honestly a Host-polled one-shot
+predicate wait, and routing time-triggered work to Schedules is a product
+policy enforced by guidance and the causal budget, not by static or dynamic
+analysis of program intent.
+
 **Waits are one-shot slots, superseded by name.** Every registration belongs
 to a slot: its `key`, or an unnamed default. Registering into a slot atomically
 supersedes that slot's earlier unfinished wait and withdraws its not-yet-started
@@ -46,16 +52,23 @@ continuation through the owning Session input owner. Parallel observation is an
 explicit opt-in through distinct keys. Exact-match
 deduplication remains only as a retry shortcut. One cancel of the current wait
 in a slot therefore ends its whole lineage, and rephrasing or re-registering a
-task replaces rather than multiplies it.
+task replaces rather than multiplies it. Unkeyed registrations sharing one
+default slot is a deliberate behavioral contract: a Session keeps one
+outstanding unnamed observation, and genuinely independent parallel waits must
+be keyed explicitly.
 
-**Automation continuations join the causal chain.** A continuation delivered to
-a Session is a machine-caused input like any other: it advances the causal
-depth defined in [Session orchestration](session-orchestration.md) by one over
-the turn that preceded it, whether it continues a condition wait or a managed
-run, and only a human input resets that count. The same budget then covers a
-Session talking to itself through the ledger, Sessions steering one another,
-and mixed loops alternating between the two, because depth is derived from the
-causal record rather than from the transport that delivered the input.
+**Registrations freeze their causal origin, and the budget is enforced.**
+A registration records the machine-caused input that produced it: the exact
+invoking turn when provenance is available, otherwise the in-flight turn of
+the requesting Session, otherwise a human or external root at depth zero.
+A continuation input then costs exactly one hop over that frozen depth,
+whether it continues a condition wait or a managed run, and target-Session
+history never resets it — chronology is not causality. A turn at the causal
+cap defined in [Session orchestration](session-orchestration.md) cannot
+register new machine-caused work, and a continuation whose frozen depth would
+exceed the cap fails durably rather than blocking forever. The same budget
+then covers a Session talking to itself through the ledger, Sessions steering
+one another, and mixed loops alternating between the two.
 
 **A continuation input announces what it is.** The delivered input opens with
 the facts of its origin — the wait, its reason and its registration time — as
@@ -67,8 +80,15 @@ prefix carries facts only; it does not direct the agent's work.
 delivered settles, regardless of other work the Session group still runs;
 delegated outcomes own their own reporting. Cancelling, expiry, failure and
 supersession close the registration's internal rule. Archiving or deleting a
-Session cancels its unfinished waits. Terminal rows are pruned after a
-retention window, and inspection defaults to live rows.
+Session cancels its unfinished waits. Terminal waits — including a normally
+matched wait whose continuation settled — are pruned after a retention window
+measured from their terminal settlement, along with their one-shot rules;
+receipts remain as inspectable history. Inspection defaults to live rows.
+
+**Supersession is not cancellation.** A slot replacement withdraws a
+continuation only while its input has not started; an already-running turn
+belongs to the Session owner and completes on its own. Observation ownership
+ends where execution ownership begins.
 
 ## Guarantees
 
@@ -79,9 +99,11 @@ retention window, and inspection defaults to live rows.
   never leaves the previous watcher running in parallel, and cancelling the
   visible wait cancels the lineage behind it.
 - Every machine-caused input advances one shared causal budget, whatever
-  transport delivered it; no medium resets it except a human input. An
+  transport delivered it; only human-caused work restarts at the root. The
+  cap is enforced both at registration and at continuation admission, so an
   unattended loop through any combination of ledger and message channel
-  reaches `CHAIN_DEPTH_EXCEEDED` within the same fixed hop count.
+  reaches `CHAIN_DEPTH_EXCEEDED` within the same fixed hop count, and the
+  refusal is a durable failure rather than a retrying block.
 - A continuation whose wait was superseded or cancelled before its input
   started never reaches the Session; one already running is not undone.
 - The count of ledger rows and visible notes for one Session stays bounded by

@@ -105,28 +105,39 @@ The Spec carries the contract; the reasoning that shaped it:
 - **Slot supersession.** A registration belongs to its key or the unnamed
   default slot; registering supersedes the slot's unfinished wait atomically,
   including withdrawal of its not-yet-started continuation input. The proposed
-  per-Session key cap was dropped in implementation: parallel volume is bounded
-  by the causal budget, and a cap nobody can size adds machinery without a
-  demonstrated hazard. Rephrasing and post-compaction
+  per-Session key cap was dropped in implementation: a cap nobody can size adds
+  machinery without a demonstrated hazard (depth bounds path length, never
+  breadth — volume is a separate, unproven concern). Rephrasing and post-compaction
   re-registration become idempotent replacement. Registration responses carry
   the active wait inventory for free, so the agent sees what it replaced and
   what is already pending without a separate `list` round-trip — this addresses
   the silent-drop risk of an unrelated wait sharing the default slot.
-- **Causal depth derived from history.** Depth is computed when a continuation
-  input is prepared: the newest user-role turn in history decides — a human
-  input resets the chain to depth 1; any machine-authored input (ledger wake,
-  delegated chat or steer) continues its recorded depth plus one, and a
-  depthless machine input conservatively counts one hop. No registration-time
-  capture, no new wait columns, and CLI/MCP paths behave identically. Depth
-  binding to
-  Session continuity rather than one wait's lineage matches the real hazard,
-  which is unattended self-propagation of the conversation itself.
+  Supersession never cancels a started turn: withdrawal is atomic at the
+  Session input owner (`unlessActive` inbox semantics), and an input that
+  already drives the runtime is left to complete on its own.
+- **Causal origin frozen at registration, budget enforced at both ends.** The
+  first implementation derived depth from the newest user-role turn in the
+  target Session's history; review correctly rejected this because chronology
+  is not causality — a depth-15 turn in Session A registering a wait targeting
+  Session B would inherit depth 1 from B's unrelated human history. The shipped
+  design freezes the causal origin into the registration: exact invoking-turn
+  provenance when available, the in-flight turn of the requesting Session as
+  CLI attribution, otherwise a human or external root at depth zero. The
+  continuation costs exactly one hop over that frozen depth, registrations at
+  the cap are refused with `CHAIN_DEPTH_EXCEEDED`, and continuation admission
+  durably fails any row that would exceed it — a terminal `failed` receipt,
+  never an endless block. Depth bounds path length, never breadth: it does not
+  cap how many independent keys or targets one shallow turn may fan out to.
 - **Zero-observation results are invalid.** Dynamic enforcement at evaluation:
   a result produced without any `read`/`fetch`/`exec` call fails the wait as a
   deterministic programming error on first occurrence rather than counting
   toward generic check errors. The planned static AST hint at registration was
   dropped: the dynamic gate fires on the first check anyway, and a heuristic
-  that aliases defeat cannot carry its documentation weight.
+  that aliases defeat cannot carry its documentation weight. The counter is a
+  lint-like misuse guard, not a consent proof: a program can observe without
+  depending on the observation, so routing timers to Schedules remains a
+  product policy carried by guidance and the causal budget, not by analysis
+  of arbitrary JavaScript.
 - **Provenance prefix.** Continuation inputs open with origin facts only
   (wait id, reason, registration time), in line with the invariant that text
   Lody sends to agents carries facts, never workflow direction. Richer headers
@@ -174,10 +185,14 @@ The Spec carries the contract; the reasoning that shaped it:
   delivery without a skill read.
 - The ledger hygiene work (settlement, retirement after a 48-hour window, rule
   closing, archive cancellation, live-row list filtering) and the contract
-  change (causal depth derivation, slot supersession with input withdrawal,
+  change (frozen causal origin with enforced budget, slot supersession with input withdrawal,
   provenance prefix, observation requirement) shipped together; archived-session
   cancellation is convergent — the wait cancels at its next evaluation, when
-  the session context read fails permanently, not at archive time.
+  the session context read fails permanently, not at archive time. Retirement
+  covers the incident's dominant shape: a normally matched wait retires from
+  its continuation's settlement, and historical rows self-heal through the
+  hourly prune without a destructive migration — receipts stay as inspectable
+  history in `activities`.
   `existing_session: "current"` for Schedules remains open in the Spec.
 - `#3477` can then be answered: supersession covers its dedup intent, causal
   depth plus slot withdrawal covers the storm and stale-burst mechanics,
@@ -188,13 +203,14 @@ The Spec carries the contract; the reasoning that shaped it:
 
 - The pre-change code claims were verified by reading the working tree on
   2026-11-28; incident numbers come from the reporters. Synthetic integration
-  tests cover supersession fencing, depth derivation across human/machine
-  inputs, zero-observation failure, settlement independence and terminal
-  pruning; no live multi-agent reproduction was run.
+  tests cover supersession fencing, frozen causal depth with cap refusal,
+  queued withdrawal and running-turn survival, zero-observation failure,
+  settlement independence and terminal pruning including the normal-completion
+  path; no live multi-agent reproduction was run.
 - `inputConfig` — including `_lodyAutomation` and `chainDepth` — is part of the
   session document schema, so provenance survives restarts and applies to
-  encrypted sessions uniformly; machine-authored legacy turns without a
-  recorded depth conservatively count one hop.
+  encrypted sessions uniformly; legacy waits without frozen provenance continue
+  at depth 1 as a bounded grace before the cap binds.
 - Whether depth-16 forced stops surface a comprehensible reason to users of
   long unattended pipelines is untested; the fuse is a disaster ceiling, and
   the intended answer to hitting it is re-authorization through a Schedule,

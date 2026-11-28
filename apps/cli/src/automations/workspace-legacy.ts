@@ -406,14 +406,18 @@ export async function createAutomationWorkspaceLegacy(options: {
           await runtime.runPromise(service.wake);
         }),
       wake,
-      command: (input: AutomationCommand, requesterSessionId?: string): Promise<unknown> =>
+      command: (
+        input: AutomationCommand,
+        requesterSessionId?: string,
+        source?: { sessionId: string; turnId: string }
+      ): Promise<unknown> =>
         ownedCall(async () => {
           const command = automationCommandSchema.parse(input);
           const principal = requesterSessionId
             ? authority.author(requesterSessionId as SessionId)
             : auth.userId;
           if (!principal) throw new Error('AUTOMATION_ACTIVE_AUTHOR_REQUIRED');
-          return controller.execute(command, principal, requesterSessionId);
+          return controller.execute(command, principal, requesterSessionId, source);
         }),
       dispose: () =>
         (close ??= (async () => {

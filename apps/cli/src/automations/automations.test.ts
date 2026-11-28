@@ -3209,13 +3209,14 @@ describe('Slot supersession and retirement', () => {
     );
     ledger.updateWait(live.id, 'waiting', { state: 'checking' }, 200);
     const matched = required(ledger.finishWait(live, { resumeText: 'done' }, 300));
-    ledger.cancelWait(live.id, 400);
     const cutoff = 48 * 3_600_000 + 1000;
     expect(ledger.pruneTerminalWaits(cutoff)).toBe(1);
     expect(ledger.wait(cancelled.id)).toBeUndefined();
     expect(ledger.wait(live.id)).toBeDefined();
     const receipt = required(ledger.receipt(required(matched.invocationId)));
     ledger.update(receipt.id, receipt.state, { state: 'settled' }, 500);
+    expect(ledger.pruneTerminalWaits(400)).toBe(0);
+    expect(ledger.wait(live.id)).toBeDefined();
     expect(ledger.pruneTerminalWaits(cutoff)).toBe(1);
     expect(ledger.wait(live.id)).toBeUndefined();
     expect(ledger.rule(live.id)).toBeUndefined();

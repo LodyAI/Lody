@@ -107,6 +107,29 @@ export class SessionAutomationAuthority {
     await this.deps.manager.repo.flush();
     return cancelled;
   }
+  /**
+   * Withdraws one input only while it has not started executing. Observation
+   * ownership ends where execution ownership begins: an already-running turn is
+   * left alone and reported as started rather than stopped.
+   */
+  async withdrawInput(sessionId: SessionId, turnId: string): Promise<'withdrawn' | 'started'> {
+    const startedOrEnded = () =>
+      this.deps.execution.automationInputStarted(sessionId, turnId) ||
+      (this.deps.execution.isInboxInputEnded(sessionId, turnId) &&
+        !this.deps.execution.isInboxInputCanceled(sessionId, turnId));
+    if (startedOrEnded()) return 'started';
+    const doc = await this.deps.manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(doc);
+    for (const item of await backend.getMessageQueue()) {
+      if (item.userTurnId !== turnId) continue;
+      await backend.removeMessageQueueItem(item.$cid);
+    }
+    await this.deps.execution.withdrawAutomationInput(sessionId, turnId);
+    await this.deps.manager.repo.flush();
+    if (startedOrEnded()) return 'started';
+    if (this.deps.execution.isInboxInputCanceled(sessionId, turnId)) return 'withdrawn';
+    return 'withdrawn';
+  }
   private async inspect(
     meta: SessionMeta,
     userId: string,

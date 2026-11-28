@@ -264,6 +264,78 @@ async function archiveAfterMergeFixture() {
 }
 
 describe('Automation control authority', () => {
+  it('freezes the causal depth of the driving input at registration', async () => {
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+      latestUserMsgId: 'wake-9',
+      processingUserMsgId: 'wake-9',
+    };
+    const host = await workspaceFixture(meta);
+    const doc = host.testDocument;
+    await doc.sessionData.commands.appendTurn({
+      id: 'wake-9',
+      role: 'user',
+      timestamp: '2026-11-28T00:00:00.000Z',
+      items: [{ type: 'text', text: 'earlier wake' }],
+      fileDiff: [],
+      inputConfig: { chainDepth: 9 },
+    } as never);
+    const program = "async ({ctx}) => { await ctx.read('session'); return false; }";
+    const registered = (await host.command(
+      { type: 'register', sessionId: 'session-a', program, intervalMs: 30000 },
+      'session-a'
+    )) as { id: string };
+    expect(host.ledger.wait(registered.id)?.causal).toMatchObject({
+      depth: 9,
+      sessionId: 'session-a',
+      turnId: 'wake-9',
+    });
+    await doc.sessionData.commands.appendTurn({
+      id: 'source-12',
+      role: 'user',
+      timestamp: '2026-11-28T00:00:30.000Z',
+      items: [{ type: 'text', text: 'deeper wake' }],
+      fileDiff: [],
+      inputConfig: { chainDepth: 12 },
+    } as never);
+    const exact = (await host.command(
+      {
+        type: 'register',
+        sessionId: 'session-a',
+        program,
+        key: 'exact',
+        intervalMs: 30000,
+      },
+      'session-a',
+      { sessionId: 'session-a', turnId: 'source-12' }
+    )) as { id: string };
+    expect(host.ledger.wait(exact.id)?.causal).toMatchObject({
+      depth: 12,
+      sessionId: 'session-a',
+      turnId: 'source-12',
+    });
+    await doc.sessionData.commands.appendTurn({
+      id: 'wake-16',
+      role: 'user',
+      timestamp: '2026-11-28T00:01:00.000Z',
+      items: [{ type: 'text', text: 'deep wake' }],
+      fileDiff: [],
+      inputConfig: { chainDepth: 16 },
+    } as never);
+    meta.processingUserMsgId = 'wake-16';
+    await expect(
+      host.command(
+        { type: 'register', sessionId: 'session-a', program, key: 'deep', intervalMs: 30000 },
+        'session-a'
+      )
+    ).rejects.toThrow('CHAIN_DEPTH_EXCEEDED');
+    expect(host.ledger.waits(undefined, 'session-a').some((wait) => wait.key === 'deep')).toBe(
+      false
+    );
+  });
   it('executes a registered condition in the Session workspace', async () => {
     const host = await workspaceFixture({
       id: 'session-a',

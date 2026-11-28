@@ -16,6 +16,7 @@ export async function sendDaemonAutomationCommand(
     machineId: string;
     workspaceId: string;
     requesterSessionId?: string;
+    source?: { sessionId: string; turnId: string };
     socketPath?: string;
   }
 ): Promise<unknown> {
@@ -25,6 +26,7 @@ export async function sendDaemonAutomationCommand(
         machineId: target.machineId,
         workspaceId: target.workspaceId,
         requesterSessionId: target.requesterSessionId,
+        source: target.source,
         command,
       })
       .pipe(Effect.result)

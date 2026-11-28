@@ -5157,6 +5157,13 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
       machineId: ctx.machineId,
       workspaceId: ctx.workspaceId,
       requesterSessionId: ctx.sessionId,
+      source:
+        command.type === 'register' || command.type === 'run'
+          ? {
+              sessionId: ctx.sessionId,
+              turnId: (await resolveInvokingTurnSource()).id,
+            }
+          : undefined,
       socketPath: ctx.localControlSocketPath,
     });
   });

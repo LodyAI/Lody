@@ -103,6 +103,8 @@ export type AutomationWait = Omit<AutomationRegistration, 'program'> & {
   /** Condition program; absent for a managed run. */
   program?: string;
   run?: AutomationManagedRun;
+  /** Frozen causal origin: the machine-caused input that produced this registration. */
+  causal?: AutomationCausalOrigin;
   id: string;
   sessionId: string;
   workspaceId: string;
@@ -129,6 +131,12 @@ export const automationProgramContextSchema = z
   })
   .strict();
 export type AutomationProgramContext = z.infer<typeof automationProgramContextSchema>;
+
+export type AutomationCausalOrigin = {
+  depth: number;
+  sessionId?: string;
+  turnId?: string;
+};
 
 export const autoDeliverMergeMethodSchema = z.enum(['auto', 'squash', 'merge', 'rebase']);
 export type AutoDeliverMergeMethod = z.infer<typeof autoDeliverMergeMethodSchema>;

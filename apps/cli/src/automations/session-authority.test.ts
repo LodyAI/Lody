@@ -24,6 +24,11 @@ import { createSessionBackend } from '@/session/session-backend';
 import { AutomationLedger } from './storage/ledger';
 import { AutomationSessionActionsLegacy } from './actions/session-actions-legacy';
 
+function required<A>(value: A | undefined): A {
+  if (value === undefined) throw new Error('Required value missing');
+  return value;
+}
+
 function groupFixture() {
   const rootId = 'root' as SessionId;
   const childId = 'child' as SessionId;
@@ -370,7 +375,7 @@ describe('Automation Session authority', () => {
       ledger.close();
     }
   });
-  it('derives the causal depth of a continuation from history authorship', async () => {
+  it('derives continuation depth from the frozen causal origin, never target history', async () => {
     const f = groupFixture();
     const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
     const adapter = new AutomationSessionActionsLegacy({
@@ -385,12 +390,13 @@ describe('Automation Session authority', () => {
       admission: allowed,
       capacity: allowed,
     });
-    const prepareDepth = async (label: string) => {
+    const prepareDepth = async (label: string, depth?: number) => {
       const { wait } = ledger.registerWait(
         { program: `() => '${label}' === 'never'`, key: `probe-${label}`, intervalMs: 1000 },
         f.rootId,
         'user',
-        Date.now()
+        Date.now(),
+        depth === undefined ? undefined : { depth, sessionId: 'source-session', turnId: 't1' }
       );
       ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, Date.now());
       const matched = ledger.finishWait(wait, { resumeText: 'Continue' }, Date.now());
@@ -402,7 +408,8 @@ describe('Automation Session authority', () => {
     };
     try {
       const doc = await f.manager.getOrCreateSessionDoc(f.rootId);
-      expect(await prepareDepth('empty')).toBe(1);
+      expect(await prepareDepth('legacy')).toBe(1);
+      expect(await prepareDepth('deep', 15)).toBe(16);
       await doc.sessionData.commands.appendTurn({
         id: 'human-1',
         role: 'user',
@@ -410,26 +417,229 @@ describe('Automation Session authority', () => {
         items: [{ type: 'text', text: 'hello' }],
         fileDiff: [],
       } as never);
-      expect(await prepareDepth('human')).toBe(1);
-      await doc.sessionData.commands.appendTurn({
-        id: 'agent-1',
-        role: 'user',
-        timestamp: '2026-11-28T00:01:00.000Z',
-        items: [{ type: 'text', text: 'delegated' }],
-        fileDiff: [],
-        author: { v: 1, kind: 'agent', sessionId: 'other', turnId: 't1', name: 'worker' },
-        inputConfig: { chainDepth: 7 },
-      } as never);
-      expect(await prepareDepth('machine')).toBe(8);
-      await doc.sessionData.commands.appendTurn({
-        id: 'legacy-wake',
-        role: 'user',
-        timestamp: '2026-11-28T00:02:00.000Z',
-        items: [{ type: 'text', text: 'older wake' }],
-        fileDiff: [],
-        author: { v: 1, kind: 'system' },
-      } as never);
-      expect(await prepareDepth('legacy')).toBe(1);
+      expect(await prepareDepth('after-human', 15)).toBe(16);
+    } finally {
+      ledger.close();
+    }
+  });
+
+  it('refuses a continuation whose frozen causal depth reaches the chain cap', async () => {
+    const f = groupFixture();
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+    const adapter = new AutomationSessionActionsLegacy({
+      lody: {
+        documentManager: f.manager,
+        getAutomationSessionAuthority: () => f.authority,
+        hasAutomationSessionWork: () => false,
+      } as unknown as Lody,
+      auth: { userId: 'user', machineId: 'machine' } as AuthContext,
+      workspace: { id: 'workspace' } as WorkspaceSummary,
+      ledger,
+      admission: allowed,
+      capacity: allowed,
+    });
+    try {
+      const { wait } = ledger.registerWait(
+        { program: '() => false', intervalMs: 1000 },
+        f.rootId,
+        'user',
+        Date.now(),
+        { depth: 16, sessionId: 'source-session', turnId: 't1' }
+      );
+      ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, Date.now());
+      const matched = ledger.finishWait(wait, { resumeText: 'Continue' }, Date.now());
+      const receipt = matched?.invocationId ? ledger.receipt(matched.invocationId) : undefined;
+      if (!receipt) throw new Error('missing continuation receipt');
+      expect(await adapter.authorize(receipt)).toEqual({
+        value: 'no',
+        reason: 'chain_depth_exceeded',
+        terminalState: 'failed',
+      });
+    } finally {
+      ledger.close();
+    }
+  });
+
+  it('withdraws a queued continuation but never stops a running one', async () => {
+    const f = groupFixture();
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+    const inputs = new Map<string, { canceled: boolean; finished: boolean; active: boolean }>();
+    f.authority.deps.execution = {
+      acceptAutomationInput: async () => true,
+      automationInputDisposition: (_sessionId: SessionId, turnId: string) => {
+        const row = inputs.get(turnId);
+        if (!row) return 'unsubmitted';
+        if (row.canceled) return 'cancelled';
+        if (row.finished) return 'ended';
+        return 'unknown';
+      },
+      automationInputStarted: (_sessionId: SessionId, turnId: string) =>
+        inputs.get(turnId)?.active === true,
+      withdrawAutomationInput: async (_sessionId: SessionId, turnId: string) => {
+        const row = inputs.get(turnId);
+        if (!row || row.active) return;
+        row.canceled = true;
+        row.finished = true;
+      },
+      cancelAutomationInput: async () => true,
+      isInboxInputCanceled: (_sessionId: SessionId, turnId: string) =>
+        inputs.get(turnId)?.canceled ?? false,
+      isInboxInputEnded: (_sessionId: SessionId, turnId: string) => {
+        const row = inputs.get(turnId);
+        return row ? row.canceled || row.finished : false;
+      },
+      hasBlockedAutomationExecution: () => false,
+      getExecutionSnapshot: () => ({ hasRewriteBarrier: false }),
+      guardAutomationAction: async (
+        _ids: SessionId[],
+        _user: string,
+        body: () => Promise<unknown>
+      ) => body(),
+    } as unknown as SessionExecutionService;
+    const adapter = new AutomationSessionActionsLegacy({
+      lody: {
+        documentManager: f.manager,
+        getAutomationSessionAuthority: () => f.authority,
+        hasAutomationSessionWork: () => false,
+      } as unknown as Lody,
+      auth: { userId: 'user', machineId: 'machine' } as AuthContext,
+      workspace: { id: 'workspace' } as WorkspaceSummary,
+      ledger,
+      admission: allowed,
+      capacity: allowed,
+    });
+    const deliver = (label: string) => {
+      const { wait } = ledger.registerWait(
+        { program: `() => '${label}'`, key: `slot-${label}`, intervalMs: 1000 },
+        f.rootId,
+        'user',
+        Date.now()
+      );
+      ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, Date.now());
+      const matched = ledger.finishWait(wait, { resumeText: 'Continue' }, Date.now());
+      const receipt = matched?.invocationId ? ledger.receipt(matched.invocationId) : undefined;
+      if (!receipt) throw new Error('missing continuation receipt');
+      inputs.set(receipt.turnId, { canceled: false, finished: false, active: false });
+      return receipt;
+    };
+    try {
+      const queued = deliver('queued');
+      ledger.update(
+        queued.id,
+        queued.state,
+        { state: 'cancelling', reason: 'guard:slot_superseded' },
+        Date.now()
+      );
+      const fenced = ledger.receipt(queued.id);
+      if (!fenced) throw new Error('missing fenced receipt');
+      expect(await adapter.cancel(fenced)).toEqual({
+        state: 'superseded',
+        reason: 'guard:slot_superseded',
+      });
+      expect(inputs.get(queued.turnId)).toMatchObject({ canceled: true });
+
+      const running = deliver('running');
+      const runningInput = inputs.get(running.turnId);
+      if (!runningInput) throw new Error('missing running input');
+      runningInput.active = true;
+      ledger.update(
+        running.id,
+        running.state,
+        { state: 'cancelling', reason: 'guard:slot_superseded' },
+        Date.now()
+      );
+      const fencedRunning = ledger.receipt(running.id);
+      if (!fencedRunning) throw new Error('missing fenced running receipt');
+      const started = await adapter.cancel(fencedRunning);
+      expect(started.state).toBe('unknown');
+      expect(inputs.get(running.turnId)).toMatchObject({ canceled: false, active: true });
+    } finally {
+      ledger.close();
+    }
+  });
+
+  it('ends an automation-only chain at the shared causal cap with a durable failure', async () => {
+    const f = groupFixture();
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+    const adapter = new AutomationSessionActionsLegacy({
+      lody: {
+        documentManager: f.manager,
+        getAutomationSessionAuthority: () => f.authority,
+        hasAutomationSessionWork: () => false,
+      } as unknown as Lody,
+      auth: { userId: 'user', machineId: 'machine' } as AuthContext,
+      workspace: { id: 'workspace' } as WorkspaceSummary,
+      ledger,
+      admission: allowed,
+      capacity: allowed,
+    });
+    const host = Layer.succeed(AutomationHost, {
+      evaluate: () => Effect.succeed({ resumeText: 'Continue' }),
+      authorize: (receipt) => Effect.tryPromise(() => adapter.authorize(receipt)),
+      condition: () => Effect.succeed({ value: 'yes', reason: 'wait_matched' }),
+      prepare: (receipt) => Effect.tryPromise(() => adapter.prepare(receipt)),
+      submit: (receipt) => Effect.tryPromise(() => adapter.submit(receipt)),
+      reconcile: (receipt) => Effect.tryPromise(() => adapter.reconcile(receipt)),
+      cancel: (receipt) => Effect.tryPromise(() => adapter.cancel(receipt)),
+      report: () => Effect.void,
+    });
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const runtime = yield* Automations;
+            const shallow = ledger.registerWait(
+              { program: '() => false', key: 'shallow', intervalMs: 1000 },
+              f.rootId,
+              'user',
+              0,
+              { depth: 15, sessionId: f.rootId, turnId: 'wake-15' }
+            );
+            ledger.updateWait(shallow.wait.id, 'waiting', { state: 'checking' }, 1);
+            ledger.finishWait(shallow.wait, { resumeText: 'Continue' }, 2);
+            const deep = ledger.registerWait(
+              { program: '() => false', key: 'deep', intervalMs: 1000 },
+              f.rootId,
+              'user',
+              0,
+              { depth: 16, sessionId: f.rootId, turnId: 'wake-16' }
+            );
+            ledger.updateWait(deep.wait.id, 'waiting', { state: 'checking' }, 1);
+            ledger.finishWait(deep.wait, { resumeText: 'Continue' }, 2);
+            const shallowReceipt = ledger.receipt(
+              required(ledger.wait(shallow.wait.id)?.invocationId)
+            );
+            const deepReceipt = ledger.receipt(required(ledger.wait(deep.wait.id)?.invocationId));
+            yield* runtime.pass;
+            if (!shallowReceipt) throw new Error('missing shallow receipt');
+            const prepared = yield* Effect.tryPromise(() => adapter.prepare(shallowReceipt));
+            if (prepared.state !== 'resolved')
+              throw new Error(`prepare blocked: ${prepared.reason}`);
+            expect(
+              (prepared.prepared as { config: { chainDepth?: number } }).config.chainDepth
+            ).toBe(16);
+            for (let pass = 0; pass < 3; pass++) {
+              const current = deepReceipt && ledger.receipt(deepReceipt.id);
+              if (!current) throw new Error('missing deep receipt');
+              if (current.state === 'failed') break;
+              ledger.update(current.id, current.state, { retryAt: 0 }, 0);
+              yield* runtime.pass;
+            }
+            expect(ledger.receipt(required(deepReceipt?.id))).toMatchObject({
+              state: 'failed',
+              reason: 'chain_depth_exceeded',
+            });
+            const backend = yield* Effect.tryPromise(async () =>
+              createSessionBackend(await f.manager.getOrCreateSessionDoc(f.rootId))
+            );
+            expect(
+              (yield* Effect.tryPromise(() => backend.getMessageQueue())).filter(
+                (item) => item.operationId === deepReceipt?.id
+              )
+            ).toEqual([]);
+          }).pipe(Effect.provide(Automations.layer(ledger).pipe(Layer.provide(host))))
+        )
+      );
     } finally {
       ledger.close();
     }

@@ -82,7 +82,8 @@ availability. Expired waits cannot create a continuation.
 Every registration belongs to a slot: its optional `key` (CLI `--key`), or the
 Session's shared default slot when omitted. Registering into a slot atomically
 supersedes that slot's unfinished wait and withdraws its continuation when it has
-not started execution; a continuation already running is not undone. Rephrasing or
+not started execution, atomically at the Session input owner; a continuation
+already running is never cancelled by replacement. Rephrasing or
 redirecting a task therefore replaces its watcher rather than multiplying it, and
 cancelling the visible wait ends the lineage behind it. Parallel observation is an
 explicit opt-in through distinct keys. Registration reports the superseded wait ids
@@ -190,16 +191,22 @@ A continuation input opens with frozen provenance facts — the wait, its key,
 reason and registration time — before the resume text, so the agent can tell an
 automation wake from a human message and a superseded continuation never
 masquerades as a fresh instruction. The prefix states facts only. Every
-automation continuation also advances the Session's causal chain depth by one
-over the machine input before it, and only human input resets that count, so an
-unattended loop through the ledger or cross-Session messages reaches
-`CHAIN_DEPTH_EXCEEDED` within the shared hop budget. A receipt settles when the
-input it delivered settles, regardless of other work the Session group still
-runs; delegated outcomes report through their own owners.
+automation continuation advances the Session's causal chain depth by one hop
+over the depth frozen into its registration: the exact invoking turn when the
+runtime carries provenance, otherwise the requesting Session's in-flight turn,
+otherwise a human or external root at depth zero. Target-Session history never
+resets that count. A turn at the cap cannot register new machine-caused work,
+and a continuation whose frozen depth would exceed it fails durably instead of
+blocking, so an unattended loop through the ledger or cross-Session messages
+reaches `CHAIN_DEPTH_EXCEEDED` within the shared hop budget. A receipt settles
+when the input it delivered settles, regardless of other work the Session group
+still runs; delegated outcomes report through their own owners.
 
 The ledger retires what has ended. Terminal waits — cancelled, expired, failed,
-superseded — and their one-shot rules are pruned 48 hours after their last
-update, except while their continuation is still in flight. Archiving or
+superseded — and their one-shot rules are pruned 48 hours after their terminal
+update; a normally matched wait retires from its continuation's settlement,
+measured from settlement time, while receipts stay inspectable through
+`activities`. Archiving or
 deleting the Session cancels its unfinished waits on the next evaluation. `list`
 returns only live rows: unfinished waits and failed waits still awaiting a
 decision; completed history is paged through `activities`.

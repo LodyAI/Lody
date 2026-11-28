@@ -387,7 +387,7 @@ export class LodyFleet {
             ok: true,
             result: await (
               await this.ensureAutomations(runtime)
-            ).command(message.command, message.requesterSessionId),
+            ).command(message.command, message.requesterSessionId, message.source),
           };
         } catch (cause) {
           return {

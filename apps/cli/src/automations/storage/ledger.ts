@@ -14,6 +14,7 @@ import {
 } from '@lody/shared/automations';
 import { isDeepStrictEqual } from 'node:util';
 import type {
+  AutomationCausalOrigin,
   AutomationEvent,
   AutomationReceipt,
   AutomationRule,
@@ -74,7 +75,8 @@ export class AutomationLedger {
     input: AutomationRegistration,
     sessionId: string,
     userId: string,
-    now: number
+    now: number,
+    causal?: AutomationCausalOrigin
   ): { wait: AutomationWait; superseded: AutomationWait[] } {
     const registration = automationRegistrationSchema.parse(input);
     return this.connection.withImmediate(() => {
@@ -92,6 +94,7 @@ export class AutomationLedger {
       if (existing) return { wait: existing, superseded: [] };
       const wait: AutomationWait = {
         ...registration,
+        ...(causal ? { causal } : {}),
         id: randomUUID(),
         sessionId,
         workspaceId: this.workspaceId,
@@ -151,7 +154,8 @@ export class AutomationLedger {
     sessionId: string,
     userId: string,
     logDirectory: string,
-    now: number
+    now: number,
+    causal?: AutomationCausalOrigin
   ): AutomationWait {
     const { reason, ...run } = automationRunSchema.parse(input);
     return this.connection.withImmediate(() => {
@@ -174,6 +178,7 @@ export class AutomationLedger {
       const id = randomUUID();
       const wait: AutomationWait = {
         id,
+        ...(causal ? { causal } : {}),
         sessionId,
         workspaceId: this.workspaceId,
         ownerUserId: userId,
@@ -477,7 +482,8 @@ export class AutomationLedger {
           action: { kind: 'agent.invoke', parameters: invocation },
         },
         now,
-        current.evidence
+        current.evidence,
+        current.causal
       );
       this.finishDelivery(delivery, undefined, now);
       return this.updateWait(
@@ -524,8 +530,15 @@ export class AutomationLedger {
           WHERE state IN ('cancelled','expired','failed','superseded') AND updated_at<? LIMIT 500`
         )
         .all(cutoff) as Array<JsonRow & { id: string }>;
+      const matchedRows = this.connection.raw
+        .prepare(
+          `SELECT w.id,w.payload FROM waits w JOIN receipts r ON r.id=w.invocation_id
+          WHERE w.state='matched' AND r.state IN ('settled','failed','cancelled','superseded')
+          AND r.updated_at<? LIMIT 500`
+        )
+        .all(cutoff) as Array<JsonRow & { id: string }>;
       let pruned = 0;
-      for (const row of rows) {
+      for (const row of [...rows, ...matchedRows]) {
         const wait = JSON.parse(row.payload) as AutomationWait;
         const receipt = wait.invocationId && this.receipt(wait.invocationId);
         if (receipt && !terminal.has(receipt.state)) continue;
@@ -755,7 +768,8 @@ export class AutomationLedger {
     delivery: Delivery,
     input: AutomationContinuation,
     now: number,
-    evidence?: AutomationEvidence[]
+    evidence?: AutomationEvidence[],
+    causal?: AutomationCausalOrigin
   ): AutomationReceipt {
     const intent = automationContinuationSchema.parse(input);
     return this.connection.withImmediate(() => {
@@ -810,6 +824,7 @@ export class AutomationLedger {
         id,
         deliveryId: delivery.id,
         ...(evidence?.length ? { evidence } : {}),
+        ...(causal ? { causal } : {}),
         rule: delivery.rule,
         event: delivery.event,
         intent,

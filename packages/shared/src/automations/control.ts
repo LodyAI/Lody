@@ -38,6 +38,10 @@ export const automationControlRequestSchema = z
     machineId: id,
     workspaceId: id,
     requesterSessionId: id.optional(),
+    source: z
+      .object({ sessionId: id, turnId: id })
+      .strict()
+      .optional(),
     command: automationCommandSchema,
   })
   .strict();

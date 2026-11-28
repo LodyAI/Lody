@@ -1209,6 +1209,16 @@ export class SessionExecutionService {
     return true;
   }
 
+  /** True once this input drives the session's active runtime turn. */
+  automationInputStarted(sessionId: SessionId, turnId: string): boolean {
+    return this.turnRuntimeBySession.get(sessionId)?.invocation?.sourceTurnId === turnId;
+  }
+  /** Withdraws one queued input without touching an active runtime that already owns it. */
+  async withdrawAutomationInput(sessionId: SessionId, turnId: string): Promise<void> {
+    if (this.automationInputStarted(sessionId, turnId)) return;
+    await this.operationInbox?.abandonInput(this.deps.workspaceId, sessionId, turnId, true);
+  }
+
   async acceptAutomationInput(args: {
     sessionId: SessionId;
     turnId: string;

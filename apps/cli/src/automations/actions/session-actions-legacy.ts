@@ -27,7 +27,6 @@ import type { AuthContext } from '@/lib/command-runtime';
 import type { WorkspaceSummary } from '@/lib/workspace';
 import { createSessionBackend } from '@/session/session-backend';
 import { readMergedAgentConfigById } from '@/lib/agent-config-machine-flock';
-import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import {
   applyAgentRoleCreateTarget,
   resolveAgentRoleCreateFromCatalog,
@@ -69,25 +68,6 @@ function automationProvenancePrefix(wait: AutomationWait | undefined): string {
     if (wait.run) facts.managedRun = true;
   }
   return JSON.stringify(facts);
-}
-
-/**
- * One medium-independent causal budget: the newest user input decides. A human
- * input means depth 1; a machine-authored input continues its recorded depth,
- * and an unreadable or depthless one conservatively counts one hop.
- */
-async function deriveAutomationChainDepth(
-  backend: Awaited<ReturnType<typeof createSessionBackend>>
-): Promise<number> {
-  try {
-    const latest = await backend.readLatestTurn('user');
-    if (!latest) return 1;
-    if (turnNotificationAudience(latest.author).kind === 'user') return 1;
-    const prior = normalizeSessionTurnInputConfig(latest.inputConfig)?.chainDepth;
-    return (prior ?? 0) + 1;
-  } catch {
-    return 1;
-  }
 }
 
 function buildInvocationPrompt(
@@ -321,7 +301,7 @@ export class AutomationSessionActionsLegacy {
         inputBlocks: [{ type: 'text', text: prompt }],
         cliType: meta.cliType,
         agentType: meta.agentType,
-        chainDepth: await deriveAutomationChainDepth(backend),
+        chainDepth: (receipt.causal?.depth ?? 0) + 1,
         resume: (work?.nativeSessionId ?? meta.acpSessionId ?? undefined) as
           | ACPSessionId
           | undefined,
@@ -561,6 +541,14 @@ export class AutomationSessionActionsLegacy {
       return observed.state === 'settled'
         ? { state: 'settled', reason: 'archive_already_committed' }
         : { state: 'cancelled', reason: 'user_cancelled' };
+    }
+    if (receipt.reason?.includes('slot_superseded')) {
+      const withdrawn = await this.authority.withdrawInput(
+        receipt.sessionId as SessionId,
+        receipt.turnId
+      );
+      if (withdrawn === 'withdrawn') return { state: 'superseded', reason: receipt.reason };
+      return { state: 'unknown', reason: receipt.reason };
     }
     const workId = receipt.prepared?.workId;
     const work = typeof workId === 'string' ? this.options.ledger.work(workId) : undefined;

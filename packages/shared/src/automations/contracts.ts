@@ -1,4 +1,5 @@
 import type { AutomationEvidence } from './reads';
+import type { AutomationCausalOrigin } from './conditions';
 import { z } from 'zod';
 
 const id = z.string().min(1).max(512);
@@ -205,6 +206,7 @@ export type AutomationReceipt = {
   id: string;
   deliveryId: string;
   evidence?: AutomationEvidence[];
+  causal?: AutomationCausalOrigin;
   rule: AutomationRule;
   event: AutomationEvent;
   intent: AutomationContinuation;

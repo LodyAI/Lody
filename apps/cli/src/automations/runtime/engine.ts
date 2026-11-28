@@ -190,7 +190,12 @@ export class Automations extends Context.Service<
             const result = yield* host.cancel(receipt);
             yield* persist(receipt, {
               ...result,
-              state: TERMINAL_STATES.has(result.state) ? result.state : 'cancelling',
+              state:
+                result.state === 'unknown' && receipt.reason?.includes('slot_superseded')
+                  ? 'unknown'
+                  : TERMINAL_STATES.has(result.state)
+                    ? result.state
+                    : 'cancelling',
               retryAt: now + 15_000,
             });
             return;
