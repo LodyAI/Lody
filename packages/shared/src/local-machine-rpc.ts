@@ -900,6 +900,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
     })
     .strict(),
 ]);
+export type SessionLiveStatusResponse = z.infer<typeof SessionLiveStatusResponseSchema>;
 
 export const LocalMachineRpcResultSchema = z.union([
   SessionHistoryReadResponseSchema,

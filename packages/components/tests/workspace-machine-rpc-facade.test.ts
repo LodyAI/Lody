@@ -2268,3 +2268,158 @@ it.each(['ios-simulator', 'android-emulator'] as const)(
     expect(await control(args)).toMatchObject({ success: false });
   }
 );
+
+describe('requestSessionLiveStatus', () => {
+  it('routes over local IPC on the local plane', async () => {
+    const invoke = vi.fn(async (channel: string, request: unknown) => {
+      expect(channel).toBe('machineRpc.send');
+      return {
+        ok: true as const,
+        result: {
+          type: 'session/live-status_response' as const,
+          machineId: localMachineId,
+          sessionId,
+          success: true as const,
+          state: 'running' as const,
+          observedAtMs: 1_700_000_000_000,
+        },
+        request,
+      };
+    });
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: { invoke },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      getMachineRpcClient: async () => {
+        throw new Error('unexpected cloud RPC on local plane');
+      },
+    });
+    const result = await facade.requestSessionLiveStatus(localMachineId, sessionId, {
+      timeoutMs: 2_500,
+    });
+    expect(result).toEqual({
+      type: 'session/live-status_response',
+      machineId: localMachineId,
+      sessionId,
+      success: true,
+      state: 'running',
+      observedAtMs: 1_700_000_000_000,
+    });
+    expect(invoke).toHaveBeenCalledWith('machineRpc.send', {
+      machineId: localMachineId,
+      workspaceId,
+      method: 'session/live-status',
+      params: { sessionId },
+      timeoutMs: 2_500,
+    });
+  });
+
+  it('uses encrypted feature RPC for protected remote machines and never falls back to plaintext', async () => {
+    const requests: LocalMachineRpcRequest[] = [];
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      getMachineRpcClient: async () => {
+        throw new Error('plaintext RPC forbidden in encrypted workspaces');
+      },
+      requestEncryptedFeature: async (request) => {
+        requests.push(request);
+        return {
+          ok: true,
+          result: {
+            type: 'session/live-status_response',
+            machineId: remoteMachineId,
+            sessionId,
+            success: true,
+            state: 'waiting',
+            observedAtMs: 1_700_000_000_100,
+          },
+        } as never;
+      },
+    });
+    expect(await facade.requestSessionLiveStatus(remoteMachineId, sessionId)).toMatchObject({
+      success: true,
+      state: 'waiting',
+    });
+    expect(requests).toEqual([
+      {
+        machineId: remoteMachineId,
+        workspaceId,
+        method: 'session/live-status',
+        params: { sessionId },
+        timeoutMs: 5_000,
+      },
+    ]);
+
+    const closedFacade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      getMachineRpcClient: async () => {
+        throw new Error('plaintext RPC forbidden in encrypted workspaces');
+      },
+    });
+    expect(await closedFacade.requestSessionLiveStatus(remoteMachineId, sessionId)).toMatchObject({
+      success: false,
+      state: 'unknown',
+    });
+  });
+
+  it('uses cloud RPC for plaintext remote machines and converts timeout or failure to unknown', async () => {
+    let reply: unknown = {
+      type: 'session/live-status_response',
+      machineId: remoteMachineId,
+      sessionId,
+      success: true,
+      state: 'unknown',
+      observedAtMs: 1_700_000_000_200,
+      reason: 'No active session presence or pending daemon work was observed.',
+    };
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      getMachineRpcClient: async () =>
+        ({
+          requestSessionLiveStatus: async () => {
+            if (reply instanceof Error) throw reply;
+            return reply;
+          },
+        }) as never,
+    });
+    expect(await facade.requestSessionLiveStatus(remoteMachineId, sessionId)).toMatchObject({
+      success: true,
+      state: 'unknown',
+    });
+    reply = null;
+    expect(await facade.requestSessionLiveStatus(remoteMachineId, sessionId)).toMatchObject({
+      success: false,
+      state: 'unknown',
+    });
+    reply = new Error('transport offline');
+    expect(await facade.requestSessionLiveStatus(remoteMachineId, sessionId)).toMatchObject({
+      success: false,
+      state: 'unknown',
+      error: 'transport offline',
+    });
+  });
+});

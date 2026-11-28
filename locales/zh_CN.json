@@ -7312,5 +7312,12 @@
   "chat.machineSelector.diskFreeSuffix": "可用",
   "chat.machineSelector.cpuTitle": "CPU 占用 {{percent}}%（共 {{cores}} 核）",
   "chat.machineSelector.memoryTitle": "已用内存：{{pair}}",
-  "chat.machineSelector.diskTitle": "可用磁盘：{{pair}}"
+  "chat.machineSelector.diskTitle": "可用磁盘：{{pair}}",
+  "schedules.runNowConfirm": "仍然运行",
+  "schedules.runNowBusyTitle": "对话“{{chat}}”正在运行中",
+  "schedules.runNowBusyHelp": "立即运行“{{title}}”将按当前队列或引导策略向该对话发送新一轮任务。确定要继续吗？",
+  "schedules.runNowBusyDetailHelp": "立即运行“{{title}}”将使用上次保存的配置（不包含未保存修改），并按当前队列或引导策略向该对话发送新一轮任务。确定要继续吗？",
+  "schedules.runNowStatusUnknownTitle": "无法确认“{{chat}}”是否正在运行",
+  "schedules.runNowStatusUnknownHelp": "当前无法获取该对话的实时运行状态。立即运行“{{title}}”可能会排队或与正在进行的工作并行。确定要继续吗？",
+  "schedules.runNowStatusUnknownDetailHelp": "当前无法获取该对话的实时运行状态。立即运行“{{title}}”将使用上次保存的配置（不包含未保存修改），可能会排队或与正在进行的工作并行。确定要继续吗？"
 }

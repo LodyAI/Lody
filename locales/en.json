@@ -7312,5 +7312,12 @@
   "chat.machineSelector.diskFreeSuffix": "free",
   "chat.machineSelector.cpuTitle": "CPU usage {{percent}}% across {{cores}} cores",
   "chat.machineSelector.memoryTitle": "Memory used: {{pair}}",
-  "chat.machineSelector.diskTitle": "Disk available: {{pair}}"
+  "chat.machineSelector.diskTitle": "Disk available: {{pair}}",
+  "schedules.runNowConfirm": "Run anyway",
+  "schedules.runNowBusyTitle": "“{{chat}}” is currently running",
+  "schedules.runNowBusyHelp": "Running “{{title}}” now will send a new turn to this chat using its current queue or steer behavior. Run anyway?",
+  "schedules.runNowBusyDetailHelp": "Running “{{title}}” now uses the last saved schedule (unsaved edits are excluded) and will send a new turn to this chat using its current queue or steer behavior. Run anyway?",
+  "schedules.runNowStatusUnknownTitle": "Couldn’t confirm whether “{{chat}}” is running",
+  "schedules.runNowStatusUnknownHelp": "Live status for this chat is unavailable right now. Running “{{title}}” now may queue or run alongside active work in this chat. Run anyway?",
+  "schedules.runNowStatusUnknownDetailHelp": "Live status for this chat is unavailable right now. Running “{{title}}” uses the last saved schedule (unsaved edits are excluded) and may queue or run alongside active work in this chat. Run anyway?"
 }
