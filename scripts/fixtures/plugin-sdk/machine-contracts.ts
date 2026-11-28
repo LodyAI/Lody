@@ -1,5 +1,5 @@
-import { defineMutation, defineQuery, hostQueries } from '@lody/plugin-sdk';
-import { defineMachinePlugin } from '@lody/plugin-sdk/machine';
+import { defineMutation, defineQuery, lodyQueries } from '@lody/plugin-sdk';
+import { defineMachinePlugin, lodyCommands } from '@lody/plugin-sdk/machine';
 import { z } from 'zod';
 import { runSuiteTool } from './examples/test-report/shared';
 
@@ -26,17 +26,28 @@ const recoverReviewMutation = defineMutation('project', 'review.ensure', {
 });
 
 export const machineContractChecks = defineMachinePlugin((machine) => {
+  // @ts-expect-error Pre-Turn prompt injection (`beforeSessionTurn`) was removed to preserve E2EE prompt integrity.
+  void machine.beforeSessionTurn;
+
   machine.query(machineDigestQuery, (ctx, input) => {
     const limit: number = input.limit;
     const machineId: string = ctx.target.machineId;
+    const dataDir: string = ctx.dataDir;
     void machineId;
+    void dataDir;
     // @ts-expect-error Machine-scoped context does not expose projectId.
     void ctx.target.projectId;
+    // @ts-expect-error Separate `sessionDataDir` was collapsed into `ctx.dataDir` keyed by immutable IDs.
+    void ctx.sessionDataDir;
+    // @ts-expect-error Duplicate `ctx.env` was unified into `ctx.config`.
+    void ctx.env;
     return { count: limit };
   });
 
   machine.query(sessionMonitorQuery, async (ctx) => {
-    const detail = await ctx.host.read(ctx.target, hostQueries.sessionDetail, {
+    // @ts-expect-error Bespoke `answerQuestion` stays removed on machine port too; use 1:1 `respondInteraction`.
+    void ctx.lody.sessions.answerQuestion;
+    const detail = await ctx.lody.read(ctx.target, lodyQueries.sessionDetail, {
       recentTurnLimit: 3,
     });
     return { activeStep: detail.recentTurns[0]?.previewText ?? null };
@@ -44,11 +55,13 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
 
   machine.mutation(recoverReviewMutation, async (ctx, input) => {
     const key = `review/${input.prNumber}/${input.headSha}`;
+    ctx.invalidate(sessionMonitorQuery);
     // Replaying the original request also recovers an archived Session; an active-only
     // catalog lookup must not decide whether this operation has already been accepted.
-    const created = await ctx.host.sessions.create(ctx.target, {
+    const created = await ctx.lody.sessions.create(ctx.target, {
       requestId: input.requestId,
       businessKey: key,
+      roleId: 'role_reviewer',
       pullRequestUrl: `https://github.com/lodyai/lody/pull/${input.prNumber}`,
       prompt: `Review PR #${input.prNumber} at ${input.headSha}.`,
     });
@@ -61,5 +74,24 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
   // @ts-expect-error Tool handler return type must satisfy the tool output schema.
   machine.tool(runSuiteTool, () => ({ wrongField: true }));
 
-  return () => {};
+  return async () => {};
+});
+
+export const machineWorkflowEventChecks = defineMachinePlugin((machine) => {
+  machine.events.on('session.tool.completed', async (ctx, event) => {
+    const completedTool: string = event.toolCall.toolName;
+    void completedTool;
+    const raw = await ctx.lody.readSnapshot({
+      kind: 'session-meta',
+      session: event.session,
+    });
+    // @ts-expect-error Machine raw document snapshots are deeply readonly.
+    raw.doc.tampered = 'nope';
+    await ctx.lody.execute(event.session, lodyCommands.sessionSettle);
+    await ctx.lody.sessions.respondInteraction(event.session, {
+      requestId: 'req_1',
+      outcome: { outcome: 'selected', optionId: 'allow_once' },
+      originTurn: { session: event.session, userTurnId: 'user_turn_1' },
+    });
+  });
 });
