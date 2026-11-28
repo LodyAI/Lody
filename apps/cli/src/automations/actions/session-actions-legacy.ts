@@ -301,7 +301,7 @@ export class AutomationSessionActionsLegacy {
         inputBlocks: [{ type: 'text', text: prompt }],
         cliType: meta.cliType,
         agentType: meta.agentType,
-        chainDepth: (receipt.causal?.depth ?? 0) + 1,
+        ...(work ? {} : { chainDepth: (receipt.causal?.depth ?? 0) + 1 }),
         resume: (work?.nativeSessionId ?? meta.acpSessionId ?? undefined) as
           | ACPSessionId
           | undefined,

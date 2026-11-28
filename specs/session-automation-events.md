@@ -63,7 +63,9 @@ invoking turn when provenance is available, otherwise the in-flight turn of
 the requesting Session, otherwise a human or external root at depth zero.
 A continuation input then costs exactly one hop over that frozen depth,
 whether it continues a condition wait or a managed run, and target-Session
-history never resets it — chronology is not causality. A turn at the causal
+history never resets it — chronology is not causality. Recovery of unfinished
+work is resumption, not new intent: its continuation preserves the original
+input's depth rather than paying a hop. A turn at the causal
 cap defined in [Session orchestration](session-orchestration.md) cannot
 register new machine-caused work, and a continuation whose frozen depth would
 exceed the cap fails durably rather than blocking forever. The same budget

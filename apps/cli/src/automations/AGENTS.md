@@ -46,8 +46,9 @@
   admission. Active continuations retain source demand; results cannot forge provenance.
 - A continuation input opens with frozen provenance facts and joins the causal chain:
   registration freezes the invoking input's machine-caused depth, each continuation
-  costs exactly one hop over it, the cap refuses registration and fails continuation
-  admission durably, and only human-caused work restarts at the root. A receipt
+  costs exactly one hop over it, recovery of unfinished work preserves the original
+  input's depth rather than paying a hop, the cap refuses registration and fails
+  continuation admission durably, and only human-caused work restarts at the root. A receipt
   settles when its delivered input settles; other Session group work never un-settles
   it. Terminal waits retire after the retention window, and inspection defaults to
   live rows.

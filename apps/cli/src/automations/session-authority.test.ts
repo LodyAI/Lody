@@ -423,6 +423,113 @@ describe('Automation Session authority', () => {
     }
   });
 
+  it('preserves the original input depth through a capacity recovery continuation', async () => {
+    const f = groupFixture();
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+    const adapter = new AutomationSessionActionsLegacy({
+      lody: {
+        documentManager: f.manager,
+        getAutomationSessionAuthority: () => f.authority,
+        hasAutomationSessionWork: () => false,
+      } as unknown as Lody,
+      auth: { userId: 'user', machineId: 'machine' } as AuthContext,
+      workspace: { id: 'workspace' } as WorkspaceSummary,
+      ledger,
+      admission: allowed,
+      capacity: allowed,
+    });
+    try {
+      const doc = await f.manager.getOrCreateSessionDoc(f.rootId);
+      await doc.sessionData.commands.appendTurn({
+        id: 'input-deep',
+        role: 'user',
+        timestamp: '2026-11-28T00:00:00.000Z',
+        items: [{ type: 'text', text: 'deep machine work' }],
+        fileDiff: [],
+        inputConfig: { chainDepth: 15 },
+      } as never);
+      ledger.putWork({
+        id: 'work-deep',
+        ownerUserId: 'user',
+        updatedAt: 1,
+        sessionId: f.rootId,
+        turnId: 'turn-deep',
+        nativeSessionId: 'native-deep',
+        bindingId: 'binding',
+        fingerprint: 'fingerprint',
+        inputRef: 'input-deep',
+        confirmedBoundary: 'assistant',
+        unresolvedEffects: false,
+        release: 'released',
+        state: 'blocked_on_capacity',
+        attempts: 1,
+      });
+      ledger.upsert(
+        {
+          id: 'rule-recovery',
+          name: 'Recover capacity',
+          scope: { workspaceId: 'workspace', sessionId: f.rootId },
+          selector: { types: ['provider.quota.available'] },
+          enabled: true,
+          handler: {
+            kind: 'agent',
+            invocation: {
+              target: { kind: 'existing', sessionId: f.rootId, onUnavailable: 'blocked' },
+              input: { kind: 'pending_work', ref: 'work-deep' },
+              ifBusy: 'enqueue',
+            },
+          },
+          grants: {
+            actions: ['agent.invoke'],
+            sessionIds: [f.rootId],
+            agentRoleIds: [],
+            bindingIds: [],
+            allowLinkedSession: false,
+            allowCapacityAttempt: false,
+          },
+          budget: { maxActionsPerEvent: 10, maxInvocationsPerCorrelation: 2, maxDepth: 4 },
+        },
+        'user',
+        1
+      );
+      ledger.publish({
+        id: 'ev-quota',
+        source: 'session/session',
+        type: 'provider.quota.available',
+        version: 1,
+        subject: 'quota',
+        observedAt: 2,
+        scope: { workspaceId: 'workspace', sessionId: f.rootId },
+        data: { workId: 'work-deep' },
+        provenance: 'poll',
+        completeness: 'observed',
+        depth: 0,
+      });
+      const delivery = ledger.deliveries().find((item) => item.rule.id === 'rule-recovery');
+      if (!delivery) throw new Error('missing recovery delivery');
+      const receipt = ledger.accept(
+        delivery,
+        {
+          key: 'work-deep',
+          action: {
+            kind: 'agent.invoke',
+            parameters: {
+              target: { kind: 'existing', sessionId: f.rootId, onUnavailable: 'blocked' },
+              input: { kind: 'pending_work', ref: 'work-deep' },
+              ifBusy: 'enqueue',
+            },
+          },
+        },
+        3
+      );
+      const prepared = await adapter.prepare(receipt);
+      if (prepared.state !== 'resolved') throw new Error(`prepare blocked: ${prepared.reason}`);
+      expect((prepared.prepared as { config: { chainDepth?: number } }).config.chainDepth).toBe(15);
+    } finally {
+      ledger.close();
+    }
+  });
+
   it('refuses a continuation whose frozen causal depth reaches the chain cap', async () => {
     const f = groupFixture();
     const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
