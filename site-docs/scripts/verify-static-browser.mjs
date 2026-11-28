@@ -494,6 +494,95 @@ async function faults() {
       await edgeContext.close();
     }
   }
+  const attributionContext = await newContext();
+  try {
+    await run(
+      'organic landing attribution across SPA navigation to download and login',
+      async () => {
+        const page = await attributionContext.newPage();
+        const pageErrors = [];
+        page.on('pageerror', (error) => pageErrors.push(error.message));
+        await page.goto(origin + '/docs/quickstart/', {
+          referer: 'https://www.google.com/search?q=lody+coding+agents',
+        });
+        await settled(page);
+
+        const bootCommands = await page.evaluate(() =>
+          (window.dataLayer ?? []).map((entry) => Array.from(entry).slice(0, 3))
+        );
+        assert.equal(bootCommands[0]?.[0], 'consent');
+        assert.equal(bootCommands[0]?.[1], 'default');
+        assert.equal(bootCommands[0]?.[2]?.analytics_storage, 'denied');
+        assert.equal(bootCommands[1]?.[0], 'consent');
+        assert.equal(bootCommands[1]?.[1], 'default');
+        assert.equal(bootCommands[1]?.[2]?.analytics_storage, 'granted');
+        assert.ok(
+          bootCommands.some((cmd) => cmd[0] === 'config' && cmd[1] === 'G-JSXEKG6RRV'),
+          'gtag config must be queued synchronously before SPA navigation'
+        );
+
+        await clickTo(page, page.locator('#nd-page a[href="/download/"]').first(), '/download');
+
+        await page.evaluate(() => {
+          document.addEventListener(
+            'click',
+            (event) => {
+              const anchor =
+                event.target instanceof Element ? event.target.closest('a[href]') : null;
+              if (
+                anchor &&
+                (anchor.getAttribute('href')?.startsWith('https://updates.lody.ai/') ||
+                  anchor.getAttribute('href') === '/login')
+              ) {
+                event.stopPropagation();
+                event.preventDefault();
+              }
+            },
+            { capture: false }
+          );
+        });
+
+        await page
+          .locator('a[href*="Lody-latest-arm64.dmg"], a[href*="-arm64.dmg"]')
+          .first()
+          .click();
+        await page.locator('.download-card a[href="/login"]').first().click();
+
+        const events = await page.evaluate(() =>
+          (window.dataLayer ?? [])
+            .map((entry) => Array.from(entry))
+            .filter((entry) => entry[0] === 'event')
+        );
+
+        const downloadEvent = events.find((entry) => entry[1] === 'download_installer');
+        assert.ok(downloadEvent, 'Expected download_installer conversion event in dataLayer');
+        assert.equal(downloadEvent[2]?.entry_page, '/docs/quickstart/');
+        assert.equal(downloadEvent[2]?.source_page, '/download/');
+        assert.equal(downloadEvent[2]?.traffic_channel, 'organic_search');
+        assert.equal(downloadEvent[2]?.referrer_host, 'www.google.com');
+        assert.equal(downloadEvent[2]?.platform, 'mac');
+        assert.equal(downloadEvent[2]?.arch, 'arm64');
+        assert.equal(downloadEvent[2]?.installer_format, 'dmg');
+        assert.equal(downloadEvent[2]?.release_channel, 'stable');
+        assert.equal(downloadEvent[2]?.cta_surface, 'download_card');
+        assert.equal(downloadEvent[2]?.transport_type, 'beacon');
+
+        const loginEvent = events.find((entry) => entry[1] === 'open_web_app');
+        assert.ok(loginEvent, 'Expected open_web_app conversion event in dataLayer');
+        assert.equal(loginEvent[2]?.entry_page, '/docs/quickstart/');
+        assert.equal(loginEvent[2]?.source_page, '/download/');
+        assert.equal(loginEvent[2]?.traffic_channel, 'organic_search');
+        assert.equal(loginEvent[2]?.referrer_host, 'www.google.com');
+        assert.equal(loginEvent[2]?.destination, '/login');
+        assert.equal(loginEvent[2]?.cta_surface, 'download_card');
+        assert.equal(loginEvent[2]?.transport_type, 'beacon');
+
+        assert.deepEqual(pageErrors, []);
+      }
+    );
+  } finally {
+    await attributionContext.close();
+  }
 }
 
 async function clickTo(page, link, destination) {
