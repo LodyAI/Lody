@@ -16,6 +16,7 @@ import {
   automationResultSchema,
   type AutomationOrigin,
   type AutomationReceipt,
+  type AutomationWait,
   type ConditionObservation,
   type PendingWork,
 } from '@lody/shared/automations';
@@ -26,6 +27,7 @@ import type { AuthContext } from '@/lib/command-runtime';
 import type { WorkspaceSummary } from '@/lib/workspace';
 import { createSessionBackend } from '@/session/session-backend';
 import { readMergedAgentConfigById } from '@/lib/agent-config-machine-flock';
+import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import {
   applyAgentRoleCreateTarget,
   resolveAgentRoleCreateFromCatalog,
@@ -54,10 +56,45 @@ export { deliveryRequest } from '../policies/delivery';
 const json = (input: unknown) =>
   z.record(z.string(), z.json()).parse(JSON.parse(JSON.stringify(input)));
 
+function automationProvenancePrefix(wait: AutomationWait | undefined): string {
+  const facts: Record<string, unknown> = {
+    notice:
+      'This input is an automation wake, not a human message. Its content was frozen when the condition was registered.',
+  };
+  if (wait) {
+    facts.waitId = wait.id;
+    facts.registeredAt = new Date(wait.createdAt).toISOString();
+    if (wait.key) facts.key = wait.key;
+    if (wait.reason) facts.reason = wait.reason;
+    if (wait.run) facts.managedRun = true;
+  }
+  return JSON.stringify(facts);
+}
+
+/**
+ * One medium-independent causal budget: the newest user input decides. A human
+ * input means depth 1; a machine-authored input continues its recorded depth,
+ * and an unreadable or depthless one conservatively counts one hop.
+ */
+async function deriveAutomationChainDepth(
+  backend: Awaited<ReturnType<typeof createSessionBackend>>
+): Promise<number> {
+  try {
+    const latest = await backend.readLatestTurn('user');
+    if (!latest) return 1;
+    if (turnNotificationAudience(latest.author).kind === 'user') return 1;
+    const prior = normalizeSessionTurnInputConfig(latest.inputConfig)?.chainDepth;
+    return (prior ?? 0) + 1;
+  } catch {
+    return 1;
+  }
+}
+
 function buildInvocationPrompt(
   receipt: AutomationReceipt,
   invocation: z.infer<typeof automationInvocationSchema>,
-  work: PendingWork | undefined
+  work: PendingWork | undefined,
+  ledger: AutomationLedger
 ): string | undefined {
   if (invocation.input.kind === 'delivery') {
     return deliveryRequest(invocation.input.ref, invocation.input.values ?? {});
@@ -65,7 +102,10 @@ function buildInvocationPrompt(
   if (receipt.event.type === 'automation.condition.completed') {
     const completion = automationResultSchema.parse(receipt.event.data);
     if (completion !== false) {
+      const wait =
+        invocation.input.kind === 'external_event' ? ledger.wait(invocation.input.ref) : undefined;
       return [
+        automationProvenancePrefix(wait),
         completion.resumeText,
         ...(completion.payload === undefined
           ? []
@@ -239,7 +279,7 @@ export class AutomationSessionActionsLegacy {
       return { state: 'blocked', reason: 'pending_work_unavailable' };
     if (work && !ledger.claimWork(work.id, receipt.id))
       return { state: 'superseded', reason: 'pending_work_already_claimed' };
-    const prompt = buildInvocationPrompt(receipt, invocation, work);
+    const prompt = buildInvocationPrompt(receipt, invocation, work, ledger);
     if (!prompt) return { state: 'failed', reason: 'delivery_request_invalid' };
 
     if (invocation.target.kind === 'existing') {
@@ -281,6 +321,7 @@ export class AutomationSessionActionsLegacy {
         inputBlocks: [{ type: 'text', text: prompt }],
         cliType: meta.cliType,
         agentType: meta.agentType,
+        chainDepth: await deriveAutomationChainDepth(backend),
         resume: (work?.nativeSessionId ?? meta.acpSessionId ?? undefined) as
           | ACPSessionId
           | undefined,
@@ -486,11 +527,9 @@ export class AutomationSessionActionsLegacy {
         return { state: 'cancelled', reason: 'session_input_cancelled' };
       if (turnRead.turn.status === 'failed')
         return { state: 'failed', reason: 'agent_turn_failed' };
-      if (
-        turnRead.turn.status === 'handled' &&
-        !this.options.lody.hasAutomationSessionWork(receipt.sessionId as SessionId)
-      )
-        return { state: 'settled' };
+      // The receipt delivers one input; other work the Session group runs is
+      // tracked by its own owners and never un-settles this delivery.
+      if (turnRead.turn.status === 'handled') return { state: 'settled' };
       if (meta.processingUserMsgId === receipt.turnId) return { state: 'running' };
       if (turnRead.turn.status !== 'prepared') return { state: 'queued' };
     }

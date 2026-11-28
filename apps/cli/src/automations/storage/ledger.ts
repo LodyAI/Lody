@@ -75,7 +75,7 @@ export class AutomationLedger {
     sessionId: string,
     userId: string,
     now: number
-  ): AutomationWait {
+  ): { wait: AutomationWait; superseded: AutomationWait[] } {
     const registration = automationRegistrationSchema.parse(input);
     return this.connection.withImmediate(() => {
       const existing = this.waits(userId, sessionId).find(
@@ -86,9 +86,10 @@ export class AutomationLedger {
           wait.program === registration.program &&
           wait.intervalMs === registration.intervalMs &&
           wait.expiresAt === registration.expiresAt &&
-          wait.reason === registration.reason
+          wait.reason === registration.reason &&
+          (wait.key ?? '') === (registration.key ?? '')
       );
-      if (existing) return existing;
+      if (existing) return { wait: existing, superseded: [] };
       const wait: AutomationWait = {
         ...registration,
         id: randomUUID(),
@@ -103,9 +104,46 @@ export class AutomationLedger {
         checks: 0,
         consecutiveErrors: 0,
       };
+      const superseded: AutomationWait[] = [];
+      for (const prior of this.connection.raw
+        .prepare(
+          `SELECT payload FROM waits WHERE session_id=? AND owner_user_id=? AND slot_key=?
+          AND state IN ('waiting','checking','matched')`
+        )
+        .all(sessionId, userId, registration.key ?? '') as JsonRow[]) {
+        const old = JSON.parse(prior.payload) as AutomationWait;
+        if (!this.supersedeWaitLocked(old, now)) continue;
+        superseded.push(this.wait(old.id) ?? old);
+      }
       this.writeWait(wait);
-      return wait;
+      return { wait, superseded };
     });
+  }
+  /** Unmatched waits stop being checked; a live continuation receipt is durably fenced. */
+  private supersedeWaitLocked(wait: AutomationWait, now: number): boolean {
+    if (!['waiting', 'checking', 'matched'].includes(wait.state)) return false;
+    const receipt = wait.invocationId && this.receipt(wait.invocationId);
+    const receiptLive = receipt && !terminal.has(receipt.state);
+    if (wait.state === 'matched' && !receiptLive) return false;
+    if (receipt && receiptLive) {
+      if (['submitting', 'queued', 'running', 'unknown'].includes(receipt.state)) {
+        this.update(
+          receipt.id,
+          receipt.state,
+          { state: 'cancelling', reason: 'guard:slot_superseded' },
+          now
+        );
+      } else {
+        this.update(
+          receipt.id,
+          receipt.state,
+          { state: 'superseded', reason: 'guard:slot_superseded' },
+          now
+        );
+      }
+    }
+    this.writeWait({ ...wait, state: 'superseded', updatedAt: now });
+    return true;
   }
   /** Matching unfinished runs deduplicate, so a repeated request never starts a second process. */
   registerRun(
@@ -207,11 +245,12 @@ export class AutomationLedger {
     const c = waitColumns(wait);
     this.connection.raw
       .prepare(`INSERT INTO waits
-      (id,state,next_check_at,session_id,owner_user_id,invocation_id,created_at,due_at,run_pending,payload)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
+      (id,state,next_check_at,session_id,owner_user_id,invocation_id,slot_key,created_at,updated_at,due_at,run_pending,payload)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET state=excluded.state,next_check_at=excluded.next_check_at,
       session_id=excluded.session_id,owner_user_id=excluded.owner_user_id,
-      invocation_id=excluded.invocation_id,created_at=excluded.created_at,due_at=excluded.due_at,
+      invocation_id=excluded.invocation_id,slot_key=excluded.slot_key,
+      created_at=excluded.created_at,updated_at=excluded.updated_at,due_at=excluded.due_at,
       run_pending=excluded.run_pending,payload=excluded.payload`)
       .run(
         wait.id,
@@ -220,7 +259,9 @@ export class AutomationLedger {
         c.session_id,
         c.owner_user_id,
         c.invocation_id,
+        c.slot_key,
         c.created_at,
+        c.updated_at,
         c.due_at,
         c.run_pending,
         JSON.stringify(wait)
@@ -456,7 +497,8 @@ export class AutomationLedger {
   cancelWait(id: string, now: number): AutomationWait | undefined {
     return this.connection.withImmediate(() => {
       const prior = this.wait(id);
-      if (!prior || ['cancelled', 'expired', 'failed'].includes(prior.state)) return prior;
+      if (!prior || ['cancelled', 'expired', 'failed', 'superseded'].includes(prior.state))
+        return prior;
       const rule = this.rule(id);
       if (rule) {
         const {
@@ -471,6 +513,28 @@ export class AutomationLedger {
         this.upsert({ ...draft, enabled: false }, ownerUserId, now, revision);
       }
       return this.updateWait(id, prior.state, { state: 'cancelled' }, now);
+    });
+  }
+  /** Waits whose continuation is still in flight are never pruned; receipts embed their frozen rule. */
+  pruneTerminalWaits(cutoff: number): number {
+    return this.connection.withImmediate(() => {
+      const rows = this.connection.raw
+        .prepare(
+          `SELECT id,payload FROM waits
+          WHERE state IN ('cancelled','expired','failed','superseded') AND updated_at<? LIMIT 500`
+        )
+        .all(cutoff) as Array<JsonRow & { id: string }>;
+      let pruned = 0;
+      for (const row of rows) {
+        const wait = JSON.parse(row.payload) as AutomationWait;
+        const receipt = wait.invocationId && this.receipt(wait.invocationId);
+        if (receipt && !terminal.has(receipt.state)) continue;
+        this.connection.raw.prepare('DELETE FROM wait_reads WHERE wait_id=?').run(wait.id);
+        this.connection.raw.prepare('DELETE FROM waits WHERE id=?').run(wait.id);
+        this.connection.raw.prepare('DELETE FROM rules WHERE id=?').run(wait.id);
+        pruned += 1;
+      }
+      return pruned;
     });
   }
   stageTurn(fact: SessionAutomationObservation): void {
@@ -1003,6 +1067,20 @@ export class AutomationLedger {
                   : 'cancelled',
             updatedAt: now,
           });
+        // One-shot rules share their id with their wait; policy rules never do.
+        const rule = this.rule(next.rule.id);
+        if (rule?.enabled && this.wait(next.rule.id)) {
+          const {
+            revision,
+            ownerUserId,
+            ownerMachineId: _machine,
+            activationSequence: _sequence,
+            createdAt: _created,
+            updatedAt: _updated,
+            ...draft
+          } = rule;
+          this.upsert({ ...draft, enabled: false }, ownerUserId, now, revision);
+        }
       }
       return next;
     });

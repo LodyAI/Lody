@@ -271,7 +271,7 @@ describe('Automation control authority', () => {
       userId: 'user',
       collaborationStopped: true,
     });
-    const wait = host.ledger.registerWait(
+    const { wait: wait } = host.ledger.registerWait(
       {
         program: `async ({ctx}) => {
         const result = await ctx.exec({command: ${JSON.stringify(process.execPath)}, args: ['-e', 'process.stdout.write(process.cwd()); process.exitCode = 7']});
@@ -658,11 +658,16 @@ describe('Automation control authority', () => {
     for (let index = 0; index < 15; index++) {
       ids.add(
         host.ledger.registerWait(
-          { program: `() => ${index} === -1`, intervalMs: 1000, reason: '\u0000'.repeat(2000) },
+          {
+            program: `() => ${index} === -1`,
+            key: `w${index}`,
+            intervalMs: 1000,
+            reason: '\u0000'.repeat(2000),
+          },
           'session-a',
           'user',
           index
-        ).id
+        ).wait.id
       );
     }
     const recipient = await createRpcSecretRecipient();
@@ -733,7 +738,7 @@ describe('Automation control authority', () => {
       operation: input.operation,
     });
     await expect(host.remoteControl(input)).rejects.toThrow('AUTOMATION_REQUEST_USED');
-    const foreign = host.ledger.registerWait(
+    const { wait: foreign } = host.ledger.registerWait(
       { program: '() => false', intervalMs: 1000 },
       'other-session',
       'user',
@@ -790,7 +795,7 @@ describe('Automation control authority', () => {
         operation,
         proof: { runtimeNonce: nonce, requestId: crypto.randomUUID(), requestToken: 'valid' },
       });
-    const ownerWait = host.ledger.registerWait(
+    const { wait: ownerWait } = host.ledger.registerWait(
       { program: '() => false', intervalMs: 30_000 },
       'session-a',
       'user',
@@ -817,7 +822,7 @@ describe('Automation control authority', () => {
     const nonce = host.remoteControlNonce;
     if (!nonce) throw new Error('missing remote nonce');
     const responseKey = (await createRpcSecretRecipient()).publicKey;
-    const wait = host.ledger.registerWait(
+    const { wait: wait } = host.ledger.registerWait(
       { program: '() => false', intervalMs: 30_000 },
       'session-a',
       'user',
@@ -959,7 +964,7 @@ describe('Automation control authority', () => {
       depth: 0,
     };
     host.ledger.publish(event);
-    const wait = host.ledger.registerWait(
+    const { wait: wait } = host.ledger.registerWait(
       {
         program: `async ({ctx}) => {
       const {value} = await ctx.read('events', {limit: 50});
@@ -1029,7 +1034,7 @@ describe('Automation control authority', () => {
       collaborationStopped: false,
     };
     const host = await workspaceFixture(meta);
-    const wait = host.ledger.registerWait(
+    const { wait: wait } = host.ledger.registerWait(
       {
         program: `async ({ctx}) => {
         const {value} = await ctx.read('session');
@@ -1047,7 +1052,7 @@ describe('Automation control authority', () => {
     expect(host.ledger.wait(wait.id)).toMatchObject({ state: 'waiting', consecutiveErrors: 0 });
     expect(host.ledger.wait(wait.id)?.checks).toBeGreaterThanOrEqual(5);
 
-    const ready = host.ledger.registerWait(
+    const { wait: ready } = host.ledger.registerWait(
       {
         program: `async ({ctx}) => {
         await ctx.read('session');

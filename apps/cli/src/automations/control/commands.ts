@@ -23,6 +23,7 @@ import type { SessionAutomationAuthority } from '@/session/session-automation-au
 import type { AutomationLedger } from '../storage/ledger';
 import { Automations } from '../runtime/engine';
 import { ManagedRunsService } from '../runtime/managed-runs';
+import { TERMINAL_STATES as TERMINAL_RECEIPT_STATES } from '../storage/schema';
 import { resolveAutomationCwd } from '../context/exec';
 import { evaluateAutomationProgram } from '../programs/codemode';
 import { configureSessionPolicies, sessionPolicySettings } from '../policies/session';
@@ -72,6 +73,14 @@ export function createAutomationController(deps: AutomationControlDeps) {
   const { ledger, lody, authority, workspaceId, machineId, managedRunLogs, delivery } = deps;
   const remoteNonce = randomUUID();
   const consumedRemoteRequests = new Map<string, number>();
+
+  const liveWaits = (userId: string | undefined, sessionId: string | undefined) =>
+    ledger.waits(userId, sessionId).filter((wait) => {
+      if (['waiting', 'checking', 'failed'].includes(wait.state)) return true;
+      if (wait.state !== 'matched') return false;
+      const receipt = wait.invocationId && ledger.receipt(wait.invocationId);
+      return !receipt || !TERMINAL_RECEIPT_STATES.has(receipt.state);
+    });
 
   const requireSessionMeta = async (sessionId: string): Promise<SessionMeta> => {
     const read = await readSessionMeta(lody.documentManager, sessionId as SessionId);
@@ -126,9 +135,24 @@ export function createAutomationController(deps: AutomationControlDeps) {
         );
         if (deps.isClosing()) return yield* Effect.fail(new Error('AUTOMATION_OWNER_CLOSING'));
         const { type: _type, sessionId: _session, ...registration } = command;
-        const wait = ledger.registerWait(registration, sessionId, principal, now);
+        const { wait, superseded } = ledger.registerWait(registration, sessionId, principal, now);
+        for (const old of superseded) {
+          yield* runtime.cancel(old.invocationId ?? old.id).pipe(Effect.ignore);
+        }
         yield* runtime.wake;
-        return publicWait(ledger, wait);
+        return {
+          ...publicWait(ledger, wait),
+          supersededIds: superseded.map((old) => old.id),
+          activeWaits: ledger
+            .waits(undefined, sessionId)
+            .filter((item) => ['waiting', 'checking', 'matched'].includes(item.state))
+            .map((item) => ({
+              id: item.id,
+              key: item.key ?? null,
+              state: item.state,
+              reason: item.reason ?? null,
+            })),
+        };
       }
       case 'run': {
         const sessionId = command.sessionId ?? requesterSessionId;
@@ -183,9 +207,9 @@ export function createAutomationController(deps: AutomationControlDeps) {
       case 'list': {
         const sessionId = command.sessionId ?? requesterSessionId;
         if (sessionId) yield* promise(() => assertCanEdit(sessionId, principal));
-        return ledger
-          .waits(sessionId ? undefined : principal, sessionId)
-          .map((wait) => publicWait(ledger, wait));
+        return liveWaits(sessionId ? undefined : principal, sessionId).map((wait) =>
+          publicWait(ledger, wait)
+        );
       }
       case 'show': {
         const wait = ledger.wait(command.id);
@@ -286,7 +310,7 @@ export function createAutomationController(deps: AutomationControlDeps) {
           return { type: 'cancel' as const };
         }
         if (operation.type === 'list') {
-          const all = ledger.waits(undefined, input.sessionId);
+          const all = liveWaits(undefined, input.sessionId);
           const start = operation.after
             ? all.findIndex((wait) => wait.id === operation.after) + 1
             : 0;

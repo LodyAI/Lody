@@ -33,7 +33,7 @@ agent 指引也必须把周期与延时请求导流到 Schedule。
 **等待是单次槽位，按名取代。** 每次注册属于一个槽位：它的 `key`，或未命名
 的默认槽。向槽位注册新等待时，原子地取代该槽位上未完成的旧等待，并通过
 Session 输入属主撤回其尚未开始执行的续航输入。并行观察需要通过不同 key
-显式选择，并按会话设上限。精确匹配去重仅保留为重试捷径。因此取消槽位里的
+显式选择。精确匹配去重仅保留为重试捷径。因此取消槽位里的
 当前等待即终结其整条血缘；改口或重新注册是替换，而不是翻倍。
 
 **自动化续航接入因果链。** 投递进会话的续航输入与其他机器成因输入同等对待：
@@ -69,8 +69,7 @@ Session 输入属主撤回其尚未开始执行的续航输入。并行观察需
 
 ## 未决问题
 
-- 终态行的保留窗口（建议 48 小时）与每会话命名 key 上限（建议 4）是待
-  评审的起始值。
+- 终态行的保留窗口（建议 48 小时）是待评审的起始值。
 - `lody_schedule` 的 `existing_session` 要求显式 `sessionId`；一个
   `current` 简写会消除最后一处摩擦——当用户要求在当前对话里周期检查时，
   正是这处摩擦把 agent 推向账本定时器。这属于 Schedule 面的变更，与本
@@ -86,7 +85,7 @@ Session 输入属主撤回其尚未开始执行的续航输入。并行观察需
   `apps/cli/src/automations/programs/codemode.ts` 的求值、
   `apps/cli/src/automations/actions/session-actions-legacy.ts` 的续航准备。
 - 理据、现场证据与被否方案：
-  [设计笔记](../.agents/notes/proposed/architecture/2026-11-28-session-automation-event-perception.zh.md)。
+  [设计笔记](../.agents/notes/implemented/architecture/2026-11-28-session-automation-event-perception.zh.md)。
 - 事故报告：[LodyAI/Lody#3477](https://github.com/LodyAI/Lody/issues/3477)
   及其跨会话后续评论。
 - 模块行为契约：[automation README](../apps/cli/src/automations/README.md)。

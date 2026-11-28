@@ -1,8 +1,9 @@
 # Session automation as event perception: slot supersession and medium-independent causal depth
 
 Date: 2026-11-28
-Status: proposed
+Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/3519
 
 [中文](2026-11-28-session-automation-event-perception.zh.md)
 
@@ -20,9 +21,10 @@ Schedules), every registration occupies a slot superseded by name, and
 automation continuations join the existing causal depth count derived from
 history rather than transport. Recurring registration, intent-level dedup,
 dispatch coalescing, clock removal and per-session outbound gates were evaluated
-and rejected. The design is reviewed and agreed in conversation but not yet
-implemented; every behavioral claim about current code was verified against the
-working tree, while the fixes themselves have no validation yet.
+and rejected. The design ships in PR #3519 with synthetic integration coverage
+for supersession, depth derivation, settlement and ledger retirement; the
+field evidence comes from the reporters and no live multi-agent reproduction
+was run.
 
 ## Field evidence
 
@@ -102,25 +104,29 @@ The Spec carries the contract; the reasoning that shaped it:
   refuses the demand rather than serving it better.
 - **Slot supersession.** A registration belongs to its key or the unnamed
   default slot; registering supersedes the slot's unfinished wait atomically,
-  including withdrawal of its not-yet-started continuation input. The slot cap
-  (proposed 4) bounds parallelism; rephrasing and post-compaction
+  including withdrawal of its not-yet-started continuation input. The proposed
+  per-Session key cap was dropped in implementation: parallel volume is bounded
+  by the causal budget, and a cap nobody can size adds machinery without a
+  demonstrated hazard. Rephrasing and post-compaction
   re-registration become idempotent replacement. Registration responses carry
   the active wait inventory for free, so the agent sees what it replaced and
   what is already pending without a separate `list` round-trip — this addresses
   the silent-drop risk of an unrelated wait sharing the default slot.
 - **Causal depth derived from history.** Depth is computed when a continuation
-  input is prepared: walk back user-role turns (bounded by the hop limit); the
-  most recent one either carries automation provenance — continue its depth
-  plus one — or is human — reset. No registration-time capture, no new wait
-  columns, and CLI/MCP registration paths behave identically. Depth binding to
+  input is prepared: the newest user-role turn in history decides — a human
+  input resets the chain to depth 1; any machine-authored input (ledger wake,
+  delegated chat or steer) continues its recorded depth plus one, and a
+  depthless machine input conservatively counts one hop. No registration-time
+  capture, no new wait columns, and CLI/MCP paths behave identically. Depth
+  binding to
   Session continuity rather than one wait's lineage matches the real hazard,
   which is unattended self-propagation of the conversation itself.
 - **Zero-observation results are invalid.** Dynamic enforcement at evaluation:
   a result produced without any `read`/`fetch`/`exec` call fails the wait as a
   deterministic programming error on first occurrence rather than counting
-  toward generic check errors. A static AST hint at registration gives honest
-  programs immediate feedback pointing at Schedules; it is UX, not a gate,
-  because aliasing defeats static analysis by construction.
+  toward generic check errors. The planned static AST hint at registration was
+  dropped: the dynamic gate fires on the first check anyway, and a heuristic
+  that aliases defeat cannot carry its documentation weight.
 - **Provenance prefix.** Continuation inputs open with origin facts only
   (wait id, reason, registration time), in line with the invariant that text
   Lody sends to agents carries facts, never workflow direction. Richer headers
@@ -158,7 +164,7 @@ The Spec carries the contract; the reasoning that shaped it:
   receipts, traffic volume collapses without new settings; the general chat
   question is recorded as an open question in the Spec instead.
 
-## Consequences and implementation split
+## Consequences
 
 - The automation success metric shifts: `register` usage should decrease as
   Auto delivery, group settlement, Inbox receipts and `recoverCapacity` absorb
@@ -166,13 +172,13 @@ The Spec carries the contract; the reasoning that shaped it:
   decision table leads — not teaching program syntax. Schema fields gain
   descriptions so `lody_help` output shows `ctx.read` resources and Auto
   delivery without a skill read.
-- Proposed PR split, in dependency order: (1) ledger hygiene — settlement,
-  retirement, rule closing, archive cancellation, list filtering; (2) contract
-  change — causal depth derivation, slot supersession with input withdrawal,
-  provenance prefix, observation requirement; (3) discoverability — schema
-  descriptions, skill routing rewrite, `settings.md` merge default correction,
-  `existing_session: "current"` investigation. Unit (1) is independently
-  shippable bug repair.
+- The ledger hygiene work (settlement, retirement after a 48-hour window, rule
+  closing, archive cancellation, live-row list filtering) and the contract
+  change (causal depth derivation, slot supersession with input withdrawal,
+  provenance prefix, observation requirement) shipped together; archived-session
+  cancellation is convergent — the wait cancels at its next evaluation, when
+  the session context read fails permanently, not at archive time.
+  `existing_session: "current"` for Schedules remains open in the Spec.
 - `#3477` can then be answered: supersession covers its dedup intent, causal
   depth plus slot withdrawal covers the storm and stale-burst mechanics,
   retirement covers ledger growth, and the recurring-timer request is declined
@@ -180,21 +186,24 @@ The Spec carries the contract; the reasoning that shaped it:
 
 ## Verification and limits
 
-- Code claims in this note were verified by reading the working tree on
-  2026-11-28; the design itself is unimplemented and unvalidated. No live
-  multi-agent reproduction was run; incident numbers come from the reporters.
-- Chain depth derivation assumes user-role turns in Session history carry
-  automation provenance (`_lodyAutomation`) reliably; encrypted and legacy
-  transcripts need checking during implementation.
+- The pre-change code claims were verified by reading the working tree on
+  2026-11-28; incident numbers come from the reporters. Synthetic integration
+  tests cover supersession fencing, depth derivation across human/machine
+  inputs, zero-observation failure, settlement independence and terminal
+  pruning; no live multi-agent reproduction was run.
+- `inputConfig` — including `_lodyAutomation` and `chainDepth` — is part of the
+  session document schema, so provenance survives restarts and applies to
+  encrypted sessions uniformly; machine-authored legacy turns without a
+  recorded depth conservatively count one hop.
 - Whether depth-16 forced stops surface a comprehensible reason to users of
   long unattended pipelines is untested; the fuse is a disaster ceiling, and
   the intended answer to hitting it is re-authorization through a Schedule,
   not a larger number.
 - Related active notes, cross-linked rather than superseded: the
-  [automation coordinator](2026-10-25-session-automation-coordinator.md)
+  [automation coordinator](../../proposed/architecture/2026-10-25-session-automation-coordinator.md)
   (whose "automations do not replace Schedules" boundary this design sharpens),
-  [external checks](2026-10-28-automation-external-checks.md),
-  [managed long runs](../../implemented/feature/2026-11-16-managed-long-runs.md),
-  [automation guidance scope](../../implemented/simplification/2026-11-21-automation-guidance-scope.md),
-  and [bound agent message chains](../../implemented/bug-fix/2026-10-11-bound-agent-message-chains.md)
+  [external checks](../../proposed/architecture/2026-10-28-automation-external-checks.md),
+  [managed long runs](../feature/2026-11-16-managed-long-runs.md),
+  [automation guidance scope](../simplification/2026-11-21-automation-guidance-scope.md),
+  and [bound agent message chains](../bug-fix/2026-10-11-bound-agent-message-chains.md)
   (the existing depth budget this extends across media).

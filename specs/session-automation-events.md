@@ -43,7 +43,7 @@ wake at all, so observation polling stays with the Host.
 to a slot: its `key`, or an unnamed default. Registering into a slot atomically
 supersedes that slot's earlier unfinished wait and withdraws its not-yet-started
 continuation through the owning Session input owner. Parallel observation is an
-explicit opt-in through distinct keys, bounded per Session. Exact-match
+explicit opt-in through distinct keys. Exact-match
 deduplication remains only as a retry shortcut. One cancel of the current wait
 in a slot therefore ends its whole lineage, and rephrasing or re-registering a
 task replaces rather than multiplies it.
@@ -91,8 +91,8 @@ retention window, and inspection defaults to live rows.
 
 ## Open questions
 
-- The retention window for terminal rows (proposed: 48 hours) and the per-Session
-  named-key cap (proposed: 4) are starting values awaiting review.
+- The retention window for terminal rows (proposed: 48 hours) is a starting
+  value awaiting review.
 - `lody_schedule` requires an explicit `sessionId` for `existing_session`; a
   `current` shorthand would remove the last friction that pushes agents toward
   ledger timers when the user asks for periodic checks in this conversation.
@@ -110,7 +110,7 @@ retention window, and inspection defaults to live rows.
   `apps/cli/src/automations/programs/codemode.ts`, continuation preparation in
   `apps/cli/src/automations/actions/session-actions-legacy.ts`.
 - Rationale, field evidence and rejected alternatives:
-  [design note](../.agents/notes/proposed/architecture/2026-11-28-session-automation-event-perception.md).
+  [design note](../.agents/notes/implemented/architecture/2026-11-28-session-automation-event-perception.md).
 - Incident reports: [LodyAI/Lody#3477](https://github.com/LodyAI/Lody/issues/3477)
   and its cross-session follow-up comment.
 - Module behavior contract: [automation README](../apps/cli/src/automations/README.md).

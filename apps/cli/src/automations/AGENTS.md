@@ -25,6 +25,14 @@
   [guidance](../../../../.agents/notes/implemented/simplification/2026-11-21-automation-guidance-scope.md).
 - External JavaScript checks conditions and returns false or a resume result. Keep
   event-to-action mapping internal; registration binds the same Session once.
+- Automations perceive state, not time. A wake is never produced without a
+  successful `ctx` observation in its check; a result from a check that observed
+  nothing fails the wait at once, and Schedules own every time trigger.
+  [Spec](../../../../specs/session-automation-events.md).
+- Registration is slot supersession, not accumulation: the shared default slot or a
+  named key holds one unfinished wait per Session, a new registration atomically
+  supersedes the old one and durably fences its unstarted continuation as
+  `guard:slot_superseded`, and an exact-match duplicate in the slot deduplicates.
 - Commit a matched result and its continuation identity together. Never rerun a matched
   program; recheck admission and captured source evidence. Retry interrupted checks,
   reconcile accepted effects, and never use tool side effects as durable steps.
@@ -34,6 +42,11 @@
   auth for observations stay with resource owners.
 - Capture source evidence on the Host, freeze it with the receipt, and recheck at
   admission. Active continuations retain source demand; results cannot forge provenance.
+- A continuation input opens with frozen provenance facts and joins the causal chain:
+  machine-caused depth is scan-derived from the newest user input and never resets
+  except on human input. A receipt settles when its delivered input settles; other
+  Session group work never un-settles it. Terminal waits retire after the retention
+  window, and inspection defaults to live rows.
 - Session actions use normal admission/queue/Stop/permission owners. Idle maintenance
   expires on new input. Settled groups include unfinished automation and native work.
   Stop blocks continuation admission, not authorized condition reads; only explicit

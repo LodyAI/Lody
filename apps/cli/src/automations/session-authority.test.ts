@@ -174,7 +174,7 @@ describe('Automation Session authority', () => {
         });
       };
       try {
-        const wait = ledger.registerWait(
+        const { wait: wait } = ledger.registerWait(
           { program: '() => false', intervalMs: 1000 },
           f.rootId,
           'user',
@@ -217,9 +217,9 @@ describe('Automation Session authority', () => {
           expect(await adapter.submit(submitting)).toEqual({ state: 'queued' });
         }
         const queued = await backend.getMessageQueue();
-        expect(queued).toMatchObject([
-          { operationId: receipt.id, userTurnId: receipt.turnId, task: 'Continue the task' },
-        ]);
+        expect(queued).toMatchObject([{ operationId: receipt.id, userTurnId: receipt.turnId }]);
+        expect(queued[0]?.task).toContain('automation wake');
+        expect(queued[0]?.task.endsWith('Continue the task')).toBe(true);
         expect(queued).toHaveLength(1);
         expect(await adapter.reconcile(submitting)).toEqual({ state: 'queued' });
         expect(await backend.getMessageQueue()).toEqual(queued);
@@ -249,7 +249,7 @@ describe('Automation Session authority', () => {
         admission: allowed,
         capacity: allowed,
       });
-      const wait = ledger.registerWait(
+      const { wait: wait } = ledger.registerWait(
         { program: '() => false', intervalMs: 1000 },
         f.rootId,
         'teammate',
@@ -275,7 +275,7 @@ describe('Automation Session authority', () => {
     f.editors.add('teammate');
     const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
     try {
-      const wait = ledger.registerWait(
+      const { wait: wait } = ledger.registerWait(
         { program: '() => false', intervalMs: 1000 },
         f.rootId,
         'teammate',
@@ -315,7 +315,7 @@ describe('Automation Session authority', () => {
       admission: allowed,
       capacity: allowed,
     });
-    const wait = ledger.registerWait(
+    const { wait: wait } = ledger.registerWait(
       { program: '() => false', intervalMs: 1000 },
       f.rootId,
       'user',
@@ -370,6 +370,71 @@ describe('Automation Session authority', () => {
       ledger.close();
     }
   });
+  it('derives the causal depth of a continuation from history authorship', async () => {
+    const f = groupFixture();
+    const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+    const adapter = new AutomationSessionActionsLegacy({
+      lody: {
+        documentManager: f.manager,
+        getAutomationSessionAuthority: () => f.authority,
+        hasAutomationSessionWork: () => false,
+      } as unknown as Lody,
+      auth: { userId: 'user', machineId: 'machine' } as AuthContext,
+      workspace: { id: 'workspace' } as WorkspaceSummary,
+      ledger,
+      admission: allowed,
+      capacity: allowed,
+    });
+    const prepareDepth = async (label: string) => {
+      const { wait } = ledger.registerWait(
+        { program: `() => '${label}' === 'never'`, key: `probe-${label}`, intervalMs: 1000 },
+        f.rootId,
+        'user',
+        Date.now()
+      );
+      ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, Date.now());
+      const matched = ledger.finishWait(wait, { resumeText: 'Continue' }, Date.now());
+      const receipt = matched?.invocationId ? ledger.receipt(matched.invocationId) : undefined;
+      if (!receipt) throw new Error('missing continuation receipt');
+      const prepared = await adapter.prepare(receipt);
+      if (prepared.state !== 'resolved') throw new Error(`prepare blocked: ${prepared.reason}`);
+      return (prepared.prepared as { config: { chainDepth?: number } }).config.chainDepth;
+    };
+    try {
+      const doc = await f.manager.getOrCreateSessionDoc(f.rootId);
+      expect(await prepareDepth('empty')).toBe(1);
+      await doc.sessionData.commands.appendTurn({
+        id: 'human-1',
+        role: 'user',
+        timestamp: '2026-11-28T00:00:00.000Z',
+        items: [{ type: 'text', text: 'hello' }],
+        fileDiff: [],
+      } as never);
+      expect(await prepareDepth('human')).toBe(1);
+      await doc.sessionData.commands.appendTurn({
+        id: 'agent-1',
+        role: 'user',
+        timestamp: '2026-11-28T00:01:00.000Z',
+        items: [{ type: 'text', text: 'delegated' }],
+        fileDiff: [],
+        author: { v: 1, kind: 'agent', sessionId: 'other', turnId: 't1', name: 'worker' },
+        inputConfig: { chainDepth: 7 },
+      } as never);
+      expect(await prepareDepth('machine')).toBe(8);
+      await doc.sessionData.commands.appendTurn({
+        id: 'legacy-wake',
+        role: 'user',
+        timestamp: '2026-11-28T00:02:00.000Z',
+        items: [{ type: 'text', text: 'older wake' }],
+        fileDiff: [],
+        author: { v: 1, kind: 'system' },
+      } as never);
+      expect(await prepareDepth('legacy')).toBe(1);
+    } finally {
+      ledger.close();
+    }
+  });
+
   it('delivers a JS-selected CI failure through the existing Session queue with Host-owned evidence', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
     const f = groupFixture();
@@ -387,7 +452,12 @@ describe('Automation Session authority', () => {
         const failed = value.pullRequests.flatMap(pr => pr.runs).filter(run => run.conclusion === 'failure');
         return failed.length ? {resumeText:'Fix this CI failure',payload:failed} : false;
       }`;
-      const wait = ledger.registerWait({ program, intervalMs: 1000 }, f.rootId, 'user', 1000);
+      const { wait: wait } = ledger.registerWait(
+        { program, intervalMs: 1000 },
+        f.rootId,
+        'user',
+        1000
+      );
       ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, 1000);
 
       const read = (input: import('@lody/shared/automations').AutomationReadRequest) =>

@@ -1,8 +1,9 @@
 # 会话自动化作为事件感知：槽位取代与介质无关的因果深度
 
 Date: 2026-11-28
-Status: proposed
+Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/3519
 
 [English](2026-11-28-session-automation-event-perception.md)
 
@@ -16,8 +17,8 @@ Translation: current
 收敛设计：automation 只感知状态跃迁（时间触发的工作归 Schedule），每次注册
 占用按名取代的槽位，自动化续航接入从因果记录派生的既有深度计数。周期注册、
 意图级去重、派发合并、时钟摘除与按会话出站开关均已评估并否决。设计已在对话
-中评审并达成一致，但尚未实现；所有关于现状代码的论断已逐条对照工作区核实，
-修复本身还没有任何验证。
+中评审并达成一致，随 PR #3519 落地，合成集成测试覆盖取代围栏、深度派生、
+结算与账本退役；现场证据数字来自报告者，未运行真实多 agent 复现。
 
 ## 现场证据
 
@@ -82,19 +83,22 @@ Translation: current
   管理与暂停。agent 自建的 `ctx.now` 接力链是一道绕过该授权面的免审批
   cron，因此设计拒绝这个需求，而不是更好地服务它。
 - **槽位取代。** 注册属于其 key 或未命名默认槽；注册即原子取代槽内未完成
-  等待，包括撤回其尚未开始执行的续航输入。槽位上限（建议 4）约束并行度；
+  等待，包括撤回其尚未开始执行的续航输入。提议中的每会话 key 上限在实现中
+  被舍弃：并行规模已由因果预算约束，一个无人能定大小的上限只会增加机制
+  而没有被证实的危害。
   措辞漂移与压缩后的重复注册变为幂等替换。注册响应免费携带活跃等待清单，
   agent 无需额外一轮 `list` 就能看到自己取代了什么、还有什么在挂起——这
   化解了无关等待共享默认槽时被静默丢弃的风险。
-- **因果深度从历史派生。** 准备续航输入时计算深度：向前回溯 user-role 回合
-  （以跳数上限为界）；最近一条若携带自动化 provenance 则在其深度上加一，
-  若是人类输入则归零。无注册时捕获、无新增 wait 列，CLI 与 MCP 注册路径行为
+- **因果深度从历史派生。** 准备续航输入时计算深度：最新的 user-role 回合
+  即决定深度：人类输入归零（链深回到 1）；机器成因输入
+  （账本唤醒、委派 chat 或 steer）在其记录的深度上加一；无深度记录的机器
+  回合保守记为一跳。无注册时捕获、无新增 wait 列，CLI 与 MCP 注册路径行为
   一致。深度绑定会话连续性而非单条等待的血缘，恰匹配真实危害——对话自身
   的无人值守自转。
 - **零观察结果无效。** 求值时动态执行：未调用任何 `read`/`fetch`/`exec` 就
   产生的结果使该等待以确定性编程错误失败，首次即失败，不计入通用检查错误。
-  注册时的静态 AST 提示为诚实程序提供即时反馈并指路 Schedule；它是用户体验
-  而非闸门，因为别名在构造上击败静态分析。
+  原计划注册时的静态 AST 提示被舍弃：动态闸在第一次检查时即生效，而别名
+  在构造上击败静态分析，启发式撑不起它的文档重量。
 - **provenance 前缀。** 续航输入仅以来源事实开头（等待 id、理由、注册时间），
   符合不变量：Lody 发给 agent 的文本携带事实，绝不携带工作流指挥。更丰富的
   头部（介入的人类回合数、活跃等待摘要）已舍弃：人类回合本来就在 transcript
@@ -122,33 +126,35 @@ Translation: current
   与 automation 无关。链死之后、监督归回执之后，流量自然崩溃，无需新设置；
   通用 chat 问题已作为未决问题记入 Spec。
 
-## 后果与实现切分
+## 后果
 
 - automation 的成功度量改变：`register` 的使用量应当下降——Auto delivery、
   组结算、Inbox 回执与 `recoverCapacity` 各自吸收本该属于自己的场景。MCP
   skill 的第一职责变为导流（决策表先行），而非教授程序语法。schema 字段补齐
   描述，使 `lody_help` 输出直接展示 `ctx.read` 资源与 Auto delivery，无需
   读取 skill。
-- 建议按依赖序拆 PR：（1）账本卫生——结算、退役、rule 关闭、归档取消、
-  list 过滤；（2）契约变更——因果深度派生、带输入撤回的槽位取代、provenance
-  前缀、观察要求；（3）可发现性——schema 描述、skill 导流重写、`settings.md`
-  merge 默认值修正、`existing_session: "current"` 调研。单元（1）是可独立
-  合并的缺陷修复。
+- 账本卫生（结算、48 小时保留窗后的退役、rule 关闭、归档取消、活跃行
+  list 过滤）与契约变更（因果深度派生、带输入撤回的槽位取代、provenance
+  前缀、观察要求）一同落地；归档会话的等待取消是收敛式的——等待在下一次
+  求值、会话上下文读取永久失败时取消，而非在归档时刻。Schedule 的
+  `existing_session: "current"` 仍作为未决问题留在 Spec。
 - 此后可回应 #3477：槽位取代覆盖其去重意图，因果深度加槽位撤回覆盖风暴与
   过期连发机理，退役覆盖账本增长；周期定时器诉求以 Schedule 边界为由谢绝。
 
 ## 验证与限制
 
-- 本笔记中的代码论断于 2026-11-28 通过阅读工作区核实；设计本身未实现、
-  未验证。未运行真实多 agent 复现；事故数字来自报告者。
-- 因果深度派生假设会话历史中的 user-role 回合可靠携带自动化 provenance
-  （`_lodyAutomation`）；加密与遗留 transcript 需在实现时核查。
+- 改动前的代码论断于 2026-11-28 通过阅读工作区核实；事故数字来自报告者。
+  合成集成测试覆盖取代围栏、跨人类/机器输入的深度派生、零观察失败、结算
+  独立性与终态清理；未运行真实多 agent 复现。
+- `inputConfig`（含 `_lodyAutomation` 与 `chainDepth`）是会话文档 schema 的
+  组成部分，因此 provenance 在重启后存续，并对加密会话一致适用；无深度记录
+  的机器成因遗留回合保守记为一跳。
 - 长无人值守流水线撞上 16 跳强制停止时，用户能否理解其原因未经测试；
   熔断是灾难上限，撞上它的正解是通过 Schedule 重新授权，而非调大数字。
-- 相关活跃笔记，交叉链接而非取代：[automation 协调器](2026-10-25-session-automation-coordinator.zh.md)
+- 相关活跃笔记，交叉链接而非取代：[automation 协调器](../../proposed/architecture/2026-10-25-session-automation-coordinator.zh.md)
   （本设计锐化了其“automation 不替代 Schedule”的边界）、
-  [外部检查](2026-10-28-automation-external-checks.zh.md)、
-  [托管长运行](../../implemented/feature/2026-11-16-managed-long-runs.zh.md)、
-  [automation 指引范围](../../implemented/simplification/2026-11-21-automation-guidance-scope.zh.md)、
-  以及[约束 agent 消息链](../../implemented/bug-fix/2026-10-11-bound-agent-message-chains.zh.md)
+  [外部检查](../../proposed/architecture/2026-10-28-automation-external-checks.zh.md)、
+  [托管长运行](../feature/2026-11-16-managed-long-runs.zh.md)、
+  [automation 指引范围](../simplification/2026-11-21-automation-guidance-scope.zh.md)、
+  以及[约束 agent 消息链](../bug-fix/2026-10-11-bound-agent-message-chains.zh.md)
   （本设计将其深度预算扩展到全介质）。

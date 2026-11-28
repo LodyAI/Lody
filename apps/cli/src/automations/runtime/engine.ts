@@ -56,6 +56,7 @@ export class Automations extends Context.Service<
         const signal = sharedSignal ?? (yield* Queue.dropping<void>(1));
         const gate = Semaphore.makeUnsafe(1);
         const active = new Map<string, Deferred.Deferred<void>>();
+        let lastPruneAt = 0;
         const checking = new Map<
           string,
           { stop: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
@@ -93,6 +94,29 @@ export class Automations extends Context.Service<
                 : Clock.currentTimeMillis.pipe(
                     Effect.flatMap((at) =>
                       Effect.try(() => {
+                        const message = Cause.pretty(cause).slice(0, 2000);
+                        if (
+                          message.includes('AUTOMATION_SESSION_ARCHIVED') ||
+                          message.includes('AUTOMATION_SESSION_UNAVAILABLE')
+                        ) {
+                          ledger.updateWait(
+                            claimed.id,
+                            'checking',
+                            { state: 'cancelled', lastError: message },
+                            at
+                          );
+                          return;
+                        }
+                        // A result produced without observing is a programming error, not transient.
+                        if (message.includes('AUTOMATION_RESULT_WITHOUT_OBSERVATION')) {
+                          ledger.updateWait(
+                            claimed.id,
+                            'checking',
+                            { state: 'failed', lastError: message },
+                            at
+                          );
+                          return;
+                        }
                         const errors = claimed.consecutiveErrors + 1;
                         ledger.updateWait(
                           claimed.id,
@@ -105,7 +129,7 @@ export class Automations extends Context.Service<
                                   ? 'failed'
                                   : 'waiting',
                             consecutiveErrors: errors,
-                            lastError: Cause.pretty(cause).slice(0, 2000),
+                            lastError: message,
                             nextCheckAt:
                               at +
                               Math.max(claimed.intervalMs, Math.min(300_000, 1000 * 2 ** errors)),
@@ -288,6 +312,12 @@ export class Automations extends Context.Service<
           Effect.gen(function* () {
             const now = yield* Clock.currentTimeMillis;
             if (host.observe) yield* host.observe;
+            if (now - lastPruneAt >= 3_600_000) {
+              lastPruneAt = now;
+              yield* Effect.try(() => ledger.pruneTerminalWaits(now - 48 * 3_600_000)).pipe(
+                Effect.catch(() => Effect.void)
+              );
+            }
             const waits = yield* Effect.try(() => ledger.dueWaits(now));
             yield* Effect.forEach(waits, evaluate, { concurrency: 4, discard: true });
             const deliveries = yield* Effect.try(() => ledger.deliveries(4));
