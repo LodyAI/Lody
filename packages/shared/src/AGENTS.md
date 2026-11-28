@@ -25,6 +25,18 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
   explicit authorization action opens the browser. Cancel owned attempts on editor
   disposal, fence late replies, and omit the scope helper line.
 
+## Sorbet store mirror rows
+
+- `machine-flock.ts` `sorbetStore` rows (`credentials`, `providers`, `models`) publish what
+  a machine's daemon read from its own Sorbet store, so a client without Machine RPC can
+  draw its Providers. Descriptors only, never a secret; the rows carry no config id because
+  one store serves every config, and the machine's own doc supplies the machine half of the
+  key. Writers replace a whole family so a deletion converges; a reader treats a missing
+  family as unpublished, never as empty, and keeps each family's `mirroredAt` honest.
+  Sorbet's control facade has no change notification, so the daemon re-reads after every
+  store RPC write, on a five-minute probe, and at start; `mirroredAt` is the honest
+  staleness bound of any row.
+
 ## Encrypted feature RPC
 
 - `e2ee-rpc.ts` `E2EE_RPC_POLICIES` is the one exhaustive table of admitted methods: its

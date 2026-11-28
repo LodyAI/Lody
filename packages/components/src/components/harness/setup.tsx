@@ -22,7 +22,7 @@ import { panelStyles as panel } from './panels.styles';
 import { useActiveDevice } from './machines';
 import { useSessionDefaults } from './session-defaults';
 import { useSorbetTarget } from './sorbet';
-import { harness, useHarness } from './store';
+import { harness, storeMirrored, useHarness } from './store';
 import { setupStyles as s } from './setup.styles';
 
 const STEPS = [
@@ -69,7 +69,7 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
   const foot = useFootShape();
 
   const connected = Object.keys(state.credentials).length > 0;
-  const answered = state.status === 'ready';
+  const answered = state.status === 'ready' || storeMirrored(state);
   const canContinue =
     current.id === 'providers' ? connected || !answered : current.id === 'review' ? checked : true;
 
@@ -207,9 +207,11 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
               <span {...stylex.props(s.footHint)}>
                 {connected
                   ? `${Object.keys(state.credentials).length} connected`
-                  : answered
-                    ? 'Connect one to continue'
-                    : 'This app cannot read this machine’s connections'}
+                  : storeMirrored(state)
+                    ? 'Read-only view · connect on that machine'
+                    : answered
+                      ? 'Connect one to continue'
+                      : 'This app cannot read this machine’s connections'}
               </span>
             )}
             <Button variant="primary" onClick={advance} disabled={!canContinue}>
@@ -323,7 +325,7 @@ function useSetupChecks(): SetupCheck[] {
   const target = useSorbetTarget();
   const capabilities = useDeviceCapabilities();
   const { synced } = useWorkspaceMcpCatalog();
-  const answered = state.status === 'ready';
+  const answered = state.status === 'ready' || storeMirrored(state);
   return [
     { label: 'Device online', ok: device?.status === 'online' },
     { label: 'Lody Agent set up on this device', ok: !!target },
@@ -374,7 +376,7 @@ function Review({
   ];
   const providersValue = providers.length
     ? providers.join(', ')
-    : state.status === 'ready'
+    : state.status === 'ready' || storeMirrored(state)
       ? 'None connected'
       : 'Not readable from this app';
   const modelName = (id: string | undefined) =>

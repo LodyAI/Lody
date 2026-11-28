@@ -182,6 +182,72 @@ export type BuiltinAgentOptOut = {
   removedAt: number;
 };
 
+/**
+ * Sorbet's machine-wide store, mirrored as descriptors so a client that cannot
+ * ask the machine still draws its Providers, endpoints and model catalog.
+ *
+ * One machine's Sorbet store serves every config on it: the data directory is
+ * machine-scoped and a config only authorizes a caller. The rows therefore carry
+ * no config id — one store, one mirror — and the machine's own Flock doc supplies
+ * the machine half of the key.
+ *
+ * A descriptor is never a secret: a credential is `{ providerId, type }`, the
+ * same pair Machine RPC lists. Endpoint names, base URLs and model ids are
+ * machine metadata a workspace member can already infer from a session, while
+ * the key that authenticates them stays in Sorbet's store.
+ */
+export type SorbetMirrorCredential = { providerId: string; type: string };
+export type SorbetMirrorProviderProtocol =
+  | 'anthropic-messages'
+  | 'openai-responses'
+  | 'openai-completions';
+/**
+ * A custom Provider as the machine holds it. Each model keeps its id and name
+ * only: curated fields (context window, reasoning, catalog refs) stay Sorbet's,
+ * and a client that cannot write the store has nothing to do with them.
+ */
+export type SorbetMirrorProvider = {
+  id: string;
+  name: string;
+  protocol: SorbetMirrorProviderProtocol;
+  baseUrl: string;
+  models: Array<{ id: string; name?: string }>;
+};
+/** One selectable model, by the `providerId/modelId` selector a session uses. */
+export type SorbetMirrorModel = {
+  selector: string;
+  providerId: string;
+  modelId: string;
+  displayName: string;
+};
+/**
+ * When the machine last read this family out of its Sorbet store. A reader uses
+ * it to say how old the mirror is instead of presenting it as a live answer;
+ * the daemon renews it on a whole hour of unchanged content so an idle machine
+ * still shows a bounded staleness rather than a write every probe.
+ */
+export type SorbetMirrorStamp = { v: 1; mirroredAt: number };
+
+export type SorbetMirrorCredentials = SorbetMirrorStamp & {
+  credentials: SorbetMirrorCredential[];
+};
+export type SorbetMirrorProviders = SorbetMirrorStamp & { providers: SorbetMirrorProvider[] };
+export type SorbetMirrorModels = SorbetMirrorStamp & { models: SorbetMirrorModel[] };
+
+/** What one successful read of the machine's store puts in the Flock. */
+export type SorbetStoreMirror = {
+  credentials: readonly SorbetMirrorCredential[];
+  providers: readonly SorbetMirrorProvider[];
+  models: readonly SorbetMirrorModel[];
+};
+
+/** The mirror families a reader got, each stamped with its own read time. */
+export type MachineFlockSorbetStore = {
+  credentials?: SorbetMirrorCredentials;
+  providers?: SorbetMirrorProviders;
+  models?: SorbetMirrorModels;
+};
+
 export type MachineFlockDotlodyPathKey = ['dotlodyPath'];
 export type MachineFlockArchiveSessionCommandKey = ['cmd', 'archiveSession', SessionId];
 export type MachineFlockDeleteSessionCommandKey = ['cmd', 'deleteSession', SessionId];
@@ -197,6 +263,13 @@ export type MachineFlockProviderSetupKey = ['providerSetup', AgentConfigId];
 export type MachineFlockProviderSetupCancellationKey = ['providerSetupCancellation', AgentConfigId];
 export type MachineFlockAgentConfigIndexKey = ['agentConfigIndex', AgentConfigId];
 export type MachineFlockAcpCapabilityKey = ['acpCapability', AgentConfigId];
+export type MachineFlockSorbetCredentialsKey = ['sorbetStore', 'credentials'];
+export type MachineFlockSorbetProvidersKey = ['sorbetStore', 'providers'];
+export type MachineFlockSorbetModelsKey = ['sorbetStore', 'models'];
+export type MachineFlockSorbetStoreKey =
+  | MachineFlockSorbetCredentialsKey
+  | MachineFlockSorbetProvidersKey
+  | MachineFlockSorbetModelsKey;
 /** Per-model controls an agent config's adapter declared (`AcpModelCapabilities`). */
 export type MachineFlockAcpModelCapabilityKey = ['acpModelCapability', AgentConfigId];
 /** Which stored option list one model has (`AcpModelConfigOptions`). */
@@ -229,6 +302,7 @@ export type MachineFlockKey =
   | MachineFlockProviderSetupCancellationKey
   | MachineFlockAgentConfigIndexKey
   | MachineFlockAcpCapabilityKey
+  | MachineFlockSorbetStoreKey
   | MachineFlockAcpModelCapabilityKey
   | MachineFlockAcpModelConfigOptionsKey
   | MachineFlockAcpModelConfigOptionsShapeKey
@@ -276,6 +350,9 @@ export type ParsedMachineFlockKey =
       key: MachineFlockAcpCapabilityKey;
       configId: AgentConfigId;
     }
+  | { kind: 'sorbetStoreCredentials'; key: MachineFlockSorbetCredentialsKey }
+  | { kind: 'sorbetStoreProviders'; key: MachineFlockSorbetProvidersKey }
+  | { kind: 'sorbetStoreModels'; key: MachineFlockSorbetModelsKey }
   | {
       kind: 'acpModelCapability';
       key: MachineFlockAcpModelCapabilityKey;
@@ -354,6 +431,9 @@ export const machineFlockKeys = {
     'acpCapability',
     configId,
   ],
+  sorbetStoreCredentials: (): MachineFlockSorbetCredentialsKey => ['sorbetStore', 'credentials'],
+  sorbetStoreProviders: (): MachineFlockSorbetProvidersKey => ['sorbetStore', 'providers'],
+  sorbetStoreModels: (): MachineFlockSorbetModelsKey => ['sorbetStore', 'models'],
   acpModelCapability: (configId: AgentConfigId): MachineFlockAcpModelCapabilityKey => [
     'acpModelCapability',
     configId,
@@ -544,6 +624,18 @@ export const parseMachineFlockKey = (
     };
   }
 
+  if (key.length === 2 && key[0] === 'sorbetStore' && key[1] === 'credentials') {
+    return { kind: 'sorbetStoreCredentials', key: machineFlockKeys.sorbetStoreCredentials() };
+  }
+
+  if (key.length === 2 && key[0] === 'sorbetStore' && key[1] === 'providers') {
+    return { kind: 'sorbetStoreProviders', key: machineFlockKeys.sorbetStoreProviders() };
+  }
+
+  if (key.length === 2 && key[0] === 'sorbetStore' && key[1] === 'models') {
+    return { kind: 'sorbetStoreModels', key: machineFlockKeys.sorbetStoreModels() };
+  }
+
   if (key.length === 3 && key[0] === 'rateLimit' && isCliType(key[1]) && isNonEmptyString(key[2])) {
     return {
       kind: 'rateLimit',
@@ -614,6 +706,9 @@ export type MachineFlockRow =
     }
   | { key: MachineFlockAgentConfigIndexKey; value: AgentConfigListSummary }
   | { key: MachineFlockAcpCapabilityKey; value: AcpCapabilityCacheEntry }
+  | { key: MachineFlockSorbetCredentialsKey; value: SorbetMirrorCredentials }
+  | { key: MachineFlockSorbetProvidersKey; value: SorbetMirrorProviders }
+  | { key: MachineFlockSorbetModelsKey; value: SorbetMirrorModels }
   | { key: MachineFlockAcpModelCapabilityKey; value: AcpModelCapabilities }
   | { key: MachineFlockAcpModelConfigOptionsKey; value: AcpModelConfigOptions }
   | { key: MachineFlockAcpModelConfigOptionsShapeKey; value: AcpModelConfigOptionsShape }
@@ -660,6 +755,7 @@ export type MachineFlockRowFamily =
   | 'providerSetupCancellation'
   | 'agentConfigIndex'
   | 'acpCapability'
+  | 'sorbetStore'
   | 'acpModelCapability'
   | 'acpModelConfigOptions'
   | 'acpModelConfigOptionsShape'
@@ -679,6 +775,7 @@ const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly 
   providerSetupCancellation: ['providerSetupCancellation'],
   agentConfigIndex: ['agentConfigIndex'],
   acpCapability: ['acpCapability'],
+  sorbetStore: ['sorbetStore'],
   acpModelCapability: ['acpModelCapability'],
   acpModelConfigOptions: ['acpModelConfigOptions'],
   acpModelConfigOptionsShape: ['acpModelConfigOptionsShape'],
@@ -1523,6 +1620,18 @@ export function parseMachineFlockRow(
     }
     case 'acpCapability':
       return isAcpCapabilityCacheEntry(value) ? { key: parsedKey.key, value } : undefined;
+    case 'sorbetStoreCredentials': {
+      const mirror = normalizeSorbetMirrorCredentials(value);
+      return mirror ? { key: parsedKey.key, value: mirror } : undefined;
+    }
+    case 'sorbetStoreProviders': {
+      const mirror = normalizeSorbetMirrorProviders(value);
+      return mirror ? { key: parsedKey.key, value: mirror } : undefined;
+    }
+    case 'sorbetStoreModels': {
+      const mirror = normalizeSorbetMirrorModels(value);
+      return mirror ? { key: parsedKey.key, value: mirror } : undefined;
+    }
     case 'acpModelCapability':
       return isAcpModelCapabilities(value) ? { key: parsedKey.key, value } : undefined;
     case 'acpModelConfigOptions':
@@ -2125,6 +2234,183 @@ const isAcpCapabilityCacheEntry = (value: unknown): value is AcpCapabilityCacheE
   Array.isArray(value.modes) &&
   Array.isArray(value.models) &&
   typeof value.fetchedAt === 'number';
+
+const isSorbetMirrorProtocol = (value: unknown): value is SorbetMirrorProviderProtocol =>
+  value === 'anthropic-messages' ||
+  value === 'openai-responses' ||
+  value === 'openai-completions';
+
+/** A mirror row's shared half; every family carries the read it came from. */
+const isSorbetMirrorStamp = (value: Record<string, unknown>): boolean =>
+  value.v === 1 && typeof value.mirroredAt === 'number' && Number.isFinite(value.mirroredAt);
+
+const normalizeSorbetMirrorCredential = (value: unknown): SorbetMirrorCredential | undefined =>
+  isRecord(value) && isNonEmptyString(value.providerId) && isNonEmptyString(value.type)
+    ? { providerId: value.providerId, type: value.type }
+    : undefined;
+
+const normalizeSorbetMirrorProvider = (value: unknown): SorbetMirrorProvider | undefined => {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.id) ||
+    !isNonEmptyString(value.name) ||
+    !isSorbetMirrorProtocol(value.protocol) ||
+    !isNonEmptyString(value.baseUrl) ||
+    !Array.isArray(value.models)
+  ) {
+    return undefined;
+  }
+  const models: SorbetMirrorProvider['models'] = [];
+  for (const model of value.models) {
+    if (!isRecord(model) || !isNonEmptyString(model.id)) return undefined;
+    models.push({
+      id: model.id,
+      ...(isNonEmptyString(model.name) ? { name: model.name } : {}),
+    });
+  }
+  return {
+    id: value.id,
+    name: value.name,
+    protocol: value.protocol,
+    baseUrl: value.baseUrl,
+    models,
+  };
+};
+
+const normalizeSorbetMirrorCredentials = (value: unknown): SorbetMirrorCredentials | undefined => {
+  if (!isRecord(value) || !isSorbetMirrorStamp(value) || !Array.isArray(value.credentials)) {
+    return undefined;
+  }
+  const credentials = value.credentials.map(normalizeSorbetMirrorCredential);
+  if (credentials.some((credential) => credential === undefined)) return undefined;
+  return {
+    v: 1,
+    mirroredAt: value.mirroredAt as number,
+    credentials: credentials as SorbetMirrorCredential[],
+  };
+};
+
+const normalizeSorbetMirrorProviders = (value: unknown): SorbetMirrorProviders | undefined => {
+  if (!isRecord(value) || !isSorbetMirrorStamp(value) || !Array.isArray(value.providers)) {
+    return undefined;
+  }
+  const providers = value.providers.map(normalizeSorbetMirrorProvider);
+  if (providers.some((provider) => provider === undefined)) return undefined;
+  return { v: 1, mirroredAt: value.mirroredAt as number, providers: providers as SorbetMirrorProvider[] };
+};
+
+const normalizeSorbetMirrorModels = (value: unknown): SorbetMirrorModels | undefined => {
+  if (!isRecord(value) || !isSorbetMirrorStamp(value) || !Array.isArray(value.models)) {
+    return undefined;
+  }
+  const models: SorbetMirrorModel[] = [];
+  for (const model of value.models) {
+    if (
+      !isRecord(model) ||
+      !isNonEmptyString(model.selector) ||
+      !isNonEmptyString(model.providerId) ||
+      !isNonEmptyString(model.modelId) ||
+      !isNonEmptyString(model.displayName)
+    ) {
+      return undefined;
+    }
+    models.push({
+      selector: model.selector,
+      providerId: model.providerId,
+      modelId: model.modelId,
+      displayName: model.displayName,
+    });
+  }
+  return { v: 1, mirroredAt: value.mirroredAt as number, models };
+};
+
+/**
+ * The mirror families a machine published, by family. A missing family means the
+ * daemon has not mirrored that part of its store yet — an older daemon mirrors
+ * nothing — and is never read as "the machine has none".
+ */
+const isMachineFlockSorbetCredentialsRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockSorbetCredentialsKey }> =>
+  row.key[0] === 'sorbetStore' && row.key[1] === 'credentials';
+
+const isMachineFlockSorbetProvidersRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockSorbetProvidersKey }> =>
+  row.key[0] === 'sorbetStore' && row.key[1] === 'providers';
+
+const isMachineFlockSorbetModelsRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockSorbetModelsKey }> =>
+  row.key[0] === 'sorbetStore' && row.key[1] === 'models';
+
+export function getMachineFlockSorbetStore(rows: MachineFlockRowMap): MachineFlockSorbetStore {
+  const store: MachineFlockSorbetStore = {};
+  for (const row of Object.values(rows)) {
+    if (isMachineFlockSorbetCredentialsRow(row)) store.credentials = row.value;
+    else if (isMachineFlockSorbetProvidersRow(row)) store.providers = row.value;
+    else if (isMachineFlockSorbetModelsRow(row)) store.models = row.value;
+  }
+  return store;
+}
+
+/**
+ * An unchanged family keeps its row: the only thing a rewrite would add is a
+ * newer `mirroredAt`, and that stamp is what a reader uses to age the view. It
+ * is renewed once the stored read is an hour old, so an idle machine's mirror
+ * stays within the staleness the page can state rather than drifting for days.
+ */
+export const SORBET_MIRROR_STAMP_RENEWAL_MS = 60 * 60_000;
+
+const sorbetMirrorPayload = (row: { mirroredAt: number }): string => {
+  const { mirroredAt: _stamp, ...payload } = row;
+  return JSON.stringify(payload);
+};
+
+/**
+ * Replaces every mirror family in one commit, so a reader never sees half a
+ * read. Whole-family replacement is also how a deletion converges: a Provider
+ * the machine dropped is absent from the next payload, so no row can survive it.
+ * Returns whether anything was written.
+ */
+export function writeSorbetStoreMirrorToFlock(
+  flock: MachineFlockWritableFlock,
+  mirror: SorbetStoreMirror,
+  nowMs: number
+): boolean {
+  const rows = readMachineFlockRowsFromFlock(flock, { families: ['sorbetStore'] });
+  const stored = getMachineFlockSorbetStore(rows);
+  let changed = false;
+  const write = <T extends SorbetMirrorStamp>(key: MachineFlockSorbetStoreKey, value: T, previous: T | undefined): void => {
+    if (
+      previous &&
+      sorbetMirrorPayload(previous) === sorbetMirrorPayload(value) &&
+      value.mirroredAt - previous.mirroredAt < SORBET_MIRROR_STAMP_RENEWAL_MS
+    ) {
+      return;
+    }
+    flock.set(key, value, nowMs);
+    changed = true;
+  };
+  write(
+    machineFlockKeys.sorbetStoreCredentials(),
+    { v: 1, mirroredAt: nowMs, credentials: [...mirror.credentials] } satisfies SorbetMirrorCredentials,
+    stored.credentials
+  );
+  write(
+    machineFlockKeys.sorbetStoreProviders(),
+    { v: 1, mirroredAt: nowMs, providers: [...mirror.providers] } satisfies SorbetMirrorProviders,
+    stored.providers
+  );
+  write(
+    machineFlockKeys.sorbetStoreModels(),
+    { v: 1, mirroredAt: nowMs, models: [...mirror.models] } satisfies SorbetMirrorModels,
+    stored.models
+  );
+  if (changed) flock.commit();
+  return changed;
+}
+
 import { encodeCodexProfileConfig, CODEX_PROFILE_LEGACY_LAUNCH_GUARD } from './codex-auth-profile';
 
 export function getMachineFlockMemories(

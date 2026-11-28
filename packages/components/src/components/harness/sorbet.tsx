@@ -25,6 +25,7 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  getMachineFlockSorbetStore,
   machineSupportsProtocolCapability,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
@@ -32,6 +33,7 @@ import {
   SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION,
   type AgentConfigId,
   type AgentConfigMeta,
+  type MachineFlockSorbetStore,
   type MachineId,
   type MachineViewMeta,
 } from '@lody/shared';
@@ -41,6 +43,7 @@ import { getAgentConfigsByMachineAtomFamily } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
+import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { useRefreshMachineAcpCapabilities } from '@/hooks/use-refresh-machine-acp-capabilities';
 
 import { useHarnessDevices } from './machines';
@@ -161,6 +164,76 @@ export function supportsSorbetHostSettings(
 const wireMethod = (type: string): HarnessState['credentials'][string]['method'] =>
   type === 'oauth' ? 'oauth' : type === 'local' ? 'local' : 'key';
 
+/**
+ * One stored credential as a drawn row. Shared by the RPC read and the mirror
+ * read so a plaintext workspace and the desktop cannot describe the same stored
+ * key differently.
+ */
+function credentialRows(
+  credentials: readonly { providerId: string; type: string }[]
+): HarnessState['credentials'] {
+  const rows: HarnessState['credentials'] = {};
+  for (const credential of credentials) {
+    rows[credential.providerId] = {
+      provider: credential.providerId,
+      method: wireMethod(credential.type),
+      account:
+        credential.type === 'oauth'
+          ? 'Signed in'
+          : credential.type === 'local'
+            ? 'Local'
+            : 'API key',
+      addedAt: Date.now(),
+    };
+  }
+  return rows;
+}
+
+/**
+ * What a machine mirrored into its Flock, as the drawn lists. `null` when the
+ * connection list itself was never published: every control that offers a
+ * connection is drawn from it, so without that family the page has nothing it
+ * may claim. An absent row is never an empty store. The stamp is the oldest
+ * family's: the newest list is only as good as the stalest one beside it.
+ */
+function mirroredStore(
+  mirror: MachineFlockSorbetStore
+): (Pick<HarnessState, 'credentials' | 'customs' | 'models'> & { mirroredAt: number }) | null {
+  if (!mirror.credentials) return null;
+  const credentials = mirror.credentials;
+  const stamps = [credentials, mirror.providers, mirror.models]
+    .filter((row) => row !== undefined)
+    .map((row) => row.mirroredAt);
+  return {
+    credentials: credentialRows(credentials.credentials),
+    customs: (mirror.providers?.providers ?? []).map((provider) => ({
+      id: provider.id,
+      name: provider.name,
+      protocol: provider.protocol as EndpointProtocol,
+      baseUrl: provider.baseUrl,
+      models: provider.models.map((model) => ({ id: model.id, name: model.name })),
+    })),
+    models: (mirror.models?.models ?? []).map((model) => ({
+      selector: model.selector,
+      providerId: model.providerId,
+      modelId: model.modelId,
+      displayName: model.displayName,
+    })),
+    mirroredAt: Math.min(...stamps),
+  };
+}
+
+/** How old a machine's mirrored read is, in the page's own words. */
+export function formatMirrorAge(mirroredAt: number, nowMs = Date.now()): string {
+  const elapsedMs = Math.max(0, nowMs - mirroredAt);
+  if (elapsedMs < 60_000) return 'just now';
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} d ago`;
+}
+
 export interface SorbetActions {
   /** Logout and delete are writes on the machine; a re-read settles them. */
   disconnect: (providerId: string) => Promise<void>;
@@ -212,6 +285,8 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
   const machineIds = useMemo(() => [...machines.keys()], [machines]);
   useMachineFlockAgentConfigsForMachineIds(machineIds);
   const configs = useAtomValue(getAgentConfigsByMachineAtomFamily(machineId ?? undefined));
+  const mirrorRows = useMachineFlockRows(machineId, { families: ['sorbetStore'] });
+  const mirror = useMemo(() => getMachineFlockSorbetStore(mirrorRows), [mirrorRows]);
   const refreshCapabilities = useRefreshMachineAcpCapabilities();
   // Bumping this after a sign-in or a mutation re-reads both lists.
   const [version, setVersion] = useState(0);
@@ -236,25 +311,36 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
       models: [] as HarnessState['models'],
     };
     if (isLoading) {
-      harness.applyRemote({ ...empty, status: 'loading' });
+      harness.applyRemote({ ...empty, mirroredAt: null, status: 'loading' });
       return;
     }
-    if (!machine || access !== 'store') {
-      harness.applyRemote({
-        ...empty,
-        status: access === 'needs-encryption' ? 'unreachable' : 'unsupported',
-      });
+    if (!machine) {
+      harness.applyRemote({ ...empty, mirroredAt: null, status: 'unsupported' });
+      return;
+    }
+    if (access !== 'store') {
+      // The machine's own read, for a client that cannot ask it.
+      const mirrored = mirroredStore(mirror);
+      harness.applyRemote(
+        mirrored
+          ? { ...mirrored, status: 'mirrored' }
+          : {
+              ...empty,
+              mirroredAt: null,
+              status: access === 'needs-encryption' ? 'unreachable' : 'unsupported',
+            }
+      );
       return;
     }
     if (!target) {
-      harness.applyRemote({ ...empty, status: 'no-agent' });
+      harness.applyRemote({ ...empty, mirroredAt: null, status: 'no-agent' });
       return;
     }
     if (!runtime) {
-      harness.applyRemote({ ...empty, status: 'no-runtime' });
+      harness.applyRemote({ ...empty, mirroredAt: null, status: 'no-runtime' });
       return;
     }
-    harness.applyRemote({ ...empty, status: 'loading' });
+    harness.applyRemote({ ...empty, mirroredAt: null, status: 'loading' });
     void (async () => {
       // Keep the related control reads ordered so the surface commits one
       // coherent generation after a machine switch.
@@ -265,22 +351,7 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
           params: { configId: target.configId },
         });
         if (result.type === 'sorbet/credentials-list') {
-          credentials = {};
-          for (const credential of result.credentials) {
-            credentials[credential.providerId] = {
-              provider: credential.providerId,
-              // The wire name is `api_key`; anything that is not oauth or
-              // local is a stored secret, so the row can say "API key".
-              method: wireMethod(credential.type),
-              account:
-                credential.type === 'oauth'
-                  ? 'Signed in'
-                  : credential.type === 'local'
-                    ? 'Local'
-                    : 'API key',
-              addedAt: Date.now(),
-            };
-          }
+          credentials = credentialRows(result.credentials);
         }
       } catch {
         // The read failed; the status below reports it.
@@ -322,13 +393,14 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
         credentials: credentials ?? {},
         customs: customs ?? [],
         models: models ?? [],
+        mirroredAt: null,
         status: credentials && customs && models ? 'ready' : 'error',
       });
     })();
     return () => {
       generation.current++;
     };
-  }, [runtime, target?.machineId, target?.configId, access, isLoading, version]);
+  }, [runtime, target?.machineId, target?.configId, access, isLoading, version, mirror]);
 
   const reread = useCallback(() => setVersion((value) => value + 1), []);
 

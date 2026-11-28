@@ -78,6 +78,19 @@ refreshes discovery for that endpoint alone, and edits its name, protocol and ba
 through `sorbet/providers-update` (Providers protocol v3). The daemon applies an edit
 over the stored definition, so discovered models and catalog references survive.
 
+A machine's daemon also mirrors what it read from its own Sorbet store into the
+machine Flock (`sorbetStore` rows: credential descriptors, custom endpoints, the model
+catalog), so a client that cannot ask the machine can still draw its Providers,
+endpoints and models. Those rows carry descriptors only — never a secret — and stay a
+mirror of Sorbet's store, written only by the daemon that read it and replaced whole
+on every read, so a removed endpoint cannot leave a row behind. The page reads them
+exactly when the RPC store is out of reach (`mirrored`), states how old that read is,
+and disables every write, including sign-in: a mirrored list says what the machine
+holds, not what it would accept. `machine/acp-authenticate` answers on the plaintext
+channel, but nothing there can re-read the store to confirm a stored credential, so
+the page offers sign-in only where it can see the result. With RPC available its answer
+always wins; the rows are never merged with it.
+
 ### Session defaults
 
 The Models and Permissions pages write the Sorbet Provider's `sessionDefaults`

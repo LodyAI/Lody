@@ -64,6 +64,8 @@ const mounted = vi.hoisted(() => ({
   machine: null as unknown,
   calls: [] as string[],
   configs: [] as unknown[],
+  /** The rows a machine published into its Machine Flock, keyed by machine id. */
+  rowsByMachineId: {} as Record<string, unknown>,
 }));
 
 const runtime = {
@@ -131,6 +133,16 @@ vi.mock('@/components/harness/machines', async (importOriginal) => ({
 
 vi.mock('@/hooks/use-machine-flock-agent-configs', () => ({
   useMachineFlockAgentConfigsForMachineIds: () => {},
+}));
+
+/**
+ * The bridge's second source: the rows a machine published about its own store.
+ * Everything between that read and the drawn panel is the real code under test.
+ */
+vi.mock('@/hooks/use-machine-flock-rows', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/hooks/use-machine-flock-rows')>()),
+  useMachineFlockRows: (machineId: string | null | undefined) =>
+    (machineId ? mounted.rowsByMachineId[machineId] : undefined) ?? {},
 }));
 
 /** One stable atom per read: a fresh atom would resubscribe on every render. */
@@ -327,5 +339,186 @@ describe('an unreadable machine store', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('Not readable from this app');
     expect(text).not.toContain('None connected');
+  });
+});
+
+/**
+ * A machine publishes what it read from its Sorbet store into its Machine Flock.
+ * A plaintext workspace can read those rows even though it cannot ask the
+ * machine, so the page shows the machine's own list — old and unchangeable, not
+ * empty and not unknowable.
+ */
+describe('a machine that mirrors its Sorbet store', () => {
+  let container: HTMLDivElement;
+  let root: Root | null = null;
+
+  const mirroredAt = 1_700_000_000_000;
+
+  /** One machine's published read: credentials, endpoints and the catalog. */
+  function publishedStore(stamp: number) {
+    const row = (key: unknown[], value: unknown) => ({ key, value });
+    return {
+      [JSON.stringify(['sorbetStore', 'credentials'])]: row(['sorbetStore', 'credentials'], {
+        v: 1,
+        mirroredAt: stamp,
+        credentials: [{ providerId: 'anthropic', type: 'oauth' }],
+      }),
+      [JSON.stringify(['sorbetStore', 'providers'])]: row(['sorbetStore', 'providers'], {
+        v: 1,
+        mirroredAt: stamp,
+        providers: [
+          {
+            id: 'gateway',
+            name: 'Acme Gateway',
+            protocol: 'openai-completions',
+            baseUrl: 'https://gateway.example.com/v1',
+            models: [{ id: 'meridian', name: 'Meridian' }],
+          },
+        ],
+      }),
+      [JSON.stringify(['sorbetStore', 'models'])]: row(['sorbetStore', 'models'], {
+        v: 1,
+        mirroredAt: stamp,
+        models: [
+          {
+            selector: 'gateway/meridian',
+            providerId: 'gateway',
+            modelId: 'meridian',
+            displayName: 'Meridian',
+          },
+        ],
+      }),
+    };
+  }
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    window.localStorage.clear();
+    harness.reset();
+    mounted.calls.length = 0;
+    mounted.machine = machine();
+    mounted.configs = [lodyAgent];
+    mounted.rowsByMachineId = { [machineId]: publishedStore(mirroredAt) };
+    getDefaultStore().set(activeWorkspaceRuntimeAtom, runtime);
+    getDefaultStore().set(localMachineIdAtom, null);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(async () => {
+    if (root) await act(async () => root?.unmount());
+    root = null;
+    container.remove();
+    mounted.rowsByMachineId = {};
+  });
+
+  const render = async (node: ReactNode) => {
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(node);
+    });
+    for (let turn = 0; turn < 20 && getHarness().status === 'loading'; turn += 1) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+  };
+
+  it('draws the machine\u2019s own list without asking RPC it does not answer', async () => {
+    await render(
+      <SorbetBridge>
+        <ProvidersPanel />
+      </SorbetBridge>
+    );
+
+    const state = getHarness();
+    expect(state.status).toBe('mirrored');
+    expect(state.mirroredAt).toBe(mirroredAt);
+    expect(Object.keys(state.credentials)).toEqual(['anthropic']);
+    expect(state.customs.map((custom) => custom.name)).toEqual(['Acme Gateway']);
+    expect(state.models.map((model) => model.selector)).toEqual(['gateway/meridian']);
+    expect(mounted.calls).toEqual([]);
+
+    const text = container.textContent ?? '';
+    expect(text).toContain('Acme Gateway');
+    expect(text).toContain('Meridian');
+    expect(text).not.toContain('cannot be read from this app');
+  });
+
+  it('disables every write and says why, instead of offering a control that fails', async () => {
+    await render(
+      <SorbetBridge>
+        <ProvidersPanel />
+      </SorbetBridge>
+    );
+
+    const buttons = [...container.querySelectorAll('button')];
+    const add = buttons.find((button) => button.textContent?.trim() === 'Add endpoint');
+    const signIn = buttons.filter((button) => button.textContent?.trim() === 'Sign in');
+    const refresh = buttons.find((button) =>
+      button.getAttribute('aria-label')?.startsWith('Refresh models for')
+    );
+    const remove = buttons.find((button) =>
+      button.getAttribute('aria-label')?.startsWith('Remove')
+    );
+
+    expect(add?.hasAttribute('disabled')).toBe(true);
+    expect(signIn.length).toBeGreaterThan(0);
+    expect(signIn.every((button) => button.hasAttribute('disabled'))).toBe(true);
+    expect(refresh?.hasAttribute('disabled')).toBe(true);
+    expect(remove?.hasAttribute('disabled')).toBe(true);
+    expect(add?.getAttribute('title')).toContain('change it on the machine');
+  });
+
+  it('says how old the machine\u2019s read is rather than presenting it as live', async () => {
+    const threeMinutesAgo = Date.now() - 3 * 60_000;
+    mounted.rowsByMachineId = { [machineId]: publishedStore(threeMinutesAgo) };
+
+    await render(
+      <SorbetBridge>
+        <ProvidersPanel />
+      </SorbetBridge>
+    );
+
+    expect(container.textContent).toContain('Read-only · synced from MyMac 3 min ago');
+  });
+
+  it('counts a mirrored provider as connected for setup, but not as signable-in', async () => {
+    await render(
+      <SorbetBridge>
+        <Setup />
+      </SorbetBridge>
+    );
+
+    const footer = [...container.querySelectorAll('span')].map((span) => span.textContent ?? '');
+    expect(footer).toContain('1 connected');
+  });
+
+  it('still asks the machine itself when this client can reach its store', async () => {
+    getDefaultStore().set(localMachineIdAtom, machineId);
+
+    await render(
+      <SorbetBridge>
+        <ProvidersPanel />
+      </SorbetBridge>
+    );
+
+    expect(getHarness().status).toBe('ready');
+    expect(getHarness().mirroredAt).toBeNull();
+    expect(mounted.calls).toContain('sorbet/credentials-list');
+  });
+
+  it('keeps the old daemon\u2019s answer when no mirror was ever published', async () => {
+    mounted.machine = machine({ protocolCapabilities: {} });
+    mounted.rowsByMachineId = {};
+
+    await render(
+      <SorbetBridge>
+        <ProvidersPanel />
+      </SorbetBridge>
+    );
+
+    expect(getHarness().status).toBe('unsupported');
+    expect(container.textContent).toContain('Endpoints on this machine cannot be read from this app.');
   });
 });
