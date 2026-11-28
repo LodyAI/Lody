@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest';
-import { Cause, Effect, Exit, Option } from 'effect';
+import { Cause, Deferred, Effect, Exit, Fiber, Option } from 'effect';
+import { TestClock } from 'effect/testing';
 
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +9,7 @@ import { runCommand } from '../src/node/process';
 import { signalChildTreeNowLegacy } from '../src/node/process';
 import { spawnProcess as acquireProcess, type SpawnSpec } from '../src/node/process';
 import { processLayer, isPidAliveSyncLegacy, terminatePidLegacy } from '../src/node/process';
+import { terminateTree, windowsTree, type NodeProcessApi } from '../src/node/process';
 import { resolveWindowsCommand } from '../src/node/process';
 import { FakeProcessTable } from '../src/node/process-testing';
 
@@ -58,6 +60,48 @@ describe('process tree termination (Windows)', () => {
 
     expect(table.spawned.filter((call) => call.command === 'taskkill')).toEqual([]);
   });
+
+  it('never force-kills a bare pid after taskkill exits 128', async () => {
+    const table = new FakeProcessTable('win32');
+    table.queueSpawn({ ignores: ['SIGTERM'] });
+    const host = table.api.spawn('host', [], {}).pid ?? -1;
+    table.addDescendant(host, { ignores: ['SIGTERM'] });
+
+    await terminatePidLegacy(host, GRACEFUL, { nodeProcess: table.api });
+
+    expect(table.delivered).toEqual([{ target: host, signal: 'SIGTERM' }]);
+  });
+
+  it.effect('waits for the exit record instead of forcing a root that taskkill did not find', () =>
+    Effect.gen(function* () {
+      const table = new FakeProcessTable('win32');
+      const answered = Deferred.makeUnsafe<void>();
+      const nodeProcess: NodeProcessApi = {
+        ...table.api,
+        spawn: (command, args, options) => {
+          const spawned = table.api.spawn(command, args, options);
+          spawned.once('close', () => Deferred.doneUnsafe(answered, Effect.void));
+          return spawned;
+        },
+      };
+      const child = table.api.spawn('agent', [], {});
+      const root = child.pid ?? -1;
+      table.exitUnreaped(root);
+
+      const terminating = yield* Effect.forkChild(
+        terminateTree(windowsTree(nodeProcess, Object.assign(child, { pid: root })), GRACEFUL)
+      );
+      yield* Deferred.await(answered);
+      yield* TestClock.adjust('20 millis');
+      table.reap(root);
+      yield* TestClock.adjust('20 millis');
+      yield* Fiber.join(terminating);
+
+      expect(
+        table.spawned.filter((call) => call.command === 'taskkill').map((call) => call.args)
+      ).toEqual([['/PID', String(root), '/T']]);
+    })
+  );
 });
 
 const readPidLine = (stream: Readable | null) =>
