@@ -38,6 +38,10 @@ export const automationControlRequestSchema = z
     machineId: id,
     workspaceId: id,
     requesterSessionId: id.optional(),
+    source: z
+      .object({ sessionId: id, turnId: id, depth: z.number().int().nonnegative() })
+      .strict()
+      .optional(),
     command: automationCommandSchema,
   })
   .strict();
@@ -84,7 +88,15 @@ export const remoteAutomationWaitSchema = z
     id,
     sessionId: id,
     reason: z.string().max(2000).optional(),
-    state: z.enum(['waiting', 'checking', 'matched', 'cancelled', 'expired', 'failed']),
+    state: z.enum([
+      'waiting',
+      'checking',
+      'matched',
+      'cancelled',
+      'expired',
+      'failed',
+      'superseded',
+    ]),
     nextCheckAt: z.number(),
     expiresAt: z.number().optional(),
     continuation: z

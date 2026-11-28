@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -264,6 +265,205 @@ async function archiveAfterMergeFixture() {
 }
 
 describe('Automation control authority', () => {
+  it('freezes the causal depth of the driving input at registration', async () => {
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+      latestUserMsgId: 'wake-9',
+      processingUserMsgId: 'wake-9',
+    };
+    const host = await workspaceFixture(meta);
+    const doc = host.testDocument;
+    await doc.sessionData.commands.appendTurn({
+      id: 'wake-9',
+      role: 'user',
+      timestamp: '2026-11-28T00:00:00.000Z',
+      items: [{ type: 'text', text: 'earlier wake' }],
+      fileDiff: [],
+      inputConfig: { chainDepth: 9 },
+    } as never);
+    const program = "async ({ctx}) => { await ctx.read('session'); return false; }";
+    const registered = (await host.command(
+      { type: 'register', sessionId: 'session-a', program, intervalMs: 30000 },
+      'session-a'
+    )) as { id: string };
+    expect(host.ledger.wait(registered.id)?.causal).toMatchObject({
+      depth: 9,
+      sessionId: 'session-a',
+      turnId: 'wake-9',
+    });
+    await doc.sessionData.commands.appendTurn({
+      id: 'source-12',
+      role: 'user',
+      timestamp: '2026-11-28T00:00:30.000Z',
+      items: [{ type: 'text', text: 'deeper wake' }],
+      fileDiff: [],
+      inputConfig: { chainDepth: 12 },
+    } as never);
+    const exact = (await host.command(
+      {
+        type: 'register',
+        sessionId: 'session-a',
+        program,
+        key: 'exact',
+        intervalMs: 30000,
+      },
+      'session-a',
+      { sessionId: 'session-a', turnId: 'source-12', depth: 12 }
+    )) as { id: string };
+    expect(host.ledger.wait(exact.id)?.causal).toMatchObject({
+      depth: 12,
+      sessionId: 'session-a',
+      turnId: 'source-12',
+    });
+    const wired = (await host.command(
+      {
+        type: 'register',
+        sessionId: 'session-a',
+        program,
+        key: 'wired',
+        intervalMs: 30000,
+      },
+      'session-a',
+      { sessionId: 'session-a', turnId: 'unsynced-turn', depth: 14 }
+    )) as { id: string };
+    expect(host.ledger.wait(wired.id)?.causal).toMatchObject({
+      depth: 14,
+      turnId: 'unsynced-turn',
+    });
+    await doc.sessionData.commands.appendTurn({
+      id: 'wake-16',
+      role: 'user',
+      timestamp: '2026-11-28T00:01:00.000Z',
+      items: [{ type: 'text', text: 'deep wake' }],
+      fileDiff: [],
+      inputConfig: { chainDepth: 16 },
+    } as never);
+    meta.processingUserMsgId = 'wake-16';
+    await expect(
+      host.command(
+        { type: 'register', sessionId: 'session-a', program, key: 'deep', intervalMs: 30000 },
+        'session-a'
+      )
+    ).rejects.toThrow('CHAIN_DEPTH_EXCEEDED');
+    expect(host.ledger.waits(undefined, 'session-a').some((wait) => wait.key === 'deep')).toBe(
+      false
+    );
+  });
+  it('reports only live waits in the registration inventory and list', async () => {
+    const host = await workspaceFixture({
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    });
+    const program = "async ({ctx}) => { await ctx.read('session'); return false; }";
+    const { wait: completed } = host.ledger.registerWait(
+      { program, intervalMs: 30000 },
+      'session-a',
+      'user',
+      Date.now()
+    );
+    host.ledger.updateWait(completed.id, 'waiting', { state: 'checking' }, Date.now());
+    const matched = host.ledger.finishWait(completed, { resumeText: 'done' }, Date.now());
+    const receipt = matched?.invocationId && host.ledger.receipt(matched.invocationId);
+    if (!receipt) throw new Error('missing continuation receipt');
+    host.ledger.update(receipt.id, receipt.state, { state: 'settled' }, Date.now());
+    const registered = (await host.command(
+      { type: 'register', sessionId: 'session-a', program, key: 'next', intervalMs: 30000 },
+      'session-a'
+    )) as { id: string; activeWaits: Array<{ id: string }> };
+    expect(registered.activeWaits.map((wait) => wait.id)).toEqual([registered.id]);
+    const listed = (await host.command(
+      { type: 'list', sessionId: 'session-a' },
+      'session-a'
+    )) as Array<{
+      id: string;
+    }>;
+    expect(listed.map((wait) => wait.id)).toEqual([registered.id]);
+    expect(host.ledger.wait(completed.id)?.state).toBe('matched');
+  });
+  it.skipIf(process.platform === 'win32')(
+    'passes the enclosing Session as the causal requester from the CLI',
+    async () => {
+      const root = mkdtempSync(path.join('/tmp', 'lody-cli-'));
+      roots.push(root);
+      vi.stubEnv('LODY_DATA_DIR', root);
+      const catalog = {
+        version: 1,
+        identity: { userId: 'user' },
+        machine: { machineId: 'machine' },
+        workspaces: [
+          {
+            workspaceId: 'workspace',
+            name: 'Workspace',
+            slug: 'workspace',
+            role: 'owner',
+            state: 'active',
+            cachedAt: Date.now(),
+          },
+        ],
+        sessions: [],
+      };
+      writeFileSync(path.join(root, 'workspace-catalog.json'), `${JSON.stringify(catalog)}\n`, {
+        mode: 0o600,
+      });
+      const requests: string[] = [];
+      const server = http.createServer((request, response) => {
+        void (async () => {
+          const chunks: Buffer[] = [];
+          for await (const chunk of request) chunks.push(Buffer.from(chunk));
+          requests.push(Buffer.concat(chunks).toString('utf8'));
+          response
+            .writeHead(200, { 'Content-Type': 'application/json' })
+            .end(JSON.stringify({ ok: true, result: {} }));
+        })();
+      });
+      mkdirSync(path.join(root, 'run'), { recursive: true, mode: 0o700 });
+      const socketPath = path.join(root, 'run', 'control.sock');
+      writeFileSync(
+        path.join(root, 'run', 'daemon.json'),
+        JSON.stringify({
+          pid: process.pid,
+          socketPath,
+          controlSocketPath: socketPath,
+          version: 'test',
+          startedAt: new Date().toISOString(),
+        }),
+        { mode: 0o600 }
+      );
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(socketPath, resolve);
+      });
+      try {
+        vi.stubEnv('LODY_SESSION_ID', 'session-enclosing');
+        vi.stubEnv('LODY_AUTH_URL', '');
+        const { loadEnv } = await import('@/utils/const');
+        loadEnv();
+        const { sendAutomationCommand } = await import('./control/client');
+        await sendAutomationCommand({ type: 'list', sessionId: 'session-target' });
+        expect(requests).toHaveLength(1);
+        const body = JSON.parse(requests[0] ?? '{}') as {
+          requesterSessionId?: string;
+          command?: { sessionId?: string };
+        };
+        expect(body.requesterSessionId).toBe('session-enclosing');
+        expect(body.command?.sessionId).toBe('session-target');
+        requests.length = 0;
+        vi.stubEnv('LODY_SESSION_ID', '');
+        await sendAutomationCommand({ type: 'list', sessionId: 'session-target' });
+        const outside = JSON.parse(requests[0] ?? '{}') as { requesterSessionId?: string };
+        expect(outside.requesterSessionId).toBeUndefined();
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        );
+      }
+    }
+  );
   it('executes a registered condition in the Session workspace', async () => {
     const host = await workspaceFixture({
       id: 'session-a',
@@ -271,7 +471,7 @@ describe('Automation control authority', () => {
       userId: 'user',
       collaborationStopped: true,
     });
-    const wait = host.ledger.registerWait(
+    const { wait: wait } = host.ledger.registerWait(
       {
         program: `async ({ctx}) => {
         const result = await ctx.exec({command: ${JSON.stringify(process.execPath)}, args: ['-e', 'process.stdout.write(process.cwd()); process.exitCode = 7']});
@@ -658,11 +858,16 @@ describe('Automation control authority', () => {
     for (let index = 0; index < 15; index++) {
       ids.add(
         host.ledger.registerWait(
-          { program: `() => ${index} === -1`, intervalMs: 1000, reason: '\u0000'.repeat(2000) },
+          {
+            program: `() => ${index} === -1`,
+            key: `w${index}`,
+            intervalMs: 1000,
+            reason: '\u0000'.repeat(2000),
+          },
           'session-a',
           'user',
           index
-        ).id
+        ).wait.id
       );
     }
     const recipient = await createRpcSecretRecipient();
@@ -733,7 +938,7 @@ describe('Automation control authority', () => {
       operation: input.operation,
     });
     await expect(host.remoteControl(input)).rejects.toThrow('AUTOMATION_REQUEST_USED');
-    const foreign = host.ledger.registerWait(
+    const { wait: foreign } = host.ledger.registerWait(
       { program: '() => false', intervalMs: 1000 },
       'other-session',
       'user',
@@ -790,7 +995,7 @@ describe('Automation control authority', () => {
         operation,
         proof: { runtimeNonce: nonce, requestId: crypto.randomUUID(), requestToken: 'valid' },
       });
-    const ownerWait = host.ledger.registerWait(
+    const { wait: ownerWait } = host.ledger.registerWait(
       { program: '() => false', intervalMs: 30_000 },
       'session-a',
       'user',
@@ -817,7 +1022,7 @@ describe('Automation control authority', () => {
     const nonce = host.remoteControlNonce;
     if (!nonce) throw new Error('missing remote nonce');
     const responseKey = (await createRpcSecretRecipient()).publicKey;
-    const wait = host.ledger.registerWait(
+    const { wait: wait } = host.ledger.registerWait(
       { program: '() => false', intervalMs: 30_000 },
       'session-a',
       'user',
@@ -959,7 +1164,7 @@ describe('Automation control authority', () => {
       depth: 0,
     };
     host.ledger.publish(event);
-    const wait = host.ledger.registerWait(
+    const { wait: wait } = host.ledger.registerWait(
       {
         program: `async ({ctx}) => {
       const {value} = await ctx.read('events', {limit: 50});
@@ -1029,7 +1234,7 @@ describe('Automation control authority', () => {
       collaborationStopped: false,
     };
     const host = await workspaceFixture(meta);
-    const wait = host.ledger.registerWait(
+    const { wait: wait } = host.ledger.registerWait(
       {
         program: `async ({ctx}) => {
         const {value} = await ctx.read('session');
@@ -1047,7 +1252,7 @@ describe('Automation control authority', () => {
     expect(host.ledger.wait(wait.id)).toMatchObject({ state: 'waiting', consecutiveErrors: 0 });
     expect(host.ledger.wait(wait.id)?.checks).toBeGreaterThanOrEqual(5);
 
-    const ready = host.ledger.registerWait(
+    const { wait: ready } = host.ledger.registerWait(
       {
         program: `async ({ctx}) => {
         await ctx.read('session');

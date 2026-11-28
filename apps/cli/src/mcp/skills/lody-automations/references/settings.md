@@ -33,7 +33,8 @@ Exact defaults and limits are in `skill://lody-automations/references/commands.s
 
 `autoDeliver: {"fixCi": true, "resolveConflicts": true, "merge": true}` hands this
 Session's current pull request to Lody. Defaults: `fixCi` and `resolveConflicts`
-true, `merge` false; set `merge: true` only when the user asked for the merge.
+true, and `merge` true as well; pass `merge: false` when the user did not ask
+for the merge.
 Without a PR, Lody first sends the Create PR request. It then waits for PR
 observations and, while the Session group is idle, sends the same Fix CI, Resolve
 Conflicts or merge request as the Info Bar buttons. Lody requests each repair at most

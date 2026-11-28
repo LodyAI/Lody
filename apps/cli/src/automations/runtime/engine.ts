@@ -56,6 +56,7 @@ export class Automations extends Context.Service<
         const signal = sharedSignal ?? (yield* Queue.dropping<void>(1));
         const gate = Semaphore.makeUnsafe(1);
         const active = new Map<string, Deferred.Deferred<void>>();
+        let lastPruneAt = 0;
         const checking = new Map<
           string,
           { stop: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
@@ -93,6 +94,28 @@ export class Automations extends Context.Service<
                 : Clock.currentTimeMillis.pipe(
                     Effect.flatMap((at) =>
                       Effect.try(() => {
+                        const message = Cause.pretty(cause).slice(0, 2000);
+                        if (
+                          message.includes('AUTOMATION_SESSION_ARCHIVED') ||
+                          message.includes('AUTOMATION_SESSION_UNAVAILABLE')
+                        ) {
+                          ledger.updateWait(
+                            claimed.id,
+                            'checking',
+                            { state: 'cancelled', lastError: message },
+                            at
+                          );
+                          return;
+                        }
+                        if (message.includes('AUTOMATION_RESULT_WITHOUT_OBSERVATION')) {
+                          ledger.updateWait(
+                            claimed.id,
+                            'checking',
+                            { state: 'failed', lastError: message },
+                            at
+                          );
+                          return;
+                        }
                         const errors = claimed.consecutiveErrors + 1;
                         ledger.updateWait(
                           claimed.id,
@@ -105,7 +128,7 @@ export class Automations extends Context.Service<
                                   ? 'failed'
                                   : 'waiting',
                             consecutiveErrors: errors,
-                            lastError: Cause.pretty(cause).slice(0, 2000),
+                            lastError: message,
                             nextCheckAt:
                               at +
                               Math.max(claimed.intervalMs, Math.min(300_000, 1000 * 2 ** errors)),
@@ -166,7 +189,12 @@ export class Automations extends Context.Service<
             const result = yield* host.cancel(receipt);
             yield* persist(receipt, {
               ...result,
-              state: TERMINAL_STATES.has(result.state) ? result.state : 'cancelling',
+              state:
+                result.state === 'unknown' && receipt.reason?.includes('slot_superseded')
+                  ? 'unknown'
+                  : TERMINAL_STATES.has(result.state)
+                    ? result.state
+                    : 'cancelling',
               retryAt: now + 15_000,
             });
             return;
@@ -288,6 +316,12 @@ export class Automations extends Context.Service<
           Effect.gen(function* () {
             const now = yield* Clock.currentTimeMillis;
             if (host.observe) yield* host.observe;
+            if (now - lastPruneAt >= 3_600_000) {
+              lastPruneAt = now;
+              yield* Effect.try(() => ledger.pruneTerminalWaits(now - 48 * 3_600_000)).pipe(
+                Effect.catch(() => Effect.void)
+              );
+            }
             const waits = yield* Effect.try(() => ledger.dueWaits(now));
             yield* Effect.forEach(waits, evaluate, { concurrency: 4, discard: true });
             const deliveries = yield* Effect.try(() => ledger.deliveries(4));
@@ -371,10 +405,13 @@ export class Automations extends Context.Service<
             if (!receipt) return;
             if (IN_FLIGHT_STATES.has(receipt.state) || receipt.state === 'cancelling') {
               // Revoke admission before awaiting the owner; this fence survives restart.
-              const fenced = yield* persist(receipt, {
-                state: 'cancelling',
-                reason: 'user_cancel_requested',
-              });
+              const fenced =
+                receipt.state === 'cancelling'
+                  ? receipt
+                  : yield* persist(receipt, {
+                      state: 'cancelling',
+                      reason: 'user_cancel_requested',
+                    });
               if (fenced) {
                 // Join this invocation only; an unrelated provider read cannot delay Stop.
                 const running = active.get(id);

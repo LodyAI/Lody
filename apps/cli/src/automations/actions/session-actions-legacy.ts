@@ -16,6 +16,7 @@ import {
   automationResultSchema,
   type AutomationOrigin,
   type AutomationReceipt,
+  type AutomationWait,
   type ConditionObservation,
   type PendingWork,
 } from '@lody/shared/automations';
@@ -54,10 +55,26 @@ export { deliveryRequest } from '../policies/delivery';
 const json = (input: unknown) =>
   z.record(z.string(), z.json()).parse(JSON.parse(JSON.stringify(input)));
 
+function automationProvenancePrefix(wait: AutomationWait | undefined): string {
+  const facts: Record<string, unknown> = {
+    notice:
+      'This input is an automation wake, not a human message. Its content was frozen when the condition was registered.',
+  };
+  if (wait) {
+    facts.waitId = wait.id;
+    facts.registeredAt = new Date(wait.createdAt).toISOString();
+    if (wait.key) facts.key = wait.key;
+    if (wait.reason) facts.reason = wait.reason;
+    if (wait.run) facts.managedRun = true;
+  }
+  return JSON.stringify(facts);
+}
+
 function buildInvocationPrompt(
   receipt: AutomationReceipt,
   invocation: z.infer<typeof automationInvocationSchema>,
-  work: PendingWork | undefined
+  work: PendingWork | undefined,
+  ledger: AutomationLedger
 ): string | undefined {
   if (invocation.input.kind === 'delivery') {
     return deliveryRequest(invocation.input.ref, invocation.input.values ?? {});
@@ -65,7 +82,10 @@ function buildInvocationPrompt(
   if (receipt.event.type === 'automation.condition.completed') {
     const completion = automationResultSchema.parse(receipt.event.data);
     if (completion !== false) {
+      const wait =
+        invocation.input.kind === 'external_event' ? ledger.wait(invocation.input.ref) : undefined;
       return [
+        automationProvenancePrefix(wait),
         completion.resumeText,
         ...(completion.payload === undefined
           ? []
@@ -239,7 +259,7 @@ export class AutomationSessionActionsLegacy {
       return { state: 'blocked', reason: 'pending_work_unavailable' };
     if (work && !ledger.claimWork(work.id, receipt.id))
       return { state: 'superseded', reason: 'pending_work_already_claimed' };
-    const prompt = buildInvocationPrompt(receipt, invocation, work);
+    const prompt = buildInvocationPrompt(receipt, invocation, work, ledger);
     if (!prompt) return { state: 'failed', reason: 'delivery_request_invalid' };
 
     if (invocation.target.kind === 'existing') {
@@ -281,6 +301,7 @@ export class AutomationSessionActionsLegacy {
         inputBlocks: [{ type: 'text', text: prompt }],
         cliType: meta.cliType,
         agentType: meta.agentType,
+        ...(work ? {} : { chainDepth: (receipt.causal?.depth ?? 0) + 1 }),
         resume: (work?.nativeSessionId ?? meta.acpSessionId ?? undefined) as
           | ACPSessionId
           | undefined,
@@ -486,11 +507,7 @@ export class AutomationSessionActionsLegacy {
         return { state: 'cancelled', reason: 'session_input_cancelled' };
       if (turnRead.turn.status === 'failed')
         return { state: 'failed', reason: 'agent_turn_failed' };
-      if (
-        turnRead.turn.status === 'handled' &&
-        !this.options.lody.hasAutomationSessionWork(receipt.sessionId as SessionId)
-      )
-        return { state: 'settled' };
+      if (turnRead.turn.status === 'handled') return { state: 'settled' };
       if (meta.processingUserMsgId === receipt.turnId) return { state: 'running' };
       if (turnRead.turn.status !== 'prepared') return { state: 'queued' };
     }
@@ -522,6 +539,14 @@ export class AutomationSessionActionsLegacy {
       return observed.state === 'settled'
         ? { state: 'settled', reason: 'archive_already_committed' }
         : { state: 'cancelled', reason: 'user_cancelled' };
+    }
+    if (receipt.reason?.includes('slot_superseded')) {
+      const withdrawn = await this.authority.withdrawInput(
+        receipt.sessionId as SessionId,
+        receipt.turnId
+      );
+      if (withdrawn === 'withdrawn') return { state: 'superseded', reason: receipt.reason };
+      return { state: 'unknown', reason: receipt.reason };
     }
     const workId = receipt.prepared?.workId;
     const work = typeof workId === 'string' ? this.options.ledger.work(workId) : undefined;

@@ -40,6 +40,7 @@ for (const action of [
   if (action === 'register')
     command
       .requiredOption('--file <path>', 'JavaScript condition function')
+      .option('--key <name>', 'Slot name; registering supersedes the slot’s unfinished wait')
       .option('--reason <text>', 'Why this Session is waiting')
       .option('--interval <ms>', 'Check interval in milliseconds', '30000')
       .option('--expires-at <time>', 'Absolute expiry as an ISO date or epoch milliseconds');
@@ -52,6 +53,7 @@ for (const action of [
   command.action(async (...values: unknown[]) => {
     const options = values[action === 'run' ? 2 : hasId ? 1 : 0] as CommonCommandOptions & {
       file?: string;
+      key?: string;
       cwd?: string;
       env?: Record<string, string>;
       session?: string;
@@ -70,6 +72,7 @@ for (const action of [
         ...(action === 'register'
           ? {
               program: file,
+              ...(options.key ? { key: options.key } : {}),
               reason: options.reason,
               intervalMs: Number(options.interval),
               ...(options.expiresAt

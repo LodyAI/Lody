@@ -11,12 +11,16 @@ such hops. A command issued by a turn already at depth 16 is rejected before an
 Operation or target Session is created, with the non-retryable
 `CHAIN_DEPTH_EXCEEDED` error.
 
-The depth is a causal delegation count, not a general `parentSessionId` tree
-depth. Creating a Session, sending work to another Session, and delivering an
-Operation continuation each advance the target turn by one. A missing depth on
-an ordinary human turn starts at zero. The limit remains fixed in the shared
-protocol contract; changing it requires updating every producer, recovery path,
-executable model, and this Spec.
+The depth counts machine-caused inputs since the last human turn, not a
+general `parentSessionId` tree depth, and not a property of any transport.
+Creating a Session, sending work to another Session, delivering an Operation
+continuation, and delivering an automation continuation each advance the target
+turn by one, whatever mechanism carried the input; the automation ledger is no
+exception ([Session automation events](session-automation-events.md)). A human
+turn resets the count, and a missing depth on an ordinary human turn starts at
+zero. The limit remains fixed in the shared protocol contract; changing it
+requires updating every producer, recovery path, executable model, and this
+Spec.
 
 The limit is visible before and when it is reached. From depth 8 (the soft limit),
 every accepted create or chat reply carries `chainBudget`: the hop the delegated Turn

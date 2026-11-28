@@ -98,7 +98,9 @@ export const waitColumns = (wait: AutomationWait) => ({
   session_id: wait.sessionId,
   owner_user_id: wait.ownerUserId,
   invocation_id: wait.invocationId ?? null,
+  slot_key: wait.run ? null : (wait.key ?? ''),
   created_at: wait.createdAt,
+  updated_at: wait.updatedAt,
   due_at: Math.min(wait.nextCheckAt, wait.expiresAt ?? Number.MAX_SAFE_INTEGER),
   run_pending: wait.run && wait.run.startedAt !== undefined && !wait.run.exit ? 1 : 0,
 });
@@ -128,7 +130,7 @@ export const deliveryColumns = (delivery: Delivery) => ({
 export function initializeAutomationLedgerSchema(connection: OrchestrationConnection): void {
   const db = connection.raw;
   const version = Number(db.pragma('user_version', { simple: true }));
-  if (version > 4) throw new Error('AUTOMATION_DATABASE_VERSION_UNSUPPORTED');
+  if (version > 5) throw new Error('AUTOMATION_DATABASE_VERSION_UNSUPPORTED');
   db.exec(`
     CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS events (
@@ -161,6 +163,7 @@ export function initializeAutomationLedgerSchema(connection: OrchestrationConnec
       db.pragma('user_version = 2');
     });
   if (version < 4) migrateQueryColumns(connection);
+  if (version < 5) migrateSlotColumns(connection);
   db.exec(`
     CREATE INDEX IF NOT EXISTS turn_observations_due ON turn_observations(retry_at);
     CREATE INDEX IF NOT EXISTS events_session ON events(session_id, observed_at);
@@ -178,6 +181,9 @@ export function initializeAutomationLedgerSchema(connection: OrchestrationConnec
     CREATE INDEX IF NOT EXISTS receipts_capacity ON receipts(event_type, policy, state);
     CREATE INDEX IF NOT EXISTS receipts_owner ON receipts(owner_user_id);
     CREATE INDEX IF NOT EXISTS waits_due_at ON waits(state, due_at);
+    CREATE INDEX IF NOT EXISTS waits_slot ON waits(session_id, slot_key, state);
+    CREATE INDEX IF NOT EXISTS waits_terminal ON waits(updated_at)
+    WHERE state IN ('cancelled','expired','failed','superseded');
     CREATE INDEX IF NOT EXISTS waits_owner ON waits(owner_user_id, session_id);
     CREATE INDEX IF NOT EXISTS waits_session ON waits(session_id);
     CREATE INDEX IF NOT EXISTS waits_run ON waits(state, run_pending);
@@ -231,7 +237,9 @@ function migrateQueryColumns(connection: OrchestrationConnection): void {
       session_id: 'TEXT',
       owner_user_id: 'TEXT',
       invocation_id: 'TEXT',
+      slot_key: 'TEXT',
       created_at: 'INTEGER',
+      updated_at: 'INTEGER',
       due_at: 'INTEGER',
       run_pending: 'INTEGER NOT NULL DEFAULT 0',
     });
@@ -317,7 +325,7 @@ function migrateQueryColumns(connection: OrchestrationConnection): void {
       );
     });
     const waits = db.prepare(
-      `UPDATE waits SET session_id=?,owner_user_id=?,invocation_id=?,created_at=?,due_at=?,run_pending=?
+      `UPDATE waits SET session_id=?,owner_user_id=?,invocation_id=?,slot_key=?,created_at=?,updated_at=?,due_at=?,run_pending=?
       WHERE id=?`
     );
     const insertRead = db.prepare('INSERT OR IGNORE INTO wait_reads VALUES (?,?)');
@@ -328,7 +336,9 @@ function migrateQueryColumns(connection: OrchestrationConnection): void {
         c.session_id,
         c.owner_user_id,
         c.invocation_id,
+        c.slot_key,
         c.created_at,
+        c.updated_at,
         c.due_at,
         c.run_pending,
         row.id
@@ -379,5 +389,27 @@ function migrateQueryColumns(connection: OrchestrationConnection): void {
       turns.run(fact.userId, fact.sessionId, fact.observedAt, row.id);
     });
     db.pragma('user_version = 4');
+  });
+}
+
+/** v5 projects slot ownership and update time for supersession and terminal retirement. */
+function migrateSlotColumns(connection: OrchestrationConnection): void {
+  const db = connection.raw;
+  connection.withImmediate(() => {
+    const existing = new Set(
+      (db.pragma('table_info(waits)') as Array<{ name: string }>).map((c) => c.name)
+    );
+    if (!existing.has('slot_key')) db.exec('ALTER TABLE waits ADD COLUMN slot_key TEXT');
+    if (!existing.has('updated_at')) db.exec('ALTER TABLE waits ADD COLUMN updated_at INTEGER');
+    const update = db.prepare('UPDATE waits SET slot_key=?,updated_at=? WHERE id=?');
+    const rows = db.prepare('SELECT rowid,id,payload FROM waits').all() as Array<
+      JsonRow & { rowid: number; id: string }
+    >;
+    for (const row of rows) {
+      const wait = JSON.parse(row.payload) as AutomationWait;
+      const c = waitColumns(wait);
+      update.run(c.slot_key, c.updated_at, row.id);
+    }
+    db.pragma('user_version = 5');
   });
 }

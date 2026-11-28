@@ -27,15 +27,35 @@ export type AutomationResult = z.infer<typeof automationResultSchema>;
 
 export const automationRegistrationSchema = z
   .object({
-    program: automationProgramSchema,
-    reason: z.string().max(2000).optional(),
+    program: automationProgramSchema.describe(
+      'A JavaScript function expression `async ({ ctx }) => ...` observing state through ctx.read/ctx.fetch/ctx.exec. Return false to keep waiting, or { resumeText, payload? } to complete once. Time-triggered wake-ups do not belong here: use lody_schedule for periodic or delayed work.'
+    ),
+    key: z
+      .string()
+      .min(1)
+      .max(128)
+      .optional()
+      .describe(
+        'Slot name. Registering into a slot supersedes its unfinished wait; omit it for the shared default slot. Pass distinct keys only for genuinely independent parallel observations.'
+      ),
+    reason: z
+      .string()
+      .max(2000)
+      .optional()
+      .describe('Short human-facing summary of what is being waited for.'),
     intervalMs: z
       .number()
       .int()
       .min(1000)
       .max(24 * 60 * 60_000)
-      .default(30_000),
-    expiresAt: z.number().int().positive().optional(),
+      .default(30_000)
+      .describe('Minimum delay between condition checks; default 30 seconds.'),
+    expiresAt: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe('Absolute epoch milliseconds after which the wait expires.'),
   })
   .strict();
 export type AutomationRegistration = z.infer<typeof automationRegistrationSchema>;
@@ -83,6 +103,8 @@ export type AutomationWait = Omit<AutomationRegistration, 'program'> & {
   /** Condition program; absent for a managed run. */
   program?: string;
   run?: AutomationManagedRun;
+  /** Frozen causal origin: the machine-caused input that produced this registration. */
+  causal?: AutomationCausalOrigin;
   id: string;
   sessionId: string;
   workspaceId: string;
@@ -93,7 +115,7 @@ export type AutomationWait = Omit<AutomationRegistration, 'program'> & {
   nextCheckAt: number;
   checks: number;
   consecutiveErrors: number;
-  state: 'waiting' | 'checking' | 'matched' | 'cancelled' | 'expired' | 'failed';
+  state: 'waiting' | 'checking' | 'matched' | 'cancelled' | 'expired' | 'failed' | 'superseded';
   lastError?: string;
   result?: Exclude<AutomationResult, false>;
   invocationId?: string;
@@ -109,6 +131,12 @@ export const automationProgramContextSchema = z
   })
   .strict();
 export type AutomationProgramContext = z.infer<typeof automationProgramContextSchema>;
+
+export type AutomationCausalOrigin = {
+  depth: number;
+  sessionId?: string;
+  turnId?: string;
+};
 
 export const autoDeliverMergeMethodSchema = z.enum(['auto', 'squash', 'merge', 'rebase']);
 export type AutoDeliverMergeMethod = z.infer<typeof autoDeliverMergeMethodSchema>;

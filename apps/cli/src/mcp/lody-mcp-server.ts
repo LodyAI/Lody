@@ -5186,10 +5186,22 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
   registerAutomationTools(toolServer, async (command) => {
     const ctx = getSessionContext();
     const { sendDaemonAutomationCommand } = await import('@/automations/control/client');
+    const source =
+      command.type === 'register' || command.type === 'run'
+        ? await (async () => {
+            const invoking = await resolveInvokingTurnSource();
+            return {
+              sessionId: ctx.sessionId,
+              turnId: invoking.id,
+              depth: invoking.inputConfig.chainDepth ?? 0,
+            };
+          })()
+        : undefined;
     return sendDaemonAutomationCommand(command, {
       machineId: ctx.machineId,
       workspaceId: ctx.workspaceId,
       requesterSessionId: ctx.sessionId,
+      source,
       socketPath: ctx.localControlSocketPath,
     });
   });

@@ -845,8 +845,13 @@ describe('JavaScript conditions', () => {
       if (result.value.status !== 'ready') return false;
       return {resumeText: 'Continue with the result', payload: result.value};
     }`;
-    const wait = ledger.registerWait({ program, intervalMs: 1000 }, 'session', 'user', 100);
-    expect(ledger.registerWait({ program, intervalMs: 1000 }, 'session', 'user', 101).id).toBe(
+    const { wait: wait } = ledger.registerWait(
+      { program, intervalMs: 1000 },
+      'session',
+      'user',
+      100
+    );
+    expect(ledger.registerWait({ program, intervalMs: 1000 }, 'session', 'user', 101).wait.id).toBe(
       wait.id
     );
 
@@ -1011,7 +1016,7 @@ describe('JavaScript conditions', () => {
   });
   it('does not accept a late result after cancellation or expiry', () => {
     const { ledger } = fixture();
-    const wait = ledger.registerWait(
+    const { wait: wait } = ledger.registerWait(
       { program: '() => false', intervalMs: 1000, expiresAt: 500 },
       'session',
       'user',
@@ -1020,7 +1025,7 @@ describe('JavaScript conditions', () => {
     ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, 100);
     ledger.cancelWait(wait.id, 101);
     expect(ledger.finishWait(wait, { resumeText: 'Late' }, 102)).toBeUndefined();
-    const next = ledger.registerWait(
+    const { wait: next } = ledger.registerWait(
       { program: '() => false', intervalMs: 1000, expiresAt: 500 },
       'session',
       'user',
@@ -1447,7 +1452,7 @@ function conditionHost(
 
 it('recovers an interrupted check and delivers its result through the existing receipt loop once', async () => {
   const { ledger, open } = fixture();
-  const wait = ledger.registerWait(
+  const { wait: wait } = ledger.registerWait(
     { program: '() => false', intervalMs: 1000 },
     'session',
     'user',
@@ -1484,7 +1489,7 @@ it('recovers an interrupted check and delivers its result through the existing r
 
 it('joins a cancelled condition’s tool cleanup before returning and never creates a continuation', async () => {
   const { ledger } = fixture();
-  const wait = ledger.registerWait(
+  const { wait: wait } = ledger.registerWait(
     { program: '() => false', intervalMs: 1000 },
     'session',
     'user',
@@ -1529,7 +1534,7 @@ it('joins a cancelled condition’s tool cleanup before returning and never crea
 
 it('reports bounded check failures without inventing a ready result', async () => {
   const { ledger } = fixture();
-  const wait = ledger.registerWait(
+  const { wait: wait } = ledger.registerWait(
     { program: '() => false', intervalMs: 1000 },
     'session',
     'user',
@@ -1600,7 +1605,7 @@ describe('Scoped observations and admission evidence', () => {
     observeWorkflows(ledger, meta, 'owner/project', sha, [run], false, 100);
     const initial = readWorkflowRuns(ledger, meta, 100);
     expect(initial.value.status).toBe('observed');
-    const wait = ledger.registerWait(
+    const { wait: wait } = ledger.registerWait(
       { program: '() => false', intervalMs: 1000 },
       'session',
       'user',
@@ -1651,7 +1656,7 @@ describe('Scoped observations and admission evidence', () => {
     const { readAutomationContext } = await import('./context/reads-legacy');
     const { observeWorkflows } = await import('./sources/workflows');
     const { ledger } = fixture();
-    const wait = ledger.registerWait(
+    const { wait: wait } = ledger.registerWait(
       { program: '() => false', intervalMs: 1000 },
       'session',
       'user',
@@ -2691,7 +2696,9 @@ describe('Ledger query columns', () => {
       CREATE TABLE rules (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
       CREATE TABLE events (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT NOT NULL UNIQUE,
-        payload TEXT NOT NULL
+        payload TEXT NOT NULL,
+        type TEXT, source TEXT, subject TEXT, session_id TEXT, project_id TEXT,
+        work_id TEXT, observed_at INTEGER
       );
       CREATE TABLE sources (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
       CREATE TABLE deliveries (id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL);
@@ -2754,13 +2761,190 @@ describe('Ledger query columns', () => {
     ).toBe(1);
   });
 
+  it('retires a legacy matched completion pair when upgrading a v4 ledger', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lody-automations-v4-'));
+    roots.push(root);
+    const filename = path.join(root, 'automations.sqlite');
+    const database = new OrchestrationConnection({ kind: 'disk', path: filename });
+    database.raw.exec(`
+      CREATE TABLE rules (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE events (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT NOT NULL UNIQUE,
+        payload TEXT NOT NULL,
+        type TEXT, source TEXT, subject TEXT, session_id TEXT, project_id TEXT,
+        work_id TEXT, observed_at INTEGER
+      );
+      CREATE TABLE sources (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE deliveries (
+        id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL,
+        rule_id TEXT, owner_user_id TEXT, scope_session_id TEXT, event_source TEXT,
+        event_id TEXT, event_work_id TEXT, updated_at INTEGER
+      );
+      CREATE TABLE receipts (
+        id TEXT PRIMARY KEY, delivery_id TEXT NOT NULL, state TEXT NOT NULL,
+        updated_at INTEGER NOT NULL, payload TEXT NOT NULL,
+        session_id TEXT, scope_session_id TEXT, owner_user_id TEXT, rule_id TEXT,
+        action_kind TEXT, event_type TEXT, event_source TEXT, event_id TEXT,
+        correlation_key TEXT, policy TEXT, work_id TEXT, retry_at INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE capacity (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE work (
+        id TEXT PRIMARY KEY, payload TEXT NOT NULL,
+        session_id TEXT, owner_user_id TEXT, state TEXT, turn_id TEXT, invocation_id TEXT,
+        updated_at INTEGER, binding_id TEXT, fingerprint TEXT, model_id TEXT
+      );
+      CREATE TABLE waits (
+        id TEXT PRIMARY KEY, state TEXT NOT NULL, next_check_at INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        session_id TEXT, owner_user_id TEXT, invocation_id TEXT, created_at INTEGER,
+        due_at INTEGER, run_pending INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE turn_observations (
+        id TEXT PRIMARY KEY, payload TEXT NOT NULL, retry_at INTEGER NOT NULL DEFAULT 0,
+        user_id TEXT, session_id TEXT, observed_at INTEGER
+      );
+      PRAGMA user_version = 4;
+    `);
+    const legacyRule = (waitId: string) => ({
+      id: waitId,
+      name: 'Session condition',
+      ownerUserId: 'user',
+      ownerMachineId: 'machine',
+      scope: { workspaceId: 'workspace', sessionId: 's1' },
+      selector: {
+        types: ['automation.condition.completed'],
+        sources: [`automation/${waitId}`],
+      },
+      enabled: true,
+      handler: {
+        kind: 'agent',
+        invocation: {
+          target: { kind: 'existing', sessionId: 's1', onUnavailable: 'blocked' },
+          input: { kind: 'external_event', ref: waitId },
+          ifBusy: 'enqueue',
+        },
+      },
+      grants: { actions: ['agent.invoke'], sessionIds: ['s1'] },
+      revision: 1,
+    });
+    const legacyWait = (overrides: Record<string, unknown>) => ({
+      id: 'wait-done',
+      sessionId: 's1',
+      workspaceId: 'workspace',
+      ownerUserId: 'user',
+      ownerMachineId: 'machine',
+      program: 'async () => false',
+      intervalMs: 30_000,
+      state: 'matched',
+      createdAt: 1000,
+      updatedAt: 2000,
+      nextCheckAt: 2000,
+      checks: 4,
+      consecutiveErrors: 0,
+      result: { resumeText: 'Continue' },
+      invocationId: 'receipt-done',
+      ...overrides,
+    });
+    const legacyReceipt = (overrides: Record<string, unknown> = {}) => ({
+      id: 'receipt-done',
+      deliveryId: 'delivery-1',
+      sessionId: 's1',
+      turnId: 'turn-1',
+      state: 'settled',
+      retryAt: 0,
+      attempts: 1,
+      intent: {
+        key: 'invoke',
+        action: {
+          kind: 'agent.invoke',
+          parameters: {
+            target: { kind: 'existing', sessionId: 's1' },
+            input: { kind: 'external_event', ref: 'wait-done' },
+            ifBusy: 'enqueue',
+          },
+        },
+      },
+      rule: legacyRule('wait-done'),
+      event: { id: 'e1', source: 'automation/wait-done', type: 'automation.condition.completed' },
+      ...overrides,
+    });
+    const insertWait = database.raw.prepare(
+      `INSERT INTO waits
+      (id,state,next_check_at,payload,session_id,owner_user_id,invocation_id,created_at,due_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`
+    );
+    const insertReceipt = database.raw.prepare(
+      `INSERT INTO receipts
+      (id,delivery_id,state,updated_at,payload,session_id,owner_user_id,rule_id,action_kind,
+      event_type,event_source,event_id,correlation_key,retry_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    );
+    const insertRule = database.raw.prepare('INSERT INTO rules VALUES (?,?)');
+    const insertLegacy = (
+      waitId: string,
+      receiptId: string,
+      receiptState: string,
+      receiptUpdatedAt: number
+    ) => {
+      insertWait.run(
+        waitId,
+        'matched',
+        2000,
+        JSON.stringify(legacyWait({ id: waitId, invocationId: receiptId })),
+        's1',
+        'user',
+        receiptId,
+        1000,
+        2000
+      );
+      insertReceipt.run(
+        receiptId,
+        'delivery-1',
+        receiptState,
+        receiptUpdatedAt,
+        JSON.stringify(legacyReceipt({ id: receiptId, state: receiptState })),
+        's1',
+        'user',
+        waitId,
+        'agent.invoke',
+        'automation.condition.completed',
+        `automation/${waitId}`,
+        'e1',
+        receiptId,
+        0
+      );
+    };
+    insertLegacy('wait-done', 'receipt-done', 'settled', 2000);
+    insertRule.run('wait-done', JSON.stringify(legacyRule('wait-done')));
+    insertLegacy('wait-live', 'receipt-live', 'queued', 2000);
+    database.close();
+    const ledger = new AutomationLedger({ kind: 'disk', path: filename }, 'workspace', 'machine');
+    stores.push(ledger);
+    const columns = new Set(
+      (
+        rawDb(ledger).prepare(`SELECT name FROM pragma_table_info('waits')`).all() as Array<{
+          name: string;
+        }>
+      ).map((column) => column.name)
+    );
+    expect(columns.has('slot_key')).toBe(true);
+    expect(columns.has('updated_at')).toBe(true);
+    const cutoff = 48 * 3_600_000 + 3000;
+    expect(ledger.pruneTerminalWaits(cutoff)).toBe(1);
+    expect(ledger.wait('wait-done')).toBeUndefined();
+    expect(ledger.rule('wait-done')).toBeUndefined();
+    expect(ledger.receipt('receipt-done')).toBeDefined();
+    expect(ledger.wait('wait-live')?.state).toBe('matched');
+    expect(ledger.receipt('receipt-live')?.state).toBe('queued');
+  });
+
   it('keeps query columns equal to their frozen payload values', () => {
     const { ledger } = fixture();
     ledger.publish(event);
     const delivery = required(ledger.deliveries()[0]);
     const receipt = ledger.accept(delivery, intent, 100);
     ledger.update(receipt.id, 'accepted', { retryAt: 1_000 }, 101);
-    const wait = ledger.registerWait(
+    const { wait: wait } = ledger.registerWait(
       { program: 'async () => false', intervalMs: 1_000 },
       'session',
       'user',
@@ -2866,7 +3050,7 @@ describe('Ledger query columns', () => {
       const receipt = ledger.accept(delivery, intent, 100);
       ledger.update(receipt.id, 'accepted', { retryAt: 1_000 }, 101);
       ledger.finishDelivery(delivery);
-      const wait = ledger.registerWait(
+      const { wait: wait } = ledger.registerWait(
         { program: 'async () => false', intervalMs: 1_000 },
         'session',
         'user',
@@ -2955,7 +3139,7 @@ describe('Engine scheduling', () => {
     expect(ledger.nextDueAt(500)).toBe(0);
     ledger.update(receipt.id, 'accepted', { retryAt: 30_000 }, 102);
     expect(ledger.nextDueAt(0)).toBe(30_000);
-    const wait = ledger.registerWait(
+    const { wait: wait } = ledger.registerWait(
       { program: 'async () => false', intervalMs: 60_000 },
       'session',
       'user',
@@ -3034,5 +3218,253 @@ describe('Engine scheduling', () => {
       )
     );
     vi.useRealTimers();
+  });
+});
+
+describe('Slot supersession and retirement', () => {
+  const programOf = (marker: string) =>
+    `async ({ ctx }) => { await ctx.read('session'); return ${marker} ? { resumeText: 'done' } : false; }`;
+
+  it('supersedes the unfinished default-slot wait and durably fences its live continuation', () => {
+    const { ledger } = fixture();
+    const first = ledger.registerWait(
+      { program: programOf('false'), intervalMs: 1000 },
+      'session',
+      'user',
+      100
+    );
+    expect(first.superseded).toEqual([]);
+    const second = ledger.registerWait(
+      { program: programOf('false') + ' ', intervalMs: 1000 },
+      'session',
+      'user',
+      101
+    );
+    expect(second.superseded.map((wait) => wait.id)).toEqual([first.wait.id]);
+    expect(ledger.wait(first.wait.id)?.state).toBe('superseded');
+    expect(ledger.wait(second.wait.id)?.state).toBe('waiting');
+
+    ledger.updateWait(second.wait.id, 'waiting', { state: 'checking' }, 102);
+    const matched = required(ledger.finishWait(second.wait, { resumeText: 'CI failed' }, 103));
+    const receiptId = required(matched.invocationId);
+    const third = ledger.registerWait(
+      { program: programOf('false') + '  ', intervalMs: 1000 },
+      'session',
+      'user',
+      104
+    );
+    expect(third.superseded.map((wait) => wait.id)).toEqual([second.wait.id]);
+    expect(ledger.wait(second.wait.id)?.state).toBe('superseded');
+    expect(ledger.receipt(receiptId)).toMatchObject({
+      state: 'superseded',
+      reason: 'guard:slot_superseded',
+    });
+
+    const keyed = ledger.registerWait(
+      { program: programOf('false'), key: 'deploy', intervalMs: 1000 },
+      'session',
+      'user',
+      105
+    );
+    expect(keyed.superseded).toEqual([]);
+    expect(ledger.wait(third.wait.id)?.state).toBe('waiting');
+    expect(ledger.wait(keyed.wait.id)?.state).toBe('waiting');
+  });
+
+  it('keeps byte-identical registration deduplicating inside one slot', () => {
+    const { ledger } = fixture();
+    const first = ledger.registerWait(
+      { program: programOf('false'), key: 'ci', intervalMs: 1000 },
+      'session',
+      'user',
+      100
+    );
+    const retry = ledger.registerWait(
+      { program: programOf('false'), key: 'ci', intervalMs: 1000 },
+      'session',
+      'user',
+      101
+    );
+    expect(retry.wait.id).toBe(first.wait.id);
+    expect(retry.superseded).toEqual([]);
+  });
+
+  it('closes the one-shot rule when its continuation reaches a terminal state', async () => {
+    const { ledger } = fixture();
+    const { wait } = ledger.registerWait(
+      { program: '() => false', intervalMs: 1000 },
+      'session',
+      'user',
+      0
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* Automations;
+          yield* runtime.pass;
+          expect(ledger.rule(wait.id)?.enabled).toBe(true);
+          const invocationId = required(ledger.wait(wait.id)?.invocationId);
+          yield* runtime.cancel(invocationId);
+          expect(ledger.receipt(invocationId)?.state).toBe('cancelled');
+          expect(ledger.rule(wait.id)?.enabled).toBe(false);
+        }).pipe(
+          Effect.provide(
+            Automations.layer(ledger).pipe(
+              Layer.provide(conditionHost(() => Effect.succeed({ resumeText: 'Continue' })))
+            )
+          )
+        )
+      )
+    );
+  });
+
+  it('keeps the supersession fence reason when runtime cancel converges the withdrawal', async () => {
+    const { ledger } = fixture();
+    const cancelled: Array<{ state: string; reason?: string }> = [];
+    const first = ledger.registerWait(
+      { program: '() => false', intervalMs: 1000 },
+      'session',
+      'user',
+      0
+    );
+    ledger.updateWait(first.wait.id, 'waiting', { state: 'checking' }, 1);
+    const matched = required(ledger.finishWait(first.wait, { resumeText: 'Continue' }, 2));
+    const receiptId = required(matched.invocationId);
+    const receipt = required(ledger.receipt(receiptId));
+    ledger.update(receipt.id, receipt.state, { state: 'queued' }, 3);
+    const second = ledger.registerWait(
+      { program: '() => true', intervalMs: 1000 },
+      'session',
+      'user',
+      4
+    );
+    expect(second.superseded.map((wait) => wait.id)).toEqual([first.wait.id]);
+    expect(ledger.receipt(receiptId)).toMatchObject({
+      state: 'cancelling',
+      reason: 'guard:slot_superseded',
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* Automations;
+          yield* runtime.cancel(receiptId);
+          expect(cancelled).toEqual([{ state: 'cancelling', reason: 'guard:slot_superseded' }]);
+          expect(ledger.receipt(receiptId)).toMatchObject({
+            state: 'superseded',
+            reason: 'guard:slot_superseded',
+          });
+        }).pipe(
+          Effect.provide(
+            Automations.layer(ledger).pipe(
+              Layer.provide(
+                Layer.succeed(AutomationHost, {
+                  evaluate: () => Effect.succeed(false),
+                  authorize: () => Effect.succeed({ value: 'yes', reason: 'authorized' }),
+                  condition: () => Effect.succeed({ value: 'yes', reason: 'current' }),
+                  prepare: (receipt) =>
+                    Effect.succeed({
+                      state: 'resolved' as const,
+                      sessionId: receipt.sessionId,
+                      prepared: {},
+                    }),
+                  submit: () => Effect.succeed({ state: 'queued' as const }),
+                  reconcile: () => Effect.succeed({ state: 'queued' as const }),
+                  cancel: (receipt) =>
+                    Effect.sync(() => {
+                      cancelled.push({ state: receipt.state, reason: receipt.reason });
+                      return { state: 'superseded' as const };
+                    }),
+                  report: () => Effect.void,
+                })
+              )
+            )
+          )
+        )
+      )
+    );
+  });
+
+  it('fails a result produced without any observation on first evaluation', async () => {
+    const { ledger } = fixture();
+    const { wait } = ledger.registerWait(
+      {
+        program: 'async ({ ctx }) => ctx.now >= 0 ? { resumeText: "time is up" } : false',
+        intervalMs: 1000,
+      },
+      'session',
+      'user',
+      0
+    );
+    const realEvaluate = (candidate: import('@lody/shared/automations').AutomationWait) =>
+      evaluateProgram(
+        candidate.program ?? '',
+        { sessionId: candidate.sessionId, workspaceId: 'workspace', now: Date.now() },
+        () => Effect.fail(new Error('no reads in this test')),
+        false
+      );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* Automations;
+          yield* runtime.pass;
+          expect(ledger.wait(wait.id)).toMatchObject({ state: 'failed' });
+          expect(ledger.wait(wait.id)?.lastError).toContain('WITHOUT_OBSERVATION');
+          expect(ledger.activities()).toEqual([]);
+        }).pipe(
+          Effect.provide(
+            Automations.layer(ledger).pipe(
+              Layer.provide(conditionHost((candidate) => realEvaluate(candidate)))
+            )
+          )
+        )
+      )
+    );
+  });
+
+  it('evaluates real JavaScript conditions with host observations through the program runner', async () => {
+    const context = { sessionId: 'session', workspaceId: 'workspace', now: 100 };
+    const result = await evaluateAutomationProgram(
+      'async ({ ctx }) => { const { value } = await ctx.read("events"); return value.ready === true ? { resumeText: "ready" } : false; }',
+      context,
+      async () => ({ value: { ready: true }, observedAt: 100 })
+    );
+    expect(result).toEqual({ resumeText: 'ready' });
+    const pending = await evaluateAutomationProgram(
+      'async ({ ctx }) => { const { value } = await ctx.read("events"); return value.ready === true ? { resumeText: "ready" } : false; }',
+      context,
+      async () => ({ value: { ready: false }, observedAt: 100 })
+    );
+    expect(pending).toBe(false);
+  });
+
+  it('prunes terminal waits past retention with their rules, never live continuations', () => {
+    const { ledger } = fixture();
+    const { wait: cancelled } = ledger.registerWait(
+      { program: programOf('false'), key: 'old', intervalMs: 1000 },
+      'session',
+      'user',
+      100
+    );
+    ledger.cancelWait(cancelled.id, 200);
+    const { wait: live } = ledger.registerWait(
+      { program: programOf('false'), key: 'live', intervalMs: 1000 },
+      'session',
+      'user',
+      100
+    );
+    ledger.updateWait(live.id, 'waiting', { state: 'checking' }, 200);
+    const matched = required(ledger.finishWait(live, { resumeText: 'done' }, 300));
+    const cutoff = 48 * 3_600_000 + 1000;
+    expect(ledger.pruneTerminalWaits(cutoff)).toBe(1);
+    expect(ledger.wait(cancelled.id)).toBeUndefined();
+    expect(ledger.wait(live.id)).toBeDefined();
+    const receipt = required(ledger.receipt(required(matched.invocationId)));
+    ledger.update(receipt.id, receipt.state, { state: 'settled' }, 500);
+    expect(ledger.pruneTerminalWaits(400)).toBe(0);
+    expect(ledger.wait(live.id)).toBeDefined();
+    expect(ledger.pruneTerminalWaits(cutoff)).toBe(1);
+    expect(ledger.wait(live.id)).toBeUndefined();
+    expect(ledger.rule(live.id)).toBeUndefined();
+    expect(ledger.receipt(receipt.id)).toBeDefined();
   });
 });

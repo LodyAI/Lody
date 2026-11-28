@@ -6,6 +6,12 @@ Agent exits and across daemon restarts. `false` keeps waiting;
 registering Session. Workspace identifies the daemon/storage owner; it does not
 replace the Session as the continuation target.
 
+Automations perceive state transitions; time-triggered work belongs to Schedules. The
+[Session automation events Spec](../../../../specs/session-automation-events.md) (draft) defines the
+event-perception boundary, slot supersession and causal-depth contract, and the
+[event perception design note](../../../../.agents/notes/implemented/architecture/2026-11-28-session-automation-event-perception.md)
+records the rationale and rejected alternatives behind it.
+
 | Boundary            | Owner                                                                                                                                               | Responsibility                                                                                |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Public API          | [condition contracts](../../../../packages/shared/src/automations/conditions.ts), [control](../../../../packages/shared/src/automations/control.ts) | Registration, result, inspection, cancellation and Session feature settings                   |
@@ -71,8 +77,19 @@ Optional `reason`, `intervalMs` (default 30 seconds, minimum 1 second) and
 `--interval` and `--expires-at` (ISO time or epoch milliseconds). Checks begin at
 registration; already-ready conditions do not require a later source transition.
 Intervals are minimum delays after a check, subject to bounded concurrency and Host
-availability. Expired waits cannot create a continuation. Matching active
-registrations in the same Session deduplicate; a terminal wait may be registered again.
+availability. Expired waits cannot create a continuation.
+
+Every registration belongs to a slot: its optional `key` (CLI `--key`), or the
+Session's shared default slot when omitted. Registering into a slot atomically
+supersedes that slot's unfinished wait and withdraws its continuation when it has
+not started execution, atomically at the Session input owner; a continuation
+already running is never cancelled by replacement. Rephrasing or
+redirecting a task therefore replaces its watcher rather than multiplying it, and
+cancelling the visible wait ends the lineage behind it. Parallel observation is an
+explicit opt-in through distinct keys. Registration reports the superseded wait ids
+and the Session's active waits, so a caller never needs a prior `list` to know what
+already watches. Matching active registrations in the same slot deduplicate; a
+terminal wait may be registered again.
 
 Each evaluation receives `{ctx}` with `sessionId`, `workspaceId`, `now` and
 `read(resource, parameters?)`. Reads return `{value, observedAt}`; the Host checks
@@ -102,6 +119,12 @@ and a 128-KiB bound per operation. Cancellation interrupts the interpreter and
 joins in-flight operations. Five consecutive check errors
 end the wait as `failed`; successful checks reset the error count. `show` retains
 the error, check count, next check time and continuation state.
+
+A wake is never produced without observation: a check returning a result without
+any `read`, `fetch` or `exec` call fails the wait immediately, because it can only
+encode a clock comparison or a constant, and time-triggered work belongs to
+Schedules. Answering `false` — observed or not — costs no agent wake at all, so
+polling stays with the Host.
 
 CI reads request observations through the existing PR poller, using its credential,
 quota and cooldown owners. Active demand shortens the observation interval under
@@ -163,6 +186,31 @@ already created work, it cancels that exact input through its owner. Completed w
 is not undone. `activities --limit 50` also exposes native maintenance/recovery
 receipts; pass the returned `nextCursor` as JSON to `--before` for the next page.
 Private launch snapshots and credential-derived fingerprints stay in local storage.
+
+A continuation input opens with frozen provenance facts — the wait, its key,
+reason and registration time — before the resume text, so the agent can tell an
+automation wake from a human message and a superseded continuation never
+masquerades as a fresh instruction. The prefix states facts only. Every
+automation continuation advances the Session's causal chain depth by one hop
+over the depth frozen into its registration: the exact invoking turn when the
+runtime carries provenance, otherwise the requesting Session's in-flight turn,
+otherwise a human or external root at depth zero. Target-Session history never
+resets that count. A turn at the cap cannot register new machine-caused work,
+and a continuation whose frozen depth would exceed it fails durably instead of
+blocking, so an unattended loop through the ledger or cross-Session messages
+reaches `CHAIN_DEPTH_EXCEEDED` within the shared hop budget. A receipt settles
+when the input it delivered settles, regardless of other work the Session group
+still runs; delegated outcomes report through their own owners.
+
+The ledger retires what has ended. Terminal waits — cancelled, expired, failed,
+superseded — and their one-shot rules are pruned 48 hours after their terminal
+update; a normally matched wait retires from its continuation's settlement,
+measured from settlement time, while receipts stay inspectable through
+`activities`. One-shot rules share their wait's id; policy rules do not, so
+settling a continuation disables only its one-shot rule. Archiving or
+deleting the Session cancels its unfinished waits on the next evaluation. `list`
+returns only live rows: unfinished waits and failed waits still awaiting a
+decision; completed history is paged through `activities`.
 
 ## Built-in Session behavior
 

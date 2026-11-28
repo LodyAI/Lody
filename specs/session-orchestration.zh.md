@@ -10,11 +10,13 @@ Agent 通过 Lody 委派异步工作时，每个委派目标都会从发起它�
 Turn 再发起命令时，会在创建 Operation 或目标 Session 之前被拒绝，并返回
 不可重试的 `CHAIN_DEPTH_EXCEEDED` 错误。
 
-这个深度表示因果委派次数，不是通用的 `parentSessionId` 树深度。创建
-Session、向另一个 Session 发送工作、以及投递 Operation 完成通知，都会让
-目标 Turn 增加一层。普通人类 Turn 缺少深度时从零开始。这个上限仍是共享
-协议中的固定值；修改它必须同步更新所有生产者、恢复路径、可执行模型和本
-Spec。
+这个深度统计自上一个人类 Turn 以来的机器成因输入数，既不是通用的
+`parentSessionId` 树深度，也不属于任何一种传输介质。创建 Session、向另一个
+Session 发送工作、投递 Operation 完成通知、以及投递自动化续航输入，都会让
+目标 Turn 增加一层，无论输入由何种机制送达；自动化账本也不例外
+（见[会话自动化事件](session-automation-events.zh.md)）。人类 Turn 将计数
+归零，普通人类 Turn 缺少深度时从零开始。这个上限仍是共享协议中的固定值；
+修改它必须同步更新所有生产者、恢复路径、可执行模型和本 Spec。
 
 上限在到达之前和到达时都可见。从深度 8（软上限）开始，每个被接受的 create
 或 chat 回复都带 `chainBudget`：委派 Turn 所在的跳数、上限和剩余跳数。它只陈述

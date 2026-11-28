@@ -38,6 +38,15 @@ export const evaluateAutomationProgram = Effect.fn('Automations.evaluate')(funct
 ): Effect.fn.Return<AutomationResult, unknown> {
   const source = yield* Effect.try(() => conditionSource(program));
   if (validateOnly) return false;
+  let observations = 0;
+  const observed = <A>(effect: Effect.Effect<A, unknown>) =>
+    effect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          observations += 1;
+        })
+      )
+    );
   const slots = Semaphore.makeUnsafe(4);
   const tool = Tool.make({
     description: 'Read an observation in the current session',
@@ -49,7 +58,7 @@ export const evaluateAutomationProgram = Effect.fn('Automations.evaluate')(funct
           throw new Error('AUTOMATION_TOOL_INPUT_TOO_LARGE');
         return automationReadRequestSchema.parse(input);
       }).pipe(
-        Effect.flatMap((request) => slots.withPermit(read(request))),
+        Effect.flatMap((request) => slots.withPermit(observed(read(request)))),
         Effect.flatMap((output) => Effect.try(() => automationReadResponseSchema.parse(output)))
       ),
   });
@@ -59,10 +68,12 @@ export const evaluateAutomationProgram = Effect.fn('Automations.evaluate')(funct
     output: Schema.Unknown,
     execute: (input) =>
       slots.withPermit(
-        Effect.tryPromise({
-          try: (signal) => fetchAutomationContext(input, signal),
-          catch: () => new Error('AUTOMATION_FETCH_FAILED'),
-        })
+        observed(
+          Effect.tryPromise({
+            try: (signal) => fetchAutomationContext(input, signal),
+            catch: () => new Error('AUTOMATION_FETCH_FAILED'),
+          })
+        )
       ),
   });
   const execTool = Tool.make({
@@ -82,7 +93,7 @@ export const evaluateAutomationProgram = Effect.fn('Automations.evaluate')(funct
       ).pipe(
         Effect.flatMap((request) =>
           slots.withPermit(
-            exec ? exec(request) : Effect.fail(new Error('AUTOMATION_EXEC_UNAVAILABLE'))
+            observed(exec ? exec(request) : Effect.fail(new Error('AUTOMATION_EXEC_UNAVAILABLE')))
           )
         )
       ),
@@ -104,5 +115,8 @@ export const evaluateAutomationProgram = Effect.fn('Automations.evaluate')(funct
   const result = yield* runtime.execute(code);
   if (!result.ok) return yield* Effect.fail(new Error(result.error.message));
   if (result.truncated) return yield* Effect.fail(new Error('AUTOMATION_RESULT_TOO_LARGE'));
-  return yield* Effect.try(() => automationResultSchema.parse(result.value));
+  const value = yield* Effect.try(() => automationResultSchema.parse(result.value));
+  if (value !== false && observations === 0)
+    return yield* Effect.fail(new Error('AUTOMATION_RESULT_WITHOUT_OBSERVATION'));
+  return value;
 });
