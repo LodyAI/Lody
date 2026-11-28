@@ -1,4 +1,4 @@
-import { Clock, Effect, Exit, Result, Semaphore } from 'effect';
+import { Clock, Deferred, Effect, Exit, Result, Semaphore } from 'effect';
 import { toHex } from './bytes';
 import {
   derivePairingKeys,
@@ -8,6 +8,7 @@ import {
 } from '@lody/e2ee-core/protocol';
 import type { E2eeAutomaticPairingCommand, E2eeAutomaticPairingRecord } from '@lody/cloud-api';
 import type {
+  E2eeAccountPairingRequestState,
   E2eeAutomaticPairingState,
   E2eeAutomaticPairingReview,
   E2eeWorkspaceRuntime,
@@ -23,6 +24,7 @@ import {
 } from './automatic-pairing-crypto';
 
 type Hint = { workspaceId: string; name: string; genesisHash: string };
+type ApprovableWorkspace = { readonly workspaceId: string; readonly name: string };
 /** The relay transports public originals only. It never receives a pairing secret. */
 export interface AutomaticPairingRelay {
   subscribe?(changed: () => void): () => void;
@@ -147,6 +149,7 @@ type ApproverState =
       readonly nativeRequestId: string;
       readonly deviceName: string;
       readonly codeFailures: number;
+      readonly workspaces: readonly ApprovableWorkspace[];
     }
   | {
       readonly _tag: 'Authorizing';
@@ -156,6 +159,8 @@ type ApproverState =
       readonly code: string;
       readonly nativeRequestId: string;
       readonly deviceName: string;
+      readonly workspaces: readonly ApprovableWorkspace[];
+      readonly workspaceIds: readonly string[];
       readonly phase: 'waiting' | 'syncing';
     }
   | {
@@ -200,6 +205,32 @@ const id = (crypto: Crypto) =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
     b.toString(16).padStart(2, '0')
   ).join('');
+const SIBLING_RETRY_INTERVAL_MS = 2_000;
+const SIBLING_RETRY_MAX_ATTEMPTS = 10;
+const hasPendingApprovedSiblings = (
+  state: E2eeAccountPairingRequestState | null | undefined,
+  primaryWorkspaceId: string
+): boolean =>
+  Boolean(
+    state &&
+    state.status === 'waiting' &&
+    state.workspaces.some(
+      (item) =>
+        item.workspaceId !== primaryWorkspaceId &&
+        item.state === 'pending' &&
+        item.approval === 'approved'
+    )
+  );
+const shouldReleaseSettledPartialApproval = (
+  state: E2eeAccountPairingRequestState | null | undefined
+): boolean =>
+  Boolean(
+    state &&
+    state.status === 'waiting' &&
+    state.workspaces.some((item) => item.approval === 'omitted') &&
+    state.workspaces.some((item) => item.state === 'joined') &&
+    !state.workspaces.some((item) => item.approval === 'approved' && item.state === 'pending')
+  );
 /** Bound for the native decline at lockout; the hosted client may hold calls while offline. */
 const LOCKOUT_DECLINE_TIMEOUT_MS = 5_000;
 /** Bound for each relay call: a hosted client queues writes while offline and would
@@ -239,18 +270,23 @@ export function makeAutomaticPairingRuntime(options: {
   readonly accessLoss: (error: unknown) => 'e2ee_device_revoked' | 'e2ee_member_removed' | null;
   /** Advisory background hint only, after retained local identity verification. */
   readonly notifyPending?: (id: string) => void;
-  /** Surfaces `preparing` reviews once this device's local identity is verified, so
-   * Instant QR hosts can present their one-time QR immediately while ECDH finishes. */
-  readonly includePreparingReviews?: boolean;
   readonly crypto: Crypto;
   readonly now?: () => number;
   readonly run: <A>(work: Effect.Effect<A, unknown>) => Promise<A>;
   /** Overrides the relay call bounds (tests). */
   readonly relayTimeoutMs?: { readonly call: number; readonly cancelNotice: number };
+  readonly siblingRetry?: {
+    readonly intervalMs?: number;
+    readonly maxAttempts?: number;
+    readonly sleep?: (ms: number) => Effect.Effect<void>;
+  };
 }) {
   const requesting = new Map<string, RequesterEntry>();
   const approving = new Map<string, ApproverEntry>();
   const notified = new Map<string, number>();
+  // Caches verified local identity presence for pending discovery only; approval still
+  // opens the real workspace session and verifies the ledger before signing.
+  const verifiedIdentities = new Set<string>();
   const { runtime } = options;
   const limits = options.relayTimeoutMs ?? {
     call: RELAY_TIMEOUT_MS,
@@ -265,6 +301,79 @@ export function makeAutomaticPairingRuntime(options: {
     exchange: (command) => bounded(options.relay.exchange(command), limits.call),
   };
   const setup = Semaphore.makeUnsafe(1);
+  const siblingIntervalMs = options.siblingRetry?.intervalMs ?? SIBLING_RETRY_INTERVAL_MS;
+  const siblingMaxAttempts = options.siblingRetry?.maxAttempts ?? SIBLING_RETRY_MAX_ATTEMPTS;
+  const siblingSleep = options.siblingRetry?.sleep ?? ((ms: number) => Effect.sleep(ms));
+  let siblingSettlement: {
+    readonly lookupId: string;
+    readonly cancel: () => void;
+  } | null = null;
+  const stopSiblingSettlement = (lookupId?: string) => {
+    if (!siblingSettlement) return;
+    if (lookupId !== undefined && siblingSettlement.lookupId !== lookupId) return;
+    const current = siblingSettlement;
+    siblingSettlement = null;
+    current.cancel();
+  };
+  const releaseSettledPartialApproval = (
+    lookupId: string,
+    state: E2eeAccountPairingRequestState | null | undefined
+  ) =>
+    shouldReleaseSettledPartialApproval(state) && runtime.cancelAccountPairing
+      ? Effect.asVoid(
+          Effect.result(
+            promise(() => runtime.cancelAccountPairing!({ expectedLookupId: lookupId }))
+          )
+        )
+      : Effect.void;
+  const ensureSiblingSettlement = (
+    lookupId: string,
+    expiresAt: number,
+    primaryWorkspaceId: string
+  ) => {
+    if (closed || !runtime.accountPairingRequest) return;
+    if (siblingSettlement?.lookupId === lookupId) return;
+    stopSiblingSettlement();
+    const cancelSignal = Deferred.makeUnsafe<void>();
+    let cancelled = false;
+    const owner = {
+      lookupId,
+      cancel: () => {
+        if (cancelled) return;
+        cancelled = true;
+        Deferred.doneUnsafe(cancelSignal, Exit.void);
+      },
+    };
+    siblingSettlement = owner;
+    void options
+      .run(
+        Effect.gen(function* () {
+          for (let attempt = 0; attempt < siblingMaxAttempts; attempt++) {
+            if (cancelled || closed || (account && options.account() !== account)) return;
+            if ((yield* now) >= expiresAt) return;
+            yield* Effect.raceFirst(siblingSleep(siblingIntervalMs), Deferred.await(cancelSignal));
+            if (cancelled || closed || (account && options.account() !== account)) return;
+            if ((yield* now) >= expiresAt) return;
+            const next = yield* Effect.result(promise(() => runtime.accountPairingRequest!()));
+            if (cancelled || closed || (account && options.account() !== account)) return;
+            if (Result.isFailure(next)) {
+              if (options.accessLoss(next.failure)) return;
+              continue;
+            }
+            const current = next.success;
+            if (!current || (current.lookupId && current.lookupId !== lookupId)) return;
+            if (!hasPendingApprovedSiblings(current, primaryWorkspaceId)) {
+              yield* releaseSettledPartialApproval(lookupId, current);
+              return;
+            }
+          }
+        })
+      )
+      .catch(() => undefined)
+      .finally(() => {
+        if (siblingSettlement === owner) siblingSettlement = null;
+      });
+  };
   let closed = false;
   /** Page listeners and the request rows watched for them. A row is watched only while a
    * listener exists and its requester entry is live; terminal or replaced entries, the
@@ -439,15 +548,23 @@ export function makeAutomaticPairingRuntime(options: {
     value: ApproverEntry,
     requestId: string,
     deviceName = value.context.deviceName
-  ): E2eeAutomaticPairingReview => ({
-    id: value.context.id,
-    workspaceId: value.context.workspaceId,
-    workspaceName: workspace(value.context.workspaceId)?.name ?? value.context.workspaceId,
-    deviceName,
-    expiresAt: value.context.expiresAt,
-    phase: approverPhaseOf(value.state),
-    requestId,
-  });
+  ): E2eeAutomaticPairingReview => {
+    const state = value.state;
+    const workspaces =
+      state._tag === 'WaitingForCode' || state._tag === 'Authorizing'
+        ? state.workspaces.map((item) => ({ ...item }))
+        : undefined;
+    return {
+      id: value.context.id,
+      workspaceId: value.context.workspaceId,
+      workspaceName: workspace(value.context.workspaceId)?.name ?? value.context.workspaceId,
+      deviceName,
+      expiresAt: value.context.expiresAt,
+      phase: approverPhaseOf(state),
+      requestId,
+      ...(workspaces ? { workspaces } : {}),
+    };
+  };
 
   /** Never awaited: a hosted mutation can stay queued while offline. One write at a time;
    * a failure leaves the entry undelivered for the next discovery round. */
@@ -731,7 +848,16 @@ export function makeAutomaticPairingRuntime(options: {
       return snapshotRequester(value);
     }
     if (value.state._tag === 'AdmittedSyncing') {
+      const latest = yield* Effect.result(
+        promise(() => runtime.accountPairingRequest?.() ?? Promise.resolve(null))
+      );
       yield* updateKeys(value);
+      const lookupId = requesterLookupIdOf(value.state);
+      if (lookupId && Result.isSuccess(latest)) {
+        if (hasPendingApprovedSiblings(latest.success, value.context.workspaceId))
+          ensureSiblingSettlement(lookupId, value.context.expiresAt, value.context.workspaceId);
+        else yield* releaseSettledPartialApproval(lookupId, latest.success);
+      }
       return snapshotRequester(value);
     }
     if (value.state._tag === 'Terminal') {
@@ -779,6 +905,7 @@ export function makeAutomaticPairingRuntime(options: {
       return yield* Effect.fail(refuse('pairing-unavailable'));
     // The host journals its original before submit. A lost response retries this
     // same code/identity; makeAccountPairing treats that as the same request.
+    let justSubmitted = false;
     if (value.state._tag === 'ChannelReady') {
       const readyState = value.state;
       advanceRequester(value, 'ChannelReady', {
@@ -790,11 +917,19 @@ export function makeAutomaticPairingRuntime(options: {
           pairingString: readyState.code,
           expiresAt: value.context.expiresAt,
           preserveExisting: true,
-          workspace: hint,
         })
       );
       if (submitted.expiresAt !== value.context.expiresAt)
         return yield* Effect.fail(refuse('pairing-update-required'));
+      // Without this workspace no approver could ever answer the request: end it.
+      if (!submitted.workspaces.some((w) => w.workspaceId === hint.workspaceId)) {
+        if (submitted.lookupId)
+          yield* Effect.result(
+            promise(() => runtime.cancelAccountPairing!({ expectedLookupId: submitted.lookupId! }))
+          );
+        return yield* Effect.fail(refuse('pairing-unavailable'));
+      }
+      justSubmitted = true;
       advanceRequester(value, 'ChannelReady', {
         _tag: 'RequestSubmitted',
         exchange: readyState.exchange,
@@ -802,10 +937,11 @@ export function makeAutomaticPairingRuntime(options: {
         comparisonCode: readyState.comparisonCode,
         lookupId: readyState.lookupId,
         code: readyState.code,
-        phase: 'preparing',
+        phase: 'waiting',
       });
     }
     if (yield* expiresRequester(value)) return snapshotRequester(value);
+    if (justSubmitted) return snapshotRequester(value);
     const state = yield* promise(() => runtime.accountPairingRequest!());
     yield* check();
     if (state?.status === 'declined' || state?.status === 'expired') {
@@ -823,6 +959,11 @@ export function makeAutomaticPairingRuntime(options: {
         });
       }
       yield* updateKeys(value);
+      if (lookupId) {
+        if (hasPendingApprovedSiblings(state, hint.workspaceId))
+          ensureSiblingSettlement(lookupId, value.context.expiresAt, hint.workspaceId);
+        else yield* releaseSettledPartialApproval(lookupId, state);
+      }
     } else if (value.state._tag === 'RequestSubmitted' && value.state.phase !== 'waiting') {
       advanceRequester(value, 'RequestSubmitted', {
         ...value.state,
@@ -854,7 +995,7 @@ export function makeAutomaticPairingRuntime(options: {
       runtime.approveAccountPairing!({
         pairingString: authState.code,
         requestId: authState.nativeRequestId,
-        workspaceIds: [value.context.workspaceId],
+        workspaceIds: [...authState.workspaceIds],
       })
     );
     yield* check();
@@ -906,11 +1047,13 @@ export function makeAutomaticPairingRuntime(options: {
       row.commitment.commitment !== commitment.commitment
     )
       return null;
-    if (!row.requesterKey)
-      return options.includePreparingReviews ? reviewApprover(value, '') : null;
+    if (!row.requesterKey) return null;
     const reveal = yield* exchange.reveal(row.requesterKey);
-    if (!row.reveal)
+    let revealedNow = false;
+    if (!row.reveal) {
       row = yield* checked(value.context, yield* relay.exchange({ id: value.context.id, reveal }));
+      revealedNow = true;
+    }
     if (row.state !== 'pending') {
       settleApproverTerminal(value, row.state === 'approved' ? 'joined' : row.state);
       return null;
@@ -927,6 +1070,9 @@ export function makeAutomaticPairingRuntime(options: {
         code: derived.code,
       });
     }
+    if (revealedNow) {
+      return null;
+    }
     const code =
       value.state._tag === 'ChannelDerived' || value.state._tag === 'WaitingForCode'
         ? value.state.code
@@ -934,10 +1080,17 @@ export function makeAutomaticPairingRuntime(options: {
     if (!code) return null;
     const preview = yield* promise(() => runtime.inspectAccountPairing!(code));
     yield* check();
-    if (!preview) return options.includePreparingReviews ? reviewApprover(value, '') : null;
-    if (!preview.workspaces.some((w) => w.workspaceId === value.context.workspaceId)) return null;
+    if (!preview) return null;
+    const own = preview.workspaces.find((w) => w.workspaceId === value.context.workspaceId);
+    if (!own) return null;
     if (preview.expiresAt !== value.context.expiresAt)
       return yield* Effect.fail(refuse('pairing-tampered'));
+    const workspaces: readonly ApprovableWorkspace[] = [
+      { workspaceId: own.workspaceId, name: own.name },
+      ...preview.workspaces
+        .filter((w) => w.workspaceId !== own.workspaceId)
+        .map((w) => ({ workspaceId: w.workspaceId, name: w.name })),
+    ];
     if (value.state._tag === 'ChannelDerived') {
       advanceApprover(value, 'ChannelDerived', {
         _tag: 'WaitingForCode',
@@ -948,12 +1101,14 @@ export function makeAutomaticPairingRuntime(options: {
         nativeRequestId: preview.requestId,
         deviceName: preview.deviceName,
         codeFailures: 0,
+        workspaces,
       });
     } else if (value.state._tag === 'WaitingForCode') {
       advanceApprover(value, 'WaitingForCode', {
         ...value.state,
         nativeRequestId: preview.requestId,
         deviceName: preview.deviceName,
+        workspaces,
       });
     }
     return reviewApprover(value, preview.requestId, preview.deviceName);
@@ -1078,10 +1233,14 @@ export function makeAutomaticPairingRuntime(options: {
             if (!options.canPresent() && notified.has(c.id)) return null;
             // Account catalogs and relay summaries are never proof that this device
             // may approve. Read only its retained, verified local identity first.
-            const identity = yield* promise(() =>
-              runtime.readIdentity!({ workspaceId: c.workspaceId, accountId: account! })
-            );
-            if (!identity || identity.genesisHash !== c.genesisHash) return null;
+            const identityKey = `${account!}:${c.workspaceId}:${c.genesisHash}`;
+            if (!verifiedIdentities.has(identityKey)) {
+              const identity = yield* promise(() =>
+                runtime.readIdentity!({ workspaceId: c.workspaceId, accountId: account! })
+              );
+              if (!identity || identity.genesisHash !== c.genesisHash) return null;
+              verifiedIdentities.add(identityKey);
+            }
             yield* check();
             if (!options.canPresent()) {
               if (notified.size < 10 && !notified.has(c.id)) {
@@ -1161,6 +1320,7 @@ export function makeAutomaticPairingRuntime(options: {
                       return yield* Effect.fail(refuse('pairing-update-required'));
                     if (current.lookupId !== input.expectedLookupId)
                       return yield* Effect.fail(refuse('pairing-elsewhere'));
+                    stopSiblingSettlement(input.expectedLookupId);
                     yield* promise(() =>
                       runtime.cancelAccountPairing!({ expectedLookupId: input.expectedLookupId })
                     );
@@ -1239,10 +1399,16 @@ export function makeAutomaticPairingRuntime(options: {
                 if (isRequesterAdmitted(value.state)) return false;
                 const lookupId = requesterLookupIdOf(value.state);
                 // A lost request's native original already settled; only detach it.
-                if (isRequesterAttempted(value.state) && lookupId && !isRequesterLost(value.state))
+                if (
+                  isRequesterAttempted(value.state) &&
+                  lookupId &&
+                  !isRequesterLost(value.state)
+                ) {
+                  stopSiblingSettlement(lookupId);
                   yield* promise(() =>
                     runtime.cancelAccountPairing!({ expectedLookupId: lookupId })
                   );
+                }
                 settleRequesterTerminal(value, 'cancelled');
                 // A detached request is never read again: the next start makes a fresh
                 // one with its own id and gate, not the dead `cancelled` original.
@@ -1263,7 +1429,7 @@ export function makeAutomaticPairingRuntime(options: {
         )
       ),
     pendingAutomaticPairing: () => options.run(pending()),
-    approveAutomaticPairing: (id: string, enteredCode: string) =>
+    approveAutomaticPairing: (id: string, enteredCode: string, workspaceIds?: readonly string[]) =>
       options.run(
         Effect.gen(function* () {
           yield* check();
@@ -1310,6 +1476,9 @@ export function makeAutomaticPairingRuntime(options: {
                   sendDecline(id, value);
                   return yield* Effect.fail(refuse('pairing-code-locked'));
                 }
+                const chosen = new Set(
+                  workspaceIds ?? waitingState.workspaces.map((w) => w.workspaceId)
+                );
                 advanceApprover(value, 'WaitingForCode', {
                   _tag: 'Authorizing',
                   exchange: waitingState.exchange,
@@ -1318,6 +1487,10 @@ export function makeAutomaticPairingRuntime(options: {
                   code: waitingState.code,
                   nativeRequestId: waitingState.nativeRequestId,
                   deviceName: waitingState.deviceName,
+                  workspaces: waitingState.workspaces,
+                  workspaceIds: waitingState.workspaces
+                    .map((w) => w.workspaceId)
+                    .filter((wid) => wid === value.context.workspaceId || chosen.has(wid)),
                   phase: 'waiting',
                 });
               }
@@ -1353,6 +1526,7 @@ export function makeAutomaticPairingRuntime(options: {
       ),
     disposeAutomaticPairing() {
       closed = true;
+      stopSiblingSettlement();
       for (const value of requesting.values()) disposeRequesterCrypto(value.state);
       for (const value of approving.values()) disposeApproverCrypto(value.state);
       requesting.clear();

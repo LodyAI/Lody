@@ -51,6 +51,8 @@ export function resolveBackendConfig(text = '', environment = process.env) {
   result.STORAGE_SUFFIX = Object.entries(defaults).every(([key, value]) => result[key] === value)
     ? ''
     : '-' + createHash('sha256').update(JSON.stringify(result)).digest('hex').slice(0, 24);
+  const webSocket = environment.LODY_LORO_STREAMS_WS_ENABLED ?? file.LODY_LORO_STREAMS_WS_ENABLED;
+  result.LORO_STREAMS_WS_ENABLED = webSocket === '1' || webSocket === 'true' ? '1' : '0';
   return result;
 }
 

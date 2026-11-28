@@ -5,6 +5,7 @@ import type {
   CodeCollabOpenDiffManifestResponse,
   CodeCollabReadBlobRequest,
   CodeCollabReadBlobResponse,
+  RoostHistorySyncState,
 } from '@lody/shared';
 import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
 import type {
@@ -32,6 +33,7 @@ import type {
   SessionCancelResponse,
   SessionChatResponse,
   SessionDispatchTurnResponse,
+  SessionLiveStatusResponse,
   SessionSteerResponse,
   SessionGoalAction,
   SessionGoalResponse,
@@ -125,6 +127,8 @@ export type SessionDocStore = {
   acquireSync: () => () => void;
   getSyncState: () => RoomSyncState;
   subscribeSyncState: (listener: (state: RoomSyncState) => void) => () => void;
+  getHistorySync?: () => RoostHistorySyncState | undefined;
+  subscribeHistorySync?: (listener: () => void) => () => void;
   getState: () => SessionDocState;
   setState: (updater: SessionDocUpdater) => void;
   subscribe: (listener: (state: SessionDocState) => void) => () => void;
@@ -423,6 +427,11 @@ export type WorkspaceRuntime = {
       pauseInbox?: boolean;
     }
   ) => Promise<SessionCancelResponse | null>;
+  requestSessionLiveStatus?: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    options?: { timeoutMs?: number }
+  ) => Promise<SessionLiveStatusResponse | null>;
   requestSessionSteer: (
     machineId: MachineId,
     args: {

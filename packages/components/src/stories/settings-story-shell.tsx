@@ -141,6 +141,12 @@ export function SettingsStoryProviders({
               organizationId: settingsStoryOrganization.id,
               role: 'member' as const,
               createdAt: new Date('2026-01-01T00:00:00.000Z'),
+              user: {
+                id: 'settings-story-teammate',
+                name: 'Bob Smith',
+                email: 'bob@example.com',
+                image: null,
+              },
             },
           ],
         }

@@ -185,6 +185,10 @@ describe('session PR views', () => {
     expect(resolveSessionPrimaryPullRequest(meta)?.url).toBe(api);
     expect(resolveSessionPrimaryPullRequest(meta, 'example/web')?.url).toBe(web);
     expect(resolveSessionPrimaryPullRequest(meta, null)).toBeNull();
+    const crossRepoOnly = { ...meta, pullRequests: [{ url: web, status: 'open' }] } as SessionMeta;
+    expect(resolveSessionPrimaryPullRequest(crossRepoOnly)?.url).toBe(web);
+    expect(resolveSessionPrimaryPullRequest(crossRepoOnly, 'example/api')).toBeNull();
+    expect(resolveSessionPrimaryPullRequest(crossRepoOnly, null)).toBeNull();
     // A single-project Session keeps its primary slot in the project repository.
     expect(resolveSessionPrimaryPullRequest({ ...meta, projectRun: undefined })?.url).toBe(api);
     expect(

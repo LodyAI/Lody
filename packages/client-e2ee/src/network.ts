@@ -4,6 +4,7 @@ import { SeatInvitePreviewSchema } from '@lody/cloud-api/seat-invite-preview';
 import {
   isTransientGatewayStatus,
   TRANSIENT_GATEWAY_RETRY_DELAYS_MS,
+  transientGatewayRetryDelayMs,
 } from '@lody/shared/transient-gateway';
 import { Cause, Effect, Exit, Result } from 'effect';
 import { z } from 'zod';
@@ -271,7 +272,9 @@ export const gatewayRequest = <A>(
       if (!isTransientGatewayError(result.failure) || attempt >= delays.length)
         return yield* Effect.fail(result.failure);
       const delay = delays[attempt];
-      yield* Effect.sleep(Number.isFinite(delay) && delay >= 0 ? delay : 0);
+      yield* Effect.sleep(
+        Number.isFinite(delay) && delay >= 0 ? transientGatewayRetryDelayMs(delay) : 0
+      );
     }
   });
 
@@ -589,6 +592,17 @@ export function makePersonalCloudNetwork(
           Effect.gen(function* () {
             yield* guard();
             if (!anchor.equals(scope.genesis)) return yield* failure();
+            const isMatchingSuffixPage = (
+              page: z.infer<typeof historyPage>,
+              expectedStartIndex: number,
+              expectedCheckpoint?: z.infer<typeof checkpoint>
+            ) =>
+              page.workspaceId === scope.workspaceId &&
+              page.genesisHash === genesisHash &&
+              page.startIndex === expectedStartIndex &&
+              (!expectedCheckpoint ||
+                (page.checkpoint.length === expectedCheckpoint.length &&
+                  page.checkpoint.headHash === expectedCheckpoint.headHash));
             const previous = lastRead;
             if (
               !previous ||
@@ -596,6 +610,21 @@ export function makePersonalCloudNetwork(
               previous.checkpoint.length !== base.length ||
               previous.checkpoint.headHash !== hex(base.head.toBytes())
             ) {
+              if (
+                inline &&
+                isMatchingSuffixPage(inline, base.length) &&
+                inline.nextCursor === null &&
+                inline.startIndex + inline.recordsHex.length === inline.checkpoint.length
+              ) {
+                const page = inline;
+                return {
+                  records: page.recordsHex.map(raw),
+                  checkpoint: {
+                    length: page.checkpoint.length,
+                    head: Result.getOrThrow(Bytes.recordHash(raw(page.checkpoint.headHash))),
+                  },
+                };
+              }
               const pages = yield* fallback((bound) => allHistory(bound.credential), credential);
               const records = pages.flatMap((page) => page.recordsHex.map(raw));
               if (
@@ -628,13 +657,7 @@ export function makePersonalCloudNetwork(
                   credential
                 ));
               fixed ??= page.checkpoint;
-              if (
-                page.workspaceId !== scope.workspaceId ||
-                page.genesisHash !== genesisHash ||
-                page.startIndex !== base.length + records.length ||
-                page.checkpoint.length !== fixed.length ||
-                page.checkpoint.headHash !== fixed.headHash
-              )
+              if (!isMatchingSuffixPage(page, base.length + records.length, fixed))
                 return yield* failure();
               for (const record of page.recordsHex) {
                 size += record.length / 2;
@@ -835,7 +858,19 @@ export function makePersonalCloudNetwork(
           if (inlineMailboxStatuses.has(key)) {
             const cached = inlineMailboxStatuses.get(key)!;
             inlineMailboxStatuses.delete(key);
-            return guarded(verifyStatus(captured, cached));
+            return guarded(
+              verifyStatus(captured, cached).pipe(
+                Effect.tap((verified) =>
+                  Effect.sync(() => {
+                    if (captured.recipient === selfRecipients.get(credential)) {
+                      selfStatusCache.set(device, verified);
+                    } else {
+                      withinRoundCache.set(device, verified);
+                    }
+                  })
+                )
+              )
+            );
           }
           const cachedStatus =
             selfStatusCache.get(device, captured) ?? withinRoundCache.get(device, captured);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   LODY_PRESENCE_TTL_MS,
+  collectMachinePresenceResourcesFromPresence,
   collectOnlineMachineIdsFromPresence,
   collectViewedSessionIdsFromPresence,
   findFreshMachinePresenceState,
@@ -434,5 +435,94 @@ describe('presence helpers', () => {
     expect(
       parseLodyPresenceStates({ c: desktop('User name /private/path', nowMs) }, { minimal: true })
     ).toEqual({});
+  });
+
+  it('parses compact machine resources, tolerates null/malformed payloads, and strips them in minimal mode', () => {
+    const nowMs = 1_790_000_000_000;
+    const otherMachineId = '01020304-1111-4222-8333-010203040599' as MachineId;
+    const otherInstanceId = '01020304-1111-4222-8333-010203040598' as LodyPresenceInstanceId;
+
+    const states = parseLodyPresenceStates({
+      valid: {
+        kind: 'machine',
+        machineId,
+        instanceId,
+        updatedAt: nowMs - 1_000,
+        r: { cp: 800, cc: 16, mu: 184, mt: 360, df: 4120, dt: 10240 },
+      },
+      nullDisk: {
+        kind: 'machine',
+        machineId: otherMachineId,
+        instanceId,
+        updatedAt: nowMs - 2_000,
+        r: { cp: 24, cc: 8, mu: 64, mt: 160, df: null, dt: null },
+      },
+      malformed: {
+        kind: 'machine',
+        machineId: otherMachineId,
+        instanceId: otherInstanceId,
+        updatedAt: nowMs - 500,
+        r: { cp: 'bad', cc: 0 },
+      },
+      stale: {
+        kind: 'machine',
+        machineId: '01020304-1111-4222-8333-010203040588',
+        instanceId,
+        updatedAt: nowMs - LODY_PRESENCE_TTL_MS - 1,
+        r: { cp: 100, cc: 4, mu: 10, mt: 80 },
+      },
+    });
+
+    expect(states.valid).toEqual({
+      kind: 'machine',
+      machineId,
+      instanceId,
+      updatedAt: nowMs - 1_000,
+      r: { cp: 800, cc: 16, mu: 184, mt: 360, df: 4120, dt: 10240 },
+    });
+    expect(states.nullDisk).toEqual({
+      kind: 'machine',
+      machineId: otherMachineId,
+      instanceId,
+      updatedAt: nowMs - 2_000,
+      r: { cp: 24, cc: 8, mu: 64, mt: 160 },
+    });
+    expect(states.malformed).toEqual({
+      kind: 'machine',
+      machineId: otherMachineId,
+      instanceId: otherInstanceId,
+      updatedAt: nowMs - 500,
+    });
+
+    const resources = collectMachinePresenceResourcesFromPresence(states, nowMs);
+    expect(resources.get(machineId)).toEqual({
+      cp: 800,
+      cc: 16,
+      mu: 184,
+      mt: 360,
+      df: 4120,
+      dt: 10240,
+    });
+    expect(resources.get(otherMachineId)).toEqual({ cp: 24, cc: 8, mu: 64, mt: 160 });
+    expect(resources.size).toBe(2);
+
+    const minimal = parseLodyPresenceStates(
+      {
+        valid: {
+          kind: 'machine',
+          machineId,
+          instanceId,
+          updatedAt: nowMs - 1_000,
+          r: { cp: 800, cc: 16, mu: 184, mt: 360, df: 4120, dt: 10240 },
+        },
+      },
+      { minimal: true }
+    );
+    expect(minimal.valid).toEqual({
+      kind: 'machine',
+      machineId,
+      instanceId,
+      updatedAt: nowMs - 1_000,
+    });
   });
 });

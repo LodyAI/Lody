@@ -773,6 +773,12 @@ export interface ChatComposerProps {
   onVisualAnnotationReferenceRemove?: (localId: string) => void;
   /** Selector node displayed above the textarea (e.g., repo, agent) */
   topSelector?: ReactNode;
+  /**
+   * A strip inside the input card, above everything it holds: the composer's
+   * own mode (editing a queued message), never a separate card that would
+   * break the stack glued above the composer.
+   */
+  headerStrip?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
   footerSelector?: ReactNode;
   /** Node displayed below the input box (e.g., machine, agent) */
@@ -880,6 +886,7 @@ export function ChatComposer({
   visualAnnotationReferenceItems = [],
   onVisualAnnotationReferenceRemove,
   topSelector,
+  headerStrip,
   footerSelector,
   bottomBar,
   statusMessage,
@@ -1552,6 +1559,9 @@ export function ChatComposer({
                   : undefined
               }
             >
+              {headerStrip ? (
+                <div {...stylex.props(isSheet && styles.sheetStripInset)}>{headerStrip}</div>
+              ) : null}
               {commentReferenceItems.length > 0 ? (
                 <div {...stylex.props(styles.referenceStrip, isSheet && styles.sheetStripInset)}>
                   {commentReferenceItems.map((item) => (

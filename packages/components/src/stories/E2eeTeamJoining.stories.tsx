@@ -97,6 +97,30 @@ export const Ready: Story = {
     },
   },
 };
+export const WrongEmail: Story = {
+  args: {
+    email: 'other@example.test',
+    preview: {
+      ...meta.args.preview,
+      matchesRecipient: false,
+      recipientEmailMasked: 'r***@example.test',
+    },
+  },
+};
+export const Rejected: Story = {
+  args: {
+    runtime: {
+      ...meta.args.runtime,
+      pendingMemberJoin: async () => ({ offer, requestId: request.requestId }),
+      claimMemberJoin: async () => ({ ready: false, state: 'rejected' }),
+    },
+  },
+};
+export const Unavailable: Story = {
+  args: {
+    preview: { status: 'unavailable' as const },
+  },
+};
 export const DesktopHandoff: Story = { args: { runtime: undefined } };
 const pending: E2eeMemberReplies['pending'] = {
   items: [

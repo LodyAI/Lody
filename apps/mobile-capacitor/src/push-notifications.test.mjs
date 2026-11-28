@@ -19,6 +19,19 @@ function deferred() {
 }
 async function setup(platform, { channel, configure, autoToken = true } = {}) {
   const events = [];
+  const visited = [];
+  let signedIn = null;
+  const sessionListeners = new Set();
+  const storage = new Map([['lody:push-installation', 'installation']]);
+  const signIn = (id) => {
+    signedIn = id;
+    for (const fn of sessionListeners) fn(id);
+  };
+  const window = {
+    location: { origin: 'https://localhost', pathname: '/', search: '', hash: '' },
+    history: { pushState: (_state, _title, route) => visited.push(route) },
+    dispatchEvent: (event) => events.push(event.type),
+  };
   const listeners = new Map();
   const timers = new Set();
   const context = vm.createContext({
@@ -27,11 +40,28 @@ async function setup(platform, { channel, configure, autoToken = true } = {}) {
       return fn;
     },
     clearTimeout: (fn) => timers.delete(fn),
-    window: {},
+    window,
     console,
-    localStorage: { getItem: () => 'installation' },
+    URL,
+    PopStateEvent: class {
+      constructor(type) {
+        this.type = type;
+      }
+    },
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: (key) => storage.delete(key),
+    },
   });
   const exports = {
+    './auth': {
+      getAuthUserId: () => signedIn,
+      subscribeAuthUserId: (fn) => {
+        sessionListeners.add(fn);
+        return () => sessionListeners.delete(fn);
+      },
+    },
     '@capacitor/app': { App: { getInfo: async () => ({ id: 'app.test' }) } },
     '@capacitor/core': {
       Capacitor: { getPlatform: () => platform },
@@ -70,7 +100,20 @@ async function setup(platform, { channel, configure, autoToken = true } = {}) {
   );
   await entry.evaluate();
   entry.namespace.initPushBridge();
-  return { bridge: context.window.__LODY_PUSH__, events, listeners, timers };
+  const tap = (route, recipientUserId) =>
+    listeners.get('pushNotificationActionPerformed')({
+      notification: { data: { route, recipientUserId } },
+    });
+  return {
+    bridge: context.window.__LODY_PUSH__,
+    events,
+    listeners,
+    timers,
+    visited,
+    signIn,
+    storage,
+    tap,
+  };
 }
 await test('logout while Android channel creation is pending cannot register afterward', async () => {
   const entered = deferred();
@@ -204,4 +247,35 @@ await test('encrypted Live Activity keeps session navigation while removing HTTP
   assert.equal(configurations[0].authToken, 'synthetic');
   await bridge.syncConversationSummary({ ...input, contentMode: 'plaintext' });
   assert.equal(payloads[1].items[0].permissionRequestId, 'request');
+});
+await test('a cold-start tap opens once its recipient is signed in, even if push never registers', async () => {
+  const t = await setup('ios');
+  await Promise.resolve();
+  t.tap('/workspace/w1/session/s1', 'alice');
+  t.tap('//evil.test/path', 'alice');
+  t.tap('/workspace/w1/session/s0', '');
+  assert.deepEqual(t.visited, []);
+  t.signIn('alice');
+  t.tap('/workspace/w1/session/s2', 'bob');
+  t.tap('/workspace/w1/session/s3', 'alice');
+  assert.deepEqual(t.visited, ['/workspace/w1/session/s1', '/workspace/w1/session/s3']);
+  assert.equal(t.events.filter((event) => event === 'popstate').length, 2);
+});
+await test("logout fences the leaving account, keeps the next account's tap, and opt-out fences nothing", async () => {
+  const t = await setup('ios');
+  await Promise.resolve();
+  t.storage.set('lody:push-user', 'alice');
+  t.signIn('alice');
+  await t.bridge.unregister();
+  t.tap('/workspace/opted-out', 'alice');
+  assert.deepEqual(t.visited, ['/workspace/opted-out']);
+  t.storage.delete('lody:push-user');
+  await t.bridge.unregister();
+  t.tap('/workspace/leaving', 'alice');
+  t.tap('/workspace/next', 'bob');
+  t.signIn('alice');
+  assert.deepEqual(t.visited, ['/workspace/opted-out']);
+  t.signIn(null);
+  t.signIn('bob');
+  assert.deepEqual(t.visited, ['/workspace/opted-out', '/workspace/next']);
 });

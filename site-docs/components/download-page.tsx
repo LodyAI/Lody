@@ -49,6 +49,7 @@ const MOBILE_ANDROID_FALLBACK_DOWNLOAD_URL = `${MOBILE_ANDROID_DOWNLOAD_BASE}/lo
 const APP_STORE_HREF_EN = 'https://apps.apple.com/us/app/lody-run-code-agent-anywhere/id6761373528';
 const APP_STORE_HREF_ZH =
   'https://apps.apple.com/cn/app/lody-%E9%9A%8F%E6%97%B6%E9%9A%8F%E5%9C%B0%E8%BF%90%E8%A1%8C-code-agent/id6761373528';
+const IOS_NATIVE_TESTFLIGHT_HREF = 'https://testflight.apple.com/join/unptfXM3';
 const GOOGLE_PLAY_HREF = 'https://play.google.com/store/apps/details?id=ai.lody.android';
 
 type DownloadCopy = {
@@ -63,6 +64,7 @@ type DownloadCopy = {
   browserName: string;
   openApp: string;
   appStoreHref: string;
+  iosNativeLabel: string;
   platforms: {
     mac: string;
     win: string;
@@ -78,7 +80,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: 'Get the apps',
     title: 'Download Lody',
     subtitle:
-      'Manage all your code agents in one place. Conversations sync across devices in real time.',
+      'Run Claude Code, Codex, and ACP AI coding agents in parallel across desktop, mobile, and web — with real-time session sync.',
     desktop: 'Desktop',
     mobile: 'Mobile and browser',
     detected: 'Detected platform',
@@ -87,6 +89,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     browserName: 'Browser',
     openApp: 'Open app',
     appStoreHref: APP_STORE_HREF_EN,
+    iosNativeLabel: 'TestFlight · Native',
     platforms: {
       mac: 'Universal desktop app for macOS with Apple Silicon and Intel builds.',
       win: 'Signed Windows installer for x64 machines.',
@@ -99,7 +102,8 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
   zh: {
     eyebrow: '获取客户端',
     title: '下载 Lody',
-    subtitle: '轻松管理你的所有 code agent，所有对话记录多端实时同步。',
+    subtitle:
+      '在一处并行管理 Claude Code、Codex 与 ACP AI 编程 Agent，桌面端、手机与网页多端实时同步。',
     desktop: '桌面端',
     mobile: '移动端和浏览器',
     detected: '检测到的平台',
@@ -108,6 +112,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     browserName: '浏览器',
     openApp: '打开应用',
     appStoreHref: APP_STORE_HREF_ZH,
+    iosNativeLabel: 'TestFlight · 原生版',
     platforms: {
       mac: '适用于 macOS 的桌面应用，提供 Apple Silicon 和 Intel 构建。',
       win: '适用于 x64 Windows 机器的签名安装包。',
@@ -120,7 +125,8 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
   'zh-hant': {
     eyebrow: '取得應用程式',
     title: '下載 Lody',
-    subtitle: '在單一工作區管理所有程式設計 Agent，所有對話紀錄跨裝置即時同步。',
+    subtitle:
+      '在單一工作區並行管理 Claude Code、Codex 與 ACP AI 程式設計 Agent，桌面端、手機與網頁即時同步。',
     desktop: '桌面端',
     mobile: '行動裝置與瀏覽器',
     detected: '偵測到的平台',
@@ -129,6 +135,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     browserName: '瀏覽器',
     openApp: '開啟應用程式',
     appStoreHref: APP_STORE_HREF_EN,
+    iosNativeLabel: 'TestFlight · 原生版',
     platforms: {
       mac: '適用於 macOS 的桌面應用程式，提供 Apple Silicon 與 Intel 版本。',
       win: '適用於 x64 Windows 電腦的已簽署安裝程式。',
@@ -142,7 +149,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: 'アプリを入手',
     title: 'Lody をダウンロード',
     subtitle:
-      'すべてのコーディングエージェントを一か所で管理。会話は複数デバイス間でリアルタイム同期されます。',
+      'Claude Code・Codex などの AI コーディングエージェントを一か所で並列管理。デスクトップ・スマホ・Web でセッションをリアルタイム同期します。',
     desktop: 'デスクトップ',
     mobile: 'モバイル・ブラウザー',
     detected: '検出されたプラットフォーム',
@@ -151,6 +158,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     browserName: 'ブラウザー',
     openApp: 'アプリを開く',
     appStoreHref: APP_STORE_HREF_EN,
+    iosNativeLabel: 'TestFlight · ネイティブ版',
     platforms: {
       mac: 'Apple Silicon と Intel 向けビルドを備えた macOS 用デスクトップアプリ。',
       win: 'x64 環境向けの署名済み Windows インストーラー。',
@@ -164,7 +172,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: '앱 받기',
     title: 'Lody 다운로드',
     subtitle:
-      '모든 코딩 에이전트를 한곳에서 관리하세요. 대화가 여러 기기에서 실시간으로 동기화됩니다.',
+      'Claude Code, Codex 등 AI 코딩 에이전트를 한곳에서 병렬 관리하세요. 데스크톱, 모바일, 브라우저에서 세션이 실시간으로 동기화됩니다.',
     desktop: '데스크톱',
     mobile: '모바일 및 브라우저',
     detected: '감지된 플랫폼',
@@ -173,6 +181,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     browserName: '브라우저',
     openApp: '앱 열기',
     appStoreHref: APP_STORE_HREF_EN,
+    iosNativeLabel: 'TestFlight · 네이티브 버전',
     platforms: {
       mac: 'Apple Silicon 및 Intel 빌드를 지원하는 macOS용 데스크톱 앱.',
       win: 'x64 Windows PC용 서명된 설치 파일.',
@@ -186,7 +195,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: 'Consigue las aplicaciones',
     title: 'Descargar Lody',
     subtitle:
-      'Gestiona todos tus agentes de programación desde un solo lugar. Las conversaciones se sincronizan entre dispositivos en tiempo real.',
+      'Ejecuta Claude Code, Codex y agentes de código IA en paralelo desde escritorio, móvil y navegador, con sincronización en tiempo real.',
     desktop: 'Escritorio',
     mobile: 'Móvil y navegador',
     detected: 'Plataforma detectada',
@@ -195,6 +204,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     browserName: 'Navegador',
     openApp: 'Abrir aplicación',
     appStoreHref: APP_STORE_HREF_EN,
+    iosNativeLabel: 'TestFlight · Versión nativa',
     platforms: {
       mac: 'Aplicación de escritorio universal para macOS con compilaciones para Apple Silicon e Intel.',
       win: 'Instalador firmado de Windows para equipos x64.',
@@ -208,7 +218,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: 'Télécharger les applications',
     title: 'Télécharger Lody',
     subtitle:
-      'Gérez tous vos agents de code au même endroit. Les conversations se synchronisent en temps réel sur tous vos appareils.',
+      'Pilotez Claude Code, Codex et vos agents de code IA en parallèle sur ordinateur, mobile et navigateur, avec synchronisation en temps réel.',
     desktop: 'Ordinateur',
     mobile: 'Mobile et navigateur',
     detected: 'Plateforme détectée',
@@ -217,6 +227,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     browserName: 'Navigateur',
     openApp: "Ouvrir l'application",
     appStoreHref: APP_STORE_HREF_EN,
+    iosNativeLabel: 'TestFlight · Version native',
     platforms: {
       mac: 'Application de bureau universelle pour macOS avec versions Apple Silicon et Intel.',
       win: 'Installateur Windows signé pour machines x64.',
@@ -230,7 +241,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: 'Скачать приложения',
     title: 'Скачать Lody',
     subtitle:
-      'Управляйте всеми агентами разработки в одном месте. Диалоги синхронизируются между устройствами в реальном времени.',
+      'Запускайте Claude Code, Codex и ACP ИИ-агентов для кода параллельно на компьютере, телефоне и в браузере с мгновенной синхронизацией сессий.',
     desktop: 'Компьютер',
     mobile: 'Мобильные устройства и браузер',
     detected: 'Определённая платформа',
@@ -239,6 +250,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     browserName: 'Браузер',
     openApp: 'Открыть приложение',
     appStoreHref: APP_STORE_HREF_EN,
+    iosNativeLabel: 'TestFlight · Нативная версия',
     platforms: {
       mac: 'Настольное приложение для macOS со сборками для Apple Silicon и Intel.',
       win: 'Подписанный установщик Windows для систем x64.',
@@ -412,6 +424,12 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
             action: 'open',
             target: '_blank',
           },
+          {
+            label: t.iosNativeLabel,
+            href: IOS_NATIVE_TESTFLIGHT_HREF,
+            action: 'open',
+            target: '_blank',
+          },
         ],
       },
       {
@@ -449,7 +467,15 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
     ];
 
     return [desktop, mobile];
-  }, [androidDownloadUrl, downloads, t.appStoreHref, t.browserName, t.openApp, t.platforms]);
+  }, [
+    androidDownloadUrl,
+    downloads,
+    t.appStoreHref,
+    t.browserName,
+    t.iosNativeLabel,
+    t.openApp,
+    t.platforms,
+  ]);
 
   const sectionTitles = [t.desktop, t.mobile];
 

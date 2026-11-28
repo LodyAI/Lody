@@ -34,6 +34,7 @@ import {
 } from './worktree/worktree-manager';
 import { createLocalCloudPort } from '@lody/platform';
 import * as codexProfiles from '../agent/codex-profile-store';
+import { sessionMcpAuthRevisionsChanged } from '../agent/session-mcp-resolver';
 
 vi.mock('./worktree/worktree-setup-runner', () => ({
   runWorktreeSetup: vi.fn(async () => undefined),
@@ -759,6 +760,39 @@ describe('SessionManager cleanup phases', () => {
   });
 });
 
+describe('SessionManager MCP credential revisions', () => {
+  it('lets only the CLI account observe local credential changes', () => {
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    let revision = 1;
+    Object.assign(manager, { mcpAuthentication: { getAuthRevision: () => revision } });
+    const ids = ['server-a' as McpServerId];
+    const mountFor = (userId: string) => ({
+      fingerprint: 'same-config',
+      authRevisions: manager.readMcpAuthRevisions(ids, userId),
+    });
+    const owner = mountFor('user-1');
+    const member = mountFor('member-1');
+    expect(owner.authRevisions).toEqual({ 'server-a': 1 });
+    revision = 2;
+    expect(sessionMcpAuthRevisionsChanged(owner, manager.readMcpAuthRevisions(ids, 'user-1'))).toBe(
+      true
+    );
+    expect(
+      sessionMcpAuthRevisionsChanged(member, manager.readMcpAuthRevisions(ids, 'member-1'))
+    ).toBe(false);
+  });
+});
+
 describe('SessionManager child session workdir resolution', () => {
   let tempHome: string;
 
@@ -1467,6 +1501,58 @@ describe('SessionManager durable create ownership', () => {
     // The orphan is gone, but its death is invisible to the manager: the
     // replacement stays registered, and MessageHandler never hears a
     // `terminated` for this id that would finalize the replacement's live turn.
+    expect(manager.getSession(sessionId)).toBe(replacement);
+    expect(managerTerminated).toEqual([]);
+  });
+
+  it('does not let an abandoned create overwrite or remove a replacement session during createSessionInner', async () => {
+    const firstSandboxEntered = deferred<void>();
+    const firstSandboxRelease = deferred<void>();
+    const firstSandboxTerminate = vi.fn(async () => undefined);
+    let sandboxCalls = 0;
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => {
+          sandboxCalls += 1;
+          const base = createNoopSessionSandbox();
+          if (sandboxCalls === 1) {
+            firstSandboxEntered.resolve();
+            await firstSandboxRelease.promise;
+            return {
+              ...base,
+              terminate: firstSandboxTerminate,
+            };
+          }
+          return base;
+        },
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const sessionId = 'abandoned-during-inner-session' as SessionId;
+    const config = createSessionConfig({ sessionId });
+    const managerTerminated: SessionId[] = [];
+    manager.on('terminated', (event: { sessionId: SessionId }) => {
+      managerTerminated.push(event.sessionId);
+    });
+
+    const abandonedCreate = manager.createSession(config);
+    await firstSandboxEntered.promise;
+    expect(manager.abandonPendingSessionCreate(sessionId, 'session-stop')).toBe(true);
+
+    // A replacement create finishes and registers before the abandoned create
+    // unwinds out of `createSessionInner`.
+    const replacement = await createSessionInner(manager, config);
+    expect(manager.getSession(sessionId)).toBe(replacement);
+
+    firstSandboxRelease.resolve();
+    await expect(abandonedCreate).rejects.toThrow('session-stop');
+
+    expect(firstSandboxTerminate).toHaveBeenCalledWith(true);
     expect(manager.getSession(sessionId)).toBe(replacement);
     expect(managerTerminated).toEqual([]);
   });

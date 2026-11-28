@@ -1,9 +1,10 @@
 import {
   isLocalStorageFailure,
   isRequestUnavailable,
+  localStorageFailureKey,
   requestFailureCode,
-} from '@/lib/e2ee-actionable-failure';
-import { useEffect, useRef, useState, type RefObject } from 'react';
+} from '../../lib/e2ee-actionable-failure';
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { useCloudQueryState, usePlatform } from '@lody/platform/react';
@@ -11,13 +12,20 @@ import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
-import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Check } from 'lucide-react';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useStableSession } from '@/hooks/useStableSession';
+import { E2eeMemberWaitingArt } from '../e2ee/e2ee-illustrations';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { desktopMemberJoinLink, sameMemberOffer } from '@/lib/e2ee-member-offer';
-import { attemptDesktopInviteHandoff } from '@/lib/desktop-invite-deep-link';
+import {
+  attemptDesktopInviteHandoff,
+  canAttemptDesktopInviteHandoff,
+} from '@/lib/desktop-invite-deep-link';
+
+const DESKTOP_DOWNLOAD_URL = 'https://lody.ai/download';
 
 const styles = stylex.create({
   page: {
@@ -28,28 +36,92 @@ const styles = stylex.create({
     backgroundColor: colors.background,
   },
   card: { width: '100%', maxWidth: 460 },
-  stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
-  actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
-  steps: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' },
-  step: { display: 'grid', gridTemplateColumns: '22px minmax(0, 1fr)', columnGap: space[3] },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  actions: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  steps: {
+    listStyle: 'none',
+    margin: 0,
+    paddingBlock: space[3],
+    paddingInline: space[3],
+    borderRadius: radius.medium,
+    backgroundColor: colors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  step: { display: 'grid', gridTemplateColumns: '20px minmax(0, 1fr)', columnGap: space[3] },
   rail: { display: 'flex', flexDirection: 'column', alignItems: 'center' },
   dot: {
-    width: 22,
-    height: 22,
+    width: 20,
+    height: 20,
     borderRadius: '50%',
     display: 'grid',
     placeItems: 'center',
     fontSize: text.captionSize,
-    fontWeight: 700,
-    backgroundColor: colors.secondaryBackground,
+    fontWeight: 600,
+    fontVariantNumeric: 'tabular-nums',
+    backgroundColor: colors.elevatedBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
     color: colors.tertiaryLabel,
   },
-  dotDone: { backgroundColor: colors.success, color: '#ffffff' },
-  dotCurrent: { backgroundColor: colors.label, color: colors.background },
-  line: { width: 2, flexGrow: 1, minHeight: space[3], backgroundColor: colors.separator },
+  dotDone: { backgroundColor: colors.success, borderColor: colors.success, color: '#ffffff' },
+  dotCurrent: {
+    backgroundColor: colors.label,
+    borderColor: colors.label,
+    color: colors.background,
+  },
+  line: { width: '1.5px', flexGrow: 1, minHeight: space[3], backgroundColor: colors.separator },
   lineDone: { backgroundColor: colors.success },
-  stepText: { paddingBottom: space[3], color: colors.tertiaryLabel },
+  stepText: {
+    paddingBottom: space[3],
+    fontSize: text.subheadlineSize,
+    lineHeight: '20px',
+    color: colors.tertiaryLabel,
+  },
+  stepTextLast: { paddingBottom: 0 },
   stepTextActive: { color: colors.label },
+  stepTextCurrent: { fontWeight: 600 },
+  signedInNote: {
+    margin: 0,
+    color: colors.tertiaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    overflowWrap: 'anywhere',
+  },
+  signedInNoteEmphasis: { color: colors.secondaryLabel },
+  art: { marginBottom: space[2] },
+  waitingPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    padding: space[3],
+    borderRadius: radius.medium,
+    backgroundColor: colors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+  },
+  waitingTitle: {
+    margin: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 600,
+    color: colors.label,
+  },
+  muted: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  link: { color: colors.label, textDecoration: 'underline', textUnderlineOffset: '3px' },
 });
 
 const JOIN_STEPS = ['accept', 'approval', 'key', 'open'] as const;
@@ -79,7 +151,14 @@ function JoinProgress(props: { current: number }) {
                 <span {...stylex.props(styles.line, done && styles.lineDone)} />
               )}
             </span>
-            <span {...stylex.props(styles.stepText, (done || current) && styles.stepTextActive)}>
+            <span
+              {...stylex.props(
+                styles.stepText,
+                index === JOIN_STEPS.length - 1 && styles.stepTextLast,
+                (done || current) && styles.stepTextActive,
+                current && styles.stepTextCurrent
+              )}
+            >
               {t(`e2ee.team.steps.${step}`)}
             </span>
           </li>
@@ -102,6 +181,8 @@ type Props = {
   loading?: boolean;
   preview?: E2eeMemberReplies['preview'];
   previewError?: unknown;
+  alreadyMember?: boolean;
+  alreadyMemberSlug?: string | null;
   onRetryPreview?: () => void;
   onSignInRequested: () => void;
   onEmailVerificationRequested: () => void;
@@ -113,6 +194,11 @@ const CLAIM_INTERVAL_MS = 10_000;
 const KEY_WAIT_INTERVALS_MS = [500, 1000, 2000, 3000];
 /** Upper bound of the faster cadence, after which claims return to 10 s. */
 const KEY_WAIT_FAST_MS = 120_000;
+/** Surface the explanatory slow-wait hint after 20 s while keeping the 120 s fast cadence. */
+const KEY_WAIT_SLOW_UI_MS = 20_000;
+const LOADING_WORKSPACES = { status: 'loading' as const };
+const NOOP_SUBSCRIBE = () => () => {};
+
 export function E2eeMemberJoinSurface(
   props: Pick<
     Props,
@@ -124,6 +210,12 @@ export function E2eeMemberJoinSurface(
   >
 ) {
   const platform = usePlatform();
+  const workspacesStore = platform.workspaces?.state;
+  const workspaces = useSyncExternalStore(
+    workspacesStore ? (listener) => workspacesStore.subscribe(listener) : NOOP_SUBSCRIBE,
+    () => workspacesStore?.get() ?? LOADING_WORKSPACES,
+    () => LOADING_WORKSPACES
+  );
   const session = useStableSession();
   const {
     data: preview,
@@ -131,29 +223,35 @@ export function E2eeMemberJoinSurface(
     retry: retryPreview,
   } = useCloudQueryState(cloudOperations.e2eeMembers.preview, { token: props.offer.token });
   const sessionLoading = session.isPending || session.isRetrying || session.isOptimistic;
+  const existingWorkspace =
+    workspaces.status === 'ready'
+      ? workspaces.workspaces.find((workspace) => workspace.id === props.offer.workspaceId)
+      : undefined;
   return (
     <E2eeMemberJoin
       {...props}
       runtime={platform.e2eeWorkspaces?.runtime}
       watchClaim
-      accountId={session.data?.user.id ?? null}
-      email={session.data?.user.email}
-      emailVerified={session.isOptimistic ? undefined : session.data?.user.emailVerified}
+      accountId={session.data?.user?.id ?? null}
+      email={session.data?.user?.email}
+      emailVerified={session.isOptimistic ? undefined : session.data?.user?.emailVerified}
       loading={sessionLoading}
       preview={preview}
       previewError={previewError}
+      alreadyMember={Boolean(existingWorkspace)}
+      alreadyMemberSlug={existingWorkspace?.slug ?? null}
       onRetryPreview={retryPreview}
     />
   );
 }
 function memberJoinFailureKey(cause: unknown) {
-  if (isLocalStorageFailure(cause)) return 'e2ee.team.error.storage';
+  if (isLocalStorageFailure(cause)) return localStorageFailureKey('team');
   if (
     /^(?:e2ee_)?(?:invite|invitation|member_invitation|member_join)_(?:expired|invalid|not_found|unavailable|rejected)$/.test(
       requestFailureCode(cause) ?? ''
     )
   )
-    return 'e2ee.team.unavailable';
+    return 'e2ee.team.inviteExpired';
   if (isRequestUnavailable(cause)) return 'e2ee.team.error.network';
   return 'e2ee.team.retryOriginal';
 }
@@ -193,6 +291,8 @@ function JoinSession({
   emailVerified,
   preview,
   previewError,
+  alreadyMember,
+  alreadyMemberSlug,
   onRetryPreview,
   loading,
   onSignInRequested,
@@ -264,11 +364,18 @@ function JoinSession({
     if (!requestId || !runtime?.claimMemberJoin || !claimActive) return undefined;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let slowTimer: ReturnType<typeof setTimeout> | undefined;
     let checking = false;
     let wakePending = false;
     let committedSince: number | undefined;
     let keyWaitAttempt = 0;
     setSlowWait(false);
+    const armSlowWait = () => {
+      if (slowTimer !== undefined) return;
+      slowTimer = setTimeout(() => {
+        if (!disposed) setSlowWait(true);
+      }, KEY_WAIT_SLOW_UI_MS);
+    };
     const claim = async () => {
       let delay = CLAIM_INTERVAL_MS;
       checking = true;
@@ -285,10 +392,13 @@ function JoinSession({
         if (result.ready || ['rejected', 'cancelled'].includes(result.state)) return;
         if (result.state === 'committed') {
           committedSince ??= Date.now();
-          if (Date.now() - committedSince < KEY_WAIT_FAST_MS) {
+          const elapsed = Date.now() - committedSince;
+          if (elapsed >= KEY_WAIT_SLOW_UI_MS) setSlowWait(true);
+          else armSlowWait();
+          if (elapsed < KEY_WAIT_FAST_MS) {
             delay = KEY_WAIT_INTERVALS_MS[keyWaitAttempt]!;
             keyWaitAttempt = Math.min(keyWaitAttempt + 1, KEY_WAIT_INTERVALS_MS.length - 1);
-          } else setSlowWait(true);
+          }
         }
       } catch (cause) {
         if (!disposed) setError(memberJoinFailureKey(cause));
@@ -307,6 +417,8 @@ function JoinSession({
     const recheck = (reset = false) => {
       clearTimeout(timer);
       if (reset) {
+        clearTimeout(slowTimer);
+        slowTimer = undefined;
         committedSince = undefined;
         keyWaitAttempt = 0;
         setSlowWait(false);
@@ -322,6 +434,7 @@ function JoinSession({
       disposed = true;
       wake.current = undefined;
       clearTimeout(timer);
+      clearTimeout(slowTimer);
       window.removeEventListener('online', reconnect);
     };
   }, [runtime, offer.workspaceId, requestId, claimActive]);
@@ -365,11 +478,20 @@ function JoinSession({
   else if (!emailVerified) message = 'e2ee.team.verifyHelp';
   else if (!native) message = runtime ? 'e2ee.team.joinUpgrade' : 'e2ee.team.desktopRequired';
   else if (ready) message = 'e2ee.team.ready';
+  else if (alreadyMember && !request) message = 'e2ee.team.alreadyMember';
   else if (terminal) message = 'e2ee.team.rejected';
   else if (request?.state === 'committed') message = 'e2ee.team.waitingKey';
   else if (request) message = 'e2ee.team.waitingApproval';
-  else if (!pinMatches) message = 'e2ee.team.unavailable';
+  else if (!available) message = 'e2ee.team.inviteExpired';
+  else if (!pinMatches) message = 'e2ee.team.pinMismatch';
   else if (available?.matchesRecipient === false) message = 'e2ee.team.wrongEmail';
+  const canOpenDesktop = canAttemptDesktopInviteHandoff();
+  const descriptionText =
+    message === 'e2ee.team.wrongEmail' && available?.recipientEmailMasked
+      ? t('e2ee.team.wrongEmailFor', { invited: available.recipientEmailMasked })
+      : message === 'e2ee.team.desktopRequired' && !canOpenDesktop
+        ? t('e2ee.team.mobileBrowserUnsupported')
+        : t(message);
   return (
     <main data-testid="e2ee-invitation" {...stylex.props(styles.page)}>
       {watchClaim && accountId && requestId && claimActive && (
@@ -383,13 +505,18 @@ function JoinSession({
       <div {...stylex.props(styles.card)}>
         <Card.Root>
           <Card.Header>
+            {request && !ready && !terminal && (
+              <div {...stylex.props(styles.art)}>
+                <E2eeMemberWaitingArt />
+              </div>
+            )}
             <Card.Title as="h1">
               {available?.workspaceName
                 ? t('e2ee.team.joinTitle', { workspace: available.workspaceName })
                 : t('e2ee.team.join')}
             </Card.Title>
             {message !== 'e2ee.team.waitingKey' && (
-              <Card.Description>{t(message)}</Card.Description>
+              <Card.Description>{descriptionText}</Card.Description>
             )}
           </Card.Header>
           <div {...stylex.props(styles.stack)}>
@@ -403,28 +530,50 @@ function JoinSession({
                   current={ready ? 4 : request?.state === 'committed' ? 2 : request ? 1 : 0}
                 />
               )}
-            {email && <p>{email}</p>}
+            {!accountId && !loading && !previewError && !native && !runtime && (
+              <p {...stylex.props(styles.muted)}>
+                {t('e2ee.team.desktopHint')}{' '}
+                <a
+                  href={DESKTOP_DOWNLOAD_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  {...stylex.props(styles.link)}
+                >
+                  {t('e2ee.team.downloadDesktop')}
+                </a>
+              </p>
+            )}
             {message === 'e2ee.team.waitingKey' ? (
-              <Card.Root>
-                <Card.Header>
-                  <Card.Title as="h2">{t(message)}</Card.Title>
-                  <Card.Description>{t('e2ee.team.waitingKeyGuide')}</Card.Description>
-                </Card.Header>
-                <div {...stylex.props(styles.stack)}>
-                  {error ? (
-                    <p role="status">{t(error)}</p>
-                  ) : (
-                    slowWait && <p role="status">{t('e2ee.team.waitingKeySlow')}</p>
-                  )}
-                  <div {...stylex.props(styles.actions)}>
-                    <Button disabled={checkingKey} onClick={() => wake.current?.(true)}>
-                      {t('e2ee.team.checkKeyAgain')}
-                    </Button>
-                  </div>
+              <div {...stylex.props(styles.waitingPanel)}>
+                <h2 {...stylex.props(styles.waitingTitle)}>
+                  <Spinner size="small" />
+                  <span>{t(message)}</span>
+                </h2>
+                <p {...stylex.props(styles.muted)}>{t('e2ee.team.waitingKeyGuide')}</p>
+                {error ? (
+                  <p role="status" {...stylex.props(styles.muted)}>
+                    {t(error)}
+                  </p>
+                ) : (
+                  slowWait && (
+                    <p role="status" {...stylex.props(styles.muted)}>
+                      {t('e2ee.team.waitingKeySlow')}
+                    </p>
+                  )
+                )}
+                <div {...stylex.props(styles.actions)}>
+                  <Button disabled={checkingKey} onClick={() => wake.current?.(true)}>
+                    {checkingKey && <Spinner size="small" />}
+                    {t('e2ee.team.checkKeyAgain')}
+                  </Button>
                 </div>
-              </Card.Root>
+              </div>
             ) : (
-              error && <p role="status">{t(error)}</p>
+              error && (
+                <p role="status" {...stylex.props(styles.muted)}>
+                  {t(error)}
+                </p>
+              )
             )}
             <div {...stylex.props(styles.actions)}>
               {previewFailed && previewFailure !== 'e2ee.team.unavailable' && onRetryPreview && (
@@ -436,10 +585,20 @@ function JoinSession({
               {!loading && accountId && !emailVerified && (
                 <Button onClick={onEmailVerificationRequested}>{t('e2ee.team.verify')}</Button>
               )}
-              {!loading && accountId && emailVerified && !native && !runtime && (
-                <Button onClick={() => attemptDesktopInviteHandoff(desktopMemberJoinLink(offer))}>
-                  {t('e2ee.team.openDesktop')}
-                </Button>
+              {!loading && accountId && emailVerified && !native && !runtime && canOpenDesktop && (
+                <>
+                  <Button onClick={() => attemptDesktopInviteHandoff(desktopMemberJoinLink(offer))}>
+                    {t('e2ee.team.openDesktop')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    render={
+                      <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer" />
+                    }
+                  >
+                    {t('e2ee.team.downloadDesktop')}
+                  </Button>
+                </>
               )}
               {!loading &&
                 accountId &&
@@ -447,6 +606,7 @@ function JoinSession({
                 native &&
                 !recovering &&
                 !ready &&
+                !alreadyMember &&
                 !terminal &&
                 pinMatches &&
                 available?.matchesRecipient !== false &&
@@ -461,19 +621,23 @@ function JoinSession({
                 )}
               {!loading && request && request.state !== 'committed' && !ready && !terminal && (
                 <Button
-                  disabled={busy}
+                  variant="secondary"
+                  disabled={checkingKey}
                   onClick={() => {
                     wake.current?.(true);
-                    void accept();
                   }}
                 >
-                  {t('e2ee.team.retry')}
+                  {checkingKey && <Spinner size="small" />}
+                  {t('e2ee.team.checkStatus')}
                 </Button>
               )}
-              {!loading && ready && (
+              {!loading && (ready || (alreadyMember && !request)) && (
                 <Button
                   onClick={() =>
-                    onWorkspaceRequested(available?.workspaceSlug ?? null, offer.workspaceId)
+                    onWorkspaceRequested(
+                      alreadyMemberSlug ?? available?.workspaceSlug ?? null,
+                      offer.workspaceId
+                    )
                   }
                 >
                   {t('e2ee.team.openWorkspace')}
@@ -493,6 +657,17 @@ function JoinSession({
                 {t('e2ee.team.home')}
               </Button>
             </div>
+            {email && (
+              <p
+                data-testid="e2ee-invitation-account"
+                {...stylex.props(
+                  styles.signedInNote,
+                  message === 'e2ee.team.wrongEmail' && styles.signedInNoteEmphasis
+                )}
+              >
+                {t('e2ee.team.signedInAs', { email })}
+              </p>
+            )}
           </div>
         </Card.Root>
       </div>

@@ -62,11 +62,13 @@ motion.
 
 ## Why pricing carries no clock
 
-Public Plus displays standard pricing: $8 per seat per month billed yearly
-($96 per year), or $10 billed monthly. The early-bird campaign has ended and
-its banners, strike-through references, and deadline copy have been removed.
-Pricing remains static across server rendering and hydration; no client clock
-or campaign environment variable is needed.
+Prerendered Plus HTML displays standard list pricing: $8 per seat per month
+billed yearly ($96 per year), or $10 billed monthly. The former permanent
+early-bird campaign has ended. Time-bound promotional campaigns are fetched on
+the client from the read-only `/api/billing/public-promo` endpoint after mount
+(and after first-paint idle on the landing banner), keeping SSR/hydration
+deterministic and expiring immediately at the server-authoritative `endsAt`; see
+[promotional campaign display](../notes/implemented/feature/2026-11-26-promo-campaign-display.md).
 
 ## Why the underwater background starts in three stages
 

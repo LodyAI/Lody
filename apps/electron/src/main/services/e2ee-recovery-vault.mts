@@ -34,6 +34,7 @@ import {
 } from '@lody/e2ee-client/recovery-restore'
 import {
   abandonVaultReplacement,
+  isVaultWorkspaceAccessLoss,
   planVaultReplacement,
   recoveryFetchEnvelope,
   recoverySubmitOriginal,
@@ -191,17 +192,20 @@ const parseMethodsSummary = (
   }
 }
 
-const syncVaultMethodsSummary = (vault: RecoveryVault) =>
+const syncVaultMethodsSummary = (
+  vault: RecoveryVault,
+  known?: { readonly revision: number; readonly hasPasskey: boolean; readonly hasPassword: boolean }
+) =>
   Effect.gen(function* () {
     const local = yield* RecoveryVaultLocalStore
-    const current = yield* vault.readIndex()
-    const encoded = new TextEncoder().encode(
-      JSON.stringify({
-        revision: current.header?.revision ?? -1,
-        hasPasskey: (current.value.passkeys?.length ?? 0) > 0,
-        hasPassword: current.value.password !== undefined
-      })
-    )
+    const summary = known
+      ? known
+      : yield* Effect.map(vault.readIndex(), (current) => ({
+          revision: current.header?.revision ?? -1,
+          hasPasskey: (current.value.passkeys?.length ?? 0) > 0,
+          hasPassword: current.value.password !== undefined
+        }))
+    const encoded = new TextEncoder().encode(JSON.stringify(summary))
     const key = methodsSummaryKey(vault.vaultId)
     const before = yield* local.read(key)
     yield* Effect.ignore(local.compareAndSwap(key, before, encoded))
@@ -213,12 +217,23 @@ const readVaultMethods = (input: {
   readonly local: RecoveryVaultLocalStore['Service']
 }): Effect.Effect<RecoveryVaultMethodsSummary, unknown> =>
   Effect.gen(function* () {
-    const hasFile = (yield* input.store.readEntry(input.vaultId, input.vaultId)) !== null
-    const summary = parseMethodsSummary(yield* input.local.read(methodsSummaryKey(input.vaultId)))
-    const remoteIndex =
+    const slotIds = Array.from({ length: MAX_VAULT_PASSWORD_GENERATIONS }, (_, generation) =>
+      passwordWrapEntryId(input.vaultId, generation)
+    )
+    const [fileEntry, slots, summaryRaw, remoteIndex] = yield* Effect.all([
+      input.store.readEntry(input.vaultId, input.vaultId),
+      typeof input.store.readEntries === 'function'
+        ? input.store.readEntries(input.vaultId, slotIds)
+        : Effect.forEach(slotIds, (entryId) => input.store.readEntry(input.vaultId, entryId), {
+            concurrency: 4
+          }),
+      input.local.read(methodsSummaryKey(input.vaultId)),
       typeof input.store.readIndex === 'function'
-        ? yield* input.store.readIndex(input.vaultId)
-        : null
+        ? input.store.readIndex(input.vaultId)
+        : Effect.succeed(null)
+    ])
+    const hasFile = fileEntry !== null
+    const summary = parseMethodsSummary(summaryRaw)
     const remoteRevision = remoteIndex?.revision ?? -1
     if (summary !== null && summary.revision === remoteRevision) {
       return {
@@ -227,16 +242,7 @@ const readVaultMethods = (input: {
         hasPasskey: summary.hasPasskey
       }
     }
-    const slots = yield* Effect.all(
-      Array.from({ length: MAX_VAULT_PASSWORD_GENERATIONS }, (_, generation) =>
-        Effect.gen(function* () {
-          const entryId = passwordWrapEntryId(input.vaultId, generation)
-          const entry = yield* input.store.readEntry(input.vaultId, entryId)
-          return entry ? entryId : null
-        })
-      )
-    )
-    const hasPassword = slots.some((entryId) => entryId !== null)
+    const hasPassword = slots.some((entry) => entry !== null)
     return {
       hasFile,
       hasPassword,
@@ -332,12 +338,16 @@ export const createAccountRecoveryVaultWithPasskey = (
             label: verifiedLabel
           })
       })
-      yield* syncVaultMethodsSummary(created.vault)
+      yield* syncVaultMethodsSummary(created.vault, {
+        revision: 0,
+        hasPasskey: true,
+        hasPassword: false
+      })
       return { vaultId: created.vault.vaultId }
     }).pipe(Effect.provide(vaults(io)))
   )
 
-/** Create the account vault with an Argon2id password wrap and prove reopening it through the wire. */
+/** Create the account vault with an Argon2id password wrap and prove readback through the wire. */
 export const createAccountRecoveryVaultWithPassword = (
   io: RecoveryVaultIo & {
     readonly locator: string
@@ -355,15 +365,12 @@ export const createAccountRecoveryVaultWithPassword = (
         password: io.password,
         ...(io.kdf ? { kdf: io.kdf } : {})
       })
-      const reopened = yield* service.openWithPassword({
-        vaultId: created.vault.vaultId,
-        locator: io.locator,
-        password: io.password
+      yield* syncVaultMethodsSummary(created.vault, {
+        revision: 0,
+        hasPasskey: false,
+        hasPassword: true
       })
-      if (reopened.vaultId !== created.vault.vaultId)
-        return yield* Effect.fail({ code: 'authentication' })
-      yield* syncVaultMethodsSummary(reopened)
-      return { vaultId: reopened.vaultId }
+      return { vaultId: created.vault.vaultId }
     }).pipe(Effect.provide(vaults(io)))
   )
 
@@ -576,16 +583,21 @@ export const continueAccountVaultReplacement = (
       if (vault.vaultId !== replacing) return yield* Effect.fail({ code: 'authentication' })
       const local = yield* RecoveryVaultLocalStore
       const workspaces: VaultReplacementWorkspace[] = []
-      for (const target of io.workspaces)
-        workspaces.push({
-          name: target.name,
-          ...(yield* target.owner({
+      for (const target of io.workspaces) {
+        const opened = yield* Effect.result(
+          target.owner({
             vault,
             local,
             submitOriginal: submitFor(target),
             fetchCurrentEnvelope: recoveryFetchEnvelope(target)
-          }))
-        })
+          })
+        )
+        if (Result.isFailure(opened)) {
+          if (isVaultWorkspaceAccessLoss(opened.failure)) continue
+          return yield* Effect.fail(opened.failure)
+        }
+        workspaces.push({ name: target.name, ...opened.success })
+      }
       const outcome = yield* replaceAccountVault({
         workspaces,
         compromised: io.compromised,
@@ -615,15 +627,20 @@ export const abandonAccountVaultReplacement = (
         readonly name: string
         readonly revokeOwnRecoveryDevice: () => Effect.Effect<{ readonly outcome: string }, unknown>
       }[] = []
-      for (const target of io.workspaces)
-        workspaces.push({
-          name: target.name,
-          ...(yield* target.abandonOwner({
+      for (const target of io.workspaces) {
+        const opened = yield* Effect.result(
+          target.abandonOwner({
             vaultId: replacing,
             local,
             submitOriginal: submitFor(target)
-          }))
-        })
+          })
+        )
+        if (Result.isFailure(opened)) {
+          if (isVaultWorkspaceAccessLoss(opened.failure)) continue
+          return yield* Effect.fail(opened.failure)
+        }
+        workspaces.push({ name: target.name, ...opened.success })
+      }
       return yield* abandonVaultReplacement({
         workspaces,
         abandon: () => io.replacement.abandon(replacing)

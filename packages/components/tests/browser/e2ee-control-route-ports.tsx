@@ -60,6 +60,7 @@ export const usePlatformWorkspaces = () => ({ status: 'ready', workspaces: [] })
 // No other workspace here, so "Workspaces" has no ordinary workspace to return to.
 export const getPreferredOrdinaryWorkspaceSlug = () => null;
 export const readPreferredWorkspaceSlug = () => null;
+export const isNavigableWorkspaceSlug = () => false;
 export const useTranslation = () => ({ t: (key: string) => key });
 export const readWorkspaceModeEvidence = () => ({});
 export const readE2eeGenesisPin = () => fixture.genesisHash;
@@ -103,7 +104,6 @@ export const E2eeRemoteMachineDisclosure = ({ children }: { children?: ReactNode
 export const E2eeAddDeviceCard = () => null;
 export const E2eeIdentityRecovery = () => null;
 export const E2eeTeamSettingsHost = () => null;
-export const E2eePersonalPairing = () => null;
 export const E2eeAutomaticPairingPage = () => null;
 export const E2eeAccountPairingRequest = () => null;
 export const E2eeAccountPairingApprove = () => null;
@@ -116,5 +116,11 @@ export const useE2eeWorkspaceRemoval = () => undefined;
 export const E2eeDeviceApprovalGuide = () =>
   createElement('output', { 'data-approval-guide': true });
 export const E2eeLedgerAudit = () => null;
+export const getMachineMetaMapAtom = {};
+export const RouteMessage = ({ testId }: { testId?: string }) =>
+  createElement('output', { 'data-testid': testId });
+export const E2eeDevicesPanel = () => null;
+export const useLocalDeviceProfile = () => undefined;
+export const RecoveryVaultSection = () => null;
 // Places console content on a tab; the stub page above ignores tabs.
 export const E2eeConsoleSection = ({ children }: { children?: ReactNode }) => children;

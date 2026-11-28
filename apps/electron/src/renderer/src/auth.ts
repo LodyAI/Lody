@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { electronProxyClient } from '@better-auth/electron/proxy'
 import {
+  decodeBetterAuthActiveOrganization,
+  decodeBetterAuthOrganizations,
+  decodeBetterAuthSession,
+  formatBoundaryDecodeDiagnostic,
+  type BoundaryDecodeDiagnostic
+} from '@lody/shared/boundary-decode'
+import {
   ElectronDevEmailPasswordSignInInputSchema,
+  ElectronLoginStateSchema,
   isDevEmailPasswordLoginEnabled,
   type ElectronLoginState
 } from '@lody/shared/electron-ipc'
@@ -10,6 +17,8 @@ import {
   createLodyAuthClient,
   type LodyAuthClient
 } from '@lody/components/lib/auth'
+import type { AuthSessionAtom, AuthSessionSnapshot } from '@lody/components/lib/auth-session-store'
+import { recordClientLog } from '@lody/components/lib/client-log'
 import { jotaiStore } from '@lody/components/lib'
 import {
   electronDeepLinkSignInInProgressAtom,
@@ -20,7 +29,7 @@ import {
 import { readStoredAuthToken } from '@lody/components/lib/auth-bootstrap'
 import { persistNativeAuthSessionResult as persistAuthSessionResult } from '@lody/components/lib/native-auth-session-sync'
 import { getIpcServices, onIpcEvent } from '@lody/components/lib/electron-ipc-client'
-import { createAuthQueryGeneration } from './auth-query-generation'
+import { createAuthQueryStore } from './auth-query-generation'
 
 const ELECTRON_PROTOCOL_SCHEME = 'lody'
 const ELECTRON_ACCOUNT_AUTH_METHODS = [
@@ -30,45 +39,8 @@ const ELECTRON_ACCOUNT_AUTH_METHODS = [
   'requestPasswordReset'
 ] as const satisfies readonly (keyof LodyAuthClient)[]
 
-type QuerySnapshot<TData> = {
-  data: TData | undefined
-  isPending: boolean
-  isRefetching: boolean
-  error: unknown
-}
-
-type QueryResult<TData> = QuerySnapshot<TData> & {
-  refetch: () => Promise<void>
-}
-
-const ELECTRON_AUTH_QUERY_TIMEOUT_MS = 10_000
-
-class ElectronAuthQueryTimeoutError extends Error {
-  constructor(label: string) {
-    super(`${label} timed out after ${ELECTRON_AUTH_QUERY_TIMEOUT_MS}ms`)
-    this.name = 'ElectronAuthQueryTimeoutError'
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-async function withAuthQueryTimeout<T>(label: string, promise: Promise<T>): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null
-  const timeoutPromise = new Promise<never>((_resolve, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new ElectronAuthQueryTimeoutError(label))
-    }, ELECTRON_AUTH_QUERY_TIMEOUT_MS)
-  })
-
-  try {
-    return await Promise.race([promise, timeoutPromise])
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId)
-    }
-  }
 }
 
 function getAuthApi() {
@@ -110,20 +82,6 @@ function getAuthApi() {
 
 function hasResponseError(response: unknown): boolean {
   return isRecord(response) && 'error' in response && response.error != null
-}
-
-function unwrapData(response: unknown): unknown {
-  if (!isRecord(response) || !('data' in response)) {
-    return response
-  }
-  return response.data
-}
-
-function unwrapError(response: unknown): unknown {
-  if (!isRecord(response) || !('error' in response)) {
-    return null
-  }
-  return response.error ?? null
 }
 
 function withStoredSessionAuthorization(input?: unknown): unknown {
@@ -171,214 +129,62 @@ function withStoredSessionAuthorization(input?: unknown): unknown {
   }
 }
 
-function createQueryStore<TData>(
-  label: string,
-  fetcher: () => Promise<unknown>,
-  onCommit?: (response: unknown) => void
-) {
-  let snapshot: QuerySnapshot<TData> = {
-    data: undefined,
-    isPending: true,
-    isRefetching: false,
-    error: null
-  }
-  let hasLoaded = false
-  let inFlight: Promise<void> | null = null
-  let pendingRefetch = false
-  let held = false
-  let beforePending: QuerySnapshot<TData> | null = null
-  const generation = createAuthQueryGeneration()
-  const listeners = new Set<() => void>()
-
-  const notify = () => {
-    listeners.forEach((listener) => listener())
-  }
-
-  const setSnapshot = (next: QuerySnapshot<TData>) => {
-    snapshot = next
-    notify()
-  }
-
-  const run = async (isRefetch: boolean) => {
-    if (held) {
-      return
-    }
-    if (inFlight) {
-      if (isRefetch) {
-        pendingRefetch = true
-      }
-      await inFlight
-      return
-    }
-
-    const previous = snapshot
-    const requestGeneration = generation.capture()
-    setSnapshot({
-      data: previous.data,
-      isPending: !hasLoaded && !isRefetch,
-      isRefetching: hasLoaded || isRefetch,
-      error: null
-    })
-
-    const currentRun = (async () => {
-      try {
-        const response = await withAuthQueryTimeout(label, fetcher())
-        generation.commitIfCurrent(requestGeneration, () => {
-          onCommit?.(response)
-          const data = unwrapData(response) as TData | undefined
-          const error = unwrapError(response)
-          hasLoaded = true
-          setSnapshot({
-            data,
-            isPending: false,
-            isRefetching: false,
-            error
-          })
-        })
-      } catch (error) {
-        generation.commitIfCurrent(requestGeneration, () => {
-          console.warn(`[Auth] ${label} failed`, error)
-          hasLoaded = true
-          setSnapshot({
-            data: previous.data,
-            isPending: false,
-            isRefetching: false,
-            error
-          })
-        })
-      }
-    })()
-
-    inFlight = currentRun
-    await currentRun
-
-    if (inFlight === currentRun) {
-      inFlight = null
-    }
-
-    if (requestGeneration !== generation.capture()) {
-      return
-    }
-
-    if (pendingRefetch) {
-      pendingRefetch = false
-      await run(true)
-    }
-  }
-
-  const ensureLoaded = () => {
-    if (hasLoaded || inFlight) {
-      return
-    }
-    void run(false)
-  }
-
-  const refetch = async () => {
-    await run(true)
-  }
-
-  const reset = (data?: TData) => {
-    generation.advance()
-    held = false
-    hasLoaded = true
-    inFlight = null
-    pendingRefetch = false
-    setSnapshot({
-      data,
-      isPending: false,
-      isRefetching: false,
-      error: null
-    })
-  }
-
-  const beginPending = () => {
-    if (!held) beforePending = snapshot
-    generation.advance()
-    held = true
-    hasLoaded = false
-    inFlight = null
-    pendingRefetch = false
-    setSnapshot({
-      data: undefined,
-      isPending: true,
-      isRefetching: false,
-      error: null
-    })
-  }
-
-  const commitResponse = (response: unknown) => {
-    generation.advance()
-    held = false
-    hasLoaded = true
-    inFlight = null
-    pendingRefetch = false
-    onCommit?.(response)
-    setSnapshot({
-      data: unwrapData(response) as TData | undefined,
-      isPending: false,
-      isRefetching: false,
-      error: unwrapError(response)
-    })
-  }
-
-  const releasePending = () => {
-    if (!held) return
-    const previous = beforePending
-    beforePending = null
-    reset(previous?.data)
-  }
-
-  const useQuery = (): QueryResult<TData> => {
-    const state = useSyncExternalStore(
-      (listener) => {
-        listeners.add(listener)
-        return () => {
-          listeners.delete(listener)
-        }
-      },
-      () => snapshot,
-      () => snapshot
-    )
-
-    useEffect(() => {
-      ensureLoaded()
-    }, [])
-
-    const refetchFn = useCallback(async () => {
-      await refetch()
-    }, [])
-
-    return {
-      ...state,
-      refetch: refetchFn
-    }
-  }
-
-  return {
-    useQuery,
-    refetch,
-    reset,
-    beginPending,
-    releasePending,
-    commitResponse
-  }
+function reportAuthBoundaryDiagnostic(diagnostic: BoundaryDecodeDiagnostic): void {
+  const summary = formatBoundaryDecodeDiagnostic(diagnostic)
+  console.warn(`[Auth] ${summary}`)
+  recordClientLog('warn', 'boundary.decode', summary, {
+    boundary: diagnostic.boundary,
+    kind: diagnostic.kind,
+    droppedCount: diagnostic.droppedCount,
+    totalCount: diagnostic.totalCount,
+    issueCount: diagnostic.issueCount
+  })
 }
 
-const sessionStore = createQueryStore(
+const sessionStore = createAuthQueryStore<
+  NonNullable<AuthSessionSnapshot['data']>,
+  NonNullable<AuthSessionSnapshot['error']>
+>(
   'getSession',
   async () => {
     return await getAuthApi().getSession(withStoredSessionAuthorization())
   },
-  persistAuthSessionResult
+  {
+    onCommit: persistAuthSessionResult,
+    decode: (raw) =>
+      decodeBetterAuthSession('electron.renderer.getSession', raw, {
+        onDiagnostic: reportAuthBoundaryDiagnostic
+      }) as
+        | { ok: true; data: NonNullable<AuthSessionSnapshot['data']> | null }
+        | { ok: false; error: NonNullable<AuthSessionSnapshot['error']> }
+  }
 )
 
-const organizationsStore = createQueryStore('listOrganizations', async () => {
-  return await getAuthApi().listOrganizations(withStoredSessionAuthorization())
-})
+const organizationsStore = createAuthQueryStore(
+  'listOrganizations',
+  async () => {
+    return await getAuthApi().listOrganizations(withStoredSessionAuthorization())
+  },
+  {
+    decode: (raw) =>
+      decodeBetterAuthOrganizations('electron.renderer.listOrganizations', raw, {
+        onDiagnostic: reportAuthBoundaryDiagnostic
+      })
+  }
+)
 
-const activeOrganizationStore = createQueryStore('getActiveOrganization', async () => {
-  return await getAuthApi().getActiveOrganization(withStoredSessionAuthorization())
-})
+const activeOrganizationStore = createAuthQueryStore(
+  'getActiveOrganization',
+  async () => {
+    return await getAuthApi().getActiveOrganization(withStoredSessionAuthorization())
+  },
+  {
+    decode: (raw) =>
+      decodeBetterAuthActiveOrganization('electron.renderer.getActiveOrganization', raw, {
+        onDiagnostic: reportAuthBoundaryDiagnostic
+      })
+  }
+)
 
 const refetchSessionState = async () => {
   await sessionStore.refetch()
@@ -397,7 +203,23 @@ const refetchAllAuthState = async () => {
 let loginRevision = -1
 let loginPhase: ElectronLoginState['phase'] = 'idle'
 
-function applyLoginState(state: ElectronLoginState): void {
+function applyLoginState(rawState: unknown): void {
+  const parsed = ElectronLoginStateSchema.safeParse(rawState, { jitless: true })
+  if (!parsed.success) {
+    console.warn('[Auth] Dropped malformed electron login state from IPC')
+    recordClientLog(
+      'warn',
+      'boundary.decode',
+      'boundary=electron.ipc.loginState kind=invalid_payload',
+      {
+        boundary: 'electron.ipc.loginState',
+        kind: 'invalid_payload',
+        issueCount: parsed.error.issues.length
+      }
+    )
+    return
+  }
+  const state = parsed.data
   if (state.revision <= loginRevision) return
   loginRevision = state.revision
   loginPhase = state.phase
@@ -481,7 +303,26 @@ function refetchAfterMutation(response: unknown) {
 function createElectronAuthClientAdapter() {
   ensureAuthListeners()
 
+  const store = {
+    atoms: {
+      session: sessionStore.atom
+    },
+    notify: (signal: string) => {
+      if (signal === '$sessionSignal') {
+        void refetchSessionState()
+      } else if (signal === '$listOrg') {
+        void organizationsStore.refetch()
+      } else if (signal === '$activeOrgSignal') {
+        void activeOrganizationStore.refetch()
+      }
+    }
+  } satisfies {
+    atoms: { session: AuthSessionAtom }
+    notify: (signal: string) => void
+  }
+
   return {
+    $store: store,
     useSession: () => sessionStore.useQuery(),
     getSession: async (options?: unknown) => {
       const generation = loginRevision
@@ -681,6 +522,9 @@ function createAuthClientForRuntime() {
       if (typeof client[method] !== 'function') {
         throw new Error(`Electron auth adapter is missing ${method}`)
       }
+    }
+    if (!client.$store?.atoms?.session) {
+      throw new Error('Electron auth adapter is missing $store.atoms.session')
     }
     return client as unknown as LodyAuthClient
   }

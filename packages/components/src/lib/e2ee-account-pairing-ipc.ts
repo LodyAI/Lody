@@ -1,4 +1,5 @@
 import type { WorkspacesState } from '@lody/platform';
+import { E2EE_PAIRING_REFUSAL_CODES, decodeE2eeIpcError } from '@lody/shared/e2ee-ipc-error';
 
 /** Routing hints for the desktop host: the account's encrypted workspaces as the
  * renderer lists them. The host verifies every genesis itself; names are display only. */
@@ -11,15 +12,27 @@ export function accountPairingHints(state: WorkspacesState) {
   );
 }
 
-const REFUSAL = /\be2ee_(pairing-(?:tampered|expired|used|unavailable|rate-limited|elsewhere))\b/;
 /** Electron IPC carries only the message; restore the typed refusal the UI reads
  * through `accountPairingErrorCode`. Other failures pass through unchanged. */
 export async function withAccountPairingCode<A>(call: Promise<A>): Promise<A> {
   try {
     return await call;
   } catch (error) {
-    const code = error instanceof Error ? REFUSAL.exec(error.message)?.[1] : undefined;
-    if (code && error instanceof Error) Object.assign(error, { code });
+    if (error instanceof Error) {
+      const decoded = decodeE2eeIpcError(error);
+      if (
+        decoded &&
+        decoded.code !== 'invalid-input' &&
+        E2EE_PAIRING_REFUSAL_CODES.has(decoded.code as never)
+      ) {
+        Object.assign(
+          error,
+          decoded.kind === 'pairing-code-mismatch' && decoded.attemptsLeft !== undefined
+            ? { code: decoded.code, attemptsLeft: decoded.attemptsLeft }
+            : { code: decoded.code }
+        );
+      }
+    }
     throw error;
   }
 }

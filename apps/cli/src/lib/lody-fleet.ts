@@ -429,6 +429,8 @@ export class LodyFleet {
       },
       dispatchMachineRpc: async (message, signal) =>
         await this.dispatchLocalMachineRpc(message, signal),
+      dispatchMachineRpcProxy: async (message, signal) =>
+        await this.dispatchLocalMachineRpcProxy(message, signal),
       dispatchWorkspaceBundle: async (message) => {
         const runtime = await this.resolveWorkspaceRuntime(message.workspaceId as WorkspaceId);
         const { handleWorkspaceBundleControl } = await import('./workspace-bundle/control');
@@ -1312,6 +1314,10 @@ export class LodyFleet {
             [...this.runtimes.values()].some((runtime) => runtime.workspace.contentMode === 'e2ee'),
           prepareManagedUpgrade: this.prepareManagedUpgrade,
           closeSessionTerminals: (sessionId) => this.terminalPtyService.closeSession(sessionId),
+          hasSessionTerminals: (sessionId, workdir) =>
+            workdir
+              ? this.terminalPtyService.hasActiveTerminalForWorkdir(workdir, sessionId)
+              : this.terminalPtyService.list(sessionId).length > 0,
           readHostedPresenceStates: () => this.readHostedPresenceStates(),
           cleanupLocalProjectWorktreeSetupIfUnreferenced: (localProjectId) =>
             this.cleanupLocalProjectWorktreeSetupIfUnreferenced(localProjectId),
@@ -1515,7 +1521,7 @@ export class LodyFleet {
         if (
           workspace.contentMode === 'e2ee' &&
           error instanceof Error &&
-          error.message === 'e2ee_pairing_required'
+          (error.message === 'e2ee_pairing_required' || error.message === 'e2ee_device_revoked')
         ) {
           this.waitingForPairing.add(workspace.id);
           this.runtimeStateReporter.clearIssue(`workspace_start_failed:${workspace.id}`);
@@ -2056,6 +2062,54 @@ export class LodyFleet {
     }
 
     return await runtime.lody.dispatchLocalMachineRpc(message, signal);
+  }
+
+  private async dispatchLocalMachineRpcProxy(
+    message: import('@lody/shared').LocalMachineRpcProxyRequestValidated,
+    signal?: AbortSignal
+  ): Promise<import('@lody/shared').LocalMachineRpcResponse> {
+    if (message.requesterUserId !== this.userId || message.requesterMachineId !== this.machineId) {
+      return {
+        ok: false,
+        code: 'daemon_identity_mismatch',
+        error: 'Daemon identity mismatch',
+      };
+    }
+
+    const isLocalTarget = message.request.machineId === this.machineId;
+    if (isLocalTarget) {
+      const pendingStart = this.startInFlight.get(message.request.workspaceId);
+      if (pendingStart) {
+        await pendingStart;
+      }
+    }
+
+    const runtime = this.runtimes.get(message.request.workspaceId);
+    if (!runtime) {
+      return {
+        ok: false,
+        code: 'workspace_runtime_unavailable',
+        error: `workspace_runtime_unavailable:${message.request.workspaceId}`,
+      };
+    }
+
+    if (message.deadlineAtMs !== undefined && getServerNow() >= message.deadlineAtMs) {
+      return {
+        ok: false,
+        code: 'timeout',
+        error: 'RPC deadline expired before dispatch',
+      };
+    }
+
+    if (isLocalTarget) {
+      return await runtime.lody.dispatchLocalMachineRpc(message.request, signal);
+    }
+
+    return await runtime.lody.dispatchRemoteMachineRpcProxy(
+      message.request,
+      signal,
+      message.deadlineAtMs
+    );
   }
 
   // Resolves the push-based data-plane engine for a workspace the CLI socket

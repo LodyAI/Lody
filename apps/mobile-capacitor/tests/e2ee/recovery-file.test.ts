@@ -79,6 +79,24 @@ it('an export cannot report success when its secret temporary could not be remov
   );
 });
 
+it('a failed temporary cleanup never replaces the person cancelling the share sheet or a logout', async () => {
+  native.writeFile.mockResolvedValue({ uri: 'file:///synthetic' });
+  native.deleteFile.mockRejectedValue(new Error('synthetic native detail'));
+  native.share.mockRejectedValue(new Error('Share canceled'));
+  expect(await exportMobileRecoveryFile(new Uint8Array([1]), () => {})).toBe(false);
+  native.share.mockResolvedValue({});
+  let live = true;
+  native.share.mockImplementation(async () => {
+    live = false;
+  });
+  await expect(
+    exportMobileRecoveryFile(new Uint8Array([1]), () => {
+      if (!live) throw new Error('e2ee_recovery_cancelled');
+    })
+  ).rejects.toThrow('e2ee_recovery_cancelled');
+  expect(native.deleteFile).toHaveBeenCalledTimes(2);
+});
+
 it('Android keeps shared bytes readable after chooser completion and cleans only older recovery files on next export', async () => {
   native.platform.mockReturnValue('android');
   const old = 'lody-recovery-11111111-1111-4111-8111-111111111111.lodyrecovery';

@@ -90,6 +90,54 @@ void test('a value is never dropped while the keychain cannot answer', async (t)
   }
 })
 
+void test('a temporarily locked or denied keychain preserves stored credentials until unlocked', async (t) => {
+  const { path, open } = fixture(t)
+  const { store } = open()
+  const value = encrypt('{"better-auth.session_token":"live"}')
+  store.set('better-auth.cookie', value)
+  const recoveries = []
+  let lockedError = new Error('Keychain is locked (errSecInteractionNotAllowed)')
+  const auth = createRecoveringAuthStorage(
+    {
+      path,
+      get: (key) => store.get(key, null),
+      set: (key, next) => store.set(key, next),
+      delete: (key) => store.delete(key)
+    },
+    {
+      encryptedKeys: ['better-auth.cookie'],
+      cipher: {
+        isReady: () => true,
+        isEncryptionAvailable: () => true,
+        decryptString: (buffer) => {
+          if (lockedError) throw lockedError
+          return buffer.toString('utf8').slice(CURRENT_KEY.length)
+        }
+      },
+      backup: (source) => backupAuthStorageFile(source),
+      onRecovered: (recovery) => recoveries.push(recovery)
+    }
+  )
+
+  for (const error of [
+    new Error(
+      'Error while decrypting the ciphertext provided to safeStorage.decryptString. Decryption is not available.'
+    ),
+    new Error('Keychain is locked (errSecInteractionNotAllowed)'),
+    new Error('User canceled keychain authorization'),
+    Object.assign(new Error('Permission denied'), { code: 'EACCES' })
+  ]) {
+    lockedError = error
+    assert.equal(auth.getItem('better-auth.cookie'), null)
+    assert.equal(store.get('better-auth.cookie', null), value)
+    assert.deepEqual(recoveries, [])
+  }
+
+  lockedError = null
+  assert.equal(auth.getItem('better-auth.cookie'), value)
+  assert.deepEqual(recoveries, [])
+})
+
 void test('an unparsable auth store is moved aside and reopened empty', async (t) => {
   const { path, open, storage } = fixture(t)
   writeFileSync(path, '{"better-auth": {"cookie": "trunc')

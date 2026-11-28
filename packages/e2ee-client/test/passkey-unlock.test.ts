@@ -2,6 +2,8 @@ import { createHmac } from 'node:crypto';
 import { Effect, Result } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { vaultIdFromPasskeyUserHandle } from '@lody/e2ee-core/protocol';
+import { E2eePasskeyCancelled } from '@lody/platform/e2ee-passkey';
+import { browserPasskeyPort } from '../src/passkey-browser';
 import {
   createVaultWithPasskey,
   unlockVaultWithPasskey,
@@ -91,4 +93,38 @@ describe('createVaultWithPasskey', () => {
       code: 'prf-unavailable',
     });
   });
+});
+
+describe('browserPasskeyPort cancellation handling', () => {
+  it.each(['NotAllowedError', 'AbortError'] as const)(
+    'maps %s from navigator.credentials to E2eePasskeyCancelled',
+    async (errorName) => {
+      const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: {
+          credentials: {
+            get: async () => {
+              throw new DOMException('cancelled', errorName);
+            },
+            create: async () => {
+              throw new DOMException('cancelled', errorName);
+            },
+          },
+        },
+      });
+      try {
+        const port = browserPasskeyPort();
+        await expect(
+          port.authenticate({
+            rpId: 'lody.ai',
+            allowCredentialIds: [],
+            prfInput: new Uint8Array([1, 2, 3]),
+          })
+        ).rejects.toBeInstanceOf(E2eePasskeyCancelled);
+      } finally {
+        if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
+      }
+    }
+  );
 });

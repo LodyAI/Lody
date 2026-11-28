@@ -39,6 +39,8 @@ import {
   LoroStreamsTokenPorts,
   deriveConvexSiteUrl,
   normalizeBaseUrl,
+  RoostCloudHistoryRequestError,
+  roostCloudHistoryGrantSchema,
 } from '@lody/shared';
 import {
   resolveRuntimeArtifactsBaseUrl,
@@ -345,6 +347,10 @@ export function createCloudE2eePort(
       });
   };
   const irohRelays = irohRelaysFromEnv();
+  const withTimeoutSignal = (timeoutMs: number, signal?: AbortSignal): AbortSignal => {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    return signal ? AbortSignal.any([signal, timeout]) : timeout;
+  };
   const authBaseUrl = normalizeBaseUrl(options.authBaseUrl);
   const fetchImpl = getCliHttpFetch({ logger: options.logger });
   const transientGatewayStatuses = new Set([502, 503, 504]);
@@ -500,13 +506,19 @@ export function createCloudE2eePort(
     },
     ...(options.token === undefined
       ? {
-          completeMachinePairing: async (input: {
-            workspaceId: string;
-            credential: string;
-            pairingSessionId: string;
-          }) => {
+          completeMachinePairing: async (
+            input: {
+              workspaceId: string;
+              credential: string;
+              pairingSessionId: string;
+            },
+            signal?: AbortSignal
+          ) => {
             const reply = await inlineMachineComplete(input, (args) =>
-              client(AbortSignal.timeout(30_000)).mutation(api.e2eeMachinePairing.complete, args)
+              client(withTimeoutSignal(30_000, signal)).mutation(
+                api.e2eeMachinePairing.complete,
+                args
+              )
             );
             if (
               typeof reply === 'object' &&
@@ -549,11 +561,11 @@ export function createCloudE2eePort(
         atStart: result.result.atRetainedStart,
       };
     },
-    getHistory: async (input) => {
+    getHistory: async (input, signal) => {
       let status: number | undefined;
       try {
         const result = e2eeHistoryPageSchema.parse(
-          await client(AbortSignal.timeout(30_000), (value) => {
+          await client(withTimeoutSignal(30_000, signal), (value) => {
             status = value;
           }).action(api.e2eeWorkspaces.history, {
             ...input,
@@ -570,9 +582,9 @@ export function createCloudE2eePort(
         }
       }
     },
-    getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),
-    readEpochGroup: (input) =>
-      client(AbortSignal.timeout(30_000)).query(api.e2eeEpochStaging.readGroup, {
+    getContentToken: (input, signal) => getContentToken(input, withTimeoutSignal(30_000, signal)),
+    readEpochGroup: (input, signal) =>
+      client(withTimeoutSignal(30_000, signal)).query(api.e2eeEpochStaging.readGroup, {
         workspaceId: input.workspaceId,
         credential: input.credential,
         // Native discovery also retains the publication signer. The wire key
@@ -585,8 +597,8 @@ export function createCloudE2eePort(
         },
         ...(options.token === undefined ? {} : { cliToken: options.token }),
       }),
-    mailboxCall: async (method, input) => {
-      const connection = client(AbortSignal.timeout(30_000));
+    mailboxCall: async (method, input, signal) => {
+      const connection = client(withTimeoutSignal(30_000, signal));
       const common = z.object({ workspaceId: z.string(), credential: z.string() });
       const slot = z.object({
         genesis: z.string(),
@@ -732,24 +744,37 @@ export function createCloudE2eePort(
               reply = cachedStatus;
             } else {
               let usedSingle = false;
-              const statusReply = await batchMailboxStatus(
-                { ...accessArgs, slot: parsedStatus.slot },
-                {
-                  single: async (args) => {
+              const statusReply = signal
+                ? await (async () => {
                     usedSingle = true;
                     return e2eeMailboxReplySchemas.status.parse(
-                      await client(AbortSignal.timeout(30_000)).query(api.e2eeMailbox.status, args)
-                    );
-                  },
-                  batch: async (args) =>
-                    e2eeMailboxReplySchemas.batchStatus.parse(
-                      await client(AbortSignal.timeout(30_000)).query(
-                        api.e2eeMailbox.batchStatus,
-                        args
+                      await client(withTimeoutSignal(30_000, signal)).query(
+                        api.e2eeMailbox.status,
+                        { ...accessArgs, slot: parsedStatus.slot }
                       )
-                    ),
-                }
-              );
+                    );
+                  })()
+                : await batchMailboxStatus(
+                    { ...accessArgs, slot: parsedStatus.slot },
+                    {
+                      single: async (args) => {
+                        usedSingle = true;
+                        return e2eeMailboxReplySchemas.status.parse(
+                          await client(AbortSignal.timeout(30_000)).query(
+                            api.e2eeMailbox.status,
+                            args
+                          )
+                        );
+                      },
+                      batch: async (args) =>
+                        e2eeMailboxReplySchemas.batchStatus.parse(
+                          await client(AbortSignal.timeout(30_000)).query(
+                            api.e2eeMailbox.batchStatus,
+                            args
+                          )
+                        ),
+                    }
+                  );
               if (usedSingle) {
                 if (selfRecipients.get(accessKeyOf(parsedStatus)) === parsedStatus.slot.recipient) {
                   selfStatusCache.set(accessArgs, statusReply);
@@ -816,8 +841,9 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     api.analytics.getUsageSharingForCliToken,
     { cliToken: options.token },
     (enabled: boolean | null) => {
+      if (typeof enabled !== 'boolean') return;
       try {
-        syncAccountUsageSharing(enabled === true);
+        syncAccountUsageSharing(enabled);
       } catch {
         // Keep current local state if disk write fails.
       }
@@ -852,6 +878,19 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     logger: options.logger,
   });
   const billing = createCloudBillingPort({ token: options.token });
+  const requestRoostHistory = async (operation: string, request: object, signal: AbortSignal) => {
+    const response = await getCliHttpFetch({ logger: options.logger })(
+      new URL(`/api/session-history/roost-${operation}`, authSiteUrl),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${options.token}` },
+        body: JSON.stringify(request),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+      }
+    );
+    if (!response.ok) throw new RoostCloudHistoryRequestError(response.status);
+    return response;
+  };
 
   return {
     kind: 'cloud',
@@ -859,6 +898,18 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     sessionSharing: createCloudSessionSharingPort(options),
     identity: options.identity,
     access: {
+      roostHistory: {
+        async uploadGrant(request, signal) {
+          const response = await requestRoostHistory('write-grant', request, signal);
+          return roostCloudHistoryGrantSchema.parse(await response.json());
+        },
+        async publish(request, signal) {
+          await requestRoostHistory('publish', request, signal);
+        },
+        async unpublish(request, signal) {
+          await requestRoostHistory('unpublish', request, signal);
+        },
+      },
       verifySessionHistoryRead: async (request) => {
         const response = await getCliHttpFetch({ logger: options.logger })(
           new URL(
@@ -1208,33 +1259,33 @@ export function createCloudE2eeMachinePort(options: {
             },
           }
         : {}),
-      getHistory: (input) => {
+      getHistory: (input, signal) => {
         bound(input);
-        return e2ee.getHistory(input);
+        return e2ee.getHistory(input, signal);
       },
-      getContentToken: (input) => {
+      getContentToken: (input, signal) => {
         bound(input);
-        return e2ee.getContentToken(input);
+        return e2ee.getContentToken(input, signal);
       },
       ...(readEpochGroup
         ? {
-            readEpochGroup: (input) => {
+            readEpochGroup: (input, signal) => {
               bound(input);
-              return readEpochGroup(input);
+              return readEpochGroup(input, signal);
             },
           }
         : {}),
       ...(completeMachinePairing
         ? {
-            completeMachinePairing: async (input) => {
+            completeMachinePairing: async (input, signal) => {
               bound(input);
-              await completeMachinePairing(input);
+              await completeMachinePairing(input, signal);
             },
           }
         : {}),
-      mailboxCall: (method, input) => {
+      mailboxCall: (method, input, signal) => {
         bound(input);
-        return e2ee.mailboxCall(method, input);
+        return e2ee.mailboxCall(method, input, signal);
       },
     },
     access: {
@@ -1294,7 +1345,18 @@ export function createCloudRemoteMachinePairingClaim(options: {
       body: originalBody,
       signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
     });
-    if (!response.ok) throw new Error('e2ee_pairing_unavailable_retry_same_command');
+    if (!response.ok) {
+      let code = 'e2ee_pairing_unavailable_retry_same_command';
+      const body = await response.json().catch(() => null);
+      if (body && typeof body === 'object' && 'code' in body && typeof body.code === 'string') {
+        code = body.code;
+      } else if (response.status === 409) {
+        code = 'e2ee_pairing_conflict_create_new_command';
+      } else if (response.status === 410) {
+        code = 'e2ee_pairing_expired_create_new_command';
+      }
+      throw Object.assign(new Error(code), { status: response.status });
+    }
     return response.json();
   };
 }

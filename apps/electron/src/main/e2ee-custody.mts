@@ -1,5 +1,6 @@
 import { Effect } from 'effect'
 import { makeNodeE2eeCustody, NodeE2eeCustodyError } from '@lody/e2ee-core/adapters/node-custody'
+import { classifySafeStorageFailure } from './safe-storage-classification'
 export {
   NodeE2eeCustodyError as DesktopE2eeCustodyError,
   nodeE2eePorts as desktopE2eePorts,
@@ -8,6 +9,13 @@ export {
   type PreparedNodeE2eeDevice as PreparedDesktopE2eeDevice
 } from '@lody/e2ee-core/adapters/node-custody'
 
+/** Typed subclass for temporarily locked/unavailable OS safeStorage (distinct from missing backend). */
+export class DesktopSafeStorageLockedError extends NodeE2eeCustodyError {
+  constructor() {
+    super({ code: 'unavailable' })
+  }
+}
+
 /** Electron's native async interface; never the auth cookie plaintext override. */
 export interface DesktopSafeStorage {
   isEncryptionAvailable(): boolean
@@ -15,6 +23,20 @@ export interface DesktopSafeStorage {
   getSelectedStorageBackend?: () => string
   encryptStringAsync(value: string): Promise<Buffer>
   decryptStringAsync(value: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>
+}
+
+function classifySafeStorageError(
+  error: unknown,
+  storage: DesktopSafeStorage
+): NodeE2eeCustodyError {
+  if (error instanceof NodeE2eeCustodyError) return error
+  const kind = classifySafeStorageFailure({
+    error,
+    available: () => storage.isEncryptionAvailable()
+  })
+  if (kind === 'permissions') return new NodeE2eeCustodyError({ code: 'permissions' })
+  if (kind === 'locked') return new DesktopSafeStorageLockedError()
+  return new NodeE2eeCustodyError({ code: 'storage' })
 }
 
 /** Electron backend qualification stays here; the shared algorithm never guesses host backend names. */
@@ -51,8 +73,20 @@ export const makeDesktopE2eeCustody = Effect.fnUntraced(function* (input: {
     directory: input.directory,
     wrapper: {
       protection: 'os-keystore',
-      wrap: (value) => storage.encryptStringAsync(value),
-      unwrap: (value) => storage.decryptStringAsync(Buffer.from(value))
+      wrap: async (value) => {
+        try {
+          return await storage.encryptStringAsync(value)
+        } catch (error) {
+          throw classifySafeStorageError(error, storage)
+        }
+      },
+      unwrap: async (value) => {
+        try {
+          return await storage.decryptStringAsync(Buffer.from(value))
+        } catch (error) {
+          throw classifySafeStorageError(error, storage)
+        }
+      }
     }
   })
 })

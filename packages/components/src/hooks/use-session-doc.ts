@@ -2,7 +2,7 @@ import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from '../lib/session-send-admission';
 import { replaceQueueItem } from '../lib/session-send-delivery';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import {
   getServerNow,
@@ -10,6 +10,7 @@ import {
   normalizeSessionTurnInputConfig,
   type MessageQueueItem,
   type MessageQueueItemInput,
+  type RoostHistorySyncState,
 } from '@lody/shared';
 import type { SessionHistory, SessionHistoryInput, SessionId, SessionMeta } from '@lody/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -62,6 +63,7 @@ export type UseSessionDocResult = {
    * must read history only through this view.
    */
   history: ConversationView | null;
+  historySync?: RoostHistorySyncState;
   addHistory: (
     history: Omit<SessionHistoryInput, 'id'> & { id?: string },
     options?: {
@@ -74,6 +76,19 @@ export type UseSessionDocResult = {
   pushMessageQueue: (
     item: PushMessageQueueInput,
     options?: { onAccepted?: () => void }
+  ) => Promise<void>;
+  /**
+   * Save a composer edit of row `cid`: the same admission as a new queued
+   * message (receipt, signature, attachment preparation), replacing the row
+   * under its message id instead of appending one.
+   */
+  saveMessageQueueEdit: (
+    cid: string,
+    patch: Pick<
+      MessageQueueItem,
+      'task' | 'userId' | 'userName' | 'isEditing' | 'editingStartedAt' | 'acpSessionConfig'
+    >,
+    options?: { attachments?: SessionAttachmentDraft[]; onAccepted?: () => void }
   ) => Promise<void>;
   removeMessageQueueItem: (cid: string) => Promise<void>;
   updateMessageQueueItem: (
@@ -109,6 +124,8 @@ type SessionHistoryHint = Pick<
   SessionMeta,
   'lastMessageAt' | 'latestUserMsgId' | 'lastHandledUserMsgId' | 'processingUserMsgId'
 >;
+const emptyHistorySync = () => undefined;
+const ignoreHistorySync = () => () => {};
 
 export function sessionMetaSuggestsHistory(session: SessionHistoryHint | null | undefined) {
   return Boolean(
@@ -181,16 +198,12 @@ export function useSessionDoc(
 
     if (!enabled) {
       setLoadedStore(null);
-      return () => {
-        // no-op
-      };
+      return () => {};
     }
 
     if (!runtime) {
       setLoadedStore(null);
-      return () => {
-        // no-op
-      };
+      return () => {};
     }
 
     void (async () => {
@@ -273,6 +286,12 @@ export function useSessionDoc(
   }, [enabled, loadedStore, syncEnabled]);
 
   const history = loadedStore?.history ?? null;
+  const historyStore = enabled && loadedStore?.sessionId === sessionId ? loadedStore : null;
+  const historySync = useSyncExternalStore(
+    historyStore?.subscribeHistorySync ?? ignoreHistorySync,
+    historyStore?.getHistorySync ?? emptyHistorySync,
+    emptyHistorySync
+  );
 
   const withStore = useCallback(
     async <T>(fn: (store: SessionDocStore) => Promise<T> | T): Promise<T> => {
@@ -366,6 +385,7 @@ export function useSessionDoc(
       const pendingTurn = buildDraftUserHistoryEntry(
         {
           userId: entry.userId,
+          userName: entry.userName,
           inputBlocks: normalizeSessionInputBlocks(
             inputConfig?.inputBlocks,
             entry.acpSessionConfig?.prompt ?? (attachments?.length ? '' : entry.task)
@@ -388,6 +408,44 @@ export function useSessionDoc(
       );
     },
     [runtime, sessionId]
+  );
+
+  const saveMessageQueueEdit = useCallback<UseSessionDocResult['saveMessageQueueEdit']>(
+    async (cid, patch, saveOptions) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const mq = await withStore((store) => (store.getState().mq ?? []) as MessageQueueItem[]);
+      const current = mq.find((item) => item.$cid === cid);
+      if (!current?.userTurnId) throw new Error('Queued message is no longer available');
+      const userTurnId = current.userTurnId;
+      const attachments = saveOptions?.attachments;
+      const inputConfig = normalizeSessionTurnInputConfig(patch.acpSessionConfig);
+      const pendingTurn = buildDraftUserHistoryEntry(
+        {
+          userId: patch.userId,
+          userName: patch.userName,
+          inputBlocks: normalizeSessionInputBlocks(
+            inputConfig?.inputBlocks,
+            patch.acpSessionConfig?.prompt ?? (attachments?.length ? '' : patch.task)
+          ),
+          timestamp: current.timestamp,
+          inputConfig,
+        },
+        attachments
+      );
+      if (!pendingTurn) throw new Error('Queued message has no effective input');
+      await acceptSessionUserTurn(
+        runtime,
+        sessionId,
+        { ...pendingTurn, id: userTurnId } as SessionHistory,
+        { kind: 'queue' },
+        undefined,
+        { ...patch, userTurnId },
+        attachments,
+        saveOptions?.onAccepted,
+        { cid }
+      );
+    },
+    [runtime, sessionId, withStore]
   );
 
   const removeMessageQueueItem = useCallback(
@@ -475,8 +533,10 @@ export function useSessionDoc(
     doc: state,
     loadError,
     history,
+    historySync,
     addHistory,
     pushMessageQueue,
+    saveMessageQueueEdit,
     removeMessageQueueItem,
     updateMessageQueueItem,
     reorderMessageQueueItem,
@@ -510,9 +570,7 @@ export function useSessionDocSyncState(
     setHasLocalHistory(false);
 
     if (!enabled || !runtime) {
-      return () => {
-        // no-op
-      };
+      return () => {};
     }
 
     void (async () => {

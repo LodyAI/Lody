@@ -115,6 +115,7 @@ export const nativeOriginals = (databaseName: string, binding: string) =>
               return;
             }
             ended = true;
+            db.onversionchange = () => db.close();
             resolve(db);
           };
         }),

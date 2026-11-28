@@ -338,7 +338,7 @@ export function SiteNav({ locale }: SiteNavProps) {
   }, []);
   const routeLink = useRouteLink();
 
-  const homeHref = localizeSitePath('/home', locale);
+  const homeHref = localizeSitePath('/', locale);
   const navItems = [
     { label: t.docs, href: localizeSitePath('/docs', locale) },
     { label: t.blog, href: localizeSitePath('/blog', locale) },

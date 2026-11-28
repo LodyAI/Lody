@@ -120,6 +120,38 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     borderWidth: 0,
   },
+  breadcrumbRow: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+    maxWidth: '100%',
+  },
+  breadcrumbParent: {
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    color: {
+      default: colors.secondaryLabel,
+      ':hover': colors.label,
+    },
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  breadcrumbSep: {
+    flexShrink: 0,
+    width: '15px',
+    height: '15px',
+    color: colors.tertiaryLabel,
+  },
+  breadcrumbCurrent: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
   body: {
     display: 'flex',
     flexDirection: 'row',
@@ -368,9 +400,19 @@ function SettingsModalBody() {
   const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
   const [leadSlot, setLeadSlot] = useState<HTMLElement | null>(null);
   const [pane, setPane] = useState<HTMLElement | null>(null);
+  const [breadcrumbSlot, setBreadcrumbSlot] = useState<HTMLElement | null>(null);
+  const [breadcrumbActive, setBreadcrumbActive] = useState(false);
+  const activeTabLabel = t(activeTabConfig.labelKey);
   const headerSlots = useMemo(
-    () => ({ actions: actionsSlot, lead: leadSlot, pane }),
-    [actionsSlot, leadSlot, pane]
+    () => ({
+      actions: actionsSlot,
+      lead: leadSlot,
+      pane,
+      breadcrumb: breadcrumbSlot,
+      parentLabel: activeTabLabel,
+      setBreadcrumbActive,
+    }),
+    [actionsSlot, activeTabLabel, breadcrumbSlot, leadSlot, pane]
   );
 
   return (
@@ -549,9 +591,13 @@ function SettingsModalBody() {
                     <div {...stylex.props(styles.headerRow)}>
                       {/* The inner box keeps page-title sizing from competing with dialog styles. */}
                       <Dialog.Title {...stylex.props(styles.headerTitle)}>
-                        <span {...stylex.props(surface.pageTitle)}>
-                          {t(activeTabConfig.labelKey)}
-                        </span>
+                        <span
+                          ref={setBreadcrumbSlot}
+                          style={breadcrumbActive ? undefined : { display: 'none' }}
+                        />
+                        {!breadcrumbActive ? (
+                          <span {...stylex.props(surface.pageTitle)}>{activeTabLabel}</span>
+                        ) : null}
                       </Dialog.Title>
                       <div ref={setActionsSlot} {...stylex.props(styles.headerActions)} />
                     </div>

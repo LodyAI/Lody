@@ -139,7 +139,10 @@ this page is the full text of the rules summarised there.
   document is ready. Keep the known logical Turn lineage as its supersession
   fence: queue promotion, deletion, reordering, and older history backfill are
   not newer Turns; consume a draft only when the authoritative current Turn
-  moves to a previously unseen key. Role
+  moves to a previously unseen key. A composer edit of a queued Turn selects in
+  its own scope keyed by the row (run-config draft target and Role choice),
+  seeded from the row's frozen values, so the Session's unsent choices survive
+  the edit ([queue edit](../../specs/message-queue.md#editing-in-the-composer)). Role
   selection and Turn submission stay disabled until the Session document is
   ready because its transient provider defaults are not a valid run config.
   Programmatic Turns inherit the current
@@ -223,6 +226,18 @@ this page is the full text of the rules summarised there.
   same target restores its draft. Confirmed deletion and account teardown invalidate
   stale callbacks. See [private run-config drafts](../../specs/session-run-config-drafts.md).
   Landing and new-session drafts retain their component-local selection lifetime.
+  Every accepted manual send (landing, child-tab draft or existing Session)
+  records its run config through `learnAgentStartDefaults` as that Provider's
+  device-local start values and as a Recently used entry, because a person who
+  fixes a permission inside a conversation wants the next one to start that way.
+  Scheduled saves and Role-applied Turns are not learned (a Role's values are
+  the Role's), and planning never becomes a start value: `plan_mode` and
+  `collaboration_mode` are dropped and a `plan` permission keeps the one learned
+  before it. The Provider's synced `sessionDefaults` win over learned values for
+  whatever they name; the permission menu's "Use for new conversations" row and
+  the Agent settings "Default permission" field write `sessionDefaults.modeId`
+  or the `_permission` option through `lib/agent-permission-default.ts`, and
+  never offer Plan.
   Never reintroduce a
   reducer that stores the resolved selection or an effect that reconciles it —
   two dispatches disagreeing about a runtime-omitted key plus options rebuilt

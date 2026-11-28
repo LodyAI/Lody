@@ -32,5 +32,13 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   for published download mappings.
   The Nightly display sequence is non-negative: accept `.0` at the start of a
   release cycle, while rejecting leading-zero counters. It is not a CI build number.
+- `public-promo.ts` validates the optional read-only `/api/billing/public-promo`
+  campaign snapshot, resolves credential-free HTTPS (or local dev) origins from
+  `VITE_PUBLIC_PROMO_URL` / `VITE_CONVEX_SITE_URL`, and enforces server-clock-adjusted
+  `[startsAt, endsAt)` boundaries before displaying promotional copy.
+- `site-analytics.ts` owns EEA/UK/CH Consent Mode region rules, memory-only initial
+  landing attribution, and `gtag` beacon conversion events (`download_installer`,
+  `copy_install_command`, `open_web_app`, `book_founder_call`); never write cookies,
+  localStorage, or raw query/clipboard strings from it.
 - `blog-reading-time.generated.ts` and `docs-faq.generated.ts` are generated and
   ignored. Do not edit or format them.

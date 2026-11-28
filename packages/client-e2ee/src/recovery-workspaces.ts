@@ -9,8 +9,8 @@ import {
 } from '@lody/e2ee-client';
 import {
   readRecoveryHistory,
-  recoveryRestoreIncomplete,
   restoreOutcome,
+  scopedRecoveryVault,
   type VaultWorkspaceRestoreResult,
 } from '@lody/e2ee-client/recovery-restore';
 import { recoveryFetchEnvelope } from '@lody/e2ee-client/vault-replacement';
@@ -169,12 +169,14 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
     Effect.scoped(
       Effect.gen(function* () {
         if (kind === 'restore') {
-          const reference = (yield* vault.readIndex()).value.entries.find(
+          const index = yield* vault.readIndex();
+          const reference = index.value.entries.find(
             (ref) => !ref.retired && ref.genesis === workspace.genesisHash
           );
           if (!reference) return { outcome: 'not-backed-up' } as const;
+          const scopedVault = yield* scopedRecoveryVault(vault, reference, index);
           const offer = yield* Effect.acquireUseRelease(
-            vault.readEntry(reference),
+            scopedVault.readEntry(reference),
             (bundle) =>
               Effect.sync(() =>
                 accountPairingOffer(
@@ -190,7 +192,15 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
               ),
             (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
           );
-          const read = () => pages(workspace.id);
+          let cachedPages: E2eeWorkspaceHistoryPage[] | null = null;
+          const read = () =>
+            cachedPages
+              ? Effect.succeed(cachedPages)
+              : Effect.tap(pages(workspace.id), (rows) =>
+                  Effect.sync(() => {
+                    cachedPages = rows;
+                  })
+                );
           const view = () => Effect.flatMap(read(), (rows) => verifyPersonalHistory(offer, rows));
           const fetchCurrentEnvelope = envelope(workspace.id, view);
           const routed = () =>
@@ -209,7 +219,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
             });
           const restoreWith = (retained: PersonalPairingOffer | undefined) =>
             options.commands.restore(workspace.id, retained ?? offer, {
-              vault,
+              vault: scopedVault,
               local,
               reference,
               offer: retained,
@@ -232,6 +242,12 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                           credentialHash,
                           signerCredential,
                         })
+                      ).pipe(
+                        Effect.ensuring(
+                          Effect.sync(() => {
+                            cachedPages = null;
+                          })
+                        )
                       );
                       return {
                         outcome:
@@ -314,20 +330,23 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
     unlock: ClientRecoveryUnlock,
     selected: readonly string[],
     observe?: Observe,
-    reserved?: boolean
+    reserved?: boolean,
+    prefetchedPlan?: RecoveryWorkspacePlan
   ) => Effect.Effect<RecoveryWorkspaceResult[], unknown>;
+  const plannedWorkspaces = new WeakMap<RecoveryWorkspacePlan, readonly Workspace[]>();
   let active: { ready: Deferred.Deferred<Run, unknown> } | undefined;
   const batch = (
     kind: Kind,
     unlock: ClientRecoveryUnlock,
     selected: readonly string[],
-    observe?: Observe
+    observe?: Observe,
+    prefetchedPlan?: RecoveryWorkspacePlan
   ): Effect.Effect<RecoveryWorkspaceResult[], unknown> =>
     Effect.suspend(() => {
       check();
       if (active)
         return Effect.flatMap(Deferred.await(active.ready), (run) =>
-          run(kind, unlock, selected, observe)
+          run(kind, unlock, selected, observe, false, prefetchedPlan)
         );
       const owner = { ready: Deferred.makeUnsafe<Run, unknown>() };
       active = owner;
@@ -351,10 +370,10 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                   Deferred.doneUnsafe(idle, Effect.void);
                 }
               };
-              const run: Run = (nextKind, nextUnlock, ids, observe, reserved = false) =>
+              const run: Run = (nextKind, nextUnlock, ids, observe, reserved = false, nextPlan) =>
                 Effect.suspend(() => {
                   // Admission and retirement are synchronous; never fork into a closing Scope.
-                  if (!accepting) return batch(nextKind, nextUnlock, ids, observe);
+                  if (!accepting) return batch(nextKind, nextUnlock, ids, observe, nextPlan);
                   if (!reserved) pending++;
                   return Effect.gen(function* () {
                     const results = new Map<string, RecoveryWorkspaceResult>();
@@ -374,7 +393,9 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                       }
                     };
                     const work = yield* Effect.gen(function* () {
-                      const visible = yield* workspaceList();
+                      const visible =
+                        (nextPlan ? plannedWorkspaces.get(nextPlan) : undefined) ??
+                        (yield* workspaceList());
                       chosen = visible.filter((w) => ids.includes(w.id));
                       return yield* Effect.forEach(chosen, (workspace) =>
                         Effect.gen(function* () {
@@ -454,7 +475,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                   }).pipe(Effect.uninterruptible);
                 });
               yield* Deferred.succeed(owner.ready, run);
-              return yield* run(kind, unlock, selected, observe, true).pipe(
+              return yield* run(kind, unlock, selected, observe, true, prefetchedPlan).pipe(
                 Effect.ensuring(Deferred.await(idle))
               );
             })
@@ -497,21 +518,19 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           : [];
         const covered: RecoveryWorkspacePlan['covered'][number][] = [];
         const uncovered: { id: string; name: string }[] = [];
+        const listed = yield* Effect.exit(pins.listAccountPins(options.accountId));
+        const readyIds = Exit.isSuccess(listed)
+          ? new Set(listed.value.ready.map((pin) => pin.offer.workspaceId))
+          : null;
+        const corruptIds = Exit.isSuccess(listed) ? listed.value.corruptWorkspaceIds : null;
         for (const workspace of visible) {
-          // A pin or restore marker that cannot be read is unknown and not acted on.
-          const usable = yield* Effect.exit(
-            Effect.gen(function* () {
-              const pin = yield* pins.read(options.accountId, workspace.id);
-              if (pin?.phase !== 'ready') return false;
-              return !(yield* recoveryRestoreIncomplete(local, workspace.id));
-            })
-          );
           const row = { id: workspace.id, name: workspace.name };
-          if (Exit.isFailure(usable)) {
+          if (readyIds === null || corruptIds?.has(workspace.id)) {
+            // A pin store or workspace pin that cannot be read leaves it unknown rather than acting on it.
             covered.push({ ...row, status: { kind: 'unknown' } });
             continue;
           }
-          if (!usable.value) {
+          if (!readyIds.has(workspace.id)) {
             uncovered.push(row);
             continue;
           }
@@ -528,13 +547,15 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           });
         }
         yield* Effect.try({ try: check, catch: recoveryFailure });
-        return {
+        const result: RecoveryWorkspacePlan = {
           ...(state.current ? { methods: yield* recovery.methods(state.current) } : {}),
           hasVault: state.current !== null,
           replacing: state.replacing !== null,
           covered,
           uncovered,
         };
+        plannedWorkspaces.set(result, visible);
+        return result;
       })
     ).pipe(Effect.mapError(recoveryFailure));
   return {
@@ -573,12 +594,17 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           return { removed: Exit.isSuccess(removed), ...state.value };
         })
       ),
-    restore: (unlock: ClientRecoveryUnlock, selected: readonly string[], observe?: Observe) =>
-      batch('restore', unlock, [...selected], observe),
+    restore: (
+      unlock: ClientRecoveryUnlock,
+      selected: readonly string[],
+      observe?: Observe,
+      prefetchedPlan?: RecoveryWorkspacePlan
+    ) => batch('restore', unlock, [...selected], observe, prefetchedPlan),
     setup: (unlock: ClientRecoveryUnlock, selected: readonly string[], observe?: Observe) =>
       batch('setup', unlock, [...selected], observe),
     dispose: () => {
       disposed = true;
+      pins.close();
       recovery.dispose();
     },
   };

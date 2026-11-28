@@ -14,6 +14,9 @@ on:
       target-environment:
         required: true
         type: string
+      gate-job-name:
+        default: ''
+        type: string
   workflow_dispatch:
     inputs:
       expected_sha:
@@ -96,7 +99,7 @@ jobs:
       SITE_URL: ${{ vars.SITE_URL }}
       LODY_NIGHTLY_VERSION: ${{ inputs.version }}
       LODY_DAEMON_CHANNEL: ${{ inputs.channel || (github.ref_name == 'release' && 'stable' || 'next') }}
-      LODY_LORO_STREAMS_WS_ENABLED: ${{ inputs.channel == 'nightly' && '1' || '' }}
+      LODY_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       NODE_OPTIONS: --max-old-space-size=4096
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
@@ -248,6 +251,12 @@ jobs:
       - name: Ensure AWS CLI is available without publication credentials
         run: bash .github/scripts/setup-aws-cli.sh
         shell: bash
+      - name: Wait for same-run release gate before SEA publication
+        if: inputs.gate-job-name != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_GATE_JOB_NAME: ${{ inputs.gate-job-name }}
+        run: node .github/scripts/wait-release-gate.mjs
       - name: Upload immutable release, then conditionally advance channel
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

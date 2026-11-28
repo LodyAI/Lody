@@ -1,7 +1,7 @@
 import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-failure';
 import { seatBillingErrorKey } from '@/components/settings/billing-errors';
 import { createFileRoute } from '@tanstack/react-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from '@tanstack/react-router';
 import type { Invitation } from 'better-auth/plugins/organization';
@@ -83,6 +83,16 @@ export function AcceptInvitationComponent() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [status, setStatus] = useState<AcceptInvitationPageState>('loading');
   const [organizationName, setOrganizationName] = useState<string>('');
+  const [failedAction, setFailedAction] = useState<'accept' | 'switch' | null>(null);
+  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(redirectTimerRef.current);
+    };
+  }, []);
   const getInvitation = useCallback(
     async (id: string) => {
       return await authClient.organization.getInvitation({
@@ -143,48 +153,68 @@ export function AcceptInvitationComponent() {
     };
   }, [getInvitation, invitationId, isAuthenticated, isPending, isRetrying, loadAttempt, preview]);
 
+  const openAcceptedWorkspace = useCallback(
+    (slug: string | undefined) => {
+      clearTimeout(redirectTimerRef.current);
+      if (slug) {
+        void navigate({
+          to: '/$workspaceName/chat',
+          params: { workspaceName: slug },
+        });
+      } else {
+        void navigate({ to: '/workspace/create' });
+      }
+    },
+    [navigate]
+  );
+
   /**
    * 接受邀请
    */
   const acceptInvitation = async () => {
     if (!invitation) {
       setStatus('error');
+      setFailedAction(null);
       setErrorMessage(t('invite.error.notFound', 'Invitation not found or expired.'));
       return;
     }
 
     setStatus('loading');
-    const result = await authClient.organization.acceptInvitation({
-      invitationId,
-    });
+    setFailedAction(null);
+    try {
+      const result = await authClient.organization.acceptInvitation({
+        invitationId,
+      });
+      if (!mountedRef.current) return;
 
-    if (result.data) {
-      setOrganizationName(invitation.organizationName || 'Unknown organization');
-      setStatus('success');
-      // 等待一秒后跳转到工作空间主页
-      setTimeout(() => {
-        if (invitation.organizationSlug) {
-          void navigate({
-            to: '/$workspaceName/chat',
-            params: { workspaceName: invitation.organizationSlug },
-          });
+      if (result.data) {
+        setOrganizationName(invitation.organizationName || 'Unknown organization');
+        setStatus('success');
+        clearTimeout(redirectTimerRef.current);
+        redirectTimerRef.current = setTimeout(() => {
+          openAcceptedWorkspace(invitation.organizationSlug);
+        }, 1500);
+      } else if (result.error) {
+        console.error('accept invitation error', result.error);
+        if (isRecipientMismatchError(result.error)) {
+          setStatus('account_mismatch');
+        } else if (isEmailVerificationRequiredError(result.error)) {
+          setStatus('verification_required');
         } else {
-          void navigate({ to: '/workspace/create' });
+          const billingKey = seatBillingErrorKey(result.error);
+          setStatus(billingKey ? 'billing_blocked' : 'error');
+          setFailedAction(billingKey ? null : 'accept');
+          setErrorMessage(
+            billingKey ? t(billingKey) : result.error.message || t('invite.error.unknown')
+          );
         }
-      }, 1500);
-    } else if (result.error) {
-      console.error('accept invitation error', result.error);
-      if (isRecipientMismatchError(result.error)) {
-        setStatus('account_mismatch');
-      } else if (isEmailVerificationRequiredError(result.error)) {
-        setStatus('verification_required');
-      } else {
-        const billingKey = seatBillingErrorKey(result.error);
-        setStatus(billingKey ? 'billing_blocked' : 'error');
-        setErrorMessage(
-          billingKey ? t(billingKey) : result.error.message || t('invite.error.unknown')
-        );
       }
+    } catch (error) {
+      if (!mountedRef.current) return;
+      console.error('accept invitation exception', error);
+      setStatus('error');
+      setFailedAction('accept');
+      setErrorMessage(t(invitationLoadError(error)));
     }
   };
 
@@ -195,8 +225,20 @@ export function AcceptInvitationComponent() {
 
   const switchAccount = async () => {
     setStatus('loading');
-    await signOut();
-    continueToLogin();
+    setFailedAction(null);
+    try {
+      await signOut();
+      if (!mountedRef.current) return;
+      continueToLogin();
+    } catch (error) {
+      if (!mountedRef.current) return;
+      console.error('switch account error', error);
+      setStatus('error');
+      setFailedAction('switch');
+      setErrorMessage(
+        t(isRequestUnavailable(error) ? 'invite.error.network' : 'invite.error.unknown')
+      );
+    }
   };
 
   const loadErrorKey = !invitationsAvailable
@@ -259,6 +301,20 @@ export function AcceptInvitationComponent() {
       onAccept={() => {
         void acceptInvitation();
       }}
+      onOpenWorkspace={() => {
+        openAcceptedWorkspace(invitation?.organizationSlug);
+      }}
+      onRetry={
+        failedAction === 'accept'
+          ? () => {
+              void acceptInvitation();
+            }
+          : failedAction === 'switch'
+            ? () => {
+                void switchAccount();
+              }
+            : undefined
+      }
       onBackHome={() => {
         void navigate({ to: '/' });
       }}

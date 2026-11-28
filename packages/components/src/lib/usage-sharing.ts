@@ -2,6 +2,52 @@ const key = 'lody:usage-sharing';
 const accountKey = 'lody:usage-sharing-account-blocked';
 let sessionBlocked = false;
 let accountAllowed = true;
+let envDisabled = false;
+let saveSeq = 0;
+const inFlightAccountChoice = new Map<string, { choice: boolean; seq: number }>();
+const submittedAccountChoice = new Map<string, boolean>();
+
+function notify(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(key));
+}
+
+export function setEnvUsageSharingDisabled(disabled: boolean): void {
+  if (envDisabled === disabled) return;
+  envDisabled = disabled;
+  notify();
+}
+
+export function isEnvUsageSharingDisabledClient(): boolean {
+  return envDisabled;
+}
+
+export function claimAccountUsageSave(
+  accountId: string,
+  choice: boolean
+): ((succeeded: boolean) => void) | null {
+  if (inFlightAccountChoice.get(accountId)?.choice === choice) return null;
+  const seq = ++saveSeq;
+  inFlightAccountChoice.set(accountId, { choice, seq });
+  submittedAccountChoice.delete(accountId);
+  return (succeeded: boolean) => {
+    if (inFlightAccountChoice.get(accountId)?.seq === seq) {
+      inFlightAccountChoice.delete(accountId);
+      if (succeeded) submittedAccountChoice.set(accountId, choice);
+    }
+  };
+}
+
+export function hasInFlightAccountUsageSave(accountId: string): boolean {
+  return inFlightAccountChoice.has(accountId);
+}
+
+export function hasSubmittedAccountChoice(accountId: string, choice: boolean): boolean {
+  return submittedAccountChoice.get(accountId) === choice;
+}
+
+export function clearSubmittedAccountChoice(accountId: string): void {
+  submittedAccountChoice.delete(accountId);
+}
 
 export function readDeviceUsageChoice(): boolean | null {
   if (typeof window === 'undefined' || sessionBlocked) return false;
@@ -36,7 +82,7 @@ export function clearPostHogLocalStorage(): void {
 }
 
 export function usageSharingAllowed(): boolean {
-  if (!accountAllowed || !readDeviceUsageSharing()) return false;
+  if (envDisabled || !accountAllowed || !readDeviceUsageSharing()) return false;
   try {
     return window.localStorage.getItem(accountKey) !== 'true';
   } catch {
@@ -50,7 +96,12 @@ export function setAccountUsageAllowed(allowed: boolean): void {
 
 export function subscribeUsageSharing(listener: () => void): () => void {
   const storage = (event: StorageEvent) => {
-    if (event.key === null || event.key === key || event.key === accountKey) {
+    if (
+      event.key === null ||
+      event.key === key ||
+      event.key === accountKey ||
+      event.key.startsWith(key + ':pending:')
+    ) {
       listener();
     }
   };
@@ -68,11 +119,10 @@ export function writeDeviceUsageSharing(enabled: boolean): void {
     if (!enabled) clearPostHogLocalStorage();
     window.localStorage.setItem(key, enabled ? 'on:' + Date.now() : 'off');
     sessionBlocked = false;
-  } catch (error) {
+  } catch {
     sessionBlocked = true;
-    throw error;
   } finally {
-    window.dispatchEvent(new Event(key));
+    notify();
   }
 }
 
@@ -100,23 +150,25 @@ export function rememberAccountUsageSharing(enabled: boolean): void {
   }
 }
 
-export function markUsageOptOutPending(accountId: string, pending: boolean): void {
-  const name = key + ':pending:' + accountId;
-  if (pending) window.localStorage.setItem(name, '1');
-  else window.localStorage.removeItem(name);
-}
-
-export function hasPendingUsageOptOut(accountId: string): boolean {
+export function setPendingAccountChoice(accountId: string, choice: boolean | null): void {
   try {
-    return window.localStorage.getItem(key + ':pending:' + accountId) === '1';
+    const name = key + ':pending:' + accountId;
+    if (choice === null) window.localStorage.removeItem(name);
+    else window.localStorage.setItem(name, choice ? 'allow' : '1');
   } catch {
-    return false;
+    // Ignore unavailable storage.
+  } finally {
+    notify();
   }
 }
 
 export function pendingAccountChoice(accountId: string): boolean | null {
-  const pending = window.localStorage.getItem(key + ':pending:' + accountId);
-  return pending === 'allow' ? true : pending === '1' ? false : null;
+  try {
+    const pending = window.localStorage.getItem(key + ':pending:' + accountId);
+    return pending === 'allow' ? true : pending === '1' ? false : null;
+  } catch {
+    return null;
+  }
 }
 
 // Only reverse an SDK opt-out that this application set.

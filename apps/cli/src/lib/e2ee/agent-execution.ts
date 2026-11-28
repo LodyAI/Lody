@@ -98,6 +98,30 @@ export type EncryptedExecutionClaim =
   | { state: 'denied'; reason?: 'e2ee_machine_not_shared' | EncryptedRefusalReason }
   | { state: 'uncertain' | 'completed' | 'pending-evidence' };
 
+const continuationSchema = z.object({
+  workspaceId: z.string().min(1),
+  sessionId: z.string().min(1),
+  inputId: z.string().min(1),
+  requesterUserId: z.string().min(1),
+  sourceTurnIds: z.array(z.string().min(1)).min(1),
+  localProjectIds: z.array(z.string().min(1)).optional(),
+});
+export type EncryptedContinuationIntent = z.infer<typeof continuationSchema>;
+/** `partial`: nothing was claimed; the caller removes these sources' results and claims again. */
+export type EncryptedContinuationClaim =
+  | EncryptedExecutionClaim
+  | { state: 'partial'; denied: readonly string[] };
+type ContinuationSource =
+  | {
+      state: 'authorized';
+      principal: 'owner' | 'member';
+      device: string;
+      root?: DerivationOrigin;
+      isCurrent: () => boolean;
+    }
+  | { state: 'pending-evidence' }
+  | { state: 'denied'; reason?: 'e2ee_machine_not_shared' | EncryptedRefusalReason };
+
 /** One owner per encrypted workspace. Journal opening stays lazy so a broken
  * execution log never prevents content sync or another workspace from starting. */
 export function makeEncryptedAgentExecution(options: {
@@ -132,6 +156,13 @@ export function makeEncryptedAgentExecution(options: {
   onClaim?: (userTurnId: string) => void;
 }) {
   const hex64 = /^[0-9a-f]{64}$/;
+  const observeClaim = (id: string) => {
+    try {
+      options.onClaim?.(id);
+    } catch {
+      /* Diagnostics never change execution. */
+    }
+  };
   // Each lookup verifies the signed row in its workspace, including its provenance.
   const readOrigin = (ref: DerivationOrigin) =>
     options.resolveVerifiedOriginal(
@@ -476,13 +507,7 @@ export function makeEncryptedAgentExecution(options: {
       const result = journal.claim(request);
       // Execution records carry no deadline, so the journal never reports one expired.
       if (result.state === 'expired') return { state: 'denied' as const };
-      if (result.state === 'claimed') {
-        try {
-          options.onClaim?.(intent.userTurnId);
-        } catch {
-          /* Diagnostics never change execution. */
-        }
-      }
+      if (result.state === 'claimed') observeClaim(intent.userTurnId);
       return result.state === 'existing'
         ? {
             state:
@@ -495,6 +520,179 @@ export function makeEncryptedAgentExecution(options: {
               ? { origin: { requesterDevice: authorityDevice } }
               : {}),
           };
+    });
+  });
+  const deniedFor = (
+    reason: string
+  ): Extract<ContinuationSource, { state: 'denied' | 'pending-evidence' }> =>
+    reason === 'unavailable'
+      ? { state: 'pending-evidence' }
+      : reason === 'e2ee_machine_not_shared'
+        ? { state: 'denied', reason: 'e2ee_machine_not_shared' }
+        : reason === 'not-authorized'
+          ? { state: 'denied', reason: 'e2ee_sender_not_authorized' }
+          : reason === 'e2ee_machine_not_member'
+            ? { state: 'denied', reason: 'e2ee_machine_not_member' }
+            : { state: 'denied' };
+  const authorizeContinuationSource = Effect.fnUntraced(function* (
+    ref: DerivationOrigin,
+    requesterUserId: string,
+    localProjectIds: readonly string[] | undefined
+  ): Effect.fn.Return<ContinuationSource, unknown> {
+    const authorizeExecution = options.authorizeExecution;
+    if (!authorizeExecution || !options.selfDevice) return { state: 'denied' };
+    const driving = yield* readOrigin(ref);
+    if (driving && 'state' in driving)
+      return driving.state === 'pending-evidence'
+        ? { state: 'pending-evidence' }
+        : { state: 'denied', reason: driving.reason };
+    if (!driving || !hex64.test(driving.requesterDevice)) return { state: 'denied' };
+    let root = driving;
+    let rootRef = ref;
+    if (driving.derivedFrom) {
+      if (driving.requesterDevice !== options.selfDevice || driving.schedule)
+        return { state: 'denied' };
+      const origin = yield* readOrigin(driving.derivedFrom);
+      if (origin && 'state' in origin)
+        return origin.state === 'pending-evidence'
+          ? { state: 'pending-evidence' }
+          : { state: 'denied', reason: origin.reason };
+      if (
+        !origin ||
+        !hex64.test(origin.requesterDevice) ||
+        origin.derivedFrom ||
+        origin.machineAuthored ||
+        origin.schedule ||
+        origin.requesterDevice === options.selfDevice
+      )
+        return { state: 'denied' };
+      root = origin;
+      rootRef = driving.derivedFrom;
+    }
+    if (root.schedule && root.requesterDevice !== options.selfDevice) return { state: 'denied' };
+    const grant = yield* authorizeAll(
+      authorizeExecution,
+      options.workspaceId,
+      root.requesterDevice,
+      localProjectIds
+    );
+    if (grant._tag !== 'Authorized') return deniedFor(grant.reason);
+    const fences = [grant.isCurrent];
+    if (root.schedule) {
+      const authorizeSchedule = options.authorizeSchedule;
+      const scheduleRequest = root.schedule;
+      if (!authorizeSchedule) return { state: 'denied' };
+      const schedule = yield* authorizeAll(
+        (_workspaceId, _device, target) => authorizeSchedule(scheduleRequest, target),
+        options.workspaceId,
+        root.requesterDevice,
+        localProjectIds
+      );
+      if (schedule._tag !== 'Authorized') return deniedFor(schedule.reason);
+      fences.push(schedule.isCurrent);
+    }
+    const isCurrent = () => fences.every((current) => current?.() !== false);
+    if (!isCurrent()) return { state: 'denied' };
+    const humanRoot = !root.machineAuthored && root.requesterDevice !== options.selfDevice;
+    if (!humanRoot && grant.principal !== 'owner') return { state: 'denied' };
+    const principal = grant.principal === 'owner' ? ('owner' as const) : ('member' as const);
+    if (options.ledgerIdentity && humanRoot) {
+      const expected =
+        principal === 'owner'
+          ? options.machineUserId
+          : encryptedMemberRequester(root.requesterCryptoUserId);
+      if (requesterUserId !== expected) return { state: 'denied' };
+    }
+    if (principal !== 'owner' && requesterUserId === options.machineUserId)
+      return { state: 'denied' };
+    return {
+      state: 'authorized',
+      principal,
+      device: root.requesterDevice,
+      ...(humanRoot && principal === 'member' ? { root: rootRef } : {}),
+      isCurrent,
+    };
+  });
+  const claimContinuation = Effect.fnUntraced(function* (
+    input: EncryptedContinuationIntent
+  ): Effect.fn.Return<EncryptedContinuationClaim, unknown> {
+    const intent = yield* attempt(() => continuationSchema.parse(input));
+    if (intent.workspaceId !== options.workspaceId)
+      return yield* Effect.fail(new RealtimeJournalError('identity_conflict'));
+    const selfDevice = options.selfDevice;
+    if (!selfDevice || !hex64.test(selfDevice)) return { state: 'denied' };
+    const key = {
+      genesis: options.genesis,
+      workspaceId: intent.workspaceId,
+      targetMachineId: options.targetMachineId,
+      requestId: `agent-start:${intent.inputId}`,
+    };
+    const frame = Buffer.from(JSON.stringify([2, intent.sessionId, intent.inputId, null]));
+    const journal = yield* attempt(options.journal);
+    const read = () => {
+      const retained = journal.read(key);
+      if (retained) {
+        const saved = retainedIntentSchema.parse(
+          JSON.parse(Buffer.from(retained.frame).toString('utf8'))
+        );
+        if (saved[1] !== intent.sessionId || saved[2] !== intent.inputId)
+          throw new RealtimeJournalError('identity_conflict');
+      }
+      return retained;
+    };
+    let retained = yield* attempt(read);
+    if (retained && retained.state !== 'received') return { state: retained.state };
+    if (options.isExecutionOpen?.() === false) return { state: 'denied' };
+    const sources = [...new Set(intent.sourceTurnIds)];
+    const verdicts: Array<readonly [string, ContinuationSource]> = [];
+    for (const sourceTurnId of sources)
+      verdicts.push([
+        sourceTurnId,
+        yield* authorizeContinuationSource(
+          { sessionId: intent.sessionId, userTurnId: sourceTurnId },
+          intent.requesterUserId,
+          intent.localProjectIds
+        ),
+      ]);
+    if (verdicts.some(([, verdict]) => verdict.state === 'pending-evidence'))
+      return { state: 'pending-evidence' };
+    const authorized = verdicts.flatMap(([sourceTurnId, verdict]) =>
+      verdict.state === 'authorized' ? [{ sourceTurnId, ...verdict }] : []
+    );
+    const denied = verdicts.flatMap(([sourceTurnId, verdict]) =>
+      verdict.state === 'denied' ? [{ sourceTurnId, reason: verdict.reason }] : []
+    );
+    if (!authorized.length)
+      return { state: 'denied', ...(denied[0]?.reason ? { reason: denied[0].reason } : {}) };
+    if (denied.length) return { state: 'partial', denied: denied.map((d) => d.sourceTurnId) };
+    retained = yield* attempt(read);
+    if (retained && retained.state !== 'received') return { state: retained.state };
+    if (
+      retained &&
+      (retained.requester !== selfDevice || !Buffer.from(retained.frame).equals(frame))
+    )
+      return yield* Effect.fail(new RealtimeJournalError('identity_conflict'));
+    const request = retained ?? { ...key, requester: selfDevice, expiresAt: 0, frame };
+    const member = authorized.find((source) => source.principal === 'member');
+    return yield* attempt((): EncryptedContinuationClaim => {
+      if (options.isExecutionOpen?.() === false || authorized.some((source) => !source.isCurrent()))
+        return { state: 'denied' };
+      journal.receive(request);
+      const exhausted = authorized.filter(
+        (source) => source.root && !journal.reserveDerivation(request, source.root)
+      );
+      if (exhausted.length)
+        return exhausted.length === authorized.length
+          ? { state: 'denied' }
+          : { state: 'partial', denied: exhausted.map((source) => source.sourceTurnId) };
+      const result = journal.claim(request);
+      if (result.state === 'expired') return { state: 'denied' };
+      if (result.state === 'existing')
+        return { state: result.record.state === 'completed' ? 'completed' : 'uncertain' };
+      observeClaim(intent.inputId);
+      return member
+        ? { ...result, principal: 'derived', origin: { requesterDevice: member.device } }
+        : { ...result, principal: 'owner' };
     });
   });
   /** A message cancelled before it started never starts later, even if its row turns
@@ -543,6 +741,7 @@ export function makeEncryptedAgentExecution(options: {
     });
   return {
     claim,
+    claimContinuation,
     readState,
     complete,
     retire,

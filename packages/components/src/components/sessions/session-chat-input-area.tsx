@@ -1,4 +1,10 @@
 import { SessionMetaIdentityMarker } from './automation/session-meta-identity-marker';
+import {
+  sessionTextDraftsCache as sessionDraftsCache,
+  setSessionChatInputTextDraft,
+} from '../../lib/session-text-draft-cache';
+export { setSessionChatInputTextDraft };
+
 import { McpDefaultsRecovery } from '../chat/mcp-defaults-recovery';
 import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
 export { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
@@ -40,7 +46,7 @@ import {
   useImperativeHandle,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Check, File as FileIcon, MessageSquareQuote, Pencil, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
@@ -88,6 +94,8 @@ import {
   type PersistedMentionRange,
 } from '@/components/mentions/mention-persistence';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
+import { QueuedImagePreview } from '@/components/sessions/message-queue/queued-image-preview';
 import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { captureAgentRoleMentionsApplied } from '@/lib/agent-role-analytics';
@@ -158,6 +166,13 @@ import {
 import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
+import { learnAgentStartDefaults } from '@/lib/local-storage-cache';
+import { useAgentPermissionDefault } from '@/hooks/use-agent-permission-default';
+import {
+  describeRunConfigSelection,
+  recordRecentRunConfig,
+  sanitizeConfigOptionValues,
+} from '@/lib/recent-run-configs';
 import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
 import {
@@ -166,8 +181,6 @@ import {
   getComposerText,
   setComposerSelection,
 } from '@/ui/mention/composer-input';
-
-const sessionDraftsCache = new Map<SessionId, string>();
 
 const styles = stylex.create({
   mobileUsage: { height: 'calc(var(--spacing) * 8)' },
@@ -284,7 +297,143 @@ const styles = stylex.create({
   topSpacer: { height: 'calc(var(--spacing) * 1)' },
   hiddenInput: { display: 'none' },
   externalSyncLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  queueEditActions: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  // A strip inside the input card: the card stays glued under the info bar.
+  queueEditBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    columnGap: 'calc(var(--spacing) * 1.5)',
+    rowGap: 'calc(var(--spacing) * 1.5)',
+    paddingBottom: 'calc(var(--spacing) * 1.5)',
+    marginBottom: 'calc(var(--spacing) * 1)',
+    borderBottomWidth: '0.5px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+    fontSize: '12px',
+    lineHeight: '16px',
+    color: colors.secondaryLabel,
+  },
+  queueEditGlyph: { flexShrink: 0, color: colors.accent },
+  queueEditTitle: { fontWeight: 500, color: colors.secondaryLabel, marginInlineEnd: 'auto' },
+  // Touch keyboards have no Escape; the Cancel button is the way out there.
+  queueEditHint: {
+    whiteSpace: 'nowrap',
+    display: { default: 'inline', '@media (pointer: coarse), (max-width: 600px)': 'none' },
+  },
+  queueEditKept: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    width: '100%',
+  },
+  queueEditChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    maxWidth: '220px',
+    height: '26px',
+    paddingInlineStart: 'calc(var(--spacing) * 1)',
+    paddingInlineEnd: 'calc(var(--spacing) * 0.5)',
+    borderRadius: '6px',
+    backgroundColor: 'hsl(var(--foreground) / 0.06)',
+    color: colors.label,
+  },
+  queueEditChipLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  queueEditChipRemove: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '20px',
+    height: '20px',
+    borderWidth: 0,
+    borderRadius: '4px',
+    backgroundColor: { default: 'transparent', ':hover': 'hsl(var(--foreground) / 0.08)' },
+    color: colors.secondaryLabel,
+    cursor: 'pointer',
+  },
 });
+
+/** Above the composer while it edits a queued message: what is edited, and what it still carries. */
+function QueueEditBanner({
+  sessionId,
+  edit,
+  onCancel,
+}: {
+  sessionId: SessionId;
+  edit: SessionComposerQueueEdit;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div {...stylex.props(styles.queueEditBanner)} role="status" data-queue-edit-banner="">
+      <Pencil
+        size={12}
+        strokeWidth={2}
+        aria-hidden="true"
+        {...stylex.props(styles.queueEditGlyph)}
+      />
+      <span {...stylex.props(styles.queueEditTitle)}>
+        {t('sessions.messageQueue.editBanner', 'Editing queued message {{position}}', {
+          position: edit.position,
+        })}
+      </span>
+      <span {...stylex.props(styles.queueEditHint)}>
+        {t('sessions.messageQueue.editBannerHint', 'Esc to cancel')}
+      </span>
+      <button
+        type="button"
+        {...stylex.props(styles.queueEditChipRemove)}
+        aria-label={t('sessions.messageQueue.cancelEdit', 'Cancel editing')}
+        onClick={onCancel}
+      >
+        <X size={14} strokeWidth={1.75} aria-hidden="true" />
+      </button>
+      {edit.keptBlocks.length > 0 ? (
+        <div {...stylex.props(styles.queueEditKept)}>
+          {edit.keptBlocks.map((block, index) => (
+            <span key={index} {...stylex.props(styles.queueEditChip)}>
+              {block.type === 'image' ? (
+                <QueuedImagePreview sessionId={sessionId} image={block} size={20} />
+              ) : block.type === 'file' || block.type === 'local_attachment' ? (
+                <FileIcon size={14} strokeWidth={1.75} aria-hidden="true" />
+              ) : (
+                <MessageSquareQuote size={14} strokeWidth={1.75} aria-hidden="true" />
+              )}
+              <span {...stylex.props(styles.queueEditChipLabel)}>{keptBlockLabel(block, t)}</span>
+              <button
+                type="button"
+                {...stylex.props(styles.queueEditChipRemove)}
+                aria-label={t('sessions.messageQueue.removeAttachment', 'Remove from this message')}
+                onClick={() => edit.onRemoveKeptBlock(index)}
+              >
+                <X size={12} strokeWidth={1.75} aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function keptBlockLabel(block: SessionInputBlock, t: TFunction) {
+  if (block.type === 'image') return t('sessions.messageQueue.keptImage', 'Image');
+  if (block.type === 'file' || block.type === 'local_attachment')
+    return 'fileName' in block && typeof block.fileName === 'string'
+      ? block.fileName
+      : t('sessions.messageQueue.keptFile', 'File');
+  if (block.type === 'comment_reference')
+    return t('sessions.messageQueue.keptComment', 'Comment reference');
+  if (block.type === 'visual_annotation_reference')
+    return t('sessions.messageQueue.keptAnnotation', 'Annotation');
+  return t('sessions.messageQueue.keptReference', 'Reference');
+}
 
 type PendingImage = {
   localId: string;
@@ -405,16 +554,57 @@ const revokeImagePreviewUrls = (
 };
 
 /**
- * Seed the composer text draft for a session that has not mounted yet. The
- * composer hydrates from this cache on mount, so callers can hand text across
- * a tab promotion without holding a ref to the future component.
+ * The draft a composer held when a queued-message edit took it over. Same
+ * lifetime as the draft caches: it survives leaving the Session and returns
+ * when the edit ends. Comment and annotation chips are component state, so
+ * they ride along here too.
  */
-export const setSessionChatInputTextDraft = (sessionId: SessionId, text: string): void => {
-  if (text) {
-    sessionDraftsCache.set(sessionId, text);
-  } else {
-    sessionDraftsCache.delete(sessionId);
+type QueueEditDraftStash = {
+  text: string | undefined;
+  images: PendingImage[];
+  files: PendingFile[];
+  pastedText: PastedTextDraft[];
+  mentions: PersistedMentionRange[];
+  comments: CommentReferenceChipItem[];
+  annotations: VisualAnnotationReferenceChipItem[];
+};
+const sessionQueueEditStash = new Map<SessionId, QueueEditDraftStash>();
+
+/**
+ * End a queued-message edit's hold on this Session's draft caches.
+ * `restore` discards the edit's content (aborting its uploads) and brings back
+ * the stashed draft; `keep` turns the edit's content into the ordinary draft,
+ * followed by the stashed one. Returns the chips the mounted composer restores.
+ */
+export const finishQueuedMessageEditDraft = (
+  sessionId: SessionId,
+  mode: 'restore' | 'keep'
+): Pick<QueueEditDraftStash, 'comments' | 'annotations'> | null => {
+  const stash = sessionQueueEditStash.get(sessionId);
+  if (!stash) return null;
+  sessionQueueEditStash.delete(sessionId);
+  if (mode === 'restore') {
+    revokeImagePreviewUrls(getSessionImageDrafts(sessionId));
+    abortPendingFileUploads(getSessionFileDrafts(sessionId));
+    setSessionChatInputTextDraft(sessionId, stash.text ?? '');
+    setSessionImageDrafts(sessionId, stash.images);
+    setSessionFileDrafts(sessionId, stash.files);
+    setSessionPastedTextDrafts(sessionId, stash.pastedText);
+    setSessionMentionRanges(sessionId, stash.mentions);
+    return { comments: stash.comments, annotations: stash.annotations };
   }
+  const current = sessionDraftsCache.get(sessionId)?.trim() ?? '';
+  const stashed = stash.text?.trim() ?? '';
+  // The stashed ranges sit at offsets of a text that now follows another one.
+  if (stashed)
+    setSessionChatInputTextDraft(sessionId, current ? `${current}\n\n${stashed}` : stashed);
+  setSessionImageDrafts(sessionId, [...getSessionImageDrafts(sessionId), ...stash.images]);
+  setSessionFileDrafts(sessionId, [...getSessionFileDrafts(sessionId), ...stash.files]);
+  setSessionPastedTextDrafts(sessionId, [
+    ...getSessionPastedTextDrafts(sessionId),
+    ...stash.pastedText,
+  ]);
+  return { comments: stash.comments, annotations: stash.annotations };
 };
 
 export const clearSessionChatInputDrafts = (sessionId: SessionId): void => {
@@ -470,7 +660,27 @@ const createLocalImageId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
+/** A queued message being edited in this composer. */
+export type SessionComposerQueueEdit = {
+  /** 1-based position of the row in the queue. */
+  position: number;
+  /** Images, files and references the edited message still carries. */
+  keptBlocks: readonly SessionInputBlock[];
+  onRemoveKeptBlock: (index: number) => void;
+};
+
 export interface SessionChatInputAreaProps {
+  /**
+   * Set while a queued message is edited here: Send saves the edit, and the
+   * cancel button or Escape ends it without changing the queue.
+   */
+  queueEdit?: SessionComposerQueueEdit | null;
+  onQueueEditCancel?: () => void;
+  /**
+   * Keys the explicit Role choice. A queue edit passes its own scope so the
+   * Session's unsent choice survives the edit.
+   */
+  agentRoleSelectionScope?: string;
   /** Claims a one-shot navigation focus request; absent for ordinary session visits. */
   claimNavigationFocus?: () => boolean;
   session: SessionMeta;
@@ -612,6 +822,10 @@ export type SessionChatInputAreaHandle = {
     sessionId: string,
     options?: { at?: number; replaceEnd?: number }
   ) => boolean;
+  /** Stash the current draft and load a queued message's text for editing. */
+  beginQueueEdit: (text: string) => void;
+  /** End the edit's hold on the draft; see `finishQueuedMessageEditDraft`. */
+  finishQueueEdit: (mode: 'restore' | 'keep') => void;
   /** Role identity committed in the currently rendered composer. */
   getAgentRoleSelection: (
     runConfigOverrides?: ComposerRunConfigOverrides
@@ -622,6 +836,9 @@ export const SessionChatInputArea = memo(
   forwardRef<SessionChatInputAreaHandle, SessionChatInputAreaProps>(function SessionChatInputArea(
     {
       session,
+      queueEdit = null,
+      onQueueEditCancel,
+      agentRoleSelectionScope,
       isVisible = true,
       claimNavigationFocus,
       sessionLocalProjectRootPath,
@@ -774,6 +991,7 @@ export const SessionChatInputArea = memo(
         cancelNavigationDismissal.current = dismissComposerKeyboardAfterPaint(textareaRef.current);
       }
     }, [claimNavigationFocus, usesMobileKeyboardAction]);
+    const permissionDefault = useAgentPermissionDefault(session.agentConfigId);
     const agentRoleTurnSelectionRef = useRef<SessionTurnAgentRoleSelection>(undefined);
     const selectedAgentRoleRef = useRef<AgentRole | undefined>(undefined);
     /** Readable Roles, for attributing accepted `@Role` mentions in analytics. */
@@ -1081,6 +1299,8 @@ export const SessionChatInputArea = memo(
     const quoteStorageWarning = useRef<string | null>(null);
     useEffect(() => {
       if (!workspaceId) return;
+      // An edit's text is not the Session's draft; the stored draft stays as it was.
+      if (sessionQueueEditStash.has(session.id)) return;
       const key = conversationQuoteDraftKey(workspaceId, session.id);
       let saved = false;
       try {
@@ -1814,9 +2034,92 @@ export const SessionChatInputArea = memo(
       ]
     );
 
+    /** Reload component state from the draft caches after an edit transition. */
+    const syncDraftFromCaches = useCallback(
+      (
+        chips: Pick<QueueEditDraftStash, 'comments' | 'annotations'> | null,
+        mode: 'restore' | 'keep'
+      ) => {
+        const id = session.id;
+        setUserInputState(sessionDraftsCache.get(id) ?? '');
+        onInputValueChange?.(sessionDraftsCache.get(id) ?? '');
+        setPendingImages(getSessionImageDrafts(id));
+        setPendingFiles(getSessionFileDrafts(id));
+        setPastedTextDrafts(getSessionPastedTextDrafts(id));
+        if (mode === 'restore') {
+          mentionRangesRef.current = [];
+          setPersistedMentionRanges(getSessionMentionRanges(id));
+          setDraftMentionRevision((revision) => revision + 1);
+        }
+        if (chips) {
+          publishCommentReferences(
+            mode === 'restore'
+              ? chips.comments
+              : [...commentReferencesRef.current, ...chips.comments]
+          );
+          publishVisualAnnotationReferences(
+            mode === 'restore'
+              ? chips.annotations
+              : [...visualAnnotationReferencesRef.current, ...chips.annotations]
+          );
+        }
+      },
+      [onInputValueChange, publishCommentReferences, publishVisualAnnotationReferences, session.id]
+    );
+
+    const beginQueueEdit = useCallback(
+      (text: string) => {
+        const id = session.id;
+        // One edit at a time: a second begin keeps the original stash.
+        if (!sessionQueueEditStash.has(id))
+          sessionQueueEditStash.set(id, {
+            // The visible text, which a seeded draft may not have cached yet.
+            text: textareaRef.current
+              ? getComposerText(textareaRef.current)
+              : sessionDraftsCache.get(id),
+            images: getSessionImageDrafts(id),
+            files: getSessionFileDrafts(id),
+            pastedText: getSessionPastedTextDrafts(id),
+            mentions: getSessionMentionRanges(id),
+            comments: commentReferencesRef.current,
+            annotations: visualAnnotationReferencesRef.current,
+          });
+        // The stash owns these resources now: drop them without revoking.
+        sessionImageDraftsCache.delete(id);
+        sessionFileDraftsCache.delete(id);
+        setPendingImages([]);
+        setPendingFiles([]);
+        publishCommentReferences([]);
+        publishVisualAnnotationReferences([]);
+        setInputText(text);
+        const input = textareaRef.current;
+        if (input) {
+          input.focus();
+          const end = getComposerText(input).length;
+          setComposerSelection(input, end, end);
+        }
+      },
+      [publishCommentReferences, publishVisualAnnotationReferences, session.id, setInputText]
+    );
+
+    const finishQueueEdit = useCallback(
+      (mode: 'restore' | 'keep') => {
+        const chips = finishQueuedMessageEditDraft(session.id, mode);
+        syncDraftFromCaches(chips, mode);
+      },
+      [session.id, syncDraftFromCaches]
+    );
+
+    const cancelQueueEdit = useCallback(() => {
+      onQueueEditCancel?.();
+      finishQueueEdit('restore');
+    }, [finishQueueEdit, onQueueEditCancel]);
+
     useImperativeHandle(
       ref,
       () => ({
+        beginQueueEdit,
+        finishQueueEdit,
         addMessageQuote: (text) => {
           if (isArchived || submissionPending || !text.trim()) return false;
           if (!machineSupportsMessageQuotes(quoteMachineRef.current)) {
@@ -1855,6 +2158,8 @@ export const SessionChatInputArea = memo(
           }),
       }),
       [
+        beginQueueEdit,
+        finishQueueEdit,
         isArchived,
         submissionPending,
         quoteMachineRef,
@@ -1882,7 +2187,7 @@ export const SessionChatInputArea = memo(
     );
     const { absorbChange: absorbRecallChange } = useComposerMessageRecall({
       sessionId: session.id,
-      view: isArchived ? null : messageHistory,
+      view: isArchived || queueEdit ? null : messageHistory,
       inputRef: textareaRef,
       value: userInput,
       canStart:
@@ -1916,9 +2221,13 @@ export const SessionChatInputArea = memo(
       [pastedTextDrafts, session.id, updatePastedTextDraftsForSession]
     );
 
+    const queueEditRef = useLatestRef(queueEdit);
     const sendMessage = useCallback(
       async (options?: SessionSendMessageOptions) => {
         if (!isVisible) return;
+        // An edit saves through the host; scheduling and busy routing do not apply.
+        const editing = queueEditRef.current !== null;
+        const scheduledAt = editing ? null : scheduled.at;
         if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
           capturePostHogEvent(postHog, 'session/input_blocked', {
             reason: 'free_session_turn_limit_reached',
@@ -2027,7 +2336,8 @@ export const SessionChatInputArea = memo(
           pendingImages.length === 0 &&
           pendingFiles.length === 0 &&
           commentRefBlocks.length === 0 &&
-          visualAnnotationRefBlocks.length === 0
+          visualAnnotationRefBlocks.length === 0 &&
+          !(editing && (queueEditRef.current?.keptBlocks.length ?? 0) > 0)
         ) {
           capturePostHogEvent(postHog, 'session/input_blocked', {
             reason: 'empty_input',
@@ -2073,7 +2383,7 @@ export const SessionChatInputArea = memo(
           // Use the committed callback and Role after waiting: routing and run
           // config must come from the same current composer state.
           const role = agentRoleTurnSelectionRef.current;
-          accepted = scheduled.at
+          accepted = scheduledAt
             ? await scheduledSaveRef.current({
                 inputBlocks,
                 attachments,
@@ -2097,15 +2407,46 @@ export const SessionChatInputArea = memo(
                 },
               })
             : await onSendMessage(inputBlocks, role, {
-                ...options,
+                ...(editing ? {} : options),
                 attachments,
                 ...(mcpServerIds ? { mcpServerIds } : {}),
               });
           if (accepted) {
             // A sent message answers the prediction shown before it; the next turn
             // publishes its own suggestion.
-            if (!scheduled.at)
+            if (!scheduledAt && !editing)
               promptSuggestionRef.current.markPromptSuggestionAnswered(shownPromptSuggestion);
+            // A configuration picked inside a conversation is what the person
+            // wants next time too. A Role's values are the Role's, not theirs.
+            if (!scheduledAt && !editing && !role && session.agentConfigId) {
+              const sent = agentRoleRunConfigRef.current;
+              learnAgentStartDefaults(session.agentConfigId, {
+                modeId: sent.modeId,
+                modelId: modelOptions.length > 0 ? sent.modelId : null,
+                configOptionValues: sent.configOptionValues,
+              });
+              const face = describeRunConfigSelection({
+                modelOptions,
+                selectedModelId: sent.modelId,
+                configOptionSelectors: configOptionSelectors ?? [],
+                configOptionValues: sent.configOptionValues,
+              });
+              recordRecentRunConfig(
+                workspaceId,
+                {
+                  agentId: session.agentConfigId,
+                  machineId: session.machineId,
+                  modelId: face.modelId,
+                  modelLabel: face.modelLabel,
+                  reasoningLabel: face.reasoningLabel,
+                  planOn: face.planOn,
+                  fastOn: face.fastOn,
+                  configOptionValues: sanitizeConfigOptionValues(sent.configOptionValues),
+                  agentRoleId: null,
+                },
+                Date.now()
+              );
+            }
             captureAgentRoleMentionsApplied(postHog, {
               spans: trimmedSpans,
               roles: workspaceAgentRolesRef.current,
@@ -2136,8 +2477,13 @@ export const SessionChatInputArea = memo(
               // write component state from a retired submission.
               clearSessionChatInputDrafts(session.id);
             }
-            if (!scheduled.at && submittedVisualAnnotationReferences.length > 0) {
+            if (!scheduledAt && submittedVisualAnnotationReferences.length > 0) {
               void onVisualAnnotationReferencesSubmitted?.(submittedVisualAnnotationReferences);
+            }
+            // The saved edit hands the composer back to the draft it stashed.
+            if (editing) {
+              if (submission.isCurrent()) finishQueueEdit('restore');
+              else finishQueuedMessageEditDraft(session.id, 'restore');
             }
           }
         } finally {
@@ -2157,9 +2503,14 @@ export const SessionChatInputArea = memo(
         mcpSelectionReady,
         scheduled.at,
         scheduledSaveRef,
+        queueEditRef,
+        finishQueueEdit,
         selectedModeId,
         selectedModelId,
         configOptionValues,
+        configOptionSelectors,
+        modelOptions,
+        workspaceId,
         isExternalHistoryRefreshing,
         isMachineRemoved,
         isVisible,
@@ -2184,6 +2535,18 @@ export const SessionChatInputArea = memo(
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<ComposerInputElement>) => {
+        // Escape ends an edit only once nothing inside the composer (a mention
+        // or command menu, an IME candidate) claimed it first.
+        if (
+          e.key === 'Escape' &&
+          queueEditRef.current &&
+          !e.defaultPrevented &&
+          !isImeComposingKeyboardEvent(e)
+        ) {
+          e.preventDefault();
+          cancelQueueEdit();
+          return;
+        }
         if (e.key !== 'Enter' || isImeComposingKeyboardEvent(e)) {
           return;
         }
@@ -2206,7 +2569,7 @@ export const SessionChatInputArea = memo(
         e.preventDefault();
         void sendMessage();
       },
-      [mobileKeyboardAction, sendMessage, usesMobileKeyboardAction]
+      [cancelQueueEdit, mobileKeyboardAction, queueEditRef, sendMessage, usesMobileKeyboardAction]
     );
 
     const hasDraft =
@@ -2219,12 +2582,13 @@ export const SessionChatInputArea = memo(
     const hasUploadedImages = pendingImages.length > 0;
     const hasUploadedFiles = pendingFiles.length > 0;
     const hasSendableContent =
+      (queueEdit?.keptBlocks.length ?? 0) > 0 ||
       userInput.trim().length > 0 ||
       hasUploadedImages ||
       hasUploadedFiles ||
       commentReferences.length > 0 ||
       visualAnnotationReferences.length > 0;
-    const showStopButton = canStopAgent && !hasDraft && !isArchived && !scheduled.at;
+    const showStopButton = canStopAgent && !hasDraft && !isArchived && !scheduled.at && !queueEdit;
     const isSendActionDisabled =
       !isVisible ||
       submissionPending ||
@@ -2315,6 +2679,7 @@ export const SessionChatInputArea = memo(
     workspaceAgentRolesRef.current = accessibleAgentRoles;
     const sessionAgentRole = useSessionAgentRole({
       sessionId: session.id,
+      selectionScope: agentRoleSelectionScope,
       provenanceRoleId: session.agentRoleId,
       provenanceRoleRevision: session.agentRoleRevision,
       durableRoleId: durableAgentRoleId,
@@ -2500,6 +2865,7 @@ export const SessionChatInputArea = memo(
             configOptionSelectors={configOptionSelectors}
             configOptionValues={configOptionValues}
             onConfigOptionChange={onConfigOptionChange}
+            permissionDefault={permissionDefault}
           />
         )}
       </>
@@ -2565,42 +2931,22 @@ export const SessionChatInputArea = memo(
       </div>
     ) : null;
     /* Keep desktop actions compact while preserving the mobile touch target. */
-    const primaryActionNode =
-      isArchived && onRestoreSession ? (
+    const primaryActionNode = queueEdit ? (
+      <span {...stylex.props(styles.queueEditActions)}>
         <Button
+          data-testid="composer-queue-edit-cancel"
           type="button"
           variant="secondary"
           size={isMobile ? 'medium' : 'small'}
-          disabled={restoring}
-          onClick={() => void handleRestore()}
-        >
-          {restoring ? <Spinner size="small" /> : null}
-          {t('archive.restore', 'Restore session')}
-        </Button>
-      ) : showStopButton ? (
-        <Button
-          onClick={() => {
-            void onStop();
-          }}
-          variant="solid"
-          size={isMobile ? 'medium' : 'small'}
           shape="pill"
-          icon
-          aria-label={t('sessions.stop')}
-          className={stylex.props(composerActionButtonTheme).className}
-          xstyle={styles.primaryAction}
+          onClick={cancelQueueEdit}
+          onMouseDown={(event) => event.preventDefault()}
+          disabled={submissionPending}
         >
-          <span
-            {...stylex.props(
-              styles.stopGlyph,
-              isMobile ? styles.stopGlyphMobile : styles.stopGlyphDesktop
-            )}
-            aria-hidden="true"
-          />
+          {t('common.cancel', 'Cancel')}
         </Button>
-      ) : (
         <Button
-          data-testid="composer-send"
+          data-testid="composer-queue-edit-save"
           type="button"
           icon
           variant="solid"
@@ -2611,24 +2957,80 @@ export const SessionChatInputArea = memo(
           }}
           onMouseDown={(event) => event.preventDefault()}
           disabled={!hasSendableContent || isSendActionDisabled}
-          aria-label={
-            isExternalHistoryRefreshing && externalHistorySyncLabel
-              ? externalHistorySyncLabel
-              : t('sessions.send')
-          }
+          aria-label={t('sessions.messageQueue.saveEdit', 'Save changes (Enter)')}
           className={stylex.props(composerActionButtonTheme).className}
           xstyle={styles.primaryAction}
         >
-          {submissionPending || isExternalHistoryRefreshing ? (
+          {submissionPending ? (
             <Spinner size={isMobile ? 'medium' : 'small'} />
           ) : (
-            <ArrowUp {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
+            <Check {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
           )}
         </Button>
-      );
+      </span>
+    ) : isArchived && onRestoreSession ? (
+      <Button
+        type="button"
+        variant="secondary"
+        size={isMobile ? 'medium' : 'small'}
+        disabled={restoring}
+        onClick={() => void handleRestore()}
+      >
+        {restoring ? <Spinner size="small" /> : null}
+        {t('archive.restore', 'Restore session')}
+      </Button>
+    ) : showStopButton ? (
+      <Button
+        onClick={() => {
+          void onStop();
+        }}
+        variant="solid"
+        size={isMobile ? 'medium' : 'small'}
+        shape="pill"
+        icon
+        aria-label={t('sessions.stop')}
+        className={stylex.props(composerActionButtonTheme).className}
+        xstyle={styles.primaryAction}
+      >
+        <span
+          {...stylex.props(
+            styles.stopGlyph,
+            isMobile ? styles.stopGlyphMobile : styles.stopGlyphDesktop
+          )}
+          aria-hidden="true"
+        />
+      </Button>
+    ) : (
+      <Button
+        data-testid="composer-send"
+        type="button"
+        icon
+        variant="solid"
+        size={isMobile ? 'medium' : 'small'}
+        shape="pill"
+        onClick={() => {
+          void sendMessage();
+        }}
+        onMouseDown={(event) => event.preventDefault()}
+        disabled={!hasSendableContent || isSendActionDisabled}
+        aria-label={
+          isExternalHistoryRefreshing && externalHistorySyncLabel
+            ? externalHistorySyncLabel
+            : t('sessions.send')
+        }
+        className={stylex.props(composerActionButtonTheme).className}
+        xstyle={styles.primaryAction}
+      >
+        {submissionPending || isExternalHistoryRefreshing ? (
+          <Spinner size={isMobile ? 'medium' : 'small'} />
+        ) : (
+          <ArrowUp {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
+        )}
+      </Button>
+    );
 
     const scheduledAction =
-      scheduled.at && scheduled.available && !isArchived && !submissionPending
+      scheduled.at && scheduled.available && !isArchived && !submissionPending && !queueEdit
         ? {
             label: t('scheduledMessage.composerAction', {
               time: formatUpcoming(
@@ -2718,7 +3120,7 @@ export const SessionChatInputArea = memo(
         fileItems={submissionPending ? [] : fileItems}
         mcp={mcp}
         onScheduleSend={
-          (scheduled.available || scheduled.featureUnavailable) && !isArchived
+          (scheduled.available || scheduled.featureUnavailable) && !isArchived && !queueEdit
             ? scheduled.openPicker
             : undefined
         }
@@ -2739,6 +3141,11 @@ export const SessionChatInputArea = memo(
         autoResize
         maxRows={11}
         focusOnContainerClick
+        headerStrip={
+          queueEdit ? (
+            <QueueEditBanner sessionId={session.id} edit={queueEdit} onCancel={cancelQueueEdit} />
+          ) : undefined
+        }
       />
     );
 

@@ -840,3 +840,232 @@ export const ConversationWithNotices: Story = {
     />
   ),
 };
+
+const stickyStoryStyles = stylex.create({
+  shell: {
+    display: 'flex',
+    height: '100vh',
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+  header: {
+    display: 'flex',
+    height: '48px',
+    flexShrink: 0,
+    alignItems: 'center',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: colors.separator,
+    paddingInline: '16px',
+    fontSize: '14px',
+    fontWeight: 500,
+    color: colors.label,
+  },
+  messageArea: {
+    position: 'relative',
+    minHeight: 0,
+    flex: '1 1 0%',
+  },
+  composer: {
+    display: 'flex',
+    height: '76px',
+    flexShrink: 0,
+    alignItems: 'center',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    paddingInline: '16px',
+    fontSize: '13px',
+    color: colors.secondaryLabel,
+  },
+});
+
+const stickySessionId = 'synthetic-sticky-work-groups' as SessionId;
+
+function makeSyntheticToolBatch(prefix: string, commands: number, reads: number, edits: number) {
+  const items: SessionHistoryParsed['items'] = [
+    {
+      type: 'thought',
+      text: `Synthetic thought for ${prefix}: inspecting files, running checks, and preparing edits across the workspace.`,
+    },
+  ];
+  for (let i = 0; i < commands; i += 1) {
+    items.push({
+      type: 'tool_call',
+      toolCallId: `${prefix}-cmd-${i}`,
+      kind: 'execute',
+      status: 'completed',
+      title: `Run ${prefix} check #${i + 1}`,
+      content: [
+        { type: 'terminal_command', command: `pnpm test --filter synthetic-${prefix}-${i + 1}` },
+        {
+          type: 'terminal_output',
+          output: `Synthetic command ${prefix} #${i + 1} passed (42ms)`,
+          stream: 'combined',
+        },
+      ],
+    });
+  }
+  for (let i = 0; i < reads; i += 1) {
+    const filePath = `packages/components/src/synthetic/${prefix}-read-${i + 1}.ts`;
+    items.push({
+      type: 'tool_call',
+      toolCallId: `${prefix}-read-${i}`,
+      kind: 'read',
+      status: 'completed',
+      title: `Read ${filePath}`,
+      locations: [{ path: filePath }],
+    });
+  }
+  for (let i = 0; i < edits; i += 1) {
+    const filePath = `packages/components/src/synthetic/${prefix}-edit-${i + 1}.ts`;
+    items.push({
+      type: 'tool_call',
+      toolCallId: `${prefix}-edit-${i}`,
+      kind: 'edit',
+      status: 'completed',
+      title: `Edit ${filePath}`,
+      locations: [{ path: filePath }],
+    });
+  }
+  return items;
+}
+
+const stickyWorkGroupMessages: SessionHistoryParsed[] = [
+  {
+    id: 'sticky-user-1',
+    role: 'user',
+    timestamp: '2026-11-26T10:00:00.000Z',
+    read: true,
+    items: [{ type: 'text', text: 'Inspect the conversation work groups and summarize changes.' }],
+  },
+  {
+    id: 'sticky-completed-turn',
+    role: 'assistant',
+    timestamp: '2026-11-26T10:00:01.000Z',
+    endedAt: Date.parse('2026-11-26T10:00:43.000Z'),
+    read: true,
+    finished: true,
+    items: [
+      {
+        type: 'text',
+        messagePhase: 'commentary',
+        text: 'Step 1 commentary: scanning the conversation scroll container and virtual row layout.\n\nThis paragraph provides vertical room between the outer worked-group header and the first nested tool group.',
+      },
+      ...makeSyntheticToolBatch('alpha', 36, 16, 8),
+      {
+        type: 'text',
+        messagePhase: 'commentary',
+        text: 'Step 2 commentary: finished inspecting the first batch of files.\n\nScrolling past the first activity group returns focus to the outer worked-group header before entering the second activity group.\n\nExtra spacing line to ensure clear separation between adjacent inner activity groups.',
+      },
+      ...makeSyntheticToolBatch('beta', 12, 6, 4),
+      {
+        type: 'text',
+        messagePhase: 'final_answer',
+        text: 'STICKY-FINAL-ANSWER-1: All work groups have been inspected.\n\nThis is the final answer prose for round 1. Once the reader scrolls into this section, no sticky work-group header may remain visible or occlude this text.\n\nSecond paragraph of the final answer to give comfortable scroll room.\n\nThird paragraph of the final answer so the viewport can rest fully inside the final answer.\n\nFourth paragraph of the final answer confirming unobstructed reading below the session header.\n\nFifth paragraph of the final answer.',
+      },
+    ],
+  },
+  {
+    id: 'sticky-user-standalone',
+    role: 'user',
+    timestamp: '2026-11-26T10:01:00.000Z',
+    read: true,
+    items: [{ type: 'text', text: 'Inspect standalone tool work without a final answer.' }],
+  },
+  {
+    id: 'sticky-standalone-turn',
+    role: 'assistant',
+    timestamp: '2026-11-26T10:01:01.000Z',
+    read: true,
+    finished: true,
+    items: [
+      ...makeSyntheticToolBatch('gamma', 8, 4, 2),
+      {
+        type: 'text',
+        messagePhase: 'commentary',
+        text: 'Standalone turn interrupted before final answer; its tool group remains directly expandable without a worked wrapper.',
+      },
+    ],
+  },
+  {
+    id: 'sticky-user-2',
+    role: 'user',
+    timestamp: '2026-11-26T10:02:00.000Z',
+    read: true,
+    items: [{ type: 'text', text: 'Run the live verification pass.' }],
+  },
+  {
+    id: 'sticky-live-turn',
+    role: 'assistant',
+    timestamp: '2026-11-26T10:02:01.000Z',
+    read: true,
+    finished: false,
+    items: [
+      {
+        type: 'text',
+        messagePhase: 'commentary',
+        text: 'Live step 1: verifying virtualized scroll anchoring.\n\nFirst block of in-progress commentary inside the live working group.',
+      },
+      ...makeSyntheticToolBatch('live-a', 10, 6, 2),
+      {
+        type: 'text',
+        messagePhase: 'commentary',
+        text: 'Live step 2: checking adjacent work groups and keyboard focus transfer.\n\nSecond block of in-progress commentary inside the live working group.\n\nAdditional commentary line to stretch the live working region well past one viewport.',
+      },
+      ...makeSyntheticToolBatch('live-b', 10, 4, 2),
+      {
+        type: 'text',
+        messagePhase: 'commentary',
+        text: 'Live step 3: continuing verification across long virtualized rows.\n\nThird block of in-progress commentary so the live working group exceeds viewport height even when inner activity groups stay collapsed.\n\nFourth block of in-progress commentary.\n\nFifth block of in-progress commentary.',
+      },
+      ...makeSyntheticToolBatch('live-c', 8, 4, 2),
+      {
+        type: 'text',
+        messagePhase: 'commentary',
+        text: 'Live step 4: wrapping up synthetic checks.\n\nSixth block of in-progress commentary.\n\nSeventh block of in-progress commentary.\n\nEighth block of in-progress commentary.',
+      },
+    ],
+  },
+];
+
+const stickyWorkGroupItems: SessionChatStreamViewProps['items'] = stickyWorkGroupMessages.map(
+  (message, turnIndex) => ({
+    type: 'message',
+    sessionId: stickySessionId,
+    message,
+    turnIndex,
+  })
+);
+
+function StickyWorkGroupSummaryPreview() {
+  return (
+    <ForceDesktopLayoutProvider>
+      <div {...stylex.props(stickyStoryStyles.shell)}>
+        <header data-testid="synthetic-session-header" {...stylex.props(stickyStoryStyles.header)}>
+          Synthetic Desktop Session Header
+        </header>
+        <div {...stylex.props(stickyStoryStyles.messageArea)}>
+          <SessionChatStreamView
+            sessionId={stickySessionId}
+            items={stickyWorkGroupItems}
+            lastAssistantMessageId="sticky-live-turn"
+            lastCompletedAssistantMessageId="sticky-completed-turn"
+            agentActivityLabel="Working"
+            renderMessageRow={({ message, sessionId: id }) => (
+              <MessageRowView message={message} sessionId={id} />
+            )}
+            xstyle={sceneStyles.fill}
+          />
+        </div>
+        <footer data-testid="synthetic-composer" {...stylex.props(stickyStoryStyles.composer)}>
+          Synthetic Composer Input Area
+        </footer>
+      </div>
+    </ForceDesktopLayoutProvider>
+  );
+}
+
+export const StickyWorkGroupSummary: Story = {
+  render: () => <StickyWorkGroupSummaryPreview />,
+};

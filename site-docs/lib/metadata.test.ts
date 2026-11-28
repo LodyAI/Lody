@@ -11,7 +11,14 @@ import {
   SITE_LOCALES,
   switchSiteLocalePath,
 } from '../src/site-pages/shared.ts';
+import {
+  landingJsonLd,
+  landingMetaDescription,
+  landingPageTitle,
+  landingSeoKeywords,
+} from './landing-seo.ts';
 import { brandTitle, pageHead } from './metadata.ts';
+import { appOwnedRel, isAppOwnedHref } from './site-url.mjs';
 
 await test('brandTitle appends | Lody when the title is unbranded', () => {
   assert.equal(brandTitle('Introduction'), 'Introduction | Lody');
@@ -124,6 +131,8 @@ await test('locale path helpers handle all 8 locales and zh-hant vs zh prefix pr
   );
   assert.equal(switchSiteLocalePath('/ja', 'en'), '/');
   assert.equal(switchSiteLocalePath('/', 'ru'), '/ru');
+  assert.equal(switchSiteLocalePath('/home', 'ja'), '/ja');
+  assert.equal(switchSiteLocalePath('/zh/home/', 'en'), '/');
   assert.equal(switchSiteLocalePath('/fr/docs/quickstart', 'es'), '/es/docs/quickstart');
 
   assert.equal(localePrefix('en'), '');
@@ -145,4 +154,65 @@ await test('page metadata never rewrites image URLs as directory pages', () => {
       new URL(image, 'https://lody.ai').toString()
     );
   }
+});
+
+await test('noindex compatibility pages can omit cross-page canonical and hreflang signals', () => {
+  const head = pageHead({
+    title: 'Lody - Run your agents in parallel, safely',
+    path: '/home',
+    locale: 'en-US',
+    canonical: false,
+    robots: { index: false, follow: true },
+  });
+  assert.equal(head.meta.find((entry) => entry.name === 'robots')?.content, 'noindex, follow');
+  assert.equal(
+    head.meta.some((entry) => entry.property === 'og:url'),
+    false
+  );
+  assert.deepEqual(head.links, []);
+});
+
+await test('app-owned auth entrypoints receive nofollow without losing existing rel tokens', () => {
+  assert.equal(isAppOwnedHref('/login'), true);
+  assert.equal(isAppOwnedHref('/login?next=%2Fapp'), true);
+  assert.equal(isAppOwnedHref('https://lody.ai/login'), true);
+  assert.equal(isAppOwnedHref('/docs/quickstart'), false);
+
+  assert.equal(appOwnedRel('/login'), 'nofollow');
+  assert.equal(appOwnedRel('/login', 'noreferrer'), 'noreferrer nofollow');
+  assert.equal(appOwnedRel('/login', 'nofollow noreferrer'), 'nofollow noreferrer');
+  assert.equal(appOwnedRel('/docs/quickstart', 'noreferrer'), 'noreferrer');
+});
+
+await test('landing SEO maps localized primary keywords, titles, descriptions, and JSON-LD inLanguage across all 8 locales', () => {
+  const titles = new Set();
+  const descriptions = new Set();
+
+  for (const locale of SITE_LOCALES) {
+    const keywords = landingSeoKeywords(locale);
+    const title = landingPageTitle(locale);
+    const description = landingMetaDescription(locale);
+    const jsonLd = landingJsonLd(locale);
+
+    assert.ok(title.startsWith('Lody'), `Landing title must lead with brand for ${locale}`);
+    assert.equal(brandTitle(title), title, `Landing title must not double-brand for ${locale}`);
+    assert.ok(
+      title.toLowerCase().includes(keywords.primary.toLowerCase()),
+      `Landing title for ${locale} ("${title}") must include native primary keyword "${keywords.primary}"`
+    );
+    assert.ok(
+      keywords.secondary.length >= 5,
+      `Landing keyword map for ${locale} should include native secondary keywords`
+    );
+    assert.equal(jsonLd.inLanguage, localeCode(locale));
+    assert.equal(jsonLd.description, description);
+    assert.equal(jsonLd.url, `https://lody.ai${localePrefix(locale)}/`);
+    assert.equal(Array.isArray(jsonLd.featureList) && jsonLd.featureList.length, 12);
+
+    titles.add(title);
+    descriptions.add(description);
+  }
+
+  assert.equal(titles.size, SITE_LOCALES.length);
+  assert.equal(descriptions.size, SITE_LOCALES.length);
 });

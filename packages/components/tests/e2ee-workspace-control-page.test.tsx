@@ -6,6 +6,7 @@ import zhCN from '../../../locales/zh_CN.json';
 import { ClientCustodyError } from '@lody/e2ee-core/services';
 import { classifyE2eeControlFailure } from '../src/lib/e2ee-control-failure';
 import { E2eeMemberActions } from '../src/components/pages/e2ee-member-actions';
+import { E2eeLostAccess } from '../src/components/pages/e2ee-lost-access';
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -735,7 +736,7 @@ describe('QR camera', () => {
       facingMode: { ideal: 'environment' },
       width: { ideal: 720 },
     });
-    expect(probe.states.at(-1)).toBe('unavailable');
+    expect(probe.states.at(-1)).toBe('denied');
     await probe.unmount();
   });
 
@@ -751,5 +752,127 @@ describe('QR camera', () => {
     ]);
     expect(probe.states.at(-1)).toBe('unavailable');
     await probe.unmount();
+  });
+});
+
+describe('E2eeLostAccess delete confirmation guardrail', () => {
+  it('never enables delete confirmation when workspaceName is empty or whitespace', () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const submit = vi.fn().mockResolvedValue(undefined);
+    act(() =>
+      root!.render(
+        withTestI18n(
+          <E2eeLostAccess
+            workspaceId="ws-empty"
+            workspaceName=""
+            accountRole="owner"
+            removal={{
+              submit,
+              listed: async () => true,
+              refresh: () => {},
+            }}
+            onBackToWorkspaces={() => {}}
+            onRemoved={() => {}}
+          />,
+          testI18n
+        )
+      )
+    );
+    const deleteBtn = container.querySelector<HTMLButtonElement>(
+      '[data-testid="e2ee-lost-access-delete"]'
+    );
+    expect(deleteBtn).not.toBeNull();
+    act(() => deleteBtn!.click());
+    const confirmSubmit = container.querySelector<HTMLButtonElement>(
+      '[data-testid="e2ee-lost-access-submit"]'
+    );
+    expect(confirmSubmit).not.toBeNull();
+    expect(confirmSubmit!.disabled).toBe(true);
+    act(() => confirmSubmit!.click());
+    expect(submit).not.toHaveBeenCalled();
+  });
+});
+
+describe('E2eeWorkspaceControlPage mobile drill-down navigation', () => {
+  it('shows the grouped category menu on narrow viewports and drills into section details', () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: query.includes('max-width: 720px'),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    });
+    try {
+      const props = render({ workspaceName: 'Cipher Lab', onOpen: vi.fn() });
+      expect(container!.querySelector('[data-testid="e2ee-mobile-menu"]')).not.toBeNull();
+      expect(container!.querySelector('[data-testid="e2ee-workspace-control"]')?.textContent).toBe(
+        'e2ee.control.title'
+      );
+      expect(
+        container!.querySelector('[data-testid="e2ee-mobile-identity"]')?.textContent
+      ).toContain('Cipher Lab');
+      expect(container!.querySelectorAll('[data-testid="e2ee-mobile-menu"] button')).toHaveLength(
+        5
+      );
+      const menu = container!.querySelector('[data-testid="e2ee-mobile-menu"]')!;
+      const open = button('e2ee.control.openWorkspace')!;
+      expect(open).toBeDefined();
+      expect(menu.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      act(() => open.click());
+      expect(props.onOpen).toHaveBeenCalledTimes(1);
+      act(() =>
+        (container!.querySelector('[data-console-tab="members"]') as HTMLButtonElement).click()
+      );
+      expect(container!.querySelector('[data-testid="e2ee-mobile-menu"]')).toBeNull();
+      expect(container!.querySelector('[data-testid="e2ee-workspace-control"]')?.textContent).toBe(
+        'e2ee.console.tabs.members'
+      );
+      act(() =>
+        (container!.querySelector('button[aria-label="common.back"]') as HTMLButtonElement).click()
+      );
+      expect(container!.querySelector('[data-testid="e2ee-mobile-menu"]')).not.toBeNull();
+      expect(props.onBack).not.toHaveBeenCalled();
+      act(() =>
+        (
+          container!.querySelector('button[aria-label="e2ee.control.back"]') as HTMLButtonElement
+        ).click()
+      );
+      expect(props.onBack).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        value: originalMatchMedia,
+      });
+    }
+  });
+
+  it('opens directly in detail view on narrow viewports when initialTab is set', () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: query.includes('max-width: 720px'),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    });
+    try {
+      render({ workspaceName: 'Cipher Lab', initialTab: 'members' });
+      expect(container!.querySelector('[data-testid="e2ee-mobile-menu"]')).toBeNull();
+      expect(container!.querySelector('[data-testid="e2ee-workspace-control"]')?.textContent).toBe(
+        'e2ee.console.tabs.members'
+      );
+    } finally {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        value: originalMatchMedia,
+      });
+    }
   });
 });

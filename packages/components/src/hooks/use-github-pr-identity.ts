@@ -9,6 +9,21 @@ import { withGitHubTokenRetry, withGitHubOperationTokenRetry } from '@/lib/githu
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
 
+const HOSTED_UNLINKED_ERROR_CODES = new Set([
+  'repo_not_linked',
+  'installation_not_found',
+  'repo_not_authorized',
+]);
+
+function isHostedUnlinkedTokenError(error: unknown): error is Error {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string' &&
+    HOSTED_UNLINKED_ERROR_CODES.has((error as { code: string }).code)
+  );
+}
+
 /** Hosted identity authorizes writes; anonymous GitHub access only authorizes reads. */
 export function useGitHubPrIdentity({
   workspaceId,
@@ -51,21 +66,29 @@ export function useGitHubPrIdentity({
   const resolveLegacy = useLegacyWorkspaceMutation(
     cloudOperations.github.resolveLegacyPrRepositoryIdentity
   );
-  const linkedRepositoryId = serverVersions?.repositoryId;
-  const ready =
-    hasInputs &&
-    !serverVersions?.identityPending &&
-    (!sessionId ||
-      (typeof linkedRepositoryId === 'number' && Boolean(serverVersions?.repoFullName)));
-  const unresolved = hasInputs && !ready && serverVersions !== undefined;
   const key = JSON.stringify([workspaceId, sessionId, requestedRepoFullName, prNumber]);
+  const [hostedAccessDenied, setHostedAccessDenied] = useState<{
+    key: string;
+    error: Error;
+  } | null>(null);
   const [publicRepository, setPublicRepository] = useState<{ key: string; id: number } | null>(
     null
   );
   const [publicAttempt, setPublicAttempt] = useState(0);
+  const [publicProbeDoneKey, setPublicProbeDoneKey] = useState<string | null>(null);
+  const isHostedAccessDenied = !sessionId && hostedAccessDenied?.key === key;
+  const linkedRepositoryId = serverVersions?.repositoryId;
+  const ready =
+    hasInputs &&
+    !isHostedAccessDenied &&
+    !serverVersions?.identityPending &&
+    (!sessionId ||
+      (typeof linkedRepositoryId === 'number' && Boolean(serverVersions?.repoFullName)));
+  const unresolved = hasInputs && !ready && (isHostedAccessDenied || serverVersions !== undefined);
   useEffect(() => {
     if (!unresolved || !visible || !requestedRepoFullName) return undefined;
     const controller = new AbortController();
+    const probeKey = `${key}:${publicAttempt}`;
     void (async () => {
       try {
         // A name is enough to browse public content, never to acquire credentials.
@@ -94,6 +117,8 @@ export function useGitHubPrIdentity({
         if (!controller.signal.aborted) setPublicRepository({ key, id: repository.id! });
       } catch {
         // Private, missing, rate-limited and unreachable repositories retain the identity error.
+      } finally {
+        if (!controller.signal.aborted) setPublicProbeDoneKey(probeKey);
       }
     })();
     return () => controller.abort();
@@ -104,15 +129,20 @@ export function useGitHubPrIdentity({
     (linkedRepositoryId === undefined || publicRepository.id === linkedRepositoryId);
   const repositoryId = publicRead ? publicRepository.id : linkedRepositoryId;
   const runRead = useCallback<typeof withGitHubTokenRetry>(
-    (workspace, repo, read, id) => {
+    async (workspace, repo, read, id) => {
       if (publicRead) return read('');
       if (!ready)
-        return Promise.reject(
-          new Error('GitHub repository identity is not ready; no operation was attempted.')
-        );
-      return withGitHubTokenRetry(workspace, repo, read, id);
+        throw new Error('GitHub repository identity is not ready; no operation was attempted.');
+      try {
+        return await withGitHubTokenRetry(workspace, repo, read, id);
+      } catch (err) {
+        if (!sessionId && isHostedUnlinkedTokenError(err)) {
+          setHostedAccessDenied({ key, error: err });
+        }
+        throw err;
+      }
     },
-    [publicRead, ready]
+    [key, publicRead, ready, sessionId]
   );
   const runOperation = useCallback<typeof withGitHubOperationTokenRetry>(
     (workspace, repo, operation, run, id) => {
@@ -127,7 +157,10 @@ export function useGitHubPrIdentity({
   );
   const retry = useCallback(
     async (retryPublic = true) => {
-      if (retryPublic) setPublicAttempt((attempt) => attempt + 1);
+      if (retryPublic) {
+        setHostedAccessDenied(null);
+        setPublicAttempt((attempt) => attempt + 1);
+      }
       if (!hasInputs || !sessionId || !isAuthenticated) return;
       try {
         await resolveLegacy({
@@ -160,18 +193,19 @@ export function useGitHubPrIdentity({
     // visible, retryable blocked state, never permission to fall back to a name.
     void retry(false).catch(() => {});
   }, [isAuthenticated, key, retry, sessionId, unresolved, visible]);
-  const error = useMemo(
-    () =>
-      unresolved && !publicRead
-        ? new Error(
-            t(
-              'sessions.prTab.repositoryIdentityUnresolved',
-              'Cannot verify this session’s repository identity. GitHub operations are paused. Ask a workspace administrator to check Settings > GitHub, the active GitHub App installation, repository access and the original PR association. Background association stops after 6 failed attempts; after fixing access, restart this machine’s Lody background agent and retry. Signing in again does not repair a missing repository link.'
-            )
-          )
-        : null,
-    [t, unresolved, publicRead]
-  );
+  const publicProbeSettled = publicProbeDoneKey === `${key}:${publicAttempt}`;
+  const error = useMemo(() => {
+    if (!unresolved || publicRead) return null;
+    if (isHostedAccessDenied) {
+      return publicProbeSettled ? hostedAccessDenied.error : null;
+    }
+    return new Error(
+      t(
+        'sessions.prTab.repositoryIdentityUnresolved',
+        'Cannot verify this session’s repository identity. GitHub operations are paused. Ask a workspace administrator to check Settings > GitHub, the active GitHub App installation, repository access and the original PR association. Background association stops after 6 failed attempts; after fixing access, restart this machine’s Lody background agent and retry. Signing in again does not repair a missing repository link.'
+      )
+    );
+  }, [hostedAccessDenied, isHostedAccessDenied, publicProbeSettled, publicRead, t, unresolved]);
   return {
     serverVersions,
     repositoryId,

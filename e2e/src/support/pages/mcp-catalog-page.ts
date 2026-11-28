@@ -133,14 +133,101 @@ export class McpCatalogPage {
     });
   }
 
-  async deleteSyntheticServer(): Promise<void> {
+  async editSyntheticServerConfiguration(): Promise<void> {
+    const settings = await this.openMcpSettings();
+    const surface = settings.locator('[data-settings-surface]');
+    await surface.getByRole('button', { name: /^(Edit|编辑)$/u }).click();
+    const editor = this.page.getByRole('dialog', {
+      name: /^(Edit MCP server|编辑 MCP 服务器)$/u,
+    });
+    await editor.getByLabel(/^(Server name|服务器名称)$/u).fill(this.fixture.editedServerName);
+    const argumentsField = editor
+      .getByText(/^(Arguments|参数)$/u)
+      .locator('..')
+      .locator('..');
+    await argumentsField.getByRole('button', { name: /^(Add argument|添加参数)$/u }).click();
+    const argumentInputs = argumentsField.locator('input[placeholder="--flag"]');
+    await argumentInputs.nth(2).fill(this.fixture.editedMcpArgs[2]!);
+    await editor.getByRole('button', { name: /^(Save configuration|保存配置)$/u }).click();
+    await expect(settings.getByText(this.fixture.serverName, { exact: true })).toBeHidden({
+      timeout: 30_000,
+    });
+    await expect(settings.getByText(this.fixture.editedServerName, { exact: true })).toBeVisible();
+    await this.closeSettings(settings);
+  }
+
+  async sendFollowUpTurnInSameSession(): Promise<McpCatalogAcpEvent> {
+    const priorTurnSessions = this.fixture
+      .readAcpEvents()
+      .filter((event) => event.event === 'session-new' && event.purpose === 'turn');
+    const assistantResponses = this.page
+      .locator('[data-assistant-turn-id]')
+      .getByText(RESPONSE_TEXT, { exact: true });
+    const priorResponseCount = await assistantResponses.count();
+    await this.page
+      .locator('[data-keyboard-nav="composer"]')
+      .fill('Run a follow-up turn with the edited synthetic MCP.');
+    await this.page.getByRole('button', { name: /^(Send|发送)$/u }).click();
+    await expect(assistantResponses).toHaveCount(priorResponseCount + 1, { timeout: 60_000 });
+    await expect(assistantResponses.last()).toBeVisible({ timeout: 60_000 });
+    await expect
+      .poll(
+        () =>
+          this.fixture
+            .readAcpEvents()
+            .filter((event) => event.event === 'session-new' && event.purpose === 'turn').length,
+        { timeout: 30_000, intervals: [50, 100, 250, 500] }
+      )
+      .toBeGreaterThan(priorTurnSessions.length);
+    const nextSession = this.fixture
+      .readAcpEvents()
+      .filter((event) => event.event === 'session-new' && event.purpose === 'turn')
+      .at(-1);
+    expect(nextSession?.sessionId).toEqual(expect.any(String));
+    await expect
+      .poll(
+        () =>
+          this.fixture
+            .readAcpEvents()
+            .some(
+              (event) => event.event === 'prompt-end' && event.sessionId === nextSession?.sessionId
+            ),
+        { timeout: 30_000, intervals: [50, 100, 250, 500] }
+      )
+      .toBe(true);
+    return nextSession!;
+  }
+
+  async expectReconfiguredServerAtNextAcpStartup(
+    priorEvent: McpCatalogAcpEvent,
+    nextEvent: McpCatalogAcpEvent
+  ): Promise<void> {
+    expect(nextEvent.sessionId).not.toBe(priorEvent.sessionId);
+    expect(nextEvent.pid).not.toBe(priorEvent.pid);
+    expect(this.externalServers(nextEvent)).toEqual([
+      {
+        name: this.fixture.editedServerName,
+        command: this.fixture.mcpCommand,
+        args: this.fixture.editedMcpArgs,
+        env: [],
+      },
+    ]);
+    const mcpStarts = await this.fixture.waitForMcpEvents('process-start', 2);
+    expect(mcpStarts.at(-1)?.pid).not.toBe(mcpStarts[0]?.pid);
+    await Promise.all([
+      this.fixture.expectAgentExited(priorEvent.pid),
+      this.fixture.expectMcpExited(mcpStarts[0]!.pid),
+    ]);
+  }
+
+  async deleteSyntheticServer(serverName = this.fixture.serverName): Promise<void> {
     const settings = await this.openMcpSettings();
     const surface = settings.locator('[data-settings-surface]');
     await surface.getByRole('button', { name: /^(Remove|移除)$/u }).click();
     const confirmation = this.page.getByRole('alertdialog');
-    await expect(confirmation.getByText(this.fixture.serverName)).toBeVisible();
+    await expect(confirmation.getByText(serverName)).toBeVisible();
     await confirmation.getByRole('button', { name: /^(Remove|移除)$/u }).click();
-    await expect(settings.getByText(this.fixture.serverName, { exact: true })).toBeHidden({
+    await expect(settings.getByText(serverName, { exact: true })).toBeHidden({
       timeout: 30_000,
     });
     await expect(settings.getByText(/^(No MCP servers yet|还没有 MCP 服务器)$/u)).toBeVisible();
@@ -166,7 +253,8 @@ export class McpCatalogPage {
   }
 
   async deleteSessionAndReleaseAgent(event: McpCatalogAcpEvent): Promise<void> {
-    const mcpProcess = await this.fixture.waitForMcpEvent('process-start');
+    const mcpProcesses = await this.fixture.waitForMcpEvents('process-start', 1);
+    const mcpProcess = mcpProcesses.at(-1)!;
     const match = /#\/local\/sessions\/([^?]+)/u.exec(this.page.url());
     if (!match?.[1]) throw new Error(`Expected a Session route, received ${this.page.url()}`);
     const sessionId = decodeURIComponent(match[1]);
@@ -222,7 +310,10 @@ export class McpCatalogPage {
     await expect(settings).toBeHidden();
     if (/#\/local\/sessions\/[^/?#]+/u.test(this.page.url())) {
       await expect(
-        this.page.locator('[data-assistant-turn-id]').getByText(RESPONSE_TEXT, { exact: true })
+        this.page
+          .locator('[data-assistant-turn-id]')
+          .getByText(RESPONSE_TEXT, { exact: true })
+          .last()
       ).toBeVisible({ timeout: 30_000 });
       return;
     }

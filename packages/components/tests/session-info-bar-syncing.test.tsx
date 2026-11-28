@@ -2,7 +2,11 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SESSION_GOAL_COMMANDS, type SessionGoalMessage } from '@lody/shared';
+import {
+  SESSION_GOAL_COMMANDS,
+  type RoostHistorySyncState,
+  type SessionGoalMessage,
+} from '@lody/shared';
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import type { SessionMachineInfo } from '../src/components/sessions/session-machine-info';
 import { createTestI18n, withTestI18n } from './test-i18n';
@@ -52,6 +56,34 @@ describe('SessionInfoBar ambient information', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+  });
+
+  it('shows Roost history status only when there is something to report', () => {
+    const renderSync = (historySync: RoostHistorySyncState) =>
+      act(() =>
+        root.render(
+          withTestI18n(
+            <SessionInfoBar {...CONTEXT_LESS_PROPS} historySync={historySync} />,
+            testI18n
+          )
+        )
+      );
+    for (const historySync of [
+      { source: 'machine', phase: 'idle' },
+      { source: 'streams', phase: 'ready' },
+    ] as const) {
+      renderSync(historySync);
+      expect(container.textContent).toBe('');
+      expect(container.querySelector('[role="status"]')).toBeNull();
+    }
+    renderSync({ source: 'machine', phase: 'pending' });
+    const pending = container.querySelector('[role="status"]')?.textContent;
+    expect(pending).toBe('Waiting for cloud publication');
+    renderSync({ source: 'streams', phase: 'ready', newerVersionPending: true });
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'Showing the previous version'
+    );
+    expect(container.textContent).not.toContain('History from');
   });
 
   it.each([false, true])(

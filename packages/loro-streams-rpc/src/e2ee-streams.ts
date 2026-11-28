@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Fiber, Queue, Result, Schedule } from 'effect';
+import { Cause, Deferred, Effect, Fiber, Queue, Result } from 'effect';
 import { z } from 'zod';
 import type {
   E2eeDispatchAck,
@@ -8,6 +8,7 @@ import type {
 import {
   isTransientGatewayStatus,
   TRANSIENT_GATEWAY_RETRY_DELAYS_MS,
+  transientGatewayRetryDelayMs,
 } from '@lody/shared/transient-gateway';
 import type {
   LoroJsonStreamState,
@@ -44,6 +45,17 @@ export type E2eeRpcTiming = {
 
 const gatewayStatus = (cause: unknown) =>
   cause instanceof Error && 'status' in cause ? cause.status : undefined;
+const STREAM_RECONNECT_BASE_MS = 1_000;
+const STREAM_RECONNECT_CAP_MS = 30_000;
+const nextReconnectDelayMs = (attempt: number): number => {
+  const ceiling = Math.min(STREAM_RECONNECT_CAP_MS, STREAM_RECONNECT_BASE_MS * 2 ** attempt);
+  const sample = Math.random();
+  const clamped = Number.isFinite(sample) ? Math.min(1, Math.max(0, sample)) : 0.5;
+  return Math.round(clamped * ceiling);
+};
+const isStreamNotFound = (cause: unknown): boolean =>
+  gatewayStatus(cause) === 404 ||
+  (cause instanceof Error && /stream[_ ]not[_ ]found|\b404\b/i.test(cause.message));
 /**
  * Retry on an explicit gateway 502/503/504 with the shared short backoff; refusals, other
  * statuses and raw network failures fail at once. Envelope appends are idempotent by id:
@@ -57,7 +69,7 @@ export const retryTransientGateway = <A, E, R>(effect: Effect.Effect<A, E, R>) =
       if (Result.isSuccess(attempt)) return attempt.success;
       if (!isTransientGatewayStatus(gatewayStatus(attempt.failure)))
         return yield* Effect.fail(attempt.failure);
-      yield* Effect.sleep(delay);
+      yield* Effect.sleep(transientGatewayRetryDelayMs(delay));
     }
     return yield* effect;
   });
@@ -120,7 +132,7 @@ const readOwned = (
           });
           return owner.raw;
         },
-        catch: () => new Error('e2ee_rpc_transport'),
+        catch: (cause) => cause,
       }),
     (owner) =>
       Effect.promise(async () => {
@@ -196,7 +208,9 @@ export const makeEncryptedStreamsChannel = Effect.fnUntraced(function* <Input, O
       /* Observational only. */
     }
   };
+  let reconnectAttempt = 0;
   const read = readOwned(options.client, responseStream, state, (batch) => {
+    reconnectAttempt = 0;
     for (const message of batch.messages) {
       if (closed) return;
       const parsed = envelopeSchema.safeParse(message);
@@ -206,9 +220,9 @@ export const makeEncryptedStreamsChannel = Effect.fnUntraced(function* <Input, O
       Queue.offerUnsafe(replies, { envelope: parsed.data, call });
     }
   }).pipe(
-    Effect.catch(() => {
-      responseNeedsEnsure = true;
-      return Effect.sleep('1 second');
+    Effect.catch((cause) => {
+      if (isStreamNotFound(cause)) responseNeedsEnsure = true;
+      return Effect.sleep(nextReconnectDelayMs(reconnectAttempt++));
     })
   );
   const reader = yield* Effect.forkIn(
@@ -216,11 +230,20 @@ export const makeEncryptedStreamsChannel = Effect.fnUntraced(function* <Input, O
       while (true) {
         if (closed) return;
         if (responseNeedsEnsure) {
-          yield* Effect.tryPromise({
-            try: () => options.client.ensureJsonStream(responseStream, 86400),
-            catch: () => new Error('e2ee_rpc_response_transport'),
-          }).pipe(Effect.retry(Schedule.spaced('1 second')));
-          responseNeedsEnsure = false;
+          while (!closed) {
+            const ensured = yield* Effect.result(
+              Effect.tryPromise({
+                try: () => options.client.ensureJsonStream(responseStream, 86400),
+                catch: (cause) => cause,
+              })
+            );
+            if (Result.isSuccess(ensured)) {
+              responseNeedsEnsure = false;
+              break;
+            }
+            yield* Effect.sleep(nextReconnectDelayMs(reconnectAttempt++));
+          }
+          if (closed) return;
         }
         yield* read;
       }
@@ -237,7 +260,7 @@ export const makeEncryptedStreamsChannel = Effect.fnUntraced(function* <Input, O
   );
   return {
     /** Receipt timeout is an acceleration budget; the caller always keeps durable dispatch active. */
-    send: (prepared: E2eePreparedDispatch, input: Input, timeoutMs = 800) =>
+    send: (prepared: E2eePreparedDispatch, input: Input, timeoutMs = 2500) =>
       Effect.gen(function* () {
         if (
           closed ||
@@ -345,16 +368,27 @@ export const makeEncryptedRpcListener = Effect.fnUntraced(function* (options: {
     );
   yield* Effect.forkIn(
     Effect.gen(function* () {
+      let reconnectAttempt = 0;
       while (true) {
         if (closed) return;
         if (needsEnsure) {
-          yield* Effect.tryPromise({
-            try: () => options.client.ensureJsonStream(stream, 86400),
-            catch: () => new Error('e2ee_rpc_transport'),
-          }).pipe(Effect.retry(Schedule.spaced('1 second')));
-          needsEnsure = false;
+          while (!closed) {
+            const ensured = yield* Effect.result(
+              Effect.tryPromise({
+                try: () => options.client.ensureJsonStream(stream, 86400),
+                catch: (cause) => cause,
+              })
+            );
+            if (Result.isSuccess(ensured)) {
+              needsEnsure = false;
+              break;
+            }
+            yield* Effect.sleep(nextReconnectDelayMs(reconnectAttempt++));
+          }
+          if (closed) return;
         }
         yield* readOwned(options.client, stream, state, (batch) => {
+          reconnectAttempt = 0;
           if (closed) return;
           for (const message of batch.messages) {
             const parsed = envelopeSchema.safeParse(message);
@@ -372,9 +406,9 @@ export const makeEncryptedRpcListener = Effect.fnUntraced(function* (options: {
             }
           }
         }).pipe(
-          Effect.catch(() => {
-            needsEnsure = true;
-            return Effect.sleep('1 second');
+          Effect.catch((cause) => {
+            if (isStreamNotFound(cause)) needsEnsure = true;
+            return Effect.sleep(nextReconnectDelayMs(reconnectAttempt++));
           })
         );
       }

@@ -19,42 +19,48 @@ const changelogCopy: Record<
 > = {
   en: {
     title: 'Changelog',
-    description: 'Track product updates, improvements, and fixes released across Lody.',
+    description:
+      'Release notes and updates for Lody desktop, mobile, CLI, and ACP AI coding agent integrations.',
     releaseNotesFallback: (version) => `Lody ${version} release notes.`,
   },
   zh: {
     title: '更新日志',
-    description: '追踪 Lody 的产品更新、改进和修复。',
+    description: '追踪 Lody 桌面端、移动端、CLI 及 AI 编程 Agent 集成的版本更新与修复记录。',
     releaseNotesFallback: (version) => `Lody ${version} 版本更新说明。`,
   },
   'zh-hant': {
     title: '更新日誌',
-    description: '追蹤 Lody 的產品更新、改進與修復。',
+    description: '追蹤 Lody 桌面端、行動端、CLI 與 AI 程式設計 Agent 整合的版本更新與修復紀錄。',
     releaseNotesFallback: (version) => `Lody ${version} 版本更新說明。`,
   },
   ja: {
     title: '変更履歴',
-    description: 'Lody の製品アップデート、改善点、不具合修正の履歴をご覧いただけます。',
+    description:
+      'Lody デスクトップ・モバイル・CLI および AI コーディングエージェント連携のリリースノートと更新履歴。',
     releaseNotesFallback: (version) => `Lody ${version} リリースノート。`,
   },
   ko: {
     title: '변경 로그',
-    description: 'Lody의 제품 업데이트, 개선 사항 및 버그 수정을 확인하세요.',
+    description:
+      'Lody 데스크톱, 모바일, CLI 및 AI 코딩 에이전트 연동의 버전별 업데이트와 수정 내역을 확인하세요.',
     releaseNotesFallback: (version) => `Lody ${version} 릴리스 노트.`,
   },
   es: {
     title: 'Registro de cambios',
-    description: 'Sigue las actualizaciones, mejoras y correcciones publicadas en Lody.',
+    description:
+      'Notas de versión y actualizaciones de Lody para escritorio, móvil, CLI e integraciones de agentes de código IA.',
     releaseNotesFallback: (version) => `Notas de la versión Lody ${version}.`,
   },
   fr: {
     title: 'Journal des modifications',
-    description: 'Suivez les mises à jour produit, améliorations et correctifs publiés dans Lody.',
+    description:
+      'Notes de version et mises à jour de Lody pour ordinateur, mobile, CLI et intégrations d’agents de code IA.',
     releaseNotesFallback: (version) => `Notes de version de Lody ${version}.`,
   },
   ru: {
     title: 'История изменений',
-    description: 'Следите за обновлениями продукта, улучшениями и исправлениями в Lody.',
+    description:
+      'Примечания к выпускам и обновления Lody для компьютера, мобильных приложений, CLI и интеграций ИИ-агентов.',
     releaseNotesFallback: (version) => `Примечания к выпуску Lody ${version}.`,
   },
 };

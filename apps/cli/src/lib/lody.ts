@@ -7,6 +7,7 @@ import type { AuthorityStamp } from './e2ee/authority-clock';
 import { LoroDocumentManager } from '@/lib/loro/doc';
 import { MachineRuntime } from '@/lib/machine-runtime';
 import { createSorbetCredentialsHandler } from '@/lib/sorbet-credentials';
+import { startSorbetStoreMirrorLoop, type SorbetStoreMirrorLoop } from '@/lib/sorbet-store-mirror';
 import { Logger } from '@/utils/logger';
 import {
   CliType,
@@ -83,6 +84,7 @@ interface LodyOptions {
     upgrade?: ManagedDaemonUpgradeOptions
   ) => Promise<string>;
   closeSessionTerminals?: (sessionId: SessionId) => void;
+  hasSessionTerminals?: (sessionId: SessionId, workdir?: string) => boolean;
   /** See `MessageHandlerConfig.readHostedPresenceStates`. */
   readHostedPresenceStates?: () => LodyPresenceStateMap[];
   cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
@@ -129,6 +131,8 @@ export class Lody {
   private pendingBuiltinAgentConfigRetryCliTypes = new Set<CliType>();
   private builtinAgentConfigRetryAttempt = 0;
   private builtinAgentRegistrationStarted = false;
+  /** Publishes this machine's Sorbet store to its Machine Flock; see `sorbet-store-mirror.ts`. */
+  private readonly sorbetStoreMirror: SorbetStoreMirrorLoop;
 
   static async create(options: LodyOptions): Promise<Lody> {
     const handed = options.encryptedWorkspace;
@@ -352,6 +356,8 @@ export class Lody {
       throw error;
     });
     const lody = new Lody(options, manager, encryptedExecution);
+    const history = options.cloudPort.access.roostHistory;
+    if (history) manager.enableRoostCloudHistory(options.machineId, history);
     lody.encryptedWorkspace = e2ee;
     if (e2ee)
       lody.clientLossReceipt = daemonLossObserver.register(
@@ -387,6 +393,11 @@ export class Lody {
     this.machineId = options.machineId;
     this.machineName = options.machineName;
     this.supportRegistryAgentTypes = options.supportRegistryAgentTypes ?? [];
+    this.sorbetStoreMirror = startSorbetStoreMirrorLoop({
+      document: documentManager,
+      machineId: this.machineId,
+      logger: this.logger,
+    });
     this.runtime = new MachineRuntime({
       sessionManagerFactory: () =>
         new SessionManager(
@@ -401,6 +412,7 @@ export class Lody {
       memoryPressure: options.memoryPressure,
       handlerConfig: {
         sorbetCredentials: createSorbetCredentialsHandler(documentManager, this.machineId),
+        refreshSorbetStoreMirror: () => this.sorbetStoreMirror.refresh(),
         token: this.token,
         encryptedWorkspace: options.contentMode === 'e2ee',
         encryptedExecution: options.contentMode === 'e2ee' ? encryptedExecution : undefined,
@@ -418,6 +430,7 @@ export class Lody {
           ? { localWorkspaceCatalog: options.localWorkspaceCatalog }
           : {}),
         closeSessionTerminals: options.closeSessionTerminals,
+        hasSessionTerminals: options.hasSessionTerminals,
         readHostedPresenceStates: options.readHostedPresenceStates,
         cleanupLocalProjectWorktreeSetupIfUnreferenced:
           options.cleanupLocalProjectWorktreeSetupIfUnreferenced,
@@ -461,6 +474,7 @@ export class Lody {
       (sessionId) => this.runtime.resolveSessionExecutionScope(sessionId)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
+    this.sorbetStoreMirror.start();
   }
 
   async registerAgent(cliTypes: CliType[]): Promise<void> {
@@ -640,6 +654,7 @@ export class Lody {
 
   cleanup = async () => {
     this.cleanedUp = true;
+    this.sorbetStoreMirror.stop();
     if (this.builtinAgentConfigRetryTimer) {
       clearTimeout(this.builtinAgentConfigRetryTimer);
       this.builtinAgentConfigRetryTimer = undefined;
@@ -667,6 +682,14 @@ export class Lody {
     signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
     return await this.runtime.dispatchLocalMachineRpc(message, signal);
+  }
+
+  async dispatchRemoteMachineRpcProxy(
+    message: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal,
+    deadlineAtMs?: number
+  ): Promise<LocalMachineRpcResponse> {
+    return await this.runtime.dispatchRemoteMachineRpcProxy(message, signal, deadlineAtMs);
   }
 
   isControlPlaneReady(): boolean {

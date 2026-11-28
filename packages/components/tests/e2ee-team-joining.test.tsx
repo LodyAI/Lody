@@ -697,6 +697,38 @@ describe('encrypted team joining', () => {
     await settle();
     expect(row()).toBeNull();
   });
+  it('clears a recovered delivery row promptly after manual retry succeeds without waiting 10s', async () => {
+    const recoveredId = 'recovered-member-1';
+    let deliveries: {
+      requestId: string;
+      state: 'pending' | 'delivering' | 'delivered' | 'failed';
+      code?: string;
+    }[] = [{ requestId: recoveredId, state: 'failed', code: 'e2ee_key_not_sent' }];
+    await render(
+      <E2eeTeamSettings
+        workspaceId="team"
+        runtime={{
+          createMemberInvitation: async () => offer,
+          memberJoinRequests: async () => empty,
+          approveMemberJoin: async () => ({ admitted: true, keyPending: false }),
+          memberKeyDeliveries: async () => ({ items: deliveries }),
+          retryMemberKeyDelivery: async (_workspace, id) => {
+            deliveries = [{ requestId: id, state: 'delivered' }];
+            return { requestId: id, state: 'delivering' as const };
+          },
+          rejectMemberJoin: async () => ({ state: 'rejected' }),
+          revokeMemberInvitation: async () => ({ revoked: true }),
+        }}
+      />
+    );
+    const row = () => container.querySelector(`[data-key-delivery-id="${recoveredId}"]`);
+    expect(row()?.textContent).toContain('e2ee.team.keyFailed');
+    await act(async () => button('e2ee.team.keyRetry').click());
+    expect(row()?.textContent).toContain('e2ee.team.keySending');
+    await act(async () => vi.advanceTimersByTime(500));
+    await settle();
+    expect(row()).toBeNull();
+  });
   it('uses the shared member-role command and reports success only after it completes', async () => {
     let role: 'member' | 'admin' = 'member';
     const accepted = deferred<void>();
@@ -928,5 +960,237 @@ describe('encrypted team joining', () => {
     expect(button('e2ee.team.switchAccount')).toBeUndefined();
     expect(button('e2ee.team.signIn')).toBeUndefined();
     expect(onEmailVerificationRequested).not.toHaveBeenCalled();
+  });
+  it('wakes immediately on subscribePendingMemberRequests, orders pending requests above billing, copies links, and clears email/loadFailed', async () => {
+    const clipboard = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboard },
+    });
+    let onHint: (() => void) | undefined;
+    let unsubscribed = false;
+    let shouldFail = true;
+    let items: E2eeMemberReplies['pending']['items'] = [];
+    const emailOffer = { ...offer, mode: 'email' as const, email: 'member@synthetic.test' };
+    let pendingCalls = 0;
+    const runtime = {
+      createMemberInvitation: async () => emailOffer,
+      memberJoinRequests: async () => {
+        pendingCalls++;
+        if (shouldFail) throw new Error('offline');
+        return {
+          ...empty,
+          items,
+          invitations: [emailOffer],
+        };
+      },
+      subscribePendingMemberRequests: (_workspaceId: string, changed: () => void) => {
+        onHint = changed;
+        return () => {
+          unsubscribed = true;
+        };
+      },
+      approveMemberJoin: async () => ({ admitted: true, keyPending: true }),
+      rejectMemberJoin: async () => ({ state: 'rejected' as const }),
+      revokeMemberInvitation: async () => ({ revoked: true as const }),
+    };
+    await render(<E2eeTeamSettings workspaceId="team" runtime={runtime} />);
+    await settle();
+    expect(container.textContent).toContain('e2ee.team.loadFailed');
+    expect(pendingCalls).toBe(1);
+
+    // Push hint wakes read immediately without waiting 10s, clears loadFailed, and renders requests above billing.
+    shouldFail = false;
+    items = [application('req-1', 'link')];
+    await act(async () => onHint?.());
+    await settle();
+    expect(pendingCalls).toBe(2);
+    expect(container.textContent).not.toContain('e2ee.team.loadFailed');
+    expect(container.textContent).toContain('member@synthetic.test');
+    const html = container.innerHTML;
+    expect(html.indexOf('e2ee-join-request')).toBeLessThan(html.indexOf('seat quote'));
+
+    // One-click Copy link on active invitation row copies and shows Copied feedback.
+    const copyRow = container.querySelector<HTMLButtonElement>(
+      '[data-testid="e2ee-invitation-copy"]'
+    )!;
+    await act(async () => copyRow.click());
+    await settle();
+    expect(clipboard).toHaveBeenCalledWith(memberInvitationUrl(emailOffer));
+    expect(copyRow.textContent).toBe('e2ee.team.copied');
+
+    // Sending an email invitation clears the input field.
+    const input = container.querySelector('input[type="email"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        'new@synthetic.test'
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => button('e2ee.team.invite').click());
+    await settle();
+    expect(input.value).toBe('');
+
+    await act(async () => root.unmount());
+    expect(unsubscribed).toBe(true);
+    root = createRoot(container);
+  });
+  it('renders loading, error-retry, and desktop-required states in E2eeTeamSettingsHost instead of null', async () => {
+    // Missing runtime shows desktop-required notice.
+    await render(<E2eeTeamSettingsHost workspaceId="team" accountId="account" />);
+    expect(
+      container.querySelector('[data-testid="e2ee-team-host-desktop-required"]')
+    ).not.toBeNull();
+
+    // Pending ledgerView shows loading card, then failure shows retry card.
+    let failNext = true;
+    let calls = 0;
+    const pending = deferred<Awaited<ReturnType<E2eeWorkspaceRuntime['ledgerView']>>>();
+    const runtime = {
+      ledgerView: () => {
+        calls++;
+        if (calls === 1) return pending.promise;
+        if (failNext) return Promise.reject(new Error('unavailable'));
+        return Promise.resolve({
+          stateHex: '',
+          recordsHex: [],
+          status: {
+            workspaceId: 'team',
+            genesisHash: '11'.repeat(32),
+            length: 1,
+            headHash: '11'.repeat(32),
+            stateDigest: '22'.repeat(32),
+            epoch: 0,
+            rotationRequired: false,
+            deviceKind: 'recovery',
+            memberRole: 'owner',
+            hasDeviceCredential: true,
+            hasCurrentKey: true,
+            continuityPending: false,
+          },
+        });
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await render(<E2eeTeamSettingsHost runtime={runtime} workspaceId="team" accountId="account" />);
+    expect(container.querySelector('[data-testid="e2ee-team-host-loading"]')).not.toBeNull();
+
+    // Error state exposes retry button.
+    await render(
+      <E2eeTeamSettingsHost
+        runtime={{ ...runtime, ledgerView: runtime.ledgerView }}
+        workspaceId="team"
+        accountId="account"
+      />
+    );
+    await settle();
+    expect(container.querySelector('[data-testid="e2ee-team-host-error"]')).not.toBeNull();
+    failNext = false;
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="e2ee-team-host-retry"]')!.click()
+    );
+    await settle();
+    expect(
+      container.querySelector('[data-testid="e2ee-team-host-desktop-required"]')
+    ).not.toBeNull();
+  });
+
+  it('surfaces unauthorized and conflict on member approval instead of retryOriginal', async () => {
+    for (const code of ['e2ee_member_management_unauthorized', 'e2ee_member_management_conflict']) {
+      await render(
+        <E2eeTeamSettings
+          workspaceId="team"
+          runtime={{
+            createMemberInvitation: async () => offer,
+            memberJoinRequests: async () => ({
+              ...empty,
+              items: [application('applicant', 'link')],
+            }),
+            approveMemberJoin: async () => {
+              throw Object.assign(new Error(code), { code });
+            },
+            rejectMemberJoin: async () => ({ state: 'rejected' }),
+            revokeMemberInvitation: async () => ({ revoked: true }),
+          }}
+        />
+      );
+      await settle();
+      await act(async () =>
+        container.querySelector<HTMLButtonElement>('[data-testid="e2ee-join-approve"]')!.click()
+      );
+      await settle();
+      const expected = code.endsWith('unauthorized')
+        ? 'e2ee.team.error.unauthorized'
+        : 'e2ee.team.error.conflict';
+      expect(container.textContent).toContain(expected);
+      expect(container.textContent).not.toContain('e2ee.team.retryOriginal');
+    }
+  });
+
+  it('offers direct open for existing members and separates expired links from pin mismatch', async () => {
+    const opened: Array<{ slug: string | null; id?: string }> = [];
+    const baseRuntime = {
+      prepareMemberJoin: async () => ({ requestId: 'r1', state: 'pending' as const }),
+      pendingMemberJoin: async () => null,
+      claimMemberJoin: async () => ({ state: 'pending' as const, ready: false }),
+    };
+    await render(
+      <E2eeMemberJoin
+        offer={offer}
+        runtime={baseRuntime}
+        accountId="u1"
+        emailVerified
+        alreadyMember
+        alreadyMemberSlug="team-slug"
+        preview={{ status: 'unavailable' }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={() => {}}
+        onWorkspaceRequested={(slug, id) => opened.push({ slug, id })}
+        onHomeRequested={() => {}}
+      />
+    );
+    await settle();
+    expect(container.textContent).toContain('e2ee.team.alreadyMember');
+    await act(async () => button('e2ee.team.openWorkspace').click());
+    expect(opened).toEqual([{ slug: 'team-slug', id: offer.workspaceId }]);
+
+    await render(
+      <E2eeMemberJoin
+        offer={offer}
+        runtime={baseRuntime}
+        accountId="u1"
+        emailVerified
+        preview={{ status: 'unavailable' }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={() => {}}
+        onWorkspaceRequested={() => {}}
+        onHomeRequested={() => {}}
+      />
+    );
+    await settle();
+    expect(container.textContent).toContain('e2ee.team.inviteExpired');
+
+    await render(
+      <E2eeMemberJoin
+        offer={offer}
+        runtime={baseRuntime}
+        accountId="u1"
+        emailVerified
+        preview={{
+          status: 'available',
+          workspaceName: 'Team',
+          workspaceSlug: 'team-slug',
+          offer: { ...offer, genesisHash: 'ff'.repeat(32) },
+          recipientEmailMasked: null,
+          matchesRecipient: true,
+        }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={() => {}}
+        onWorkspaceRequested={() => {}}
+        onHomeRequested={() => {}}
+      />
+    );
+    await settle();
+    expect(container.textContent).toContain('e2ee.team.pinMismatch');
   });
 });

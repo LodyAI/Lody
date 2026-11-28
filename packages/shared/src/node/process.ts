@@ -306,8 +306,18 @@ export const TREE_POLL_INTERVAL = Duration.millis(20);
 export const MEMBER_SCAN_DELAY = Duration.millis(250);
 export const TASKKILL_DEADLINE = Duration.seconds(10);
 const TREE_POLL_INTERVAL_MS = Duration.toMillis(TREE_POLL_INTERVAL);
-/** taskkill exit status when no process matched the pid. */
+/**
+ * taskkill exit status when no process matched the pid. A graceful `/T` also
+ * exits with 128 when it leaves the root alive because "one or more child
+ * processes of this process were still running", so the status alone does not
+ * prove the tree is gone.
+ */
 const TASKKILL_NOT_FOUND = 128;
+/**
+ * How long a root that taskkill did not find may take to show up as exited. The
+ * exit reaches Node through its event loop, moments after the process ended.
+ */
+export const EXIT_RECORD_WAIT = Duration.millis(250);
 
 export const hasExited = (child: ChildProcess): boolean =>
   (child.exitCode ?? null) !== null || (child.signalCode ?? null) !== null;
@@ -410,6 +420,11 @@ export const childTree = (child: ChildProcess): ProcessTree => {
  * group; Windows `taskkill /T` walks its tree. The caller owns the authority for
  * this pid, which can be reused once the process exits. A pid of 1 or less
  * (init, our own group, every process) is never signalled.
+ *
+ * A taskkill status of 128 always reads as gone here, unlike in `windowsTree`:
+ * a bare pid has no identity, so a probe after a real "not found" could see a
+ * process that reused the pid, and escalating would force-kill it. A root that
+ * a graceful `/T` left running behind a child therefore still reads as gone.
  */
 export const pidTree = (np: NodeProcessApi, pid: number): ProcessTree => {
   const description = `process ${pid}`;
@@ -545,6 +560,13 @@ const runTaskkill = Effect.fnUntraced(function* (np: NodeProcessApi, args: reado
  * `taskkill /T` walks the tree from the root at call time. A descendant whose
  * parent already exited is no longer reachable from it; only a Job Object
  * could contain that case, and this tree does not claim to.
+ *
+ * A taskkill status of 128 reads as gone only once Node has recorded the
+ * root's exit. A root that taskkill really did not find has exited, but Node
+ * may not have recorded it yet; failing at once would escalate to `/F` on a pid
+ * that Node is about to release for reuse, so the signal waits up to
+ * `EXIT_RECORD_WAIT` for the record. A root still unrecorded afterwards is
+ * taken to be running, and the signal fails.
  */
 export const windowsTree = (
   np: NodeProcessApi,
@@ -567,7 +589,13 @@ export const windowsTree = (
           ...(force ? ['/F'] : []),
         ]).pipe(Effect.mapError((cause) => signalFailed(description, signal, cause)));
         if (code === 0) return 'delivered' as const;
-        if (code === TASKKILL_NOT_FOUND) return 'gone' as const;
+        if (code === TASKKILL_NOT_FOUND) {
+          const recorded = yield* pollWithin(
+            Effect.sync(() => (hasExited(root) ? Option.some(true) : Option.none())),
+            EXIT_RECORD_WAIT
+          );
+          if (Option.isSome(recorded)) return 'gone' as const;
+        }
         return yield* Effect.fail(
           signalFailed(description, signal, new Error(`taskkill exited with status ${code}`))
         );

@@ -10,6 +10,36 @@ type ResolveOptimisticWorkspaceRouteGuardArgs = {
   serverAccessConfirmed?: boolean;
 };
 
+type AdmittedModeLike = {
+  accountId: string | null;
+  workspaceSlug: string;
+  workspaceId: string | null;
+  descriptor: object | null;
+} | null;
+
+type AdmittedRuntimeLike = {
+  accountId?: string | null;
+  workspaceId: string;
+  contentMode?: string;
+} | null;
+
+/** True once the routed encrypted workspace's runtime has opened under its own admission. */
+export function isAdmittedEncryptedWorkspace(
+  workspaceName: string,
+  mode: AdmittedModeLike,
+  runtime: AdmittedRuntimeLike
+): boolean {
+  return Boolean(
+    mode?.workspaceSlug === workspaceName &&
+    mode.descriptor &&
+    'contentMode' in mode.descriptor &&
+    mode.descriptor.contentMode === 'e2ee' &&
+    runtime?.contentMode === 'e2ee' &&
+    runtime.workspaceId === mode.workspaceId &&
+    runtime.accountId === mode.accountId
+  );
+}
+
 export type OptimisticWorkspaceRouteGuardResult =
   | 'render'
   | 'wait-for-switch'

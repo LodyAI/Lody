@@ -8,18 +8,17 @@ import { field } from './field.tokens.stylex';
  * Switch and the controls that migrate next cannot each grow their own focus,
  * invalid and disabled treatment.
  *
- * The ring rides in the same box-shadow as the control's own edge: 2px, tight
- * to the control, no offset, no glow. It is not an `outline` because the app
+ * The resting edge and focus ring both use a flat 1px inset box-shadow so the
+ * control transitions cleanly between rest and focus without a double border,
+ * inner drop-shadow, or outer halo. It is not an `outline` because the app
  * shell resets every outline with `!important`, which no layer order can beat.
- * The ring comes FIRST in that list: earlier shadows paint on top, and the
- * well's lit lower lip (a 1px light line under the field) otherwise covered the
- * ring's bottom edge, so the ring read 2px at the sides and 1px below.
- * CSS cannot append to a box-shadow list, so a control that changes its edge —
- * a checked box swaps the well for the ink highlight — restates the ring with
- * it, the way each Button variant does.
+ * Checked controls swap the flat well for the ink fill and compose an outer
+ * ring around `field.checkedEdge`.
  */
-const RING = `0 0 0 ${field.ringWidth} ${field.ring}`;
-const INVALID_RING = `0 0 0 ${field.ringWidth} ${field.invalidRing}`;
+const RING = `inset 0 0 0 ${field.ringWidth} ${field.ring}`;
+const INVALID_RING = `inset 0 0 0 ${field.ringWidth} ${field.invalidRing}`;
+const CHECKED_RING = `0 0 0 ${field.ringWidth} ${field.ring}`;
+const CHECKED_INVALID_RING = `0 0 0 ${field.ringWidth} ${field.invalidRing}`;
 
 /**
  * A corner that carries the ring is `corner.round`, not the squircle: Chromium
@@ -40,7 +39,7 @@ export const well = stylex.create({
     borderStyle: 'none',
     backgroundColor: field.background,
     // A text control is always focus-visible, so this covers pointer focus too.
-    boxShadow: { default: field.well, ':focus-visible': `${RING}, ${field.well}` },
+    boxShadow: { default: field.well, ':focus-visible': RING },
     color: { default: field.value, '::placeholder': field.placeholder },
     fontFamily: 'inherit',
     // Controls are 13 at weight 500 with controlTracking; the size step sets
@@ -56,12 +55,12 @@ export const well = stylex.create({
     transitionTimingFunction: ease.standard,
   },
   // StyleX keys a conditional value per condition, so the focused case is
-  // restated here; otherwise an invalid control would flip back to the accent
-  // ring the moment it takes focus.
+  // restated here; otherwise an invalid control would flip back to the neutral
+  // focus edge the moment it takes focus.
   invalid: {
     boxShadow: {
-      default: `${INVALID_RING}, ${field.well}`,
-      ':focus-visible': `${INVALID_RING}, ${field.well}`,
+      default: INVALID_RING,
+      ':focus-visible': INVALID_RING,
     },
   },
   /**
@@ -82,7 +81,7 @@ export const well = stylex.create({
     borderWidth: 0,
     borderStyle: 'none',
     backgroundColor: field.background,
-    boxShadow: { default: field.well, ':focus-within': `${RING}, ${field.well}` },
+    boxShadow: { default: field.well, ':focus-within': RING },
     color: field.value,
     cornerShape: corner.round,
     outlineStyle: 'none',
@@ -93,8 +92,8 @@ export const well = stylex.create({
   },
   shellInvalid: {
     boxShadow: {
-      default: `${INVALID_RING}, ${field.well}`,
-      ':focus-within': `${INVALID_RING}, ${field.well}`,
+      default: INVALID_RING,
+      ':focus-within': INVALID_RING,
     },
   },
   /** The control inside a shell: the shell already is the well. */
@@ -168,7 +167,7 @@ export const well = stylex.create({
     borderWidth: 0,
     borderStyle: 'none',
     backgroundColor: field.background,
-    boxShadow: { default: field.well, ':focus-visible': `${RING}, ${field.well}` },
+    boxShadow: { default: field.well, ':focus-visible': RING },
     color: field.checkedMark,
     cornerShape: corner.round,
     outlineStyle: 'none',
@@ -182,13 +181,16 @@ export const well = stylex.create({
   checked: {
     backgroundColor: field.checkedFill,
     backgroundImage: field.checkedSheen,
-    boxShadow: { default: field.checkedEdge, ':focus-visible': `${RING}, ${field.checkedEdge}` },
+    boxShadow: {
+      default: field.checkedEdge,
+      ':focus-visible': `${CHECKED_RING}, ${field.checkedEdge}`,
+    },
   },
   /** The invalid ring on that ink edge, at rest and while focused. */
   checkedInvalid: {
     boxShadow: {
-      default: `${INVALID_RING}, ${field.checkedEdge}`,
-      ':focus-visible': `${INVALID_RING}, ${field.checkedEdge}`,
+      default: `${CHECKED_INVALID_RING}, ${field.checkedEdge}`,
+      ':focus-visible': `${CHECKED_INVALID_RING}, ${field.checkedEdge}`,
     },
   },
 });

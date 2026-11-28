@@ -111,6 +111,8 @@
     "@lody/shared": "workspace:*",
     "@lody/ui": "workspace:*",
     "@loro-dev/flock-wasm": "catalog:",
+    "@loro-dev/roost": "catalog:",
+    "@loro-dev/streams-client": "catalog:",
     "@loro-dev/streams-crdt": "catalog:",
     "@meowdown/core": "0.59.0",
     "@meowdown/react": "0.59.0",

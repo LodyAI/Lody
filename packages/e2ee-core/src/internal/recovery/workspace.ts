@@ -1,4 +1,4 @@
-import { Clock, Data, Effect, Result, Schema, Semaphore } from 'effect';
+import { Clock, Data, Effect, Exit, Result, Schema, Semaphore } from 'effect';
 import * as Bytes from '../foundation/bytes';
 import { bytesEqual } from '../foundation/cbor';
 import { copyEpochKeyBytes, disposeEpochKey } from '../foundation/epoch-key';
@@ -191,8 +191,6 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
     const next = canonical(value);
     if ((yield* local.compareAndSwap(key, before, next)) !== 'Committed')
       return yield* vaultError('conflict');
-    const read = yield* local.read(key);
-    if (!read || !bytesEqual(next, read)) return yield* vaultError('storage');
     return { raw: next, value };
   });
   const active = (view: LedgerView, identity: RecoveryIdentity) => {
@@ -223,10 +221,11 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
   const credentials = new WeakMap<RecoveryIdentity, Uint8Array>();
   const useIdentity = <A, E, R>(
     ref: RecoveryEntryReference,
-    work: (identity: RecoveryIdentity, bundle: RecoveryPrivatePackage) => Effect.Effect<A, E, R>
+    work: (identity: RecoveryIdentity, bundle: RecoveryPrivatePackage) => Effect.Effect<A, E, R>,
+    preverifiedBundle?: RecoveryPrivatePackage
   ) =>
     Effect.acquireUseRelease(
-      vault.readEntry(ref),
+      preverifiedBundle ? Effect.succeed(preverifiedBundle) : vault.readEntry(ref),
       (bundle) =>
         Effect.gen(function* () {
           if (
@@ -242,7 +241,7 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             Effect.ensuring(Effect.sync(() => derived.credential.fill(0)))
           );
         }),
-      (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
+      (bundle) => (preverifiedBundle ? Effect.void : Effect.sync(() => wipeRecoveryPackage(bundle)))
     );
   const openCurrent = Effect.fnUntraced(function* (
     identity: RecoveryIdentity,
@@ -357,19 +356,47 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             ),
             (keys) =>
               Effect.gen(function* () {
-                yield* installed.saveAndReload(epoch, latest);
-                for (const [number, epochKey] of keys)
-                  yield* installed.saveAndReload(number, epochKey);
-                yield* Effect.acquireUseRelease(
-                  installed.read(epoch),
-                  (read) =>
-                    Effect.gen(function* () {
-                      const actual = yield* Effect.fromResult(commitEpochKey(genesis, epoch, read));
-                      if (!actual.equals(commitment)) return yield* vaultError('authentication');
-                      return yield* Effect.void;
-                    }),
-                  (read) => Effect.sync(() => disposeEpochKey(read))
-                );
+                const isInstalled = (number: number, expectedCommitment: Bytes.EpochCommitment) =>
+                  Effect.acquireUseRelease(
+                    Effect.exit(installed.read(number)),
+                    (existing) =>
+                      Exit.isSuccess(existing)
+                        ? Effect.map(
+                            Effect.fromResult(commitEpochKey(genesis, number, existing.value)),
+                            (actual) => actual.equals(expectedCommitment)
+                          )
+                        : Effect.succeed(false),
+                    (existing) =>
+                      Effect.sync(() => {
+                        if (Exit.isSuccess(existing)) disposeEpochKey(existing.value);
+                      })
+                  );
+                const currentInstalled = yield* isInstalled(epoch, commitment);
+                if (!currentInstalled) {
+                  yield* installed.saveAndReload(epoch, latest);
+                }
+                for (const [number, epochKey] of keys) {
+                  const expected = yield* Effect.fromResult(
+                    commitEpochKey(genesis, number, epochKey)
+                  );
+                  if (!(yield* isInstalled(number, expected))) {
+                    yield* installed.saveAndReload(number, epochKey);
+                  }
+                }
+                if (!currentInstalled) {
+                  yield* Effect.acquireUseRelease(
+                    installed.read(epoch),
+                    (read) =>
+                      Effect.gen(function* () {
+                        const actual = yield* Effect.fromResult(
+                          commitEpochKey(genesis, epoch, read)
+                        );
+                        if (!actual.equals(commitment)) return yield* vaultError('authentication');
+                        return yield* Effect.void;
+                      }),
+                    (read) => Effect.sync(() => disposeEpochKey(read))
+                  );
+                }
                 return epoch;
               }),
             (keys) =>
@@ -446,185 +473,222 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
     return yield* checkedStatus(verified);
   });
   const setup = Effect.fnUntraced(function* () {
-    yield* current();
-    let state = yield* load();
-    if (!state.value)
-      state = yield* save(state.raw, {
-        entryId: hex(random(32)),
-        reference: null,
-        record: null,
-        recordPosition: null,
-        stage: 'candidate',
-        lastTest: null,
-        testedEpoch: null,
-        envelopeEpoch: null,
-        skipped: false,
-      });
-    let progress = state.value!;
-    if (!progress.reference) {
-      const index = yield* vault.readIndex();
-      let reference = index.value.entries.find(
-        (ref) =>
-          !ref.retired &&
-          ref.genesis === hex(genesis.toBytes()) &&
-          ref.membershipId === hex(membership.toBytes())
-      );
-      if (!reference) {
-        const candidate = yield* vault.readCandidate(progress.entryId);
-        let selected: RecoveryEntryReference;
-        if (candidate) {
-          selected = candidate.reference;
-          wipeRecoveryPackage(candidate.value);
-        } else
-          selected = yield* Effect.acquireUseRelease(
-            generateRecoveryPackage({
-              genesis: hex(genesis.toBytes()),
-              membershipId: hex(membership.toBytes()),
-              generation: 0,
-              trust,
-            }),
-            (bundle) => vault.upload(bundle, progress.entryId),
-            (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
-          );
-        const reserved = yield* vault.reserve(selected, index);
-        if (!reserved.reference) return yield* vaultError('conflict');
-        reference = reserved.reference;
-      }
-      state = yield* save(state.raw, {
-        ...progress,
-        reference,
-        entryId: reference.entryId,
-        stage: 'indexed',
-        skipped: false,
-      });
-      progress = state.value!;
-    }
-    const reference = progress.reference!;
-    return yield* useIdentity(reference, (identity, bundle) =>
+    return yield* Effect.scoped(
       Effect.gen(function* () {
-        const registration = yield* attempt(() => {
-          const derived = deriveRecoveryAccessCredential(bundle);
-          derived.credential.fill(0);
-          return { recoveryCredentialHash: derived.credentialHash };
-        });
-        let view = yield* current();
-        // The record may have committed before this process died, while its P09
-        // result still awaits acknowledgement. Reconcile that original before
-        // advancing local stage even when the registered R is already visible.
-        if (
-          progress.record &&
-          progress.stage === 'registration' &&
-          progress.recordPosition == null
-        ) {
+        yield* current();
+        let state = yield* load();
+        const freshProgress = !state.value;
+        if (!state.value)
+          state = yield* save(state.raw, {
+            entryId: hex(random(32)),
+            reference: null,
+            record: null,
+            recordPosition: null,
+            stage: 'candidate',
+            lastTest: null,
+            testedEpoch: null,
+            envelopeEpoch: null,
+            skipped: false,
+          });
+        let progress = state.value!;
+        let preverifiedBundle: RecoveryPrivatePackage | undefined;
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            if (preverifiedBundle) {
+              wipeRecoveryPackage(preverifiedBundle);
+              preverifiedBundle = undefined;
+            }
+          })
+        );
+        if (!progress.reference) {
+          const index = yield* vault.readIndex();
+          let reference = index.value.entries.find(
+            (ref) =>
+              !ref.retired &&
+              ref.genesis === hex(genesis.toBytes()) &&
+              ref.membershipId === hex(membership.toBytes())
+          );
+          if (!reference) {
+            const candidate = freshProgress ? null : yield* vault.readCandidate(progress.entryId);
+            let selected: RecoveryEntryReference;
+            let candidateBundle: RecoveryPrivatePackage | undefined;
+            if (candidate) {
+              selected = candidate.reference;
+              candidateBundle = candidate.value;
+            } else {
+              candidateBundle = yield* generateRecoveryPackage({
+                genesis: hex(genesis.toBytes()),
+                membershipId: hex(membership.toBytes()),
+                generation: 0,
+                trust,
+              });
+              selected = yield* vault.upload(candidateBundle, progress.entryId).pipe(
+                Effect.onError(() =>
+                  Effect.sync(() => {
+                    if (candidateBundle) {
+                      wipeRecoveryPackage(candidateBundle);
+                      candidateBundle = undefined;
+                    }
+                  })
+                )
+              );
+            }
+            preverifiedBundle = candidateBundle;
+            let reserved = yield* vault.reserve(selected, index);
+            if (!reserved.reference && reserved.outcome === 'Conflict') {
+              reserved = yield* vault.reserve(selected);
+            }
+            if (!reserved.reference) return yield* vaultError('conflict');
+            reference = reserved.reference;
+            if (reference.entryId !== selected.entryId || reference.digest !== selected.digest) {
+              if (preverifiedBundle) {
+                wipeRecoveryPackage(preverifiedBundle);
+                preverifiedBundle = undefined;
+              }
+            }
+          }
           state = yield* save(state.raw, {
             ...progress,
-            recordPosition: yield* setupPosition(view, progress.record),
+            reference,
+            entryId: reference.entryId,
+            stage: 'indexed',
+            skipped: false,
           });
           progress = state.value!;
         }
-        if (progress.record && progress.stage === 'registration' && active(view, identity)) {
-          const resumed = yield* submit(new Uint8Array(progress.record), registration);
-          if (!bytesEqual(resumed.record, progress.record))
-            return yield* vaultError('authentication');
-          if (resumed.outcome !== 'Committed')
-            return { outcome: resumed.outcome, status: yield* checkedStatus() };
-          view = yield* current();
-          if (!active(view, identity)) return yield* vaultError('authentication');
-          if (progress.recordPosition == null) {
-            if (view.historyStart === 0) return yield* vaultError('authentication');
-          } else if (
-            view.historyStart < progress.recordPosition &&
-            !(yield* Effect.fromResult(
-              hasVerifiedCheckpoint(view, {
-                head: hashRecordBytes(progress.record),
-                length: progress.recordPosition,
-              })
-            ))
-          )
-            return yield* vaultError('authentication');
-        }
-        if (!active(view, identity)) {
-          if (progress.record && progress.recordPosition == null)
-            return yield* vaultError('pending');
-          const previousDevice = view.inspectState().devices.get(hex(identity.publicKey.toBytes()));
-          if (previousDevice) return yield* vaultError('unauthorized');
-          const signAdmission = Effect.fnUntraced(function* (view: LedgerView) {
-            const command = yield* prepareDeviceAdmission({
-              genesis,
-              membershipId: membership,
-              encryptionPublicKey: identity.encryptionPublicKey,
-              kind: 'recovery',
-              signer: identity,
-            });
-            const proposal = yield* Effect.fromResult(
-              prepareLedgerCommand(view, personalSigner.publicKey, command)
-            );
-            const record = yield* signLedgerRecord(proposal, personalSigner);
-            state = yield* save(state.raw, {
-              ...progress,
-              record,
-              recordPosition: view.length + 1,
-              stage: 'registration',
-            });
-            progress = state.value!;
-          });
-          if (!progress.record) yield* signAdmission(view);
-          const result = yield* submit(new Uint8Array(progress.record!), registration);
-          if (!bytesEqual(result.record, progress.record!))
-            return yield* vaultError('authentication');
-          if (result.outcome !== 'Committed') {
-            if (result.outcome === 'Conflict') {
-              const after = yield* current();
-              const landed = yield* Effect.fromResult(
-                hasVerifiedCheckpoint(after, {
-                  head: hashRecordBytes(progress.record!),
-                  length: progress.recordPosition!,
-                })
-              );
-              // Only verified facts make the original impossible. After retention,
-              // complete device history still proves this R was never admitted.
+        const reference = progress.reference!;
+        return yield* useIdentity(
+          reference,
+          (identity, bundle) =>
+            Effect.gen(function* () {
+              const registration = yield* attempt(() => {
+                const derived = deriveRecoveryAccessCredential(bundle);
+                derived.credential.fill(0);
+                return { recoveryCredentialHash: derived.credentialHash };
+              });
+              let view = yield* current();
+              // The record may have committed before this process died, while its P09
+              // result still awaits acknowledgement. Reconcile that original before
+              // advancing local stage even when the registered R is already visible.
               if (
-                !landed &&
-                after.length >= progress.recordPosition! &&
-                (after.historyStart < progress.recordPosition! ||
-                  after.classifyDevice?.(hex(identity.publicKey.toBytes())) === 'unknown') &&
-                !active(after, identity)
+                progress.record &&
+                progress.stage === 'registration' &&
+                progress.recordPosition == null
               ) {
-                if (after.inspectState().devices.has(hex(identity.publicKey.toBytes())))
-                  return yield* vaultError('unauthorized');
-                yield* signAdmission(after);
+                state = yield* save(state.raw, {
+                  ...progress,
+                  recordPosition: yield* setupPosition(view, progress.record),
+                });
+                progress = state.value!;
               }
-            }
-            return { outcome: result.outcome, status: yield* checkedStatus() };
-          }
-          view = yield* current();
-          if (
-            !active(view, identity) ||
-            !(yield* Effect.fromResult(
-              hasVerifiedCheckpoint(view, {
-                head: hashRecordBytes(progress.record!),
-                length: progress.recordPosition!,
-              })
-            ))
-          )
-            return yield* vaultError('authentication');
-        }
-        state = yield* save(state.raw, {
-          ...progress,
-          stage: 'registered',
-          record: null,
-          recordPosition: null,
-          recoveryDevice: hex(identity.publicKey.toBytes()),
-        });
-        const verified = { reference, identity };
-        return yield* runTest(verified).pipe(
-          Effect.map((status) => ({ outcome: 'Committed' as const, status })),
-          Effect.catchIf(isPending, () =>
-            Effect.map(checkedStatus(verified), (status) => ({
-              outcome: 'Pending' as const,
-              status,
-            }))
-          )
+              if (progress.record && progress.stage === 'registration' && active(view, identity)) {
+                const resumed = yield* submit(new Uint8Array(progress.record), registration);
+                if (!bytesEqual(resumed.record, progress.record))
+                  return yield* vaultError('authentication');
+                if (resumed.outcome !== 'Committed')
+                  return { outcome: resumed.outcome, status: yield* checkedStatus() };
+                view = yield* current();
+                if (!active(view, identity)) return yield* vaultError('authentication');
+                if (progress.recordPosition == null) {
+                  if (view.historyStart === 0) return yield* vaultError('authentication');
+                } else if (
+                  view.historyStart < progress.recordPosition &&
+                  !(yield* Effect.fromResult(
+                    hasVerifiedCheckpoint(view, {
+                      head: hashRecordBytes(progress.record),
+                      length: progress.recordPosition,
+                    })
+                  ))
+                )
+                  return yield* vaultError('authentication');
+              }
+              if (!active(view, identity)) {
+                if (progress.record && progress.recordPosition == null)
+                  return yield* vaultError('pending');
+                const previousDevice = view
+                  .inspectState()
+                  .devices.get(hex(identity.publicKey.toBytes()));
+                if (previousDevice) return yield* vaultError('unauthorized');
+                const signAdmission = Effect.fnUntraced(function* (view: LedgerView) {
+                  const command = yield* prepareDeviceAdmission({
+                    genesis,
+                    membershipId: membership,
+                    encryptionPublicKey: identity.encryptionPublicKey,
+                    kind: 'recovery',
+                    signer: identity,
+                  });
+                  const proposal = yield* Effect.fromResult(
+                    prepareLedgerCommand(view, personalSigner.publicKey, command)
+                  );
+                  const record = yield* signLedgerRecord(proposal, personalSigner);
+                  state = yield* save(state.raw, {
+                    ...progress,
+                    record,
+                    recordPosition: view.length + 1,
+                    stage: 'registration',
+                  });
+                  progress = state.value!;
+                });
+                if (!progress.record) yield* signAdmission(view);
+                const result = yield* submit(new Uint8Array(progress.record!), registration);
+                if (!bytesEqual(result.record, progress.record!))
+                  return yield* vaultError('authentication');
+                if (result.outcome !== 'Committed') {
+                  if (result.outcome === 'Conflict') {
+                    const after = yield* current();
+                    const landed = yield* Effect.fromResult(
+                      hasVerifiedCheckpoint(after, {
+                        head: hashRecordBytes(progress.record!),
+                        length: progress.recordPosition!,
+                      })
+                    );
+                    // Only verified facts make the original impossible. After retention,
+                    // complete device history still proves this R was never admitted.
+                    if (
+                      !landed &&
+                      after.length >= progress.recordPosition! &&
+                      (after.historyStart < progress.recordPosition! ||
+                        after.classifyDevice?.(hex(identity.publicKey.toBytes())) === 'unknown') &&
+                      !active(after, identity)
+                    ) {
+                      if (after.inspectState().devices.has(hex(identity.publicKey.toBytes())))
+                        return yield* vaultError('unauthorized');
+                      yield* signAdmission(after);
+                    }
+                  }
+                  return { outcome: result.outcome, status: yield* checkedStatus() };
+                }
+                view = yield* current();
+                if (
+                  !active(view, identity) ||
+                  !(yield* Effect.fromResult(
+                    hasVerifiedCheckpoint(view, {
+                      head: hashRecordBytes(progress.record!),
+                      length: progress.recordPosition!,
+                    })
+                  ))
+                )
+                  return yield* vaultError('authentication');
+              }
+              state = yield* save(state.raw, {
+                ...progress,
+                stage: 'registered',
+                record: null,
+                recordPosition: null,
+                recoveryDevice: hex(identity.publicKey.toBytes()),
+              });
+              const verified = { reference, identity };
+              return yield* runTest(verified).pipe(
+                Effect.map((status) => ({ outcome: 'Committed' as const, status })),
+                Effect.catchIf(isPending, () =>
+                  Effect.map(checkedStatus(verified), (status) => ({
+                    outcome: 'Pending' as const,
+                    status,
+                  }))
+                )
+              );
+            }),
+          preverifiedBundle
         );
       })
     );
@@ -752,8 +816,6 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             const next = canonical(intent);
             if ((yield* local.compareAndSwap(restoreKey, before, next)) !== 'Committed')
               return yield* vaultError('conflict');
-            const read = yield* local.read(restoreKey);
-            if (!read || !bytesEqual(read, next)) return yield* vaultError('storage');
             raw = next;
           }
         } else {
@@ -761,8 +823,6 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           raw = canonical(intent);
           if ((yield* local.compareAndSwap(restoreKey, null, raw)) !== 'Committed')
             return yield* vaultError('conflict');
-          const read = yield* local.read(restoreKey);
-          if (!read || !bytesEqual(read, raw)) return yield* vaultError('storage');
         }
         const result = yield* request.submitOriginalAsRecovery(
           new Uint8Array(intent.record),
@@ -790,8 +850,6 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
               const next = canonical(intent);
               if ((yield* local.compareAndSwap(restoreKey, raw, next)) !== 'Committed')
                 return yield* vaultError('conflict');
-              const read = yield* local.read(restoreKey);
-              if (!read || !bytesEqual(read, next)) return yield* vaultError('storage');
             }
           }
           return { outcome: result.outcome, epoch, partialEpochKey };

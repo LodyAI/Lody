@@ -831,6 +831,54 @@ describe('AgentConfigDialog', () => {
     expect(saved.at(-1)?.runtimeOverrides).toBeUndefined();
   });
 
+  it('saves a default permission for new conversations and never offers Plan', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const machine = createMachine('Workstation');
+    const capability = machine.acpCapabilities![getAcpCapabilityCacheKey(claudeConfigId)]!;
+    machine.acpCapabilities![getAcpCapabilityCacheKey(claudeConfigId)] = {
+      ...capability,
+      provenance: 'runtime',
+      modes: [
+        { id: 'default', name: 'Ask before edits' },
+        { id: 'bypassPermissions', name: 'Bypass permissions' },
+        { id: 'plan', name: 'Plan mode' },
+      ],
+    };
+    const config = createBuiltinConfig({
+      id: claudeConfigId,
+      name: 'Claude',
+      agentType: 'claude',
+      sessionDefaults: { modelId: 'opus', configOptionValues: {} },
+    });
+    await renderDialog(
+      { kind: 'edit', config },
+      machine,
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      })
+    );
+
+    expect(document.body.textContent).toContain('Default permission');
+    const trigger = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Last one I picked'
+    );
+    expect(trigger).toBeDefined();
+    await act(async () => trigger!.click());
+    const options = Array.from(document.body.querySelectorAll('[role="option"]'));
+    expect(options.some((option) => option.textContent?.includes('Plan mode'))).toBe(false);
+    await act(async () => {
+      getTitleModelOptionByText('Bypass permissions').dispatchEvent(
+        new MouseEvent('click', { bubbles: true })
+      );
+    });
+    await act(async () => getPrimaryAction('Save').click());
+    expect(saved.at(-1)?.sessionDefaults).toEqual({
+      modelId: 'opus',
+      modeId: 'bypassPermissions',
+      configOptionValues: {},
+    });
+  });
+
   it('leaves Lody Agent to its own settings page even while its beta is on', async () => {
     store.set(developerModeEnabledAtom, true);
     store.set(lodyAgentBetaEnabledAtom, true);

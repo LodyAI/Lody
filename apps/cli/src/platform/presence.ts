@@ -19,6 +19,7 @@ import {
   type LodyPresenceInstanceId,
 } from '@lody/shared';
 import { PresenceHost, PresenceTransport } from '@/lib/loro/workspace-presence';
+import { MachinePresenceResourceSampler } from '@/monitor/machine-presence-resources';
 import { getCliHttpFetch } from '@/utils/http-transport';
 import type { Logger } from '@/utils/logger';
 import { createPresenceWebSocketAuthLegacy } from '@/lib/loro/presence-legacy';
@@ -36,11 +37,13 @@ export const resolveCliLoroStreamsWebSocketEnabled = (
   isLoroStreamsWebSocketEnabled(explicit, environment ?? (buildDefault ? '1' : undefined));
 
 /** Published SDK owns all network tasks; this layer only supplies capabilities and safe local logs. */
-export const presencePlatformLayer = (logger: Logger, fetchImpl = getCliHttpFetch({ logger })) =>
-  Layer.merge(
+export const presencePlatformLayer = (logger: Logger, fetchImpl = getCliHttpFetch({ logger })) => {
+  const resourceSampler = new MachinePresenceResourceSampler();
+  return Layer.merge(
     Layer.succeed(PresenceHost, {
       instanceId: () => uuid() as LodyPresenceInstanceId,
       serverOffsetMs: getServerTimeOffset,
+      machineResources: () => resourceSampler.read(),
       report: (workspaceId, event) => {
         const level =
           event.stage === 'heartbeat' || event.stage === 'barrier'
@@ -117,3 +120,4 @@ export const presencePlatformLayer = (logger: Logger, fetchImpl = getCliHttpFetc
         ),
     })
   );
+};

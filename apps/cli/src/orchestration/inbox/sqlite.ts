@@ -1,11 +1,12 @@
 import { getLogger } from '@/utils/logger';
-import type { StoredLodyOperation } from '@lody/shared';
+import { LODY_MAX_CHAIN_DEPTH, type StoredLodyOperation } from '@lody/shared';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { OrchestrationConnection } from '../platform/database';
 import {
   batchDepth,
+  type DepthLimitedIntent,
   type InboxBatch,
   type InboxInput,
   type InboxMember,
@@ -251,9 +252,10 @@ export class InboxSqlite {
       return;
     const watermark = this.watermark(scope);
     if (!this.available(scope, watermark, true).length) return;
+    const { _lodyAutomation: _origin, ...continuation } = config;
     const input: InboxInput = {
       ...scope,
-      config,
+      config: continuation,
       kind: 'automatic',
       inputId: `inbox:${executionId}`,
     };
@@ -921,6 +923,24 @@ export class InboxSqlite {
       completion: JSON.parse(r.completion_json),
     };
   }
+  /** Automatic continuations refused by the chain cap whose Session has not been told yet. */
+  depthLimitedIntents(workspaceId: string): DepthLimitedIntent[] {
+    return this.db
+      .prepare(
+        `SELECT i.intent_id AS intentId,i.session_id AS sessionId,
+          (SELECT COUNT(*) FROM inbox_results r WHERE r.workspace_id=i.workspace_id AND r.session_id=i.session_id
+            AND r.consumed=0 AND r.claim IS NULL) AS pendingResults
+        FROM inbox_intents i WHERE i.workspace_id=? AND i.state='depth_limited' ORDER BY i.rowid`
+      )
+      .all(workspaceId) as DepthLimitedIntent[];
+  }
+  acknowledgeDepthLimited(intentId: string): void {
+    this.db
+      .prepare(
+        "UPDATE inbox_intents SET state='depth_limited_reported' WHERE intent_id=? AND state='depth_limited'"
+      )
+      .run(intentId);
+  }
   pending(workspaceId: string): Array<{ intentId: string; input: InboxInput }> {
     return this.db
       .prepare(
@@ -991,7 +1011,7 @@ export class InboxSqlite {
         input,
         members.map((m) => m.chainDepth)
       );
-      if (input.kind === 'automatic' && chainDepth >= 16) {
+      if (input.kind === 'automatic' && chainDepth > LODY_MAX_CHAIN_DEPTH) {
         this.db
           .prepare("UPDATE inbox_intents SET state='depth_limited' WHERE intent_id=?")
           .run(intentId);
@@ -1105,6 +1125,50 @@ export class InboxSqlite {
       )
       .all(batch.batchId, after, limit)
       .map((row) => this.decodeMember(row));
+  }
+  memberSources(batch: InboxBatch): Array<{ sequence: number; sourceTurnId?: string }> {
+    return (
+      this.db
+        .prepare(
+          'SELECT r.sequence,r.source_turn_id FROM inbox_results r JOIN inbox_members m USING(sequence) WHERE m.batch_id=? ORDER BY r.sequence'
+        )
+        .all(batch.batchId) as { sequence: number; source_turn_id: string | null }[]
+    ).map((row) => ({
+      sequence: row.sequence,
+      ...(row.source_turn_id ? { sourceTurnId: row.source_turn_id } : {}),
+    }));
+  }
+  narrow(batch: InboxBatch, executionId: string, drop: readonly number[]): InboxBatch | undefined {
+    return this.transaction(() => {
+      const current = this.state(batch);
+      const stored = this.getBatch(batch.batchId, batch);
+      if (
+        !stored ||
+        stored.state !== 'prepared' ||
+        current.active_execution !== executionId ||
+        current.active_input !== batch.inputId
+      )
+        return undefined;
+      const removed = new Set(drop);
+      const members = this.memberSources(batch);
+      const kept = members.filter((member) => !removed.has(member.sequence)).length;
+      if (!kept) return undefined;
+      for (const member of members) {
+        if (!removed.has(member.sequence)) continue;
+        this.db
+          .prepare('DELETE FROM inbox_members WHERE batch_id=? AND sequence=?')
+          .run(batch.batchId, member.sequence);
+        this.db
+          .prepare(
+            'UPDATE inbox_results SET claim=NULL WHERE sequence=? AND claim=? AND consumed=0'
+          )
+          .run(member.sequence, batch.batchId);
+      }
+      this.db
+        .prepare('UPDATE inbox_batches SET member_count=? WHERE batch_id=?')
+        .run(kept, batch.batchId);
+      return this.getBatch(batch.batchId, batch);
+    });
   }
   private decodeBatch(row: unknown): InboxBatch {
     const r = BatchRow.parse(row);

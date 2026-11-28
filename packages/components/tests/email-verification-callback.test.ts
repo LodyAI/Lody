@@ -4,10 +4,13 @@ import {
   buildEmailVerificationCallbackUrl,
 } from '../src/lib/email-verification-callback';
 import {
+  buildElectronRedirectToken,
   buildElectronRedirectUrl,
+  buildElectronRedirectUrlFromCookie,
   buildElectronWebLoginCallbackUrl,
 } from '../src/lib/electron-oauth';
 import { runNativeOAuthSignIn, waitForNativeOAuthReturn } from '../src/lib/native-oauth';
+import { suppressEmailSignInRedirectFetchPlugin } from '../src/lib/auth';
 
 describe('email-verification-callback', () => {
   const baseInput = {
@@ -62,6 +65,7 @@ describe('email-verification-callback', () => {
           client_id: 'electron',
           state: 'state-1',
           code_challenge: 'challenge-1',
+          desktop_channel: 'nightly',
           code_challenge_method: 'S256',
         },
       });
@@ -69,6 +73,7 @@ describe('email-verification-callback', () => {
       expect(params.get('client_id')).toBe('electron');
       expect(params.get('state')).toBe('state-1');
       expect(params.get('code_challenge')).toBe('challenge-1');
+      expect(params.get('desktop_channel')).toBe('nightly');
       expect(params.get('code_challenge_method')).toBe('S256');
     });
 
@@ -101,6 +106,31 @@ describe('email-verification-callback', () => {
       });
 
       expect(params.has('redirect')).toBe(false);
+    });
+  });
+
+  describe('suppressEmailSignInRedirectFetchPlugin', () => {
+    it('disables Better Auth auto-redirect for /sign-in/email so verified sign-in never races to /email-verified', () => {
+      const emailPayload = {
+        redirect: true,
+        url: 'https://app.lody.ai/email-verified?view=email&client_id=electron',
+        token: 'tok',
+      };
+      suppressEmailSignInRedirectFetchPlugin.hooks.onSuccess({
+        request: { url: new URL('https://auth.lody.ai/api/auth/sign-in/email') },
+        data: emailPayload,
+      });
+      expect(emailPayload.redirect).toBe(false);
+
+      const socialPayload = {
+        redirect: true,
+        url: 'https://github.com/login/oauth/authorize',
+      };
+      suppressEmailSignInRedirectFetchPlugin.hooks.onSuccess({
+        request: { url: new URL('https://auth.lody.ai/api/auth/sign-in/social') },
+        data: socialPayload,
+      });
+      expect(socialPayload.redirect).toBe(true);
     });
   });
 });
@@ -196,6 +226,16 @@ describe('electron-oauth', () => {
           '/app/'
         )
       ).toBe('/app/login?client_id=electron&state=state-123&code_challenge=challenge-123');
+    });
+
+    it('avoids double-encoding an already-encoded Better Auth electron cookie token', () => {
+      const encodedCookieToken = buildElectronRedirectToken('code-123', 'state-123');
+      expect(buildElectronRedirectUrlFromCookie(encodedCookieToken, 'state-123', 'stable')).toBe(
+        `ai.lody.stable://auth/callback#token=${encodeURIComponent(encodedCookieToken)}`
+      );
+      expect(buildElectronRedirectUrlFromCookie('raw-code', 'state-123', 'stable')).toBe(
+        buildElectronRedirectUrl('raw-code', 'state-123', 'stable')
+      );
     });
   });
 });

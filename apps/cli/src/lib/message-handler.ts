@@ -86,7 +86,8 @@ import {
   handleMemoryProviderRequest,
   handleRelayedMemoryProviderRequest,
 } from './memory-providers';
-import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
+import { formatAgentSenderHeader, formatHumanSenderHeader, readMessageAuthor } from '@lody/shared';
+import { HumanSpeakerTracker } from '@/session/human-speaker-tracker';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
 import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
@@ -100,13 +101,18 @@ import { v4 as uuidV4 } from 'uuid';
 import { describeRoostHistoryFailure } from '@/session/roost-history-diagnostics';
 import {
   createLoroStreamsJsonStreamClient,
+  getLoroWorkspaceRpcResponseStreamId,
+  LoroStreamsMachineRpcClient,
   LoroStreamsMachineRpcServer,
   LoroStreamsRpcHandlerError,
+  LoroStreamsRpcResponseDispatcher,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
+  type LoroStreamsJsonStreamClient,
   type LocalProjectGitStateRpcResponse,
   type LocalProjectListBranchesRpcResponse,
 } from '@lody/loro-streams-rpc';
+import { resolveCliLoroStreamsWebSocketEnabled } from '@/platform/presence';
 import {
   HistoryWriteError,
   HistoryEntryWriteSchema,
@@ -356,7 +362,11 @@ import {
 } from 'src/agent/agent-client';
 import type { SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager, WorktreeManager } from '@/session/worktree/worktree-manager';
-import { WorktreeGarbageCollector, type WorktreeOwnerState } from '@/session/worktree/worktree-gc';
+import {
+  resolveSettledSinceMs,
+  WorktreeGarbageCollector,
+  type WorktreeOwnerState,
+} from '@/session/worktree/worktree-gc';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
 import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
 import {
@@ -726,6 +736,8 @@ export interface MessageHandlerConfig {
       signal?: AbortSignal
     ) => Promise<SorbetHostSettings>;
   };
+  /** Mirrors the machine's Sorbet store into its Flock; runs after every store write. */
+  refreshSorbetStoreMirror?: () => Promise<unknown>;
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {
@@ -755,6 +767,7 @@ export interface MessageHandlerConfig {
   ) => Promise<string>;
   supportRegistryAgentTypes?: string[];
   closeSessionTerminals?: (sessionId: SessionId) => void;
+  hasSessionTerminals?: (sessionId: SessionId, workdir?: string) => boolean;
   /**
    * Presence snapshots of every workspace this daemon hosts, so a desktop focused
    * on another hosted workspace also suppresses this workspace's mobile push.
@@ -866,6 +879,7 @@ export class MessageHandler {
   private cliVersion: string;
   private supportRegistryAgentTypes: string[];
   private closeSessionTerminals?: (sessionId: SessionId) => void;
+  private hasSessionTerminals?: (sessionId: SessionId, workdir?: string) => boolean;
   private readHostedPresenceStates?: () => LodyPresenceStateMap[];
   private cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
@@ -912,6 +926,7 @@ export class MessageHandler {
   private readonly worktreeGc: WorktreeGarbageCollector;
   private worktreeGcTimer: NodeJS.Timeout | null = null;
   private detachWorktreeGcSyncListener: (() => void) | null = null;
+  private localProjectWorktreeRemovalInFlight = 0;
   private readonly deleteLocalProjectInFlight = new Set<LocalProjectId>();
   private machineFlockCommandWatcher: MachineFlockCommandWatcher;
   // Desktop local-transport backfill: in-flight task keys (`${sessionId}:${fileId}`)
@@ -974,12 +989,19 @@ export class MessageHandler {
   /** Encrypted workspaces only: claims, derivation origins and agent-control grants. */
   private readonly encryptedExecution?: EncryptedAgentExecution;
   private readonly sorbetCredentials?: MessageHandlerConfig['sorbetCredentials'];
+  /**
+   * Re-reads this machine's Sorbet store into its Machine Flock after a store
+   * write, so a client that cannot ask the machine sees the result without
+   * waiting for the periodic probe.
+   */
+  private readonly refreshSorbetStoreMirror?: () => Promise<unknown>;
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
   private iosSimulatorService: IosSimulatorService;
   private androidEmulatorService: AndroidEmulatorService;
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
+  private readonly humanSpeakers = new HumanSpeakerTracker();
   private sessionForkService: SessionForkService;
   private sessionEditAndResendService: SessionEditAndResendService;
   private operationCoordinator: LodyOperationCoordinator;
@@ -1002,6 +1024,8 @@ export class MessageHandler {
   };
   private localWorkspaceCatalog: LocalWorkspaceCatalogService;
   private machineRpcServer: LoroStreamsMachineRpcServer | null = null;
+  private machineRpcJsonStreamClient: LoroStreamsJsonStreamClient | null = null;
+  private machineRpcResponseDispatcher: LoroStreamsRpcResponseDispatcher | null = null;
   private encryptedQueryServer: LoroStreamsMachineRpcServer | null = null;
 
   async readEncryptedMachineRequest(
@@ -2758,10 +2782,13 @@ export class MessageHandler {
   }
 
   /**
-   * Provenance header for an agent-authored input. Best effort: any read failure
-   * omits the header and the turn proceeds with its unchanged text.
+   * Sender header for an input. An agent-authored input always names its source
+   * Session. A human input is labelled only when its sender differs from the
+   * previous human sender in this Session, so a single-user Session stays
+   * unchanged. Best effort: any read failure omits the header and the turn
+   * proceeds with its unchanged text.
    */
-  private async readAgentSenderHeader(
+  private async readSenderHeader(
     sessionId: SessionId,
     userTurnId: string | undefined
   ): Promise<string | undefined> {
@@ -2772,12 +2799,19 @@ export class MessageHandler {
       const input = await backend.history.readTurn(userTurnId);
       if (input.state !== 'ready' || input.turn.role !== 'user') return undefined;
       const author = readMessageAuthor(input.turn.author);
-      if (author?.kind !== 'agent') return undefined;
-      const source = await this.workspaceDocument.repo
-        .getDocMeta(getSessionRoomId(author.sessionId as SessionId))
-        .catch(() => undefined);
-      const title = (source?.meta as SessionMeta | undefined)?.title;
-      return formatAgentSenderHeader(author, title);
+      if (author?.kind === 'agent') {
+        const source = await this.workspaceDocument.repo
+          .getDocMeta(getSessionRoomId(author.sessionId as SessionId))
+          .catch(() => undefined);
+        const title = (source?.meta as SessionMeta | undefined)?.title;
+        return formatAgentSenderHeader(author, title);
+      }
+      if (author?.kind === 'system') return undefined;
+      const speakerId = (author?.userId ?? input.turn.userId)?.trim();
+      if (!speakerId) return undefined;
+      return this.humanSpeakers.changed(sessionId, userTurnId, speakerId, this.userId)
+        ? formatHumanSenderHeader(author?.name)
+        : undefined;
     } catch (error) {
       this.logger.warn(
         `[${sessionId}] Omitting sender provenance for ${userTurnId}: ${formatErrorMessage(error)}`
@@ -2930,7 +2964,7 @@ export class MessageHandler {
     });
 
     // Build the full text prompt: comment references first, then user text
-    const senderHeader = await this.readAgentSenderHeader(args.sessionId, args.userTurnId);
+    const senderHeader = await this.readSenderHeader(args.sessionId, args.userTurnId);
     const allTextParts = [
       ...(senderHeader ? [senderHeader] : []),
       ...commentRefTexts,
@@ -3543,6 +3577,7 @@ export class MessageHandler {
   ) {
     this.sessionManager = sessionManager;
     this.sorbetCredentials = config.sorbetCredentials;
+    this.refreshSorbetStoreMirror = config.refreshSorbetStoreMirror;
     this.encryptedAttachments = config.encryptedWorkspace === true;
     // Create a child logger with workspace context for file logging
     this.logger = logger.child({
@@ -3562,6 +3597,7 @@ export class MessageHandler {
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
+    this.hasSessionTerminals = config.hasSessionTerminals;
     this.readHostedPresenceStates = config.readHostedPresenceStates;
     this.cleanupLocalProjectWorktreeSetupIfUnreferenced =
       config.cleanupLocalProjectWorktreeSetupIfUnreferenced;
@@ -3907,9 +3943,9 @@ export class MessageHandler {
       hasCompleteMetadata: () =>
         this.cloudPort.kind === 'local' || this.workspaceDocument.hasCompletedInitialMetaSync(),
       readOwnerState: (sessionId) => this.readWorktreeOwnerState(sessionId),
-      isRuntimeActive: (sessionId) =>
-        this.sessionManager.isArchiveInFlight(sessionId) ||
-        this.sessionManager.hasSession(sessionId),
+      isRuntimeActive: (sessionId, worktreePath) =>
+        this.isWorktreeRuntimeActive(sessionId, worktreePath),
+      now: () => getServerNow(),
       runCleanupScript: (input) => this.runArchivedWorktreeCleanupScript(input),
       archiveProjectGroup: (input) =>
         archiveProjectGroup({
@@ -4030,6 +4066,14 @@ export class MessageHandler {
         workspaceId: this.workspaceId,
       });
       this.machineRpcTokenProvider = streamsTokenProvider ?? null;
+      const streamsWebSocketEnabled = resolveCliLoroStreamsWebSocketEnabled(
+        undefined,
+        process.env.LODY_LORO_STREAMS_WS_ENABLED
+      );
+      const wsAuthCallback =
+        streamsWebSocketEnabled && streamsTokenProvider
+          ? streamsTokenProvider.createAuthCallback()
+          : undefined;
       const jsonStreamClient = streamsTokenProvider
         ? createLoroStreamsJsonStreamClient({
             bucketId: LORO_STREAMS_BUCKET_ID,
@@ -4038,12 +4082,33 @@ export class MessageHandler {
               streamsTokenProvider.getGatewayBaseUrl() ??
               this.machineRpcGatewayBaseUrl ??
               undefined,
+            ...(streamsWebSocketEnabled
+              ? {
+                  webSocket: {
+                    enabled: true,
+                    authPoolKey: this.workspaceId,
+                    ...(wsAuthCallback
+                      ? {
+                          auth: async ({
+                            reason,
+                            previousToken,
+                          }: import('@lody/shared').LoroStreamsWebSocketAuthContext) =>
+                            await wsAuthCallback({
+                              reason: reason === 'reauth' ? 'unauthorized' : 'request',
+                              previousToken,
+                            }),
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
             fetchImpl: cliHttpFetch,
             timeout: {
               connectTimeoutMs: rpcConnectTimeoutMs,
             },
           })
         : undefined;
+      this.machineRpcJsonStreamClient = jsonStreamClient ?? null;
       const fileReader = this.encryptedFileReader ?? this.filePreviewService;
       const codeReader = this.encryptedCodeCollabReader ?? this.codeCollabV2Service;
       const queryServer = new LoroStreamsMachineRpcServer({
@@ -5112,6 +5177,16 @@ export class MessageHandler {
       });
   }
 
+  private isWorktreeRuntimeActive(sessionId: SessionId, worktreePath?: string): boolean {
+    if (this.localProjectWorktreeRemovalInFlight > 0) {
+      return true;
+    }
+    if (this.sessionManager.isWorktreeSessionBusy(sessionId)) {
+      return true;
+    }
+    return this.hasSessionTerminals?.(sessionId, worktreePath) === true;
+  }
+
   private async readWorktreeOwnerState(sessionId: SessionId): Promise<WorktreeOwnerState> {
     const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
     if (!snapshot) {
@@ -5123,6 +5198,12 @@ export class MessageHandler {
     }
     if (meta?.isArchived === true && !meta.parentSessionId) {
       return { kind: 'archived', meta };
+    }
+    if (meta) {
+      const settledSinceMs = resolveSettledSinceMs(meta, getServerNow());
+      if (settledSinceMs !== null) {
+        return { kind: 'settled', meta, settledSinceMs };
+      }
     }
     return { kind: 'active' };
   }
@@ -5461,6 +5542,19 @@ export class MessageHandler {
   }
 
   private async deleteLocalProjectResources(
+    localProjectId: LocalProjectId,
+    command: MachineDeleteLocalProjectCommand
+  ): Promise<MachineDeleteLocalProjectCommand['cleanupResult'] | undefined> {
+    this.localProjectWorktreeRemovalInFlight += 1;
+    try {
+      await this.worktreeGc.waitForIdle?.();
+      return await this.deleteLocalProjectResourcesInner(localProjectId, command);
+    } finally {
+      this.localProjectWorktreeRemovalInFlight -= 1;
+    }
+  }
+
+  private async deleteLocalProjectResourcesInner(
     localProjectId: LocalProjectId,
     command: MachineDeleteLocalProjectCommand
   ): Promise<MachineDeleteLocalProjectCommand['cleanupResult'] | undefined> {
@@ -8176,6 +8270,17 @@ export class MessageHandler {
     return { ok: true, result };
   }
 
+  /**
+   * Re-reads the store after a write that just succeeded. Fire-and-forget by
+   * design: the write already answered the caller, and a mirror that fails only
+   * means the Flock rows keep the previous read and its older stamp.
+   */
+  private mirrorSorbetStoreAfterWrite(): void {
+    void this.refreshSorbetStoreMirror?.().catch((error: unknown) =>
+      this.logger.warn(`Sorbet store mirror refresh failed: ${String(error)}`)
+    );
+  }
+
   async handleLocalMachineRpc(
     request: LocalMachineRpcRequestValidated,
     signal?: AbortSignal,
@@ -8191,6 +8296,103 @@ export class MessageHandler {
         return { ok: true, result: error.toRpcError() };
       }
       return { ok: false, error: formatErrorMessage(error) };
+    }
+  }
+
+  async handleRemoteMachineRpcProxy(
+    request: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal,
+    deadlineAtMs?: number
+  ): Promise<LocalMachineRpcResponse> {
+    if (
+      this.cleanedUp ||
+      this.hostsEncryptedWorkspace?.() ||
+      !this.machineRpcJsonStreamClient ||
+      !this.machineRpcTokenProvider
+    ) {
+      return {
+        ok: false,
+        code: 'remote_rpc_unavailable',
+        error: 'Remote machine RPC proxy unavailable',
+      };
+    }
+    try {
+      if (!this.machineRpcGatewayBaseUrl) {
+        this.machineRpcGatewayBaseUrl = await prepareCliStreamsGatewayBaseUrl(
+          this.machineRpcTokenProvider
+        );
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        code: 'remote_rpc_unavailable',
+        error: formatErrorMessage(error),
+      };
+    }
+    if (this.cleanedUp) {
+      return {
+        ok: false,
+        code: 'remote_rpc_unavailable',
+        error: 'Remote machine RPC proxy unavailable',
+      };
+    }
+    const remainingMs =
+      deadlineAtMs !== undefined
+        ? Math.round(deadlineAtMs - getServerNow())
+        : (request.timeoutMs ?? 30_000);
+    if (deadlineAtMs !== undefined && remainingMs <= 0) {
+      return {
+        ok: false,
+        code: 'timeout',
+        error: `Machine ${request.machineId} did not answer before the RPC deadline.`,
+      };
+    }
+    const streamClient = this.machineRpcJsonStreamClient;
+    if (!this.machineRpcResponseDispatcher) {
+      this.machineRpcResponseDispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: this.workspaceId,
+        streamClient,
+        responseStreamId: `${getLoroWorkspaceRpcResponseStreamId(this.workspaceId)}:${uuidV4()}`,
+        logger: this.logger,
+        retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
+        logLabel: `daemon-proxy:${this.workspaceId}`,
+        precreateResponseStream: true,
+      });
+    }
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: this.workspaceId,
+      machineId: request.machineId,
+      streamClient,
+      responseDispatcher: this.machineRpcResponseDispatcher,
+      rpcVersion: LORO_STREAMS_RPC_VERSION,
+      retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
+      now: getServerNow,
+      logger: this.logger,
+    });
+    try {
+      const outcome = await client.callRaw({
+        method: request.method as import('@lody/loro-streams-rpc').LoroStreamsRpcMethod,
+        params: request.params,
+        timeoutMs: remainingMs,
+        ...(deadlineAtMs !== undefined ? { expiresAt: deadlineAtMs } : {}),
+        signal,
+      });
+      if (!outcome) {
+        return {
+          ok: false,
+          code: 'timeout',
+          error: `Machine ${request.machineId} did not answer the RPC request.`,
+        };
+      }
+      return outcome as LocalMachineRpcResponse;
+    } catch (error) {
+      return {
+        ok: false,
+        code: 'request_failed',
+        error: formatErrorMessage(error),
+      };
+    } finally {
+      client.stop();
     }
   }
 
@@ -8407,6 +8609,7 @@ export class MessageHandler {
           }
           if (request.method === 'sorbet/credentials-logout') {
             await this.sorbetCredentials.logout(configId, request.params.providerId, signal);
+            this.mirrorSorbetStoreAfterWrite();
             return { type: 'sorbet/credentials-logout' };
           }
           if (request.method === 'sorbet/providers-list') {
@@ -8416,24 +8619,28 @@ export class MessageHandler {
             });
           }
           if (request.method === 'sorbet/providers-create') {
+            const created = await this.sorbetCredentials.createProvider(
+              configId,
+              request.params.provider,
+              signal
+            );
+            this.mirrorSorbetStoreAfterWrite();
             return SorbetProvidersResultSchema.parse({
               type: 'sorbet/providers-create',
-              provider: await this.sorbetCredentials.createProvider(
-                configId,
-                request.params.provider,
-                signal
-              ),
+              provider: created,
             });
           }
           if (request.method === 'sorbet/providers-update') {
+            const updated = await this.sorbetCredentials.updateProvider(
+              configId,
+              request.params.providerId,
+              request.params.provider,
+              signal
+            );
+            this.mirrorSorbetStoreAfterWrite();
             return SorbetProvidersResultSchema.parse({
               type: 'sorbet/providers-update',
-              provider: await this.sorbetCredentials.updateProvider(
-                configId,
-                request.params.providerId,
-                request.params.provider,
-                signal
-              ),
+              provider: updated,
             });
           }
           if (request.method === 'sorbet/providers-delete') {
@@ -8442,6 +8649,7 @@ export class MessageHandler {
               request.params.providerId,
               signal
             );
+            this.mirrorSorbetStoreAfterWrite();
             return { type: 'sorbet/providers-delete' };
           }
           if (request.method === 'sorbet/providers-refresh') {
@@ -8450,6 +8658,7 @@ export class MessageHandler {
               request.params.providerId,
               signal
             );
+            this.mirrorSorbetStoreAfterWrite();
             return { type: 'sorbet/providers-refresh' };
           }
           return SorbetProvidersResultSchema.parse({
@@ -9224,6 +9433,8 @@ export class MessageHandler {
       if (backend.kind !== 'roost') {
         throw new Error(`Session ${sessionId} does not use Roost history.`);
       }
+      if (query.kind === 'readLatestPage')
+        this.workspaceDocument.prioritizeRoostCloudHistory(sessionId);
       const catchupSignal = signal
         ? AbortSignal.any([signal, this.historyOwnerAbort.signal])
         : this.historyOwnerAbort.signal;
@@ -12649,6 +12860,8 @@ export class MessageHandler {
     await Promise.allSettled(this.localImageBackfills.values());
     this.cancelPendingPermissionRequests();
     this.machineRpcServer?.stop();
+    this.machineRpcResponseDispatcher?.stop();
+    this.machineRpcResponseDispatcher = null;
     this.encryptedQueryServer?.stop();
     this.sessionDispatchWatcher.stop();
     this.diffBlobReader?.dispose();

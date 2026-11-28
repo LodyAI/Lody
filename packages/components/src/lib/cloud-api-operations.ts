@@ -1,3 +1,11 @@
+import { z } from 'zod';
+import {
+  decodeExternalList,
+  decodeExternalObject,
+  formatBoundaryDecodeDiagnostic,
+  type BoundaryDecodeDiagnostic,
+} from '@lody/shared/boundary-decode';
+import { recordClientLog } from './client-log';
 import type { PushRegistration } from './push-notifications';
 import {
   defineCloudAction,
@@ -6,6 +14,7 @@ import {
   definePublicCloudQuery,
   type CloudAction,
   type CloudMutation,
+  type CloudOperationDecoder,
   type CloudQuery,
   type PlatformCapability,
 } from '@lody/platform';
@@ -123,12 +132,178 @@ function capabilityForOperation(name: string): PlatformCapability {
   throw new Error(`Cloud operation ${JSON.stringify(name)} has no capability assignment`);
 }
 
+function reportCloudBoundaryDiagnostic(diagnostic: BoundaryDecodeDiagnostic): void {
+  const summary = formatBoundaryDecodeDiagnostic(diagnostic);
+  console.warn(`[CloudBoundary] ${summary}`);
+  recordClientLog('warn', 'boundary.decode', summary, {
+    boundary: diagnostic.boundary,
+    kind: diagnostic.kind,
+    droppedCount: diagnostic.droppedCount,
+    totalCount: diagnostic.totalCount,
+    issueCount: diagnostic.issueCount,
+  });
+}
+
+function listDecoder<T>(boundary: string, itemSchema: z.ZodType<T>): CloudOperationDecoder<T[]> {
+  return (raw) => {
+    const decoded = decodeExternalList(boundary, itemSchema, raw, {
+      onDiagnostic: reportCloudBoundaryDiagnostic,
+    });
+    return decoded.ok ? { ok: true, data: decoded.data } : decoded;
+  };
+}
+
+function objectDecoder<T>(boundary: string, schema: z.ZodType<T>): CloudOperationDecoder<T> {
+  return (raw) =>
+    decodeExternalObject(boundary, schema, raw, {
+      onDiagnostic: reportCloudBoundaryDiagnostic,
+    });
+}
+
+const E2eeMemberWorkspaceSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    slug: z.string(),
+    contentMode: z.literal('e2ee'),
+    contentModeVersion: z.number(),
+    cryptoOrgId: z.string(),
+    genesisHash: z.string(),
+    role: z.enum(['owner', 'admin', 'member', 'guest']),
+    members: z.array(
+      z
+        .object({
+          id: z.string().min(1),
+          userId: z.string().min(1),
+          role: z.string(),
+          user: z
+            .object({
+              id: z.string().min(1),
+              name: z.string(),
+              email: z.string(),
+              image: z.string().optional(),
+            })
+            .passthrough(),
+        })
+        .passthrough()
+    ),
+  })
+  .passthrough();
+
+const WorkspaceDirectoryMemberSchema = z
+  .object({
+    userId: z.string().min(1),
+    name: z.string().nullable(),
+    image: z.string().nullable(),
+  })
+  .passthrough();
+
+const VisibleLocalProjectSchema = z
+  .object({
+    machineId: z.string().min(1),
+    localProjectId: z.string().min(1),
+    ownerUserId: z.string().min(1),
+    sharedWithTeam: z.boolean(),
+    updatedAt: z.number(),
+  })
+  .passthrough();
+
+const VisibleMachineSchema = z
+  .object({
+    machineId: z.string().min(1),
+    ownerUserId: z.string().min(1),
+    sharedWithTeam: z.boolean(),
+    updatedAt: z.number(),
+  })
+  .passthrough();
+
+const MachineSessionAccessSchema = z
+  .object({
+    machineId: z.string().min(1),
+    readSharedSessionIds: z.array(z.string()),
+    canManage: z.boolean(),
+  })
+  .passthrough();
+
+const CloudInboxItemSchema = z
+  .object({
+    _id: z.string().min(1),
+    kind: z.enum(['session_completed', 'permission_requested', 'sharing_review']),
+    title: z.string().optional(),
+    route: z.string().optional(),
+    requestKind: z.enum(['permission', 'ask_user_question']).optional(),
+    toolLabel: z.string().optional(),
+    updatedAt: z.number(),
+    readAt: z.number().optional(),
+  })
+  .passthrough();
+
+const WorkspaceAccessSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('unauthenticated') }).passthrough(),
+  z.object({ status: z.literal('not_found') }).passthrough(),
+  z
+    .object({
+      status: z.literal('not_member'),
+      organizationId: z.string().min(1),
+    })
+    .passthrough(),
+  z
+    .object({
+      status: z.literal('member'),
+      organizationId: z.string().min(1),
+    })
+    .passthrough(),
+]);
+
+const InvitationPreviewSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('unavailable') }).passthrough(),
+  z
+    .object({
+      status: z.literal('available'),
+      organizationName: z.string(),
+      inviterName: z.string().nullable(),
+      recipientEmailMasked: z.string(),
+      recipientMatchesSession: z.boolean().nullable(),
+      role: z.string(),
+    })
+    .passthrough(),
+]);
+
+const WorkspaceJoinLinkPreviewSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('unavailable') }).passthrough(),
+  z
+    .object({
+      status: z.literal('available'),
+      workspaceName: z.string(),
+      workspaceSlug: z.string().nullable(),
+      expiresAt: z.number(),
+      viewer: z
+        .object({
+          email: z.string(),
+          emailVerified: z.boolean(),
+          alreadyMember: z.boolean(),
+          request: z
+            .object({
+              status: z.enum(['pending', 'approved', 'rejected']),
+              reason: z.string(),
+            })
+            .passthrough()
+            .nullable(),
+        })
+        .passthrough()
+        .nullable(),
+    })
+    .passthrough(),
+]);
+
 const query = <Reference extends FunctionReference<'query'>>(
-  name: string
+  name: string,
+  decode?: CloudOperationDecoder<FunctionReturnType<Reference>>
 ): QueryDescriptor<Reference> =>
   defineCloudQuery<FunctionArgs<Reference>, FunctionReturnType<Reference>>(
     capabilityForOperation(name),
-    name
+    name,
+    decode
   );
 
 const mutation = <Reference extends FunctionReference<'mutation'>>(
@@ -154,11 +329,11 @@ const action = <Reference extends FunctionReference<'action'>>(
  */
 export const cloudOperations = {
   analytics: {
-    getUsageSharing: defineCloudQuery<{ accountId: string }, boolean>(
+    getUsageSharing: defineCloudQuery<Record<string, never>, boolean>(
       'telemetry',
       'analytics:getUsageSharing'
     ),
-    setUsageSharing: defineCloudMutation<{ enabled: boolean; accountId: string }, null>(
+    setUsageSharing: defineCloudMutation<{ enabled: boolean }, null>(
       'telemetry',
       'analytics:setUsageSharing'
     ),
@@ -188,7 +363,11 @@ export const cloudOperations = {
   },
   e2eeMembers: {
     claim: query<ConvexApi['e2eeMembers']['claim']>('e2eeMembers:claim'),
-    workspaces: query<ConvexApi['e2eeMembers']['workspaces']>('e2eeMembers:workspaces'),
+    pending: query<ConvexApi['e2eeMembers']['pending']>('e2eeMembers:pending'),
+    workspaces: query<ConvexApi['e2eeMembers']['workspaces']>(
+      'e2eeMembers:workspaces',
+      listDecoder('convex.e2eeMembers.workspaces', E2eeMemberWorkspaceSchema)
+    ),
     preview: definePublicCloudQuery<
       import('@lody/cloud-api').E2eeMemberRequests['preview'],
       import('@lody/cloud-api').E2eeMemberReplies['preview']
@@ -264,21 +443,28 @@ export const cloudOperations = {
       ConvexApi['activity']['recordMyWorkspaceDailyActiveUser']
     >('activity:recordMyWorkspaceDailyActiveUser'),
   },
-  workspaceMembers: { list: query<ConvexApi['workspaceMembers']['list']>('workspaceMembers:list') },
+  workspaceMembers: {
+    list: query<ConvexApi['workspaceMembers']['list']>(
+      'workspaceMembers:list',
+      listDecoder('convex.workspaceMembers.list', WorkspaceDirectoryMemberSchema)
+    ),
+  },
   auth: {
     transferWorkspaceOwnership: mutation<ConvexApi['auth']['transferWorkspaceOwnership']>(
       'auth:transferWorkspaceOwnership'
     ),
     getInvitationPreview: definePublicCloudQuery<{ invitationId: string }, InvitationPreview>(
       'multiWorkspace',
-      'auth:getInvitationPreview'
+      'auth:getInvitationPreview',
+      objectDecoder('convex.auth.getInvitationPreview', InvitationPreviewSchema)
     ),
     getMyWorkspaceMembershipFingerprint: query<
       ConvexApi['auth']['getMyWorkspaceMembershipFingerprint']
     >('auth:getMyWorkspaceMembershipFingerprint'),
     getUserById: query<ConvexApi['auth']['getUserById']>('auth:getUserById'),
     getWorkspaceAccessBySlug: query<ConvexApi['auth']['getWorkspaceAccessBySlug']>(
-      'auth:getWorkspaceAccessBySlug'
+      'auth:getWorkspaceAccessBySlug',
+      objectDecoder('convex.auth.getWorkspaceAccessBySlug', WorkspaceAccessSchema)
     ),
     isWorkspaceSlugAvailable: query<ConvexApi['auth']['isWorkspaceSlugAvailable']>(
       'auth:isWorkspaceSlugAvailable'
@@ -305,7 +491,8 @@ export const cloudOperations = {
   inbox: {
     listMine: defineCloudQuery<{ workspaceId: string; limit?: number }, CloudInboxItem[]>(
       'teamSharing',
-      'inbox:listMine'
+      'inbox:listMine',
+      listDecoder('convex.inbox.listMine', CloudInboxItemSchema)
     ),
     getSharingReviewState: defineCloudQuery<{ workspaceId: string }, SharingReviewState | null>(
       'teamSharing',
@@ -454,7 +641,8 @@ export const cloudOperations = {
   },
   localProjects: {
     listVisibleLocalProjects: query<ConvexApi['localProjects']['listVisibleLocalProjects']>(
-      'localProjects:listVisibleLocalProjects'
+      'localProjects:listVisibleLocalProjects',
+      listDecoder('convex.localProjects.listVisibleLocalProjects', VisibleLocalProjectSchema)
     ),
     setLocalProjectSharedWithTeam: mutation<
       ConvexApi['localProjects']['setLocalProjectSharedWithTeam']
@@ -483,13 +671,15 @@ export const cloudOperations = {
   },
   machines: {
     listSessionAccess: query<ConvexApi['machines']['listSessionAccess']>(
-      'machines:listSessionAccess'
+      'machines:listSessionAccess',
+      listDecoder('convex.machines.listSessionAccess', MachineSessionAccessSchema)
     ),
     setSessionReadSharedWithTeam: mutation<ConvexApi['machines']['setSessionReadSharedWithTeam']>(
       'machines:setSessionReadSharedWithTeam'
     ),
     listVisibleMachines: query<ConvexApi['machines']['listVisibleMachines']>(
-      'machines:listVisibleMachines'
+      'machines:listVisibleMachines',
+      listDecoder('convex.machines.listVisibleMachines', VisibleMachineSchema)
     ),
     setMachineSharedWithTeam: mutation<ConvexApi['machines']['setMachineSharedWithTeam']>(
       'machines:setMachineSharedWithTeam'
@@ -512,7 +702,8 @@ export const cloudOperations = {
   workspaceJoinRequests: {
     getLinkPreview: definePublicCloudQuery<{ token: string }, WorkspaceJoinLinkPreview>(
       'teamSharing',
-      'workspaceJoinRequests:getLinkPreview'
+      'workspaceJoinRequests:getLinkPreview',
+      objectDecoder('convex.workspaceJoinRequests.getLinkPreview', WorkspaceJoinLinkPreviewSchema)
     ),
     getOwnerState: defineCloudQuery<{ workspaceId: string }, WorkspaceJoinOwnerState>(
       'teamSharing',

@@ -29,22 +29,25 @@ One rung per component. The rung fixes background and shadow together.
   shadow, plus a lift for anything that floats — never one soft cloud. A card
   rests on the page and takes no lift: a wide blur under every block of a page
   draws a halo that reads as a second layer behind each one.
-- ring: attention here. A 2px `box-shadow` composed with the control's own
-  shadow, tight to it, no offset, no glow. `accent` on focus, `destructive` on
-  invalid. Not an `outline`: the product shell resets outlines with `!important`.
-  A focus ring marks where keyboard navigation is, so its width is
-  `focus.ringWidth`, which `installFocusModality` zeroes while the person uses a
-  pointer — `:focus-visible` alone also lights the control a dialog hands focus
-  back to after Escape. A text field keeps its own 2px: whoever types there needs
-  to see where.
+- ring: attention here. A `box-shadow` composed with the control's own shadow,
+  tight to it, no offset, no glow. Not an `outline`: the product shell resets
+  outlines with `!important`. For non-field controls, a focus ring marks where
+  keyboard navigation is, so its width is `focus.ringWidth` (2px), which
+  `installFocusModality` zeroes while the person uses a pointer —
+  `:focus-visible` alone also lights the control a dialog hands focus back to
+  after Escape. Fields (inputs, textareas, selects, comboboxes, checkboxes,
+  radios, switches) never use a saturated blue or 2px accent ring: they use a
+  crisp 1px neutral focus edge (`field.ringWidth: 1px`, `label` tinted) on focus
+  and 1px `destructive` on invalid, visible for both pointer and keyboard focus.
 
 ## Color
 
 - `label` is the thing, `secondaryLabel` is about the thing, `tertiaryLabel`
   is a hint: placeholder, help text, chevron, icon at rest.
 - Ink for the primary button: `label` fill, `background` text.
-- `accent` for the states the eye should find: focus ring, link, stored
-  state (checked, on), live switch, running indicator. Never a button fill.
+- `accent` for the states the eye should find: keyboard focus ring on non-field
+  controls, link, stored state (checked, on), live switch, running indicator.
+  Never a button fill and never a text-field focus outline.
 - `success` and `warning` report an outcome rather than an action, so they mark
   and tint a message and never fill a control a person presses. `destructive`
   is the third: an action that destroys, and an outcome that failed.
@@ -70,14 +73,12 @@ changes describe the interface, not the pixels of an external image.
 
 ## Fields
 
-**Everything that holds a value is one recessed material.** Input, textarea,
+**Everything that holds a value is one flat, clean material.** Input, textarea,
 Select and Combobox triggers, a number, a password, and the tracks a checkbox,
-radio or switch sits in all take the well: `wellBackground` under
-`shadow.inset`. In a system where cards lift and buttons stand up, the fields
-are material too, and they are all the same material — a column that mixes a
-recess with a raised or a flat field reads as two kinds of thing. The recess is
-shallow and lit from the same light as everything raised: a short shadow inside
-the top edge, one inner hairline, the light catching the lower lip. Its fill is
+radio or switch sits in all take `field.background` (`wellBackground`) with a
+single flat `1px` neutral hairline (`field.well`, no inner drop-shadow or lit
+lower lip). On focus, the hairline swaps cleanly to the `1px` neutral
+`field.ring` (`colors.label` tint) without stacking a second border. Its fill is
 a translucent darkening of whatever it sits on (`wellBackground` is ink or black
 at a few percent), so a field is the same small step under a card, a dialog or
 the page — never a fixed mid-gray, which read as a hole on white and as a deep
@@ -94,8 +95,8 @@ bare appearance so the two parts do not draw separate edges.
 | ----------- | --------------------------------------------------------------------------------- |
 | rest        | `field.background` and `field.well`; the value in `field.value`                   |
 | placeholder | `field.placeholder`, the hint colour; it is a prompt, not a label                 |
-| focus       | 2px `field.ring` (accent), tight to the control, no offset                        |
-| invalid     | 2px `field.invalidRing` (destructive), at rest and while focused                  |
+| focus       | 1px `field.ring` (neutral `label` tint), tight to the control, no offset          |
+| invalid     | 1px `field.invalidRing` (destructive), at rest and while focused                  |
 | disabled    | 45% opacity on the control; the label and help dim with it                        |
 | checked, on | accent: `field.checkedFill` under `field.checkedMark`, `field.checkedEdge` on top |
 | mixed       | the checked appearance with the dash, and it announces `mixed`                    |

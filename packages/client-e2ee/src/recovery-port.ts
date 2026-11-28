@@ -28,36 +28,55 @@ export type RecoveryWorkspacesPortHost = {
 /** Recovery files are at most 4 KiB; anything larger is refused before it is read. */
 const fileLimit = 4096;
 
-/** A one-shot file chooser. Resolves null when the person dismisses it. */
-export function chooseRecoveryFile(): Promise<Uint8Array | null> {
+let openChooser: (() => void) | undefined;
+
+/**
+ * A one-shot file chooser. Resolves null when the person dismisses it. WKWebView can close
+ * its picker without `cancel`, and a caller may hold the recovery command permit while it
+ * waits, so the chooser also settles as dismissed when `signal` aborts or a newer chooser
+ * opens. Focus is no signal: WebKit may deliver `change` long after its panel closes.
+ */
+export function chooseRecoveryFile(options?: {
+  readonly signal?: AbortSignal;
+}): Promise<Uint8Array | null> {
+  openChooser?.();
+  const signal = options?.signal;
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return resolve(null);
     const input = document.createElement('input');
     input.type = 'file';
     input.hidden = true;
-    const done = () => input.remove();
-    input.addEventListener(
-      'change',
-      () => {
-        done();
-        const chosen = input.files?.[0];
-        if (!chosen) return resolve(null);
-        if (chosen.size < 1 || chosen.size > fileLimit)
-          return reject(new Error('e2ee_recovery_invalid-input'));
-        chosen.arrayBuffer().then(
-          (buffer) => resolve(new Uint8Array(buffer)),
-          () => reject(new Error('e2ee_recovery_invalid-input'))
-        );
-      },
-      { once: true }
-    );
-    input.addEventListener(
-      'cancel',
-      () => {
-        done();
-        resolve(null);
-      },
-      { once: true }
-    );
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      input.removeEventListener('change', changed);
+      input.removeEventListener('cancel', dismiss);
+      signal?.removeEventListener('abort', dismiss);
+      input.remove();
+      if (openChooser === dismiss) openChooser = undefined;
+      settle();
+    };
+    const dismiss = () => finish(() => resolve(null));
+    const changed = () => {
+      if (settled) return;
+      const chosen = input.files?.[0];
+      if (!chosen) return dismiss();
+      if (chosen.size < 1 || chosen.size > fileLimit)
+        return finish(() => reject(new Error('e2ee_recovery_invalid-input')));
+      chosen.arrayBuffer().then(
+        (buffer) => {
+          const bytes = new Uint8Array(buffer);
+          if (settled) bytes.fill(0);
+          else finish(() => resolve(bytes));
+        },
+        () => finish(() => reject(new Error('e2ee_recovery_invalid-input')))
+      );
+    };
+    input.addEventListener('change', changed);
+    input.addEventListener('cancel', dismiss);
+    signal?.addEventListener('abort', dismiss);
+    openChooser = dismiss;
     document.body.append(input);
     input.click();
   });
@@ -270,7 +289,7 @@ export function recoveryWorkspacesPort(host: RecoveryWorkspacesPortHost) {
         };
         try {
           const rows = ids.length
-            ? await batch((progress) => engine.restore(unlock, ids, progress), observe)
+            ? await batch((progress) => engine.restore(unlock, ids, progress, plan), observe)
             : [];
           return {
             outcome: 'restored' as const,

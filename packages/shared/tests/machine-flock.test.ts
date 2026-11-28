@@ -10,16 +10,20 @@ import {
   getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockLocalProjects,
   getMachineFlockRateLimits,
+  getMachineFlockSorbetStore,
   getSessionLaunchConfigLegacyFields,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
+  SORBET_MIRROR_STAMP_RENEWAL_MS,
   writeAcpModelConfigOptionsToFlock,
   writeAgentConfigToFlock,
   writeMachineFlockRowToFlock,
+  writeSorbetStoreMirrorToFlock,
   type AgentConfigMeta,
   type MachineFlockKey,
   type MachineFlockWritableFlock,
+  type SorbetStoreMirror,
 } from '../src/machine-flock';
 import {
   getRateLimitEntryKey,
@@ -546,6 +550,15 @@ describe('machine Flock helpers', () => {
       env: {},
       sessionDefaults: 'not an object',
     });
+    flock.set(machineFlockKeys.agentConfig('claude' as AgentConfigId), {
+      id: 'claude',
+      machineId: 'machine-1',
+      name: 'Claude',
+      cliType: 'builtin',
+      agentType: 'claude',
+      env: {},
+      sessionDefaults: { modeId: 'bypassPermissions', configOptionValues: {} },
+    });
 
     const configs = getMachineFlockAgentConfigs(
       readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })
@@ -574,6 +587,11 @@ describe('machine Flock helpers', () => {
     });
     expect(configs['other' as AgentConfigId]?.name).toBe('Other');
     expect(configs['other' as AgentConfigId]?.sessionDefaults).toBeUndefined();
+    // A mode-based agent's default permission is the only value it stores.
+    expect(configs['claude' as AgentConfigId]?.sessionDefaults).toEqual({
+      modeId: 'bypassPermissions',
+      configOptionValues: {},
+    });
   });
 
   it('round-trips arbitrary ACP provider names through scoped quota rows', () => {
@@ -836,5 +854,112 @@ describe('rate limit entry keys and legacy persistence migrations', () => {
       expect(isLegacyPiProvider(value)).toBe(false);
       expect(migratePiProvider(value)).toBeUndefined();
     }
+  });
+});
+
+describe('Sorbet store mirror rows', () => {
+  const mirror: SorbetStoreMirror = {
+    credentials: [{ providerId: 'anthropic', type: 'oauth' }],
+    providers: [
+      {
+        id: 'gateway',
+        name: 'Acme Gateway',
+        protocol: 'openai-completions',
+        baseUrl: 'https://gateway.example.com/v1',
+        models: [{ id: 'meridian' }],
+      },
+    ],
+    models: [
+      {
+        selector: 'gateway/meridian',
+        providerId: 'gateway',
+        modelId: 'meridian',
+        displayName: 'Meridian',
+      },
+    ],
+  };
+
+  it('writes every family in one commit so a reader never sees half a read', () => {
+    const flock = new FakeMachineFlock();
+
+    expect(writeSorbetStoreMirrorToFlock(flock, mirror, 1_000)).toBe(true);
+
+    expect(flock.commits).toBe(1);
+    const store = getMachineFlockSorbetStore(
+      readMachineFlockRowsFromFlock(flock, { families: ['sorbetStore'] })
+    );
+    expect(store.credentials).toEqual({
+      v: 1,
+      mirroredAt: 1_000,
+      credentials: [{ providerId: 'anthropic', type: 'oauth' }],
+    });
+    expect(store.providers?.providers.map((provider) => provider.id)).toEqual(['gateway']);
+    expect(store.models?.models.map((model) => model.selector)).toEqual(['gateway/meridian']);
+  });
+
+  it('drops a provider the machine no longer has instead of leaving its row behind', () => {
+    const flock = new FakeMachineFlock();
+    writeSorbetStoreMirrorToFlock(flock, mirror, 1_000);
+
+    const withoutGateway: SorbetStoreMirror = {
+      ...mirror,
+      providers: [],
+      models: [],
+    };
+    expect(writeSorbetStoreMirrorToFlock(flock, withoutGateway, 2_000)).toBe(true);
+
+    const store = getMachineFlockSorbetStore(
+      readMachineFlockRowsFromFlock(flock, { families: ['sorbetStore'] })
+    );
+    expect(store.providers?.providers).toEqual([]);
+    expect(store.models?.models).toEqual([]);
+    expect(store.providers?.mirroredAt).toBe(2_000);
+  });
+
+  it('keeps an unchanged read without a write, then renews its stamp once it is old', () => {
+    const flock = new FakeMachineFlock();
+    writeSorbetStoreMirrorToFlock(flock, mirror, 1_000);
+    flock.commits = 0;
+
+    expect(writeSorbetStoreMirrorToFlock(flock, mirror, 2_000)).toBe(false);
+    expect(flock.commits).toBe(0);
+
+    const renewed = 1_000 + SORBET_MIRROR_STAMP_RENEWAL_MS;
+    expect(writeSorbetStoreMirrorToFlock(flock, mirror, renewed)).toBe(true);
+    const store = getMachineFlockSorbetStore(
+      readMachineFlockRowsFromFlock(flock, { families: ['sorbetStore'] })
+    );
+    expect(store.credentials?.mirroredAt).toBe(renewed);
+  });
+
+  it('drops a mirror row it cannot read rather than presenting part of it', () => {
+    const flock = new FakeMachineFlock();
+    flock.set(machineFlockKeys.sorbetStoreProviders(), {
+      v: 1,
+      mirroredAt: 1_000,
+      providers: [{ id: 'gateway', name: 'Acme Gateway', protocol: 'unknown-wire' }],
+    });
+    flock.set(machineFlockKeys.sorbetStoreCredentials(), {
+      v: 1,
+      mirroredAt: 1_000,
+      credentials: [{ providerId: 'anthropic', type: 'oauth' }],
+    });
+
+    const store = getMachineFlockSorbetStore(readMachineFlockRowsFromFlock(flock));
+    expect(store.credentials?.credentials).toEqual([{ providerId: 'anthropic', type: 'oauth' }]);
+    expect(store.providers).toBeUndefined();
+  });
+
+  it('keeps a credential descriptor to the pair the store publishes, never more', () => {
+    const flock = new FakeMachineFlock();
+    flock.set(machineFlockKeys.sorbetStoreCredentials(), {
+      v: 1,
+      mirroredAt: 1_000,
+      credentials: [{ providerId: 'anthropic', type: 'oauth', apiKey: 'synthetic-secret' }],
+    });
+
+    const store = getMachineFlockSorbetStore(readMachineFlockRowsFromFlock(flock));
+    expect(store.credentials?.credentials).toEqual([{ providerId: 'anthropic', type: 'oauth' }]);
+    expect(JSON.stringify(store.credentials)).not.toContain('synthetic-secret');
   });
 });

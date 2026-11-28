@@ -1485,7 +1485,9 @@ describe('SessionFileContentView', () => {
     );
     await act(async () => confirm!.click());
     expect(view.querySelector('iframe')?.getAttribute('src')).toBe(url);
-    expect(view.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
+    expect(view.querySelector('iframe')?.getAttribute('sandbox')).toBe(
+      'allow-scripts allow-same-origin allow-forms'
+    );
     await act(async () =>
       view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')!.click()
     );

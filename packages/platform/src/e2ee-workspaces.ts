@@ -262,6 +262,10 @@ export interface E2eeWorkspaceRuntime
   memberJoinRequests?(
     workspaceId: string
   ): Promise<import('@lody/cloud-api').E2eeMemberReplies['pending']>;
+  /** Optional push hint that pending member join requests changed for this workspace.
+   * Grants nothing: callers still read `memberJoinRequests`, keep their poll as a
+   * fallback, and release the subscription when unmounting or leaving the workspace. */
+  subscribePendingMemberRequests?(workspaceId: string, changed: () => void): () => void;
   /** Unattended automatic mode is disabled; only `'explicit'` administrator approval is permitted. */
   approveMemberJoin?(
     workspaceId: string,

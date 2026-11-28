@@ -63,8 +63,13 @@ type KeyDeliverySlot = {
   /** Settles when the first pass covering the request ends, or the slot is dropped. */
   firstPasses: Map<string, Deferred.Deferred<void>>
   generation: number | undefined
-  /** Settles when the slot's fiber ends; `idle` and reentry use it. */
-  running?: Promise<void>
+  /** Active serialized fiber state; `idle`, reentry, and wake-abort share it. */
+  active?: {
+    readonly promise: Promise<void>
+    startedAt: number
+    abort: () => void
+    waking: boolean
+  }
   again: boolean
   timer?: unknown
   autoRetries: number
@@ -205,7 +210,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
   function schedule(accountId: string, workspaceId: string) {
     const key = keyOf(accountId, workspaceId)
     const slot = slots.get(key)
-    if (!slot || slot.running) return
+    if (!slot || slot.active) return
     if (slot.timer !== undefined) ports.timers().clear(slot.timer)
     slot.timer = undefined
     if (slot.autoRetries >= KEY_DELIVERY_AUTO_RETRIES) return
@@ -269,7 +274,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
       drop(accountId, workspaceId)
       return
     }
-    if (!slot || slot.running) return
+    if (!slot || slot.active) return
     const now = ports.now()
     if (
       [...slot.requests.values()].some(
@@ -332,10 +337,12 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     }
     return !slot.again
   }
-  /** A request admitted during a round gets one follow-up pass; later ones wait for a poll. */
+  /** A request admitted during a round gets one follow-up pass; later ones wait for a poll.
+   * A wake-aborted pre-sleep pass immediately retries inside this same serialized fiber. */
   const passes = (accountId: string, workspaceId: string, slot: KeyDeliverySlot) =>
     Effect.gen(function* () {
-      for (let pass = 0; pass < 2; pass++) {
+      let pass = 0
+      while (pass < 2) {
         // Sign-out or an account change ends this account's delivery at once.
         if (!slot.aborted && !current(accountId, slot)) drop(accountId, workspaceId)
         if (slot.aborted) return
@@ -352,15 +359,33 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
           delete delivery.code
           logMemberKeys('key-delivery', idOf.get(delivery)!, { state: 'delivering' })
         }
+        const roundAbort = new AbortController()
+        const active = slot.active!
+        active.abort = () => roundAbort.abort()
+        active.startedAt = nowOrZero()
         const delivered = yield* Effect.result(
           deliver(
             accountId,
             workspaceId,
             new Set(covered.map((delivery) => delivery.device)),
-            () => slot.aborted === true || !current(accountId, slot),
-            covered.every((delivery) => delivery.attempts === 0)
+            () => slot.aborted === true || roundAbort.signal.aborted || !current(accountId, slot),
+            covered.every((delivery) => delivery.attempts === 0),
+            roundAbort.signal
           )
         )
+        active.abort = () => {}
+        if (active.waking) {
+          active.waking = false
+          for (const delivery of covered) {
+            if (delivery.state !== 'delivering') continue
+            delivery.state = 'pending'
+            delivery.retryAt = 0
+            delete delivery.code
+          }
+          slot.autoRetries = 0
+          pass = 0
+          continue
+        }
         const done = recordPass(
           accountId,
           workspaceId,
@@ -373,16 +398,25 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
         )
         for (const [requestId] of coveredEntries) settleFirstPass(slot, requestId)
         if (done) return
+        pass += 1
       }
     })
   /** After the slot's fiber ends, however it ends. */
   function finish(accountId: string, workspaceId: string, slot: KeyDeliverySlot) {
-    slot.running = undefined
+    const waking = slot.active?.waking === true
+    slot.active = undefined
     // An unexpected exception must not leave a request shown as sending forever:
     // anything still delivering becomes retryable on the next due poll.
     const now = nowOrZero()
     for (const [requestId, delivery] of slot.requests) {
       if (delivery.state !== 'delivering') continue
+      if (waking) {
+        delivery.state = 'pending'
+        delivery.retryAt = 0
+        delete delivery.code
+        slot.autoRetries = 0
+        continue
+      }
       delivery.attempts += 1
       delivery.state = 'failed'
       delivery.code = KEY_DELIVERY_INTERRUPTED
@@ -406,13 +440,18 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
    * a call while it runs asks for the follow-up pass and shares its completion. */
   function run(accountId: string, workspaceId: string): Promise<void> {
     const slot = slotFor(accountId, workspaceId)
-    if (slot.running) {
+    if (slot.active) {
       slot.again = true
-      return slot.running
+      return slot.active.promise
     }
     let settle!: () => void
-    const running = new Promise<void>((resolve) => (settle = resolve))
-    slot.running = running
+    const promise = new Promise<void>((resolve) => (settle = resolve))
+    slot.active = {
+      promise,
+      startedAt: nowOrZero(),
+      abort: () => {},
+      waking: false
+    }
     Effect.runFork(
       passes(accountId, workspaceId, slot).pipe(
         Effect.catchCause((cause) => remembering(Cause.squash(cause))),
@@ -427,7 +466,42 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
         )
       )
     )
-    return running
+    return promise
+  }
+  /** Re-evaluates due retries and aborts only pre-sleep in-flight passes on OS wake.
+   * Standalone wakes (`sleptAt === undefined`) never abort a healthy in-flight pass. */
+  function wake(sleptAt?: number) {
+    const now = nowOrZero()
+    for (const [key, slot] of [...slots.entries()]) {
+      const [accountId, workspaceId] = key.split('\n') as [string, string]
+      if (!current(accountId, slot)) {
+        drop(accountId, workspaceId)
+        continue
+      }
+      if (slot.active) {
+        if (sleptAt === undefined || slot.active.startedAt > sleptAt) continue
+        slot.active.waking = true
+        slot.active.abort()
+        continue
+      }
+      if (slot.timer !== undefined) {
+        ports.timers().clear(slot.timer)
+        slot.timer = undefined
+      }
+      const hasDue = [...slot.requests.values()].some(
+        (delivery) =>
+          delivery.state === 'pending' ||
+          (delivery.state === 'failed' &&
+            delivery.retryAt <= now &&
+            !TERMINAL_KEY_DELIVERY.has(delivery.code ?? ''))
+      )
+      if (hasDue) {
+        slot.autoRetries = 0
+        void run(accountId, workspaceId)
+      } else {
+        schedule(accountId, workspaceId)
+      }
+    }
   }
   /** One key round under a main-owned reader, so closing every window cannot stop it.
    * Ingests relay history first, runs the round for devices the local verified ledger
@@ -437,9 +511,12 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     workspaceId: string,
     devices: Set<string>,
     aborted: () => boolean = () => false,
-    skipIngestIfAdmitted = false
+    skipIngestIfAdmitted = false,
+    abortSignal?: AbortSignal
   ) =>
     Effect.gen(function* () {
+      const bindSignal = (signal: AbortSignal) =>
+        abortSignal ? AbortSignal.any([signal, abortSignal]) : signal
       const scope = ports.scope(workspaceId)
       const turn = <A extends unknown>(work: (owner: Owner) => Effect.Effect<A, unknown>) =>
         promised(() => scope(work))
@@ -452,18 +529,31 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
       // A removed or reset workspace is never reopened by a round that started earlier;
       // the check runs under the account lock, immediately before the open. The reader
       // is released however the round ends, so a close drain never waits on it.
-      const acquireReader = turn((owner) =>
-        owner.accountId !== accountId
-          ? Effect.fail(new Error('e2ee_account_mismatch'))
-          : aborted()
-            ? Effect.fail(new Error('e2ee_key_delivery_aborted'))
-            : Effect.gen(function* () {
-                yield* owner.host.open(workspaceId)
-                const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
-                readers.set(KEY_DELIVERY_READER, (readers.get(KEY_DELIVERY_READER) ?? 0) + 1)
-                owner.readers.set(workspaceId, readers)
-              })
-      )
+      const acquireReaderAttempt = (drained: boolean) =>
+        turn((owner) =>
+          owner.accountId !== accountId
+            ? Effect.fail(new Error('e2ee_account_mismatch'))
+            : aborted()
+              ? Effect.fail(new Error('e2ee_key_delivery_aborted'))
+              : Effect.gen(function* () {
+                  if (!drained && typeof owner.host.pendingClose === 'function') {
+                    const closing = yield* owner.host.pendingClose(workspaceId)
+                    if (closing) return { kind: 'closing' as const, closing }
+                  }
+                  yield* owner.host.open(workspaceId)
+                  const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
+                  readers.set(KEY_DELIVERY_READER, (readers.get(KEY_DELIVERY_READER) ?? 0) + 1)
+                  owner.readers.set(workspaceId, readers)
+                  return { kind: 'opened' as const }
+                })
+        )
+      const acquireReader = Effect.gen(function* () {
+        const first = yield* acquireReaderAttempt(false)
+        if (first.kind === 'opened') return
+        yield* outside(first.closing)
+        const second = yield* acquireReaderAttempt(true)
+        if (second.kind !== 'opened') return yield* Effect.fail(new Error('e2ee_closed'))
+      })
       const releaseReader = turn((owner) =>
         Effect.gen(function* () {
           const readers = owner.readers.get(workspaceId)
@@ -494,7 +584,9 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
               break
             }
         if (needsIngest) {
-          const ingested = yield* Effect.result(ingestEffect(accountId, workspaceId, scope, cloud))
+          const ingested = yield* Effect.result(
+            ingestEffect(accountId, workspaceId, scope, cloud, abortSignal)
+          )
           // A lagging relay leaves targets unconfirmed below; only terminal causes stop here.
           if (ingested._tag === 'Failure') {
             if (TERMINAL_KEY_DELIVERY.has(ports.code(ingested.failure)))
@@ -513,7 +605,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
         const mailbox = (signal: AbortSignal) => {
           let instance = roundMailboxes.get(signal)
           if (!instance) {
-            instance = cloud.client.mailbox({ workspaceId, credential }, signal)
+            instance = cloud.client.mailbox({ workspaceId, credential }, bindSignal(signal))
             roundMailboxes.set(signal, instance)
           }
           return instance
@@ -526,7 +618,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
             Effect.succeed(
               owner.host
                 .receiveKeys(workspaceId, mailbox, (signal) =>
-                  cloud.client.staging({ workspaceId, credential }, signal)
+                  cloud.client.staging({ workspaceId, credential }, bindSignal(signal))
                 )
                 .pipe(Effect.mapError((error) => terminalKeyRoundCause(error) ?? error))
             )
@@ -569,7 +661,8 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     accountId: string,
     workspaceId: string,
     scope: KeyDeliveryScope,
-    cloud: Cloud
+    cloud: Cloud,
+    signal?: AbortSignal
   ) =>
     Effect.gen(function* () {
       const status = yield* promised(() => scope((owner) => owner.host.status(workspaceId)))
@@ -577,10 +670,13 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
       let cursor: string | undefined
       let checkpoint: import('@lody/cloud-api').E2eeLedgerCheckpoint | undefined
       for (let index = 0; index < 256; index++) {
-        const page = yield* cloud.client.history({
-          workspaceId,
-          ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
-        })
+        const page = yield* cloud.client.history(
+          {
+            workspaceId,
+            ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
+          },
+          signal
+        )
         checkpoint ??= page.checkpoint
         const ingested = yield* promised(() =>
           scope((owner) => Effect.succeed(owner.host.ingestLedgerRecords(workspaceId, page)))
@@ -625,7 +721,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
   }
   /** Synchronization point for the owning tests; production callers never await delivery. */
   function idle(accountId: string, workspaceId: string) {
-    return slots.get(keyOf(accountId, workspaceId))?.running ?? Promise.resolve()
+    return slots.get(keyOf(accountId, workspaceId))?.active?.promise ?? Promise.resolve()
   }
   /** Register an inline attempt before publication, without starting network work.
    * Its completion is fenced to this exact slot and login, including after reset. */
@@ -667,6 +763,7 @@ export function makeDesktopKeyDelivery(ports: DesktopKeyDeliveryPorts) {
     dropWorkspace,
     ingest,
     idle,
+    wake,
     prepareInline
   }
 }

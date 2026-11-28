@@ -18,6 +18,7 @@ export const BOUNDARY_CHECK_SCRIPTS = Object.freeze([
   'scripts/check-operation-inbox-boundary.mjs',
   'scripts/check-legacy-cloud-access.mjs',
   'scripts/check-streams-transport-boundary.mjs',
+  'scripts/check-external-boundary-decode.mjs',
   'scripts/check-comment-ratchet.mjs',
 ]);
 

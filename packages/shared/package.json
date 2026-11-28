@@ -14,6 +14,7 @@
     },
     "./node/e2ee-clock": "./src/node/e2ee-clock.ts",
     "./node/e2ee-identity": "./src/node/e2ee-identity.ts",
+    "./e2ee-ipc-error": "./src/e2ee-ipc-error.ts",
     "./e2ee-local-pairing": "./src/e2ee-local-pairing.ts",
     "./workspace-streams-persistence": "./src/workspace-streams-persistence.ts",
     "./streams-crdt-factory": "./src/streams-crdt-factory.ts",
@@ -105,6 +106,11 @@
       "types": "./src/electron-ipc.ts",
       "import": "./src/electron-ipc.ts",
       "default": "./src/electron-ipc.ts"
+    },
+    "./boundary-decode": {
+      "types": "./src/boundary-decode.ts",
+      "import": "./src/boundary-decode.ts",
+      "default": "./src/boundary-decode.ts"
     },
     "./language": {
       "types": "./src/language.ts",
@@ -224,6 +230,7 @@
       "types": "./src/local-loro-writer/legacy.ts",
       "import": "./src/local-loro-writer/legacy.ts"
     },
+    "./e2ee-pair-link": "./src/e2ee-pair-link.ts",
     "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts",
     "./e2ee-rpc": "./src/e2ee-rpc.ts",
     "./e2ee-execution-intent": "./src/e2ee-execution-intent.ts",

@@ -6,14 +6,15 @@ import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { ScheduledMessageEditor } from './scheduled-message-editor';
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
+import { Button } from '@lody/ui/button';
 import { AlertDialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import { markMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { useCommand } from '@/lib/commands';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { toast } from '@/lib/toast';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
@@ -48,7 +49,11 @@ import {
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { mobileHomeReturnTabAtom } from '@/atoms/mobile-home-state';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
-import { onlineMachineIdsAtom, lodyPresenceSyncStateAtom } from '@/atoms/presence';
+import {
+  onlineMachineIdsAtom,
+  lodyPresenceSyncStateAtom,
+  sessionLiveStatusAtomFamily,
+} from '@/atoms/presence';
 import { useScheduleDocument, useSchedules } from '@/hooks/use-schedules';
 import { useScheduledMessageContents } from './use-scheduled-message-content';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
@@ -86,6 +91,12 @@ import { ScheduleDestinationRows, type PickableSession } from './schedule-destin
 import { ScheduleAgentControls } from './schedule-agent-controls';
 import { FieldIssueMark } from './schedule-field-issue-mark';
 import { pickScheduleAgent, seedScheduleAgentRunRef } from './schedule-agent-defaults';
+import {
+  inspectBoundSessionBeforeRun,
+  resolveScheduleBoundSessionTarget,
+  type BoundSessionLocalSnapshot,
+  type BoundSessionRunCheckResult,
+} from './schedule-run-check';
 import { readChatLandingDefaults } from '@/lib/chat-landing-defaults';
 
 const styles = stylex.create({
@@ -207,16 +218,32 @@ function SupportedSchedulesWorkspace({
       });
   };
   const mobile = useIsMobile();
+  const store = useStore();
   const detail = useScheduleDocument(scheduleId);
   const [error, setError] = useState<string>();
   const [confirmation, setConfirmation] = useState<{
     title: string;
     description: string;
-    accept: () => Promise<void>;
+    accept: () => Promise<void | 'escalated'>;
     /** Red answer for an irreversible action. */
     destructive?: boolean;
     confirmLabel?: string;
   }>();
+  const [confirming, setConfirming] = useState(false);
+  const confirmingRef = useRef(false);
+  const inFlightRunsRef = useRef(new Set<string>());
+  const [inFlightRunIds, setInFlightRunIds] = useState<ReadonlySet<string>>(() => new Set());
+  const runGenerationRef = useRef(0);
+  useEffect(() => {
+    runGenerationRef.current += 1;
+    setConfirmation(undefined);
+  }, [runtime?.workspaceId]);
+  useEffect(
+    () => () => {
+      runGenerationRef.current += 1;
+    },
+    []
+  );
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   // ScheduleRepository builds a Mirror over the schedule doc, so the class is
   // lazy-loaded: a static import would keep `loro-crdt` (WASM) in the boot
@@ -279,16 +306,17 @@ function SupportedSchedulesWorkspace({
       createScheduleRef.current = null;
     };
   }, [createScheduleRef]);
-  const mutate = async (action: () => Promise<void>) => {
+  const mutate = async <T,>(action: () => Promise<T>): Promise<T | undefined> => {
     try {
       setError(undefined);
-      await action();
+      return await action();
     } catch (e) {
       setError(
         e instanceof Error
           ? e.message
           : t('schedules.saveError', 'The schedule could not be saved.')
       );
+      return undefined;
     }
   };
   const toggle = (row: ScheduleRegistryRow) => {
@@ -314,16 +342,237 @@ function SupportedSchedulesWorkspace({
     // without reading. Ownership and machine capability are still enforced above.
     void mutate(apply);
   };
+  const latestRunContextRef = useRef({
+    rows: registry.rows,
+    machines,
+    user,
+    runtime,
+    repository,
+    scheduledMessageContents,
+  });
+  latestRunContextRef.current = {
+    rows: registry.rows,
+    machines,
+    user,
+    runtime,
+    repository,
+    scheduledMessageContents,
+  };
+  const beginRunAttempt = (id: string): boolean => {
+    if (inFlightRunsRef.current.has(id)) return false;
+    inFlightRunsRef.current.add(id);
+    setInFlightRunIds(new Set(inFlightRunsRef.current));
+    return true;
+  };
+  const endRunAttempt = (id: string) => {
+    if (!inFlightRunsRef.current.delete(id)) return;
+    setInFlightRunIds(new Set(inFlightRunsRef.current));
+  };
+  const currentRunnableRow = (expected: ScheduleRegistryRow): ScheduleRegistryRow | null => {
+    const latest = latestRunContextRef.current;
+    if (!latest.user || !latest.repository || !latest.runtime) return null;
+    const liveRow = latest.rows.find((entry) => entry.scheduleId === expected.scheduleId);
+    if (!liveRow) return null;
+    if (
+      liveRow.ownerId !== latest.user.id ||
+      liveRow.activationId !== expected.activationId ||
+      liveRow.machineId !== expected.machineId ||
+      JSON.stringify(liveRow.destination) !== JSON.stringify(expected.destination)
+    ) {
+      return null;
+    }
+    if (!machineSupportsSchedulesProtocol(latest.machines.get(liveRow.machineId as never))) {
+      return null;
+    }
+    return liveRow;
+  };
+  const readBoundSessionSnapshot = (
+    machineId: MachineId,
+    sessionId: SessionId
+  ): BoundSessionLocalSnapshot => {
+    const allSessions = [...store.get(sessionListAtom), ...store.get(archivedSessionListAtom)];
+    return {
+      liveStatus: store.get(sessionLiveStatusAtomFamily(sessionId)),
+      presenceSyncState: store.get(lodyPresenceSyncStateAtom),
+      machineOnline: store.get(onlineMachineIdsAtom).has(machineId),
+      sessionMeta: allSessions.find((meta) => meta.id === sessionId),
+      nowMs: getServerNow(),
+    };
+  };
+  const boundChatTitle = (item: ScheduleRegistryRow, sessionId: SessionId): string => {
+    const meta = [...store.get(sessionListAtom), ...store.get(archivedSessionListAtom)].find(
+      (entry) => entry.id === sessionId
+    );
+    return (
+      meta?.title ||
+      (item.destination.kind === 'own_session'
+        ? t('schedules.destination.ownSession', 'One chat for this task')
+        : t('schedules.destination.untitledChat', 'Untitled chat'))
+    );
+  };
   const requestRun = (id: string) => async () => {
-    if (!repository || !user) return;
-    await runtime!.withScheduleStore(id, () =>
-      repository.requestRun({
+    const {
+      repository: currentRepository,
+      user: currentUser,
+      runtime: currentRuntime,
+    } = latestRunContextRef.current;
+    if (!currentRepository || !currentUser || !currentRuntime) return;
+    await currentRuntime.withScheduleStore(id, () =>
+      currentRepository.requestRun({
         scheduleId: id,
-        actorId: user.id,
+        actorId: currentUser.id,
         manualRunId: uuid(),
         now: getServerNow(),
       })
     );
+  };
+  const dispatchManualRun = async (
+    item: ScheduleRegistryRow,
+    options: { notify: boolean }
+  ): Promise<void> => {
+    const liveRow = currentRunnableRow(item);
+    if (!liveRow) return;
+    await requestRun(liveRow.scheduleId)();
+    if (options.notify) {
+      toast.success(
+        t('schedules.runStarted', 'Run requested for “{{title}}”.', {
+          title:
+            (liveRow.scheduledMessage
+              ? latestRunContextRef.current.scheduledMessageContents
+                  .get(liveRow.scheduleId)
+                  ?.trim()
+              : undefined) || liveRow.title,
+        })
+      );
+    }
+  };
+  const checkBoundSession = async (
+    item: ScheduleRegistryRow
+  ): Promise<
+    { kind: 'none' } | { kind: 'checked'; sessionId: SessionId; result: BoundSessionRunCheckResult }
+  > => {
+    const allSessions = [...store.get(sessionListAtom), ...store.get(archivedSessionListAtom)];
+    const sessionIds = new Set(allSessions.map((entry) => entry.id));
+    const target = resolveScheduleBoundSessionTarget(item, {
+      hasSession: (id) => sessionIds.has(id),
+      hasLiveStatus: (id) => store.get(sessionLiveStatusAtomFamily(id)) != null,
+    });
+    if (!target) return { kind: 'none' };
+    const result = await inspectBoundSessionBeforeRun({
+      machineId: item.machineId as MachineId,
+      sessionId: target.sessionId,
+      getSnapshot: () => readBoundSessionSnapshot(item.machineId as MachineId, target.sessionId),
+      requestLiveStatus: latestRunContextRef.current.runtime?.requestSessionLiveStatus,
+    });
+    return { kind: 'checked', sessionId: target.sessionId, result };
+  };
+  const buildBoundSessionRunConfirmation = (
+    item: ScheduleRegistryRow,
+    sessionId: SessionId,
+    check: Exclude<BoundSessionRunCheckResult, { state: 'idle' }>,
+    source: 'list' | 'detail'
+  ) => {
+    const chatTitle = boundChatTitle(item, sessionId);
+    const title = displayTitle(item);
+    if (check.state === 'busy') {
+      return {
+        title: t('schedules.runNowBusyTitle', '“{{chat}}” is currently running', {
+          chat: chatTitle,
+        }),
+        description:
+          source === 'detail'
+            ? t(
+                'schedules.runNowBusyDetailHelp',
+                'Running “{{title}}” now uses the last saved schedule (unsaved edits are excluded) and will send a new turn to this chat using its current queue or steer behavior. Run anyway?',
+                { title }
+              )
+            : t(
+                'schedules.runNowBusyHelp',
+                'Running “{{title}}” now will send a new turn to this chat using its current queue or steer behavior. Run anyway?',
+                { title }
+              ),
+        confirmLabel: t('schedules.runNowConfirm', 'Run anyway'),
+        accept: async () => {
+          await dispatchManualRun(item, { notify: source === 'list' });
+        },
+      };
+    }
+    return {
+      title: t(
+        'schedules.runNowStatusUnknownTitle',
+        'Couldn’t confirm whether “{{chat}}” is running',
+        { chat: chatTitle }
+      ),
+      description:
+        source === 'detail'
+          ? t(
+              'schedules.runNowStatusUnknownDetailHelp',
+              'Live status for this chat is unavailable right now. Running “{{title}}” uses the last saved schedule (unsaved edits are excluded) and may queue or run alongside active work in this chat. Run anyway?',
+              { title }
+            )
+          : t(
+              'schedules.runNowStatusUnknownHelp',
+              'Live status for this chat is unavailable right now. Running “{{title}}” now may queue or run alongside active work in this chat. Run anyway?',
+              { title }
+            ),
+      confirmLabel: t('schedules.runNowConfirm', 'Run anyway'),
+      accept: async () => {
+        await dispatchManualRun(item, { notify: source === 'list' });
+      },
+    };
+  };
+  const startManualRun = (item: ScheduleRegistryRow, source: 'list' | 'detail') => {
+    if (!currentRunnableRow(item)) return;
+    if (!beginRunAttempt(item.scheduleId)) return;
+    const generation = runGenerationRef.current;
+    void (async () => {
+      try {
+        const checked = await checkBoundSession(item);
+        if (runGenerationRef.current !== generation) return;
+        const liveRow = currentRunnableRow(item);
+        if (!liveRow) return;
+        if (checked.kind === 'checked' && checked.result.state !== 'idle') {
+          setConfirmation(
+            buildBoundSessionRunConfirmation(liveRow, checked.sessionId, checked.result, source)
+          );
+          return;
+        }
+        if (source === 'detail') {
+          setConfirmation({
+            title: t('schedules.runNow', 'Run now'),
+            description: t(
+              'schedules.runNowHelp',
+              'Run with the last saved prompt, Agent, Project and permission mode. Unsaved edits are excluded. This may run alongside existing work.'
+            ),
+            accept: async () => {
+              if (runGenerationRef.current !== generation) return;
+              const latest = currentRunnableRow(liveRow);
+              if (!latest) return;
+              if (checked.kind === 'checked') {
+                const recheck = await checkBoundSession(latest);
+                if (runGenerationRef.current !== generation) return;
+                if (recheck.kind === 'checked' && recheck.result.state !== 'idle') {
+                  setConfirmation(
+                    buildBoundSessionRunConfirmation(
+                      latest,
+                      recheck.sessionId,
+                      recheck.result,
+                      'detail'
+                    )
+                  );
+                  return 'escalated';
+                }
+              }
+              await dispatchManualRun(latest, { notify: false });
+            },
+          });
+          return;
+        }
+        await mutate(() => dispatchManualRun(liveRow, { notify: true }));
+      } finally {
+        endRunAttempt(item.scheduleId);
+      }
+    })();
   };
   const deleteSchedule = (id: string) => async () => {
     if (!repository || !user) return;
@@ -343,15 +592,9 @@ function SupportedSchedulesWorkspace({
       })
     );
   };
-  // From the list there are no unsaved edits to warn about, so Run starts at
-  // once and says so; the open schedule still confirms (its edits may be unsaved).
-  const runFromList = (item: ScheduleRegistryRow) =>
-    void mutate(async () => {
-      await requestRun(item.scheduleId)();
-      toast.success(
-        t('schedules.runStarted', 'Run requested for “{{title}}”.', { title: item.title })
-      );
-    });
+  // From the list, idle or new-chat schedules start at once with a toast;
+  // bound chats that are running (or whose live status is unknown) confirm first.
+  const runFromList = (item: ScheduleRegistryRow) => startManualRun(item, 'list');
   const confirmDelete = (item: ScheduleRegistryRow) =>
     setConfirmation({
       title: t('schedules.deleteTitle', 'Delete “{{title}}”?', { title: displayTitle(item) }),
@@ -478,15 +721,7 @@ function SupportedSchedulesWorkspace({
           locale: i18n.language,
         })
       : undefined;
-  const confirmRun = (item: ScheduleRegistryRow) =>
-    setConfirmation({
-      title: t('schedules.runNow', 'Run now'),
-      description: t(
-        'schedules.runNowHelp',
-        'Run with the last saved prompt, Agent, Project and permission mode. Unsaved edits are excluded. This may run alongside existing work.'
-      ),
-      accept: requestRun(item.scheduleId),
-    });
+  const confirmRun = (item: ScheduleRegistryRow) => startManualRun(item, 'detail');
   const detailActions: ScheduleAction[] = [];
   if (row && rowContext) {
     if (!row.scheduledMessage && row.trigger.kind !== 'manual')
@@ -494,7 +729,7 @@ function SupportedSchedulesWorkspace({
         key: 'run',
         label: t('schedules.runNow', 'Run now'),
         icon: Play,
-        disabled: !canManage,
+        disabled: !canManage || inFlightRunIds.has(row.scheduleId),
         onClick: () => confirmRun(row),
       });
     const chatId = rowContext.chat?.sessionId;
@@ -540,7 +775,10 @@ function SupportedSchedulesWorkspace({
       }
       run={
         row && !row.scheduledMessage && row.trigger.kind === 'manual'
-          ? { disabled: !canManage, onRun: () => confirmRun(row) }
+          ? {
+              disabled: !canManage || inFlightRunIds.has(row.scheduleId),
+              onRun: () => confirmRun(row),
+            }
           : undefined
       }
       actions={detailActions}
@@ -651,7 +889,7 @@ function SupportedSchedulesWorkspace({
       <AlertDialog.Root
         open={!!confirmation}
         onOpenChange={(isOpen) => {
-          if (!isOpen) setConfirmation(undefined);
+          if (!isOpen && !confirmingRef.current) setConfirmation(undefined);
         }}
       >
         <AlertDialog.Content>
@@ -660,16 +898,33 @@ function SupportedSchedulesWorkspace({
             <AlertDialog.Description>{confirmation?.description}</AlertDialog.Description>
           </AlertDialog.Header>
           <AlertDialog.Footer>
-            <AlertDialog.Cancel>{t('schedules.cancel', 'Cancel')}</AlertDialog.Cancel>
-            <AlertDialog.Action
+            <AlertDialog.Cancel disabled={confirming}>
+              {t('schedules.cancel', 'Cancel')}
+            </AlertDialog.Cancel>
+            <Button
+              type="button"
               variant={confirmation?.destructive ? 'destructive' : 'primary'}
+              disabled={confirming}
               onClick={() => {
-                const action = confirmation?.accept;
-                if (action) void mutate(action);
+                const current = confirmation;
+                if (!current || confirmingRef.current) return;
+                confirmingRef.current = true;
+                setConfirming(true);
+                void (async () => {
+                  try {
+                    const outcome = await mutate(() => current.accept());
+                    if (outcome !== 'escalated') {
+                      setConfirmation((active) => (active === current ? undefined : active));
+                    }
+                  } finally {
+                    confirmingRef.current = false;
+                    setConfirming(false);
+                  }
+                })();
               }}
             >
               {confirmation?.confirmLabel ?? t('schedules.confirm', 'Confirm')}
-            </AlertDialog.Action>
+            </Button>
           </AlertDialog.Footer>
         </AlertDialog.Content>
       </AlertDialog.Root>

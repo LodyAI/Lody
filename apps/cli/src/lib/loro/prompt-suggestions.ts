@@ -8,8 +8,10 @@ import {
   createLoroStreamUrl,
   getLoroMetaStreamId,
   getLoroStreamsPresenceBaseUrl,
+  loroStreamsWebSocketOptions,
   type WorkspaceId,
 } from '@lody/shared';
+import { resolveCliLoroStreamsWebSocketEnabled } from '@/platform/presence';
 import type { Logger } from '@/utils/logger';
 import type { CliMachineMonitorStreamsOptions } from './machine-monitor';
 
@@ -41,6 +43,14 @@ export class CliPromptSuggestions {
         })
       ),
       auth: options.auth,
+      ...loroStreamsWebSocketOptions(
+        resolveCliLoroStreamsWebSocketEnabled(
+          options.webSocketEnabled,
+          process.env.LODY_LORO_STREAMS_WS_ENABLED
+        ),
+        options.streamsBaseUrl,
+        this.workspaceId
+      ),
       // This source publishes only. Never import remote text into the local-origin snapshot.
       adaptor: { ...adaptor, applyRemoteUpdates: () => {} },
     });

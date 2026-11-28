@@ -171,6 +171,7 @@ const sessionDocVersion = (sessionDoc: SessionDocumentHandle): string | undefine
  * (owner decision 2026-11-10). Evidence events are the primary trigger. */
 const EVIDENCE_RETRY_FIRST_MS = 1_000;
 const EVIDENCE_RETRY_MAX_MS = 5 * 60_000;
+const AUTOMATION_ADMISSION_RETRY_MAX_MS = 30_000;
 
 type WatchedSession = {
   unsubscribe: () => void;
@@ -1766,12 +1767,15 @@ export class SessionDispatchWatcher {
             dispatchSource,
             accessPromise: executionAccessPromise,
             requestPromise,
-            onExecutionDeferred: () => {
+            onExecutionDeferred: (wait) => {
               if (isActive())
                 this.forkExecutionEvidenceRetry(
                   sessionId,
                   nextUserTurn.id,
-                  sessionDocVersion(sessionDoc)
+                  sessionDocVersion(sessionDoc),
+                  wait === 'automation-admission'
+                    ? AUTOMATION_ADMISSION_RETRY_MAX_MS
+                    : EVIDENCE_RETRY_MAX_MS
                 );
             },
             onAccessAllowed: async () => {
@@ -1900,7 +1904,12 @@ export class SessionDispatchWatcher {
     });
   }
 
-  private forkExecutionEvidenceRetry(sessionId: SessionId, turnId: string, version?: string): void {
+  private forkExecutionEvidenceRetry(
+    sessionId: SessionId,
+    turnId: string,
+    version?: string,
+    maxDelayMs = EVIDENCE_RETRY_MAX_MS
+  ): void {
     this.interruptAccessRetry(sessionId);
     const previous = this.evidenceRetryAttempts.get(sessionId);
     const attempts = previous?.turnId === turnId ? Math.min(previous.attempts + 1, 16) : 0;
@@ -1909,7 +1918,7 @@ export class SessionDispatchWatcher {
       this.detachExecutionEvidence = this.deps.subscribeExecutionEvidence((roomId) =>
         this.wakeExecutionEvidence(roomId)
       );
-    const delay = Math.min(EVIDENCE_RETRY_FIRST_MS * 2 ** attempts, EVIDENCE_RETRY_MAX_MS);
+    const delay = Math.min(EVIDENCE_RETRY_FIRST_MS * 2 ** attempts, maxDelayMs);
     const program = Effect.sleep(delay).pipe(
       Effect.andThen(
         Effect.sync(() => {
@@ -2404,6 +2413,7 @@ export class SessionDispatchWatcher {
     )?._lodyAutomation;
     const pendingEntry = buildPendingUserHistoryEntry({
       userId: queuedItem.userId ?? meta.userId,
+      userName: queuedItem.userId ? queuedItem.userName : undefined,
       inputBlocks,
       timestamp,
       inputConfig: { ...inputConfig, ...(automation ? { _lodyAutomation: automation } : {}) },
@@ -3394,21 +3404,35 @@ export class SessionDispatchWatcher {
           awaitingStart &&
           this.deps.executionService.isInboxInputEnded?.(meta.id, entry.id)
         ) {
-          /** The ended input is never admitted again; settle the turn so a surviving processingUserMsgId cannot keep Path 3 re-selecting it. */
-          await backend.applyHistoryAction({
-            kind: 'user-status',
-            turnId: entry.id,
-            status: 'failed',
-          });
-          entry.status = 'failed';
-          canceledInput = true;
-          if (meta.processingUserMsgId === entry.id) {
-            await this.deps.workspaceDocument.repo.upsertDocMeta?.(getSessionRoomId(meta.id), {
-              lastHandledUserMsgId: entry.id,
-              lastFailedUserMsgId: entry.id,
-              processingUserMsgId: undefined,
+          const continued =
+            (await this.deps.executionService.continueInterruptedTurn?.(
+              meta.id,
+              sessionDoc,
+              entry.id
+            )) ?? false;
+          if (continued) {
+            entry.status = 'canceled';
+            canceledInput = true;
+            if (meta.processingUserMsgId === entry.id) {
+              meta.processingUserMsgId = undefined;
+            }
+          } else {
+            /** The ended input is never admitted again; settle the turn so a surviving processingUserMsgId cannot keep Path 3 re-selecting it. */
+            await backend.applyHistoryAction({
+              kind: 'user-status',
+              turnId: entry.id,
+              status: 'failed',
             });
-            meta.processingUserMsgId = undefined;
+            entry.status = 'failed';
+            canceledInput = true;
+            if (meta.processingUserMsgId === entry.id) {
+              await this.deps.workspaceDocument.repo.upsertDocMeta?.(getSessionRoomId(meta.id), {
+                lastHandledUserMsgId: entry.id,
+                lastFailedUserMsgId: entry.id,
+                processingUserMsgId: undefined,
+              });
+              meta.processingUserMsgId = undefined;
+            }
           }
         }
       }

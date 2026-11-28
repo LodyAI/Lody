@@ -433,6 +433,34 @@ export const PaidYearly: Story = {
   },
 };
 
+export const PaidYearlyWithStackedGift: Story = {
+  args: {
+    overview: {
+      ...paidOverview,
+      billingInterval: 'year',
+      currentPeriodEnd: Date.now() + 300 * DAY,
+      promotionalEntitlementEndsAt: Date.now() + 330 * DAY,
+      giftStartsAt: Date.now() + 300 * DAY,
+      giftEndsAt: Date.now() + 330 * DAY,
+      nextBillingAt: Date.now() + 330 * DAY,
+      autoRenewAfterGift: true,
+      scheduledBillingInterval: 'year',
+      scheduleManaged: true,
+      seatCount: 1,
+    },
+    invoices: mockInvoices,
+    upcomingInvoice: {
+      amountDue: 0,
+      currency: 'USD',
+      expectedAt: Date.now() + 300 * DAY,
+      renewal: { amount: 1000, quantity: 1 },
+      discount: { amount: -1000 },
+      adjustment: null,
+      creditApplied: null,
+    },
+  },
+};
+
 export const PaidYearlyEarlyBirdUpcomingInvoice: Story = {
   args: {
     overview: {

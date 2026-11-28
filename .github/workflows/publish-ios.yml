@@ -73,6 +73,7 @@ jobs:
       VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
       VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
       VITE_VIBELOFT_WEB_AUTH_KEY: ${{ vars.VITE_VIBELOFT_WEB_AUTH_KEY }}
+      VITE_LORO_STREAMS_WS_ENABLED: ${{ vars.LODY_LORO_STREAMS_WS_ENABLED || '1' }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
       IOS_BUNDLE_ID: ai.lody.mobile
       LODY_PLATFORM: cloud
@@ -296,6 +297,21 @@ jobs:
             "IOS_LIVE_ACTIVITY_WIDGET_PROFILE_NAME"
       - name: Sync iOS project
         run: corepack pnpm --filter @lody/mobile-capacitor run ci:sync:ios
+      - name: Run iOS Simulator startup smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/mobile-capacitor/scripts/test-ios-simulator-smoke.mjs \
+            --skip-build \
+            --skip-sync \
+            --artifact-dir "${RUNNER_TEMP}/ios-simulator-smoke"
+      - name: Upload iOS Simulator smoke diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: publish-ios-simulator-smoke-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/ios-simulator-smoke
+          if-no-files-found: ignore
       - name: Configure manual code signing
         working-directory: apps/mobile-capacitor/ios/App
         shell: bash

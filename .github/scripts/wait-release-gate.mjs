@@ -6,37 +6,39 @@ import { pathToFileURL } from 'node:url';
 export async function waitForReleaseGate({
   getJobs,
   expectedSha,
+  gateJobName = 'verify-daemon-installation',
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = Date.now,
   timeoutMs = 60 * 60 * 1000,
   intervalMs = 30_000,
 }) {
   assert.match(expectedSha, /^[a-f0-9]{40}$/u);
+  assert.ok(gateJobName.length > 0, 'Gate job name is required');
   assert.ok(timeoutMs > 0 && intervalMs > 0);
   const deadline = now() + timeoutMs;
   for (;;) {
     const jobs = await getJobs();
     assert.ok(Array.isArray(jobs), 'Invalid same-run jobs response');
-    const gates = jobs.filter((job) => job.name === 'verify-daemon-installation');
-    assert.ok(gates.length <= 1, 'Ambiguous SEA verification job');
+    const gates = jobs.filter((job) => job.name === gateJobName);
+    assert.ok(gates.length <= 1, `Ambiguous release gate job: ${gateJobName}`);
     const gate = gates[0];
     if (gate) {
-      assert.equal(gate.head_sha, expectedSha, 'SEA verification belongs to a different source');
+      assert.equal(gate.head_sha, expectedSha, `Gate job ${gateJobName} belongs to a different source`);
       if (gate.status === 'completed') {
         assert.equal(
           gate.conclusion,
           'success',
-          'SEA verification did not succeed; refusing iOS publication'
+          `Gate job ${gateJobName} did not succeed (${gate.conclusion}); refusing publication`
         );
         return;
       }
       assert.ok(
         ['queued', 'in_progress', 'waiting', 'pending'].includes(gate.status),
-        'Unknown SEA verification state'
+        `Unknown release gate state for ${gateJobName}: ${gate.status}`
       );
     }
     const remaining = deadline - now();
-    assert.ok(remaining > 0, 'Timed out waiting for SEA verification; refusing iOS publication');
+    assert.ok(remaining > 0, `Timed out waiting for ${gateJobName}; refusing publication`);
     await sleep(Math.min(intervalMs, remaining));
   }
 }
@@ -47,12 +49,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     GITHUB_RUN_ID: runId,
     GITHUB_SHA: expectedSha,
     GH_TOKEN: token,
+    RELEASE_GATE_JOB_NAME: gateJobName = 'verify-daemon-installation',
   } = process.env;
   assert.equal(repository, 'LodyAI/Lody');
   assert.match(runId ?? '', /^[1-9]\d*$/u);
   assert.ok(token, 'GitHub read token is required');
   await waitForReleaseGate({
     expectedSha,
+    gateJobName,
     getJobs: async () => {
       const jobs = [];
       for (let page = 1; ; page++) {

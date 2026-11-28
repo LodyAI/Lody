@@ -136,6 +136,59 @@ describe('machine-batch-update-dialog', () => {
       });
       expect(document.body.textContent).toContain('Not back online after 5 minutes');
     });
+    it('a status read that fails on a cloud outage is retried until the machine answers', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let outage = true;
+      const probe = vi.fn(async () => {
+        if (outage) throw new Error('HTTP 503 cluster_not_ready');
+        return { lifecycle: daemon };
+      });
+      await render({ open: true, machines: [studio(true)], probe });
+      expect(document.body.textContent).toContain(
+        "Couldn't reach this machine through Lody's cloud; retrying…"
+      );
+      expect(document.body.textContent).not.toContain('Could not read whether');
+      expect(button('Update 1 machines')).toBeUndefined();
+
+      outage = false;
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      await flush();
+      expect(document.body.textContent).toContain('v1.0.0 → v1.1.0');
+      expect(button('Update 1 machines')?.disabled).toBe(false);
+    });
+
+    it('after the retries run out the row names the failure and offers a manual retry', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let outage = true;
+      const probe = vi.fn(async () => {
+        if (outage) throw new Error('HTTP 503 cluster_not_ready');
+        return { lifecycle: daemon };
+      });
+      await render({ open: true, machines: [studio(true)], probe });
+      for (const delay of [5_000, 15_000, 30_000]) {
+        await act(async () => {
+          vi.advanceTimersByTime(delay);
+        });
+        await flush();
+      }
+      expect(document.body.textContent).toContain(
+        "Couldn't reach this machine through Lody's cloud. Try again in a moment."
+      );
+      expect(document.body.textContent).toContain('HTTP 503 cluster_not_ready');
+      const attempts = probe.mock.calls.length;
+      await act(async () => {
+        vi.advanceTimersByTime(120_000);
+      });
+      expect(probe.mock.calls.length).toBe(attempts);
+
+      outage = false;
+      await act(async () => button('Retry')?.click());
+      await flush();
+      expect(document.body.textContent).toContain('v1.0.0 → v1.1.0');
+    });
+
     it('closing and reopening the dialog during a run keeps each machine’s progress', async () => {
       const probe = async () => ({ lifecycle: daemon });
       await render({ open: true, machines: [studio(true)], probe });

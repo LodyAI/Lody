@@ -493,27 +493,6 @@ export class ElectronHarness {
   async killProcessTree(): Promise<void> {
     const rootPid = this.app?.process().pid;
     if (!rootPid) throw new Error('Electron application is not running');
-    if (process.platform === 'win32') throw new Error('killProcessTree is POSIX-only');
-    const children = new Map<number, number[]>();
-    const table = spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' }).stdout;
-    for (const line of table.split('\n')) {
-      const [pid, ppid] = line.trim().split(/\s+/u).map(Number);
-      if (!pid || !ppid) continue;
-      children.set(ppid, [...(children.get(ppid) ?? []), pid]);
-    }
-    const tree: number[] = [];
-    for (const queue = [rootPid]; queue.length > 0;) {
-      const pid = queue.shift()!;
-      tree.push(pid);
-      queue.push(...(children.get(pid) ?? []));
-    }
-    for (const pid of tree) {
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch {
-        // Already gone.
-      }
-    }
     const alive = (pid: number) => {
       try {
         process.kill(pid, 0);
@@ -522,7 +501,32 @@ export class ElectronHarness {
         return false;
       }
     };
-    await expect.poll(() => tree.filter(alive), { timeout: 30_000 }).toEqual([]);
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/PID', String(rootPid), '/T', '/F'], { stdio: 'ignore' });
+      await expect.poll(() => alive(rootPid), { timeout: 30_000 }).toBe(false);
+    } else {
+      const children = new Map<number, number[]>();
+      const table = spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' }).stdout;
+      for (const line of table.split('\n')) {
+        const [pid, ppid] = line.trim().split(/\s+/u).map(Number);
+        if (!pid || !ppid) continue;
+        children.set(ppid, [...(children.get(ppid) ?? []), pid]);
+      }
+      const tree: number[] = [];
+      for (const queue = [rootPid]; queue.length > 0;) {
+        const pid = queue.shift()!;
+        tree.push(pid);
+        queue.push(...(children.get(pid) ?? []));
+      }
+      for (const pid of tree) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // Already gone.
+        }
+      }
+      await expect.poll(() => tree.filter(alive), { timeout: 30_000 }).toEqual([]);
+    }
     this.app = null;
     this.page = null;
     this.performanceSession = null;

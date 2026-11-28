@@ -55,6 +55,7 @@ import {
   LedgerSync,
   LedgerLog,
   LedgerPinStore,
+  LedgerFeedInvalidation,
   SubmissionJournal,
   LedgerViewSource,
   LedgerViewSourceError,
@@ -105,25 +106,99 @@ type TurnSyncCell = {
 const TurnSyncRef = Context.Reference<TurnSyncCell | null>('@lody/e2ee-client/TurnSyncRef', {
   defaultValue: () => null,
 });
+type ReadCycleCell = {
+  installationChecked: boolean;
+  view: import('@lody/e2ee-core').LedgerView | null;
+  version: number;
+};
+const ReadCycleRef = Context.Reference<ReadCycleCell | null>('@lody/e2ee-client/ReadCycleRef', {
+  defaultValue: () => null,
+});
+function makeSessionReadCycle() {
+  let version = 0;
+  let onInvalidate: (() => void) | undefined;
+  let lastHead: Bytes.RecordHash | null = null;
+  let lastLength = -1;
+  const invalidate = () => {
+    version++;
+    onInvalidate?.();
+  };
+  return {
+    version: () => version,
+    invalidate,
+    bindKeyInvalidation: (fn: () => void) => {
+      onInvalidate = fn;
+    },
+    noteFeedState: (state: import('@lody/e2ee-core').LedgerFeedState) => {
+      if (
+        lastLength !== -1 &&
+        (state.view.length !== lastLength || !lastHead || !state.view.head.equals(lastHead))
+      ) {
+        invalidate();
+      }
+      lastLength = state.view.length;
+      lastHead = state.view.head;
+      return state;
+    },
+    run: <A, E>(effect: Effect.Effect<A, E>) =>
+      Effect.suspend(() =>
+        Effect.provideService(effect, ReadCycleRef, {
+          installationChecked: false,
+          view: null,
+          version,
+        })
+      ),
+    untilStable: <A, E>(
+      first: () => Effect.Effect<A, E>,
+      recheck: () => Effect.Effect<A, E>,
+      onConflict: () => E
+    ): Effect.Effect<A, E> =>
+      Effect.gen(function* () {
+        const before = version;
+        const initial = yield* first();
+        if (version === before) return initial;
+        for (let attempt = 0; ; attempt++) {
+          const stable = version;
+          const next = yield* recheck();
+          if (version === stable) return next;
+          if (attempt >= 15) return yield* Effect.fail(onConflict());
+        }
+      }),
+  };
+}
+export interface OpenPersonalSessionOptions {
+  readonly recovered?: readonly (readonly [number, Bytes.EpochKey])[];
+  readonly preopened?: {
+    readonly identity: Effect.Success<ReturnType<typeof openPreparedIdentity>>;
+    readonly scope: Scope.Closeable;
+  };
+}
 /** Private composition. Product callers receive narrow operations, never signer/credential/core services. */
 export const openPersonalSession = Effect.fnUntraced(function* (
   prepared: PreparedPersonalIdentity,
   approval: PersonalApproval,
-  recovered: readonly (readonly [number, Bytes.EpochKey])[] = []
+  options: OpenPersonalSessionOptions = {}
 ) {
+  const recovered = options.recovered ?? [];
+  const preopened = options.preopened;
   const platform = yield* PersonalHostPlatform,
     installation = yield* ClientInstallationStore;
   const parent = yield* Scope.Scope;
   const owner = yield* Scope.fork(parent),
     operationsScope = yield* Scope.fork(parent);
   let closed = false;
+  const readCycle = makeSessionReadCycle();
+  let clearDocuments: (() => void) | undefined;
   const close = yield* Effect.cached(
     Effect.uninterruptible(
       Effect.gen(function* () {
         closed = true;
+        readCycle.invalidate();
+        clearDocuments?.();
         const exits = [
           yield* Effect.exit(Scope.close(operationsScope, Exit.void)),
           yield* Effect.exit(Scope.close(owner, Exit.void)),
+          ...(preopened ? [yield* Effect.exit(Scope.close(preopened.scope, Exit.void))] : []),
         ];
         const reasons = exits.flatMap((e) => (Exit.isFailure(e) ? e.cause.reasons : []));
         if (reasons.length) yield* Effect.failCause(Cause.fromReasons(reasons));
@@ -132,28 +207,49 @@ export const openPersonalSession = Effect.fnUntraced(function* (
   );
   yield* Effect.addFinalizer(() => close.pipe(Effect.orDie));
   const guard = Effect.gen(function* () {
-    if (closed) return yield* fail('closed');
+    if (closed) {
+      readCycle.invalidate();
+      return yield* fail('closed');
+    }
+    const cell = yield* ReadCycleRef;
+    if (cell && cell.installationChecked && cell.version === readCycle.version()) return undefined;
     const current = yield* installation.read();
-    if (!current || current.phase !== 'ready' || !sameBinding(current.binding, prepared.binding))
+    if (!current || current.phase !== 'ready' || !sameBinding(current.binding, prepared.binding)) {
+      readCycle.invalidate();
       return yield* fail('identity-lost');
+    }
+    if (cell && cell.version === readCycle.version()) cell.installationChecked = true;
     return undefined;
   });
   const work = Effect.gen(function* () {
     yield* guard;
     const { custody } = yield* acquirePersonalCustody(prepared);
-    const { device, credential, request } = yield* openPreparedIdentity(prepared, custody);
+    const { device, credential, request } = preopened
+      ? preopened.identity
+      : yield* openPreparedIdentity(prepared, custody);
     yield* Effect.fromResult(assertPersonalAdmission(prepared.binding, request, approval.view));
     const identity = Layer.merge(
       Layer.succeed(DeviceIdentity, { signer: device, encryptionKeyPair: device.encryption }),
       Layer.succeed(WorkspaceScope, { genesis: prepared.binding.genesis })
     );
-    const rawControl = yield* Layer.build(platform.control(prepared.binding, credential, approval));
+    const rawControl = yield* Layer.build(
+      platform
+        .control(prepared.binding, credential, approval)
+        .pipe(
+          Layer.provide(Layer.succeed(LedgerFeedInvalidation, { invalidate: readCycle.invalidate }))
+        )
+    );
     // Keep only owned ports: an adapter cannot replace the host's signer or verifier through an extra Layer output.
     const rawSync = Context.get(rawControl, LedgerSync),
       rawLog = Context.get(rawControl, LedgerLog);
     const sync = Object.freeze({
-      current: rawSync.current.bind(rawSync),
-      ingest: rawSync.ingest?.bind(rawSync),
+      current: () => rawSync.current().pipe(Effect.map(readCycle.noteFeedState)),
+      ingest: rawSync.ingest
+        ? (
+            page: Parameters<NonNullable<typeof rawSync.ingest>>[0],
+            checkpoint: Parameters<NonNullable<typeof rawSync.ingest>>[1]
+          ) => rawSync.ingest!(page, checkpoint).pipe(Effect.map(readCycle.noteFeedState))
+        : undefined,
       refresh: () =>
         Effect.gen(function* () {
           const cell = yield* TurnSyncRef;
@@ -164,10 +260,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               local.success.view.length === cell.current.length &&
               local.success.view.head.equals(cell.current.head)
             )
-              return local.success;
+              return readCycle.noteFeedState(local.success);
             cell.current = null;
           }
-          const refreshed = yield* rawSync.refresh();
+          const refreshed = readCycle.noteFeedState(yield* rawSync.refresh());
           if (cell) cell.current = { length: refreshed.view.length, head: refreshed.view.head };
           return refreshed;
         }),
@@ -268,18 +364,41 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       Layer.provideMerge(Layer.mergeAll(identity, controlPorts, source))
     );
     const controlServices = yield* Layer.build(controlLayer);
-    const verified = Context.get(controlServices, VerifiedLedger),
+    const rawVerified = Context.get(controlServices, VerifiedLedger),
       control = Context.get(controlServices, WorkspaceControl);
+    const verified: VerifiedLedger['Service'] = VerifiedLedger.of({
+      ...rawVerified,
+      current: () =>
+        Effect.gen(function* () {
+          const cell = yield* ReadCycleRef;
+          if (cell && cell.view && cell.version === readCycle.version()) return cell.view;
+          const view = yield* rawVerified.current();
+          if (cell && cell.version === readCycle.version()) cell.view = view;
+          return view;
+        }),
+    });
+    const readLedgerView = (
+      source: () => Effect.Effect<import('@lody/e2ee-core').LedgerView, unknown>
+    ) =>
+      Effect.gen(function* () {
+        const view = yield* source();
+        yield* Effect.fromResult(requireLedgerContinuation(approval.view, view));
+        yield* guard;
+        return view;
+      });
     const ledger = Effect.fnUntraced(function* () {
       yield* guard;
-      const view = yield* verified.current();
-      yield* Effect.fromResult(requireLedgerContinuation(approval.view, view));
-      yield* guard;
-      return view;
+      return yield* readCycle.untilStable(
+        () => readLedgerView(() => verified.current()),
+        () => readLedgerView(() => rawVerified.current()),
+        () => fail('conflict')
+      );
     });
     const admitted = Effect.fnUntraced(function* () {
       const view = yield* ledger();
-      yield* Effect.fromResult(assertPersonalAdmission(prepared.binding, request, view));
+      yield* Effect.fromResult(assertPersonalAdmission(prepared.binding, request, view)).pipe(
+        Effect.tapError(() => Effect.sync(readCycle.invalidate))
+      );
       return view;
     });
     const submission = Context.get(controlServices, LedgerSubmission);
@@ -336,68 +455,80 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       | Layer.Success<typeof keyLayer>
       | EpochStagingStore
       | ReceiveJournal
+      | DistributionJournal
       | EpochCandidateStore
       | KeyMailbox;
     let keyServices: Context.Context<Keys> | undefined;
     let maintenance: Effect.Success<ReturnType<typeof makePersonalKeyMaintenance>> | undefined;
     const keySerial = yield* Semaphore.make(1);
     const keys = () =>
-      keySerial
-        .withPermit(
-          Effect.uninterruptibleMask((restore) =>
-            Effect.gen(function* () {
-              yield* restore(admitted());
-              if (keyServices) return keyServices;
-              const child = yield* Scope.fork(owner);
-              const rawResult = yield* Effect.exit(
-                restore(
-                  Scope.provide(
-                    Layer.build(
-                      platform
-                        .keys(prepared.binding, credential)
-                        .pipe(Layer.provide(Layer.succeedContext(controlServices)))
+      keyServices
+        ? Effect.succeed(keyServices)
+        : keySerial
+            .withPermit(
+              Effect.uninterruptibleMask((restore) =>
+                Effect.gen(function* () {
+                  yield* restore(admitted());
+                  if (keyServices) return keyServices;
+                  const child = yield* Scope.fork(owner);
+                  const rawResult = yield* Effect.exit(
+                    restore(
+                      Scope.provide(
+                        Layer.build(
+                          platform
+                            .keys(prepared.binding, credential)
+                            .pipe(Layer.provide(Layer.succeedContext(controlServices)))
+                        ),
+                        child
+                      )
+                    )
+                  );
+                  if (Exit.isFailure(rawResult)) {
+                    yield* Scope.close(child, rawResult);
+                    return yield* Effect.failCause(rawResult.cause);
+                  }
+                  const rawPorts = rawResult.value;
+                  const ports = Layer.succeedContext(
+                    Context.pick(
+                      InstalledKeyStore,
+                      ReceiveJournal,
+                      RepairJournal,
+                      DistributionJournal,
+                      DeliveryOutbox,
+                      EpochCandidateStore,
+                      KeyMailbox,
+                      EpochStagingStore,
+                      EpochPublicationSource
+                    )(rawPorts)
+                  );
+                  const keyControlServices = Context.add(controlServices, VerifiedLedger, verified);
+                  const all = keyLayer.pipe(
+                    Layer.provideMerge(ports),
+                    Layer.provideMerge(
+                      clientKeyProtectors.pipe(
+                        Layer.provide(Layer.succeed(ClientKeyCustody, custody))
+                      )
                     ),
-                    child
-                  )
-                )
-              );
-              if (Exit.isFailure(rawResult)) {
-                yield* Scope.close(child, rawResult);
-                return yield* Effect.failCause(rawResult.cause);
-              }
-              const rawPorts = rawResult.value;
-              const ports = Layer.succeedContext(
-                Context.pick(
-                  InstalledKeyStore,
-                  ReceiveJournal,
-                  RepairJournal,
-                  DistributionJournal,
-                  DeliveryOutbox,
-                  EpochCandidateStore,
-                  KeyMailbox,
-                  EpochStagingStore,
-                  EpochPublicationSource
-                )(rawPorts)
-              );
-              const all = keyLayer.pipe(
-                Layer.provideMerge(ports),
-                Layer.provideMerge(
-                  clientKeyProtectors.pipe(Layer.provide(Layer.succeed(ClientKeyCustody, custody)))
-                ),
-                Layer.provide(Layer.succeedContext(controlServices))
-              );
-              const result = yield* Effect.exit(restore(Scope.provide(Layer.build(all), child)));
-              if (Exit.isFailure(result)) {
-                yield* Scope.close(child, result);
-                return yield* Effect.failCause(result.cause);
-              }
-              maintenance = yield* makePersonalKeyMaintenance().pipe(Effect.provide(result.value));
-              keyServices = result.value;
-              return keyServices;
-            })
-          )
-        )
-        .pipe(Scope.provide(owner));
+                    Layer.provide(Layer.succeedContext(keyControlServices))
+                  );
+                  const result = yield* Effect.exit(
+                    restore(Scope.provide(Layer.build(all), child))
+                  );
+                  if (Exit.isFailure(result)) {
+                    yield* Scope.close(child, result);
+                    return yield* Effect.failCause(result.cause);
+                  }
+                  maintenance = yield* makePersonalKeyMaintenance().pipe(
+                    Effect.provide(result.value)
+                  );
+                  const historyKeys = Context.get(result.value, InstalledEpochHistory);
+                  readCycle.bindKeyInvalidation(() => historyKeys.invalidate());
+                  keyServices = result.value;
+                  return keyServices;
+                })
+              )
+            )
+            .pipe(Scope.provide(owner));
     const withKeys = <A, E>(use: (context: Context.Context<Keys>) => Effect.Effect<A, E>) =>
       Effect.gen(function* () {
         const ctx = yield* keys();
@@ -445,7 +576,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         const received = yield* receiver.fetchAndInstall(null, 100);
         return { refreshRequired: received.refreshRequired ?? false };
       });
-    const distributeTo = (ctx: Context.Context<Keys>, recipients?: readonly string[]) =>
+    const confirmedDeliveredDevices = new Map<string, number>();
+    const distributeTo = (
+      ctx: Context.Context<Keys>,
+      recipients?: readonly string[],
+      epoch?: number
+    ) =>
       Effect.gen(function* () {
         // Only this device's deliveries, as on the desktop: reconcile targets,
         // resume pending sends, acknowledge ended tasks. Receive and repair stay
@@ -454,7 +590,15 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         yield* distributor.reconcileCurrentEpoch(100, null, recipients);
         yield* distributor.resumePendingDeliveries(100, null);
         const ended = yield* distributor.results(100, null);
-        for (const item of ended.items) yield* distributor.acknowledge(item.id);
+        const delivered: string[] = [];
+        for (const item of ended.items) {
+          if (item.outcome === 'Observed' && (epoch === undefined || item.epoch === epoch)) {
+            delivered.push(item.recipient);
+            confirmedDeliveredDevices.set(item.recipient, item.epoch);
+          }
+          yield* distributor.acknowledge(item.id);
+        }
+        return delivered;
       });
     const keyRound = (mode: PersonalKeyRoundMode = 'full', recipients?: readonly string[]) =>
       serialRound(
@@ -463,13 +607,13 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             const view = yield* admitted(),
               epoch = view.inspectState().epoch.number;
             if (mode === 'distribute') {
-              yield* distributeTo(ctx, recipients);
-              return { refreshRequired: false };
+              const delivered = yield* distributeTo(ctx, recipients, epoch);
+              return { refreshRequired: false, delivered };
             }
             if (mode === 'receive') {
               // Only this device's own key, from a staged group or the mailbox. Reports,
               // distribution and repair stay with a full round.
-              return yield* receiveStep(ctx);
+              return { ...(yield* receiveStep(ctx)), delivered: [] as readonly string[] };
             }
             return {
               refreshRequired: yield* maintenance!(
@@ -477,6 +621,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                 receiveFromStaging(ctx, view, epoch),
                 recipients
               ),
+              delivered: [] as readonly string[],
             };
           })
         )
@@ -505,12 +650,42 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                 const activeCandidate = yield* Effect.result(
                   Context.get(ctx, EpochCandidateStore).active()
                 );
+                const candidateRow = Result.isSuccess(activeCandidate)
+                  ? activeCandidate.success
+                  : null;
                 const hasCandidate = Result.isSuccess(activeCandidate)
-                  ? activeCandidate.success !== null
+                  ? candidateRow !== null
                   : true;
                 const pendingEntry = yield* submission.pending();
                 const publisher = Context.get(ctx, EpochPublisher);
-                if (missingCurrent || hasCandidate || pendingEntry.record !== null) {
+                const unsubmittedNonPublishDraft =
+                  pendingEntry.record === null &&
+                  candidateRow !== null &&
+                  candidateRow.outcome === null &&
+                  (() => {
+                    const decoded = decodeRecord(candidateRow.record);
+                    return (
+                      Result.isSuccess(decoded) &&
+                      decoded.success.body.type === 'ordinary' &&
+                      decoded.success.body.operation.type !== 'publishEpoch'
+                    );
+                  })();
+                if (unsubmittedNonPublishDraft && candidateRow) {
+                  yield* Effect.ignore(
+                    Context.get(ctx, EpochCandidateStore).replace(candidateRow, {
+                      ...candidateRow,
+                      blob: new Uint8Array(),
+                      outcome: 'Conflict',
+                      binding: null,
+                      consumed: true,
+                    })
+                  );
+                }
+                if (
+                  missingCurrent ||
+                  (hasCandidate && !unsubmittedNonPublishDraft) ||
+                  pendingEntry.record !== null
+                ) {
                   yield* Context.get(ctx, InstalledEpochHistory).recover();
                   const pending = yield* publisher.resume();
                   if (pending) {
@@ -563,13 +738,99 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           const slot = remote.success;
           if (slot.genesis !== genesis || slot.epoch !== epoch || slot.recipient !== recipient)
             return 'e2ee_key_recipient_ineligible';
-          if (slot.status === 'EnvelopeStored' || slot.status === 'InstallationReported')
+          if (slot.status === 'EnvelopeStored' || slot.status === 'InstallationReported') {
+            confirmedDeliveredDevices.set(recipient, epoch);
             return 'delivered';
+          }
           if (slot.status === 'NeedsEnvelope') return 'e2ee_key_not_sent';
           if (slot.status === 'Obsolete') return 'e2ee_key_epoch_changed';
           return 'e2ee_key_recipient_ineligible';
         })
       );
+    const pendingMemberKeyDeliveries = () =>
+      withKeys((ctx) =>
+        Effect.gen(function* () {
+          const view = yield* admitted(),
+            state = view.inspectState();
+          const epoch = state.epoch.number;
+          const selfHex = toHex(device.publicKey.toBytes());
+          const own = state.devices.get(selfHex);
+          const selfMembership = own ? toHex(own.membershipId.toBytes()) : null;
+          const ownerMembership = toHex(state.owner.toBytes());
+          if (
+            !own ||
+            own.kind === 'recovery' ||
+            !selfMembership ||
+            !state.members.has(selfMembership)
+          )
+            return [] as readonly {
+              readonly requestId: string;
+              readonly device: string;
+              readonly code: string;
+            }[];
+          const journal = Context.get(ctx, DistributionJournal);
+          const pendingRecipients = new Set<string>();
+          const page = yield* Effect.result(journal.pending(null, 100));
+          if (Result.isSuccess(page)) {
+            const loadedTasks = yield* Effect.forEach(
+              page.success.ids,
+              (taskId) => Effect.result(journal.load(taskId)),
+              { concurrency: 8 }
+            );
+            for (const task of loadedTasks) {
+              if (Result.isSuccess(task) && task.success && task.success.epoch === epoch)
+                pendingRecipients.add(task.success.recipient);
+            }
+          }
+          const candidates: { readonly recipient: string; readonly membershipId: string }[] = [];
+          for (const [recipient, entry] of state.devices.entries()) {
+            if (recipient === selfHex || entry.kind === 'recovery') continue;
+            const membershipId = toHex(entry.membershipId.toBytes());
+            if (membershipId === selfMembership || !state.members.has(membershipId)) continue;
+            if (epoch === 0 && membershipId === ownerMembership) continue;
+            if (
+              confirmedDeliveredDevices.get(recipient) === epoch &&
+              !pendingRecipients.has(recipient)
+            )
+              continue;
+            candidates.push({ recipient, membershipId });
+          }
+          const evidences = yield* Effect.forEach(
+            candidates,
+            (candidate) =>
+              keyDeliveryEvidence(candidate.recipient).pipe(
+                Effect.map((evidence) => ({ ...candidate, evidence }))
+              ),
+            { concurrency: 8 }
+          );
+          const items: {
+            readonly requestId: string;
+            readonly device: string;
+            readonly code: string;
+          }[] = [];
+          const seen = new Set<string>();
+          for (const { recipient, membershipId, evidence } of evidences) {
+            if (seen.has(membershipId) || evidence === 'delivered') continue;
+            if (evidence === 'e2ee_key_not_sent' || pendingRecipients.has(recipient)) {
+              seen.add(membershipId);
+              items.push({ requestId: membershipId, device: recipient, code: evidence });
+            }
+          }
+          return items;
+        })
+      );
+    const memberDeliveryDevice = (requestId: string) =>
+      Effect.gen(function* () {
+        const view = yield* admitted(),
+          state = view.inspectState();
+        const selfHex = toHex(device.publicKey.toBytes());
+        for (const [recipient, entry] of state.devices.entries()) {
+          if (recipient === selfHex || entry.kind === 'recovery') continue;
+          if (toHex(entry.membershipId.toBytes()) === requestId && state.members.has(requestId))
+            return recipient;
+        }
+        return null;
+      });
     /** True only for an active member device of this device's own verified ledger, when
      * either that ledger already holds `epoch` and the installed key store genuinely lacks
      * it (a rotation not received yet), or the frame is ledger lag: `epoch` is at most
@@ -634,20 +895,35 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         })
       );
     type Document = Effect.Success<ReturnType<typeof makeStreamsUpdateBinding>>;
-    const documents = new Map<string, Document>(),
+    type DocumentWrapper = Readonly<{
+      seal: (
+        input: Parameters<Document['seal']>[0]
+      ) => Effect.Effect<Effect.Success<ReturnType<Document['seal']>>, unknown>;
+      open: (
+        input: Parameters<Document['open']>[0]
+      ) => Effect.Effect<Effect.Success<ReturnType<Document['open']>>, unknown>;
+      openAuthenticated: (
+        input: Parameters<Document['openAuthenticated']>[0]
+      ) => Effect.Effect<Effect.Success<ReturnType<Document['openAuthenticated']>>, unknown>;
+    }>;
+    const documents = new Map<string, DocumentWrapper>(),
       documentSerial = yield* Semaphore.make(1);
-    const documentBinding = (
+    clearDocuments = () => documents.clear();
+    const document = Effect.fnUntraced(function* (
       resource: string,
       model: 'loro' | 'flock',
-      epoch: number | 'current'
-    ) =>
-      documentSerial.withPermit(
+      epoch: number | 'current' = 'current'
+    ) {
+      if (closed) return yield* fail('closed');
+      const id = JSON.stringify([resource, model, epoch]);
+      const cached = documents.get(id);
+      if (cached) return cached;
+      return yield* documentSerial.withPermit(
         Effect.gen(function* () {
           yield* admitted();
-          const id = JSON.stringify([resource, model, epoch]);
-          const retained = documents.get(id);
-          if (retained) return retained;
-          const binding = yield* Scope.provide(
+          const existing = documents.get(id);
+          if (existing) return existing;
+          const original = yield* Scope.provide(
             makeStreamsUpdateBinding({
               genesis: prepared.binding.genesis,
               resource,
@@ -666,23 +942,19 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             }).pipe(Effect.provideService(VerifiedLedger, verified)),
             owner
           );
-          documents.set(id, binding);
-          return binding;
+          const wrapper: DocumentWrapper = Object.freeze({
+            seal: (input) => run(original.seal(input)),
+            open: (input) =>
+              readCycle.run(run(original.open(input), (plaintext) => plaintext.fill(0))),
+            openAuthenticated: (input) =>
+              readCycle.run(
+                run(original.openAuthenticated(input), (opened) => opened.plaintext.fill(0))
+              ),
+          });
+          documents.set(id, wrapper);
+          return wrapper;
         })
       );
-    const document = Effect.fnUntraced(function* (
-      resource: string,
-      model: 'loro' | 'flock',
-      epoch: number | 'current' = 'current'
-    ) {
-      const original = yield* documentBinding(resource, model, epoch);
-      return Object.freeze({
-        seal: (input: Parameters<typeof original.seal>[0]) => run(original.seal(input)),
-        open: (input: Parameters<typeof original.open>[0]) =>
-          run(original.open(input), (plaintext) => plaintext.fill(0)),
-        openAuthenticated: (input: Parameters<typeof original.openAuthenticated>[0]) =>
-          run(original.openAuthenticated(input), (opened) => opened.plaintext.fill(0)),
-      });
     });
     let irohEndpoint: PersonalIrohEndpoint | undefined;
     const irohSerial = yield* Semaphore.make(1);
@@ -968,8 +1240,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               const received = yield* Effect.result(keyRound('receive'));
               if ((yield* status()).usableEpoch === (yield* admitted()).inspectState().epoch.number)
                 return;
-              if (pass === 0) yield* serialRound(control.refresh());
-              else if (Result.isFailure(received)) return yield* Effect.fail(received.failure);
+              if (pass === 0) {
+                if (Result.isSuccess(received) && !received.success.refreshRequired) return;
+                yield* serialRound(control.refresh());
+              } else if (Result.isFailure(received)) return yield* Effect.fail(received.failure);
             }
           })
         ),
@@ -1210,14 +1484,21 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         run(
           Effect.gen(function* () {
             if (mode !== 'explicit') return yield* fail('invalid-input');
-            const port = yield* membersPort();
-            const material = yield* port.read(memberAccess(), requestId);
-            if (
-              material.workspaceId !== prepared.binding.workspaceId ||
-              material.requestId !== requestId
-            )
-              return yield* fail('conflict');
-            const proof = yield* memberProof(material.keyPackageHex);
+            const pinned = memberPreviews.get(requestId);
+            let keyPackageHex: string;
+            if (pinned !== undefined) {
+              keyPackageHex = pinned;
+            } else {
+              const port = yield* membersPort();
+              const material = yield* port.read(memberAccess(), requestId);
+              if (
+                material.workspaceId !== prepared.binding.workspaceId ||
+                material.requestId !== requestId
+              )
+                return yield* fail('conflict');
+              keyPackageHex = material.keyPackageHex;
+            }
+            const proof = yield* memberProof(keyPackageHex);
             // The signed request's own id must be the approved id.
             if (toHex(proof.request.requestId.toBytes()) !== requestId)
               return yield* fail('conflict');
@@ -1233,8 +1514,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               return null;
             }
             // Only the package this session listed and showed for this very request may be signed.
-            if (memberPreviews.get(requestId) !== material.keyPackageHex)
-              return yield* fail('conflict');
+            if (memberPreviews.get(requestId) !== keyPackageHex) return yield* fail('conflict');
             return admitMember(proof.request);
           })
         ),
@@ -1298,7 +1578,9 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           recoverySerial.withPermit(
             withKeys((ctx) =>
               Effect.gen(function* () {
-                yield* serialRound(control.refresh());
+                if (!input.skipInitialRefresh) {
+                  yield* serialRound(control.refresh());
+                }
                 const view = yield* admitted();
                 const workflow = yield* makeWorkspaceRecovery({
                   vault: input.vault,
@@ -1442,7 +1724,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             })
           )
         ),
-      ledger: () => run(ledger()),
+      ledger: () => readCycle.run(run(ledger())),
       /** Public signed proof already verified and retained for this approval. */
       approvalOriginals: () =>
         run(
@@ -1459,6 +1741,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       keyRound: (mode?: PersonalKeyRoundMode, recipients?: readonly string[]) =>
         run(keyRound(mode, recipients)),
       keyDeliveryEvidence: (recipient: string) => run(keyDeliveryEvidence(recipient)),
+      pendingMemberKeyDeliveries: () => run(pendingMemberKeyDeliveries()),
+      memberDeliveryDevice: (requestId: string) => run(memberDeliveryDevice(requestId)),
       keyPending: (epoch: number, unknownAuthority?: boolean) =>
         run(keyPending(epoch, unknownAuthority)),
       status: () => run(status()),
@@ -1466,7 +1750,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         resource: string,
         model: 'loro' | 'flock',
         writeEpoch: number | 'current' = 'current'
-      ) => run(document(resource, model, writeEpoch)),
+      ) =>
+        Effect.suspend(() => {
+          if (closed) return Effect.fail(fail('closed'));
+          const cached = documents.get(JSON.stringify([resource, model, writeEpoch]));
+          return cached ? Effect.succeed(cached) : run(document(resource, model, writeEpoch));
+        }),
       execute: (command: LedgerCommand) => run(management(command)),
       resume: () =>
         run(

@@ -137,6 +137,9 @@ function bundleControlRoute() {
     const ports = fileURLToPath(
       new URL('../../components/tests/browser/e2ee-control-route-ports.tsx', import.meta.url)
     );
+    const stylexStub = fileURLToPath(
+      new URL('../../components/tests/browser/stylex-runtime-stub.ts', import.meta.url)
+    );
     const output = await build({
       entryPoints: [
         fileURLToPath(
@@ -161,6 +164,7 @@ function bundleControlRoute() {
               { filter: /^react(?:-dom)?(?:\/.*)?$|^effect$|^@lody\/e2ee-core\/protocol$/ },
               ({ path }) => ({ path: testRequire.resolve(path) })
             );
+            builder.onResolve({ filter: /^@stylexjs\/stylex$/ }, () => ({ path: stylexStub }));
             // Relatively imported lost-access display page and hosted workspace removal.
             builder.onResolve(
               {
@@ -758,6 +762,44 @@ it('a later key round on the approving device delivers to a member its approval 
     expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).envelopes.at(-1)).toBe(
       true
     );
+    expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).items).toEqual([
+      { requestId: opened.requestId, state: 'delivered' },
+    ]);
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('retains undelivered member key delivery status and retry entry across runtime reload', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-reload-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    await expect
+      .poll(
+        async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items[0]?.code,
+        { timeout: 30_000 }
+      )
+      .toBe('e2ee_key_not_sent');
+    await good(opened.page, 'close');
+    // Rebuild a fresh runtime instance (empty in-memory deliveries map) to simulate page reload.
+    await opened.page.evaluate(async () => {
+      await (globalThis as Surface).HostFixture.bootRuntime();
+    });
+    await good(opened.page, 'open');
+    const afterReload = (await good(opened.page, 'memberDeliveries')) as Deliveries;
+    expect(afterReload.items).toEqual([
+      { requestId: opened.requestId, state: 'failed', code: 'e2ee_key_not_sent' },
+    ]);
+    await good(opened.page, 'memberAcceptKeys');
+    await good(opened.page, 'memberRetry');
+    await expect
+      .poll(async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items, {
+        timeout: 30_000,
+      })
+      .toEqual([{ requestId: opened.requestId, state: 'delivered' }]);
   } finally {
     await context?.close();
     await rm(directory, { recursive: true, force: true });

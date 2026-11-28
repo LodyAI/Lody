@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Result } from 'effect';
+import { Context, Effect, Layer, Option, Result } from 'effect';
 import {
   LedgerFeed,
   LedgerFeedError,
@@ -15,6 +15,7 @@ import {
   requireLedgerContinuation,
 } from '@lody/e2ee-core/protocol';
 import {
+  LedgerFeedInvalidation,
   LedgerFeedStore,
   LedgerFeedSource,
   LedgerSync,
@@ -25,7 +26,6 @@ import {
   WorkspaceScope,
 } from '@lody/e2ee-core/services';
 import { verifyPersonalApproval, verifyPersonalOffer } from './pairing';
-import { verifyPersonalHistory } from './admission';
 import { fromHex } from './bytes';
 import { fail } from './errors';
 import type { PersonalApproval } from './platform';
@@ -65,7 +65,10 @@ export const qualifyPersonalLedgerOrigin = Effect.fnUntraced(function* (
   };
 });
 /** Feed and submission composition over injected ports, preserving a single origin and rollback pin across local identity replacement. */
-export const personalLedgerControl = (input: { readonly approval: PersonalApproval }) =>
+export const personalLedgerControl = (input: {
+  readonly approval: PersonalApproval;
+  readonly preferFeedSuffix?: boolean;
+}) =>
   Layer.effectContext(
     Effect.gen(function* () {
       const approval = input.approval,
@@ -75,7 +78,8 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         source = yield* LedgerFeedSource,
         pins = yield* LedgerPinStore,
         submissions = yield* SubmissionJournal,
-        log = yield* LedgerLog;
+        log = yield* LedgerLog,
+        invalidation = yield* Effect.serviceOption(LedgerFeedInvalidation);
       const readAfter = source.readAfter.bind(source),
         readLog = log.read.bind(log),
         injectedReadFrom = log.readFrom?.bind(log),
@@ -89,8 +93,7 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         origin = { kind: 'snapshot', snapshot: verified.snapshot };
         originView = verified.view;
       } else {
-        const full = yield* verifyPersonalHistory(approval.offer, approval.pages);
-        yield* Effect.fromResult(requireLedgerContinuation(full, approval.view));
+        yield* Effect.fromResult(requireLedgerContinuation(approval.view, approval.view));
         if (approval.originalOrigin) {
           const qualified = yield* qualifyPersonalLedgerOrigin(approval);
           originView = qualified.view;
@@ -99,27 +102,28 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
           origin = { kind: 'genesis', record: fromHex(approval.offer.genesisRecordHex) };
           originView = yield* Effect.fromResult(verifyPersonalOffer(approval.offer));
         }
+        yield* Effect.fromResult(requireLedgerContinuation(originView, approval.view));
       }
       const tail = yield* store.tail();
       const expected = tail
         ? { head: Result.getOrThrow(Bytes.recordHash(tail.head)), length: tail.count }
         : { head: originView.head, length: originView.length };
+      const feedDeps = Layer.mergeAll(
+        Layer.succeed(WorkspaceScope, { genesis }),
+        Layer.succeed(LedgerFeedStore, store),
+        Layer.succeed(LedgerFeedSource, source),
+        Layer.succeed(LedgerPinStore, pins),
+        ...(Option.isSome(invalidation)
+          ? [Layer.succeed(LedgerFeedInvalidation, invalidation.value)]
+          : [])
+      );
       const services = yield* Layer.build(
         LedgerFeed.layer({
           origin,
           expected,
           // Counts the suffix after the verified origin, not the absolute ledger sequence.
           budget: { maxRecords: 16384, maxBytes: 32 * 1024 * 1024 },
-        }).pipe(
-          Layer.provide(
-            Layer.mergeAll(
-              Layer.succeed(WorkspaceScope, { genesis }),
-              Layer.succeed(LedgerFeedStore, store),
-              Layer.succeed(LedgerFeedSource, source),
-              Layer.succeed(LedgerPinStore, pins)
-            )
-          )
-        )
+        }).pipe(Layer.provide(feedDeps))
       );
       const feed = Context.get(services, LedgerFeed);
       const advanceFeed = Effect.fnUntraced(function* () {
@@ -174,6 +178,21 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
           checkpoint: { head: next.view.head, length: next.view.length },
         };
       });
+      const readFrom = Effect.fnUntraced(function* (anchor: Bytes.GenesisHash, base: LedgerView) {
+        if (!injectedReadFrom) return yield* readSuffix(anchor, base);
+        if (input.preferFeedSuffix) {
+          const start = yield* Effect.result(feed.current());
+          if (
+            Result.isSuccess(start) &&
+            !start.success.bootstrap &&
+            start.success.view.length === base.length &&
+            start.success.view.head.equals(base.head)
+          ) {
+            return yield* readSuffix(anchor, base);
+          }
+        }
+        return yield* injectedReadFrom(anchor, base);
+      });
       const current = Effect.fnUntraced(function* () {
         const state = yield* feed.current();
         yield* Effect.fromResult(requireLedgerContinuation(approval.view, state.view));
@@ -216,7 +235,7 @@ export const personalLedgerControl = (input: { readonly approval: PersonalApprov
         Context.add(SubmissionJournal, submissions),
         Context.add(LedgerLog, {
           read: readLog,
-          readFrom: injectedReadFrom ?? readSuffix,
+          readFrom,
           appendCas: append,
         })
       );

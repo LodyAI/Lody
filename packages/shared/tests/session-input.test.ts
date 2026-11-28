@@ -370,6 +370,23 @@ describe('session-input helpers', () => {
       ],
     });
   });
+  it("records the sender's display name on a pending user turn as one line", () => {
+    const build = (userName?: string) =>
+      buildPendingUserHistoryEntry({
+        userId: 'user-1',
+        userName,
+        inputBlocks: [{ type: 'text', text: 'hi' }],
+        timestamp: '2026-11-26T00:00:00.000Z',
+      })?.author;
+    expect(build('Alice\n  Chen')).toEqual({
+      v: 1,
+      kind: 'human',
+      userId: 'user-1',
+      name: 'Alice Chen',
+    });
+    expect(build('   ')).toEqual({ v: 1, kind: 'human', userId: 'user-1' });
+    expect(build()).toEqual({ v: 1, kind: 'human', userId: 'user-1' });
+  });
   it('omits redundant plain single-text inputBlocks in pending user turns while preserving E2EE digests', () => {
     const plainBlocks: SessionInputBlock[] = [{ type: 'text', text: 'Synthetic oversized prompt' }];
     const plainConfig = buildSessionTurnInputConfig({

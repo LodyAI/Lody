@@ -29,7 +29,6 @@ const fixture = vi.hoisted(() => ({
   workspaceId: 'workspace-native',
   cachedUser: null as { id: string } | null,
   showTools: false,
-  realPairing: false,
   realTeam: false,
   workspaces: { status: 'loading' } as WorkspacesState,
   navigation: [] as unknown[],
@@ -71,7 +70,9 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
     failure,
     memberProfiles,
     children,
+    notices,
     onOpen,
+    openDisabled,
     onBack,
     memberManagement,
   }: {
@@ -86,13 +87,16 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
     failure?: unknown;
     memberProfiles?: ReadonlyMap<string, { name: string }>;
     children?: ReactNode;
+    notices?: ReactNode;
     onOpen?: () => void;
+    openDisabled?: boolean;
     onBack: () => void;
   }) => {
     fixture.management = memberManagement;
     return createElement(
       Fragment,
       null,
+      notices,
       createElement(
         'p',
         { 'data-control-state': true },
@@ -111,9 +115,15 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
           .join(','),
       }),
       children,
-      onOpen
+      onOpen && !openDisabled
         ? createElement('button', { 'data-open-workspace': true, onClick: onOpen }, 'open')
-        : null,
+        : onOpen
+          ? createElement('button', {
+              'data-open-workspace': true,
+              disabled: true,
+              'aria-label': 'open-disabled',
+            })
+          : null,
       createElement('button', { 'data-back': true, 'aria-label': 'back', onClick: onBack })
     );
   },
@@ -124,21 +134,6 @@ vi.mock('@/components/settings/e2ee-team-settings', async (importOriginal) => {
   return {
     E2eeTeamSettingsHost: (props: Parameters<typeof actual.E2eeTeamSettingsHost>[0]) =>
       fixture.realTeam ? createElement(actual.E2eeTeamSettingsHost, props) : null,
-  };
-});
-vi.mock('@/components/pages/e2ee-personal-pairing', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../src/components/pages/e2ee-personal-pairing')>();
-  return {
-    E2eePersonalPairing: (props: Parameters<typeof actual.E2eePersonalPairing>[0]) =>
-      fixture.realPairing
-        ? createElement(actual.E2eePersonalPairing, props)
-        : fixture.showTools
-          ? createElement('aside', {
-              'data-pairing': props.workspaceId,
-              'data-approved': Boolean(props.approved),
-            })
-          : null,
   };
 });
 vi.mock('@/components/pages/e2ee-ledger-audit', () => ({
@@ -207,7 +202,6 @@ beforeEach(() => {
   fixture.workspaceId = workspaceId;
   fixture.cachedUser = null;
   fixture.showTools = false;
-  fixture.realPairing = false;
   fixture.realTeam = false;
   fixture.workspaces = { status: 'loading' };
   fixture.navigation = [];
@@ -632,7 +626,7 @@ function displayPort(
 }
 
 it.each(['identity-lost', 'approval-required'] as const)(
-  'a pairing-only host retains public verification and pairing while %s',
+  'a pairing-only host retains public verification without content access while %s',
   async (code) => {
     fixture.port = displayPort(async () => [] as never);
     delete fixture.port.memberProfiles;
@@ -662,9 +656,6 @@ it.each(['identity-lost', 'approval-required'] as const)(
     await act(async () => root.render(createElement(Component)));
     expect(reads).toBe(1);
     expect(container.textContent).toBe('approval-required');
-    expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(
-      workspaceId
-    );
     expect(body).toEqual([]);
   }
 );
@@ -771,7 +762,6 @@ it('turns a live device revocation into local cleanup and re-pairing guidance, n
   const guide = container.querySelector('[data-testid="e2ee-device-approval-guide"]');
   expect(guide?.getAttribute('data-control-state')).toBe('approval-required');
   expect(guide?.textContent).toContain('e2ee.approvalGuide.revoked');
-  expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(workspaceId);
 });
 
 it.each(['automatic', 'scanned'] as const)(
@@ -1132,12 +1122,10 @@ it('offers the routed workspace only after a successful approved host open', asy
   const Component = Route.options.component as () => ReturnType<typeof createElement>;
   await act(async () => root.render(createElement(Component)));
   expect(container.querySelector('[data-open-workspace]')).toBeNull();
-  expect(container.querySelector('[data-pairing]')).not.toBeNull();
   approved = true;
   await act(async () => window.dispatchEvent(new Event('online')));
   const open = container.querySelector<HTMLButtonElement>('[data-open-workspace]');
   expect(open).not.toBeNull();
-  expect(container.querySelector('[data-pairing]')?.getAttribute('data-approved')).toBe('true');
   await act(async () => open!.click());
   expect(fixture.navigation).toEqual([
     { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
@@ -1508,7 +1496,7 @@ it.each([
         contentMode: 'e2ee',
       },
     ],
-    { to: '/workspace/create', search: { allowExisting: true } },
+    { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
   ],
 ])('returns "Workspaces" to the account\'s workspaces with %s', async (_, others, target) => {
   fixture.workspaces = {
@@ -2021,7 +2009,7 @@ it.each(['same-owner', 'account-change', 'workspace-change'] as const)(
       });
       expect(f.readers()).toBe(1);
       expect(renderedRoles()).toBe('member,owner');
-      expect(fixture.management).toBeUndefined();
+      expect(fixture.management).toBeDefined();
       if (change !== 'same-owner') {
         // A new route binding has its own reader and ledger, while the old read is pending.
         if (change === 'account-change') fixture.session.user.id = 'other-account';
@@ -2045,154 +2033,6 @@ it.each(['same-owner', 'account-change', 'workspace-change'] as const)(
     }
   }
 );
-
-// R17b J02: the requester saves its request locally, then the server registration
-// (`begin`) is still in flight when the route learns this desktop has no binding and
-// swaps the full control page for the approval guide. The real pairing component
-// remounts there; it must not offer a claim until that same registration settles.
-// Main's journal is account-bound, so the fake keeps saved requests per account.
-const pairingRoute = () => {
-  fixture.realPairing = true;
-  const offer = {
-    version: 1 as const,
-    workspaceId,
-    genesisHash,
-    genesisRecordHex: raw,
-    endorser: '22'.repeat(32),
-    membershipId: '33'.repeat(16),
-    pairingSessionId: '44'.repeat(16),
-  };
-  const opening = Promise.withResolvers<never>();
-  const begin = Promise.withResolvers<void>();
-  const beginEntered = Promise.withResolvers<void>();
-  const saved = new Map<
-    string,
-    { pairingSessionId: string; signingPublicKey: string; offer: typeof offer }
-  >();
-  let opens = 0;
-  let registered = false;
-  const claims: string[] = [];
-  fixture.port = {
-    deleteWorkspace: unexpectedE2eeWorkspaceOperation,
-    create: async () => {
-      throw new Error('unused');
-    },
-    describe: async () => ({
-      workspaceId,
-      contentMode: 'e2ee',
-      contentModeVersion: 1,
-      genesisHash,
-      cryptoOrgId: genesisHash,
-      activation: 'control-only',
-    }),
-    history: async () => ({
-      workspaceId,
-      genesisHash,
-      checkpoint: { headHash: genesisHash, length: 1 },
-      startIndex: 0,
-      recordsHex: [raw],
-      position: local.status.position!,
-      nextCursor: null,
-    }),
-    runtime: {
-      // The first open stays pending so the request is made on the full page.
-      open: () =>
-        opens++ === 0
-          ? opening.promise
-          : Promise.reject(
-              new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding")
-            ),
-      close: async () => {},
-      status: async () => local.status,
-      pendingPersonalJoin: async () => saved.get(fixture.session.user.id) ?? null,
-      preparePersonalJoin: async (value: typeof offer) => {
-        // Main persists the original request before the network registration.
-        saved.set(fixture.session.user.id, {
-          pairingSessionId: value.pairingSessionId,
-          signingPublicKey: '55'.repeat(32),
-          offer: value,
-        });
-        beginEntered.resolve();
-        await begin.promise;
-        registered = true;
-        return {
-          pairingSessionId: value.pairingSessionId,
-          signingPublicKey: '55'.repeat(32),
-          status: 'pending',
-        };
-      },
-      claimPersonalJoin: async () => {
-        // Server: an unregistered pairing session is refused as unauthorized.
-        if (!registered) throw new Error('e2ee_join_unauthorized');
-        claims.push('pending');
-        return { ready: false, status: 'pending' };
-      },
-      cancelPersonalJoin: async () => ({ status: 'cancelled' }),
-    },
-  } as unknown as PlatformE2eeWorkspaces;
-  const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  const button = (text: string) =>
-    [...container.querySelectorAll('button')].find((value) => value.textContent === text);
-  /** Submit on the full page, then let the route swap to the approval guide. */
-  const submitThenGuide = async () => {
-    await act(async () => root.render(createElement(Component)));
-    expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).toBeNull();
-    const input = container.querySelector('textarea')!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
-        input,
-        JSON.stringify(offer)
-      );
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await act(async () => {
-      button('e2ee.pair.trust')!.click();
-      await beginEntered.promise;
-    });
-    await act(async () =>
-      opening.reject(
-        new Error("Error invoking remote method 'e2ee.open': Error: e2ee_missing-binding")
-      )
-    );
-    expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
-  };
-  return { Component, begin, claims, button, submitThenGuide };
-};
-
-it('does not offer a personal claim across the approval-guide remount until registration settles', async () => {
-  const f = pairingRoute();
-  await f.submitThenGuide();
-  // The remounted component recovered the saved request, but registration is unconfirmed.
-  const unconfirmed = f.button('e2ee.pair.claim');
-  expect(unconfirmed === undefined || unconfirmed.disabled).toBe(true);
-  unconfirmed?.click();
-  expect(f.claims).toEqual([]);
-  await act(async () => f.begin.resolve());
-  const claim = f.button('e2ee.pair.claim')!;
-  expect(claim.disabled).toBe(false);
-  await act(async () => claim.click());
-  expect(f.claims).toEqual(['pending']);
-  expect(container.textContent).toContain('e2ee.pair.waiting');
-  expect(container.querySelector('[role="alert"]')).toBeNull();
-});
-
-// The cloud runtime object survives an account switch without a renderer reload. The
-// next account's card must neither join, display nor act on the previous account's
-// in-flight registration; its own request form stays available.
-it('does not carry an in-flight personal registration into another account', async () => {
-  const f = pairingRoute();
-  await f.submitThenGuide();
-  fixture.session.user.id = 'other-account';
-  await act(async () => root.render(createElement(f.Component)));
-  expect(container.querySelector('[data-testid="e2ee-device-approval-guide"]')).not.toBeNull();
-  await act(async () => f.begin.resolve());
-  expect(container.textContent).not.toContain('44'.repeat(16));
-  expect(container.textContent).not.toContain('55'.repeat(32));
-  expect(f.button('e2ee.pair.claim')).toBeUndefined();
-  expect(f.button('common.cancel')).toBeUndefined();
-  expect(container.querySelector('textarea')).not.toBeNull();
-  expect(f.button('e2ee.pair.trust')).toBeDefined();
-});
 
 it('opened from Settings keeps the running workspace, closes instead of navigating and releases its reader', async () => {
   const cleared: unknown[] = [];

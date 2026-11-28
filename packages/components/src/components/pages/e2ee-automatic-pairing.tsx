@@ -9,15 +9,11 @@ import {
 import { themeSpace as appSpace } from '../../style/theme-scale.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Result } from 'effect';
-import {
-  derivePairingKeys,
-  disposePairingKeys,
-  parsePairingString,
-} from '@lody/e2ee-core/protocol';
 import { useTranslation } from 'react-i18next';
-import { Camera, ChevronDown, ChevronLeft, CircleCheck, QrCode, Smartphone } from 'lucide-react';
+import { Camera, ChevronDown, ChevronLeft, CircleCheck, Smartphone } from 'lucide-react';
 import { Button } from '@lody/ui/button';
+import { Checkbox } from '@lody/ui/checkbox';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { Input } from '@lody/ui/input';
 import { accountPairingErrorCode } from '@lody/platform';
 import type {
@@ -30,13 +26,11 @@ import { Dialog } from '@/ui/dialog';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { WINDOW_CAPTION_CLEAR_TOP, WindowDragStrip } from '@/ui/window-drag-region';
 import { Drawer } from '@lody/ui/drawer';
-import { E2eeAccountPairingRequest, failureKey, localCodeError } from './e2ee-account-pairing';
+import { E2eeAccountPairingRequest } from './e2ee-account-pairing';
 import {
   autoPairQrPayload,
-  E2eeInstantQrApprove,
   parseAutoPairQr,
   PrivatePairingSurface,
-  supportsInstantQr,
   usePairingPrivacy,
 } from './e2ee-instant-qr';
 import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
@@ -49,6 +43,7 @@ import {
 } from './e2ee-device-requests';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
+import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
 
 /** Seconds left until `expiresAt`, ticking once a second; null without a deadline. */
 function useSecondsLeft(expiresAt: number | undefined) {
@@ -64,38 +59,12 @@ const clock = (seconds: number) =>
   `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
 const POLL_MS = 2000;
-/** The new device's poll for its QR join; the approving device signs within a second. */
-const QR_JOIN_POLL_MS = 800;
-/** A scanned join that verified approvals settled without this workspace: it was left
- * out, and every workspace that was approved finished installing, so ending the
- * request (and its secret) can no longer cost another workspace its join. */
-const leftOut = (next: E2eeAccountPairingRequestState, workspaceId: string) =>
-  next.workspaces.some((item) => item.workspaceId === workspaceId && item.approval === 'omitted') &&
-  next.workspaces.every((item) => item.approval !== 'approved' || item.state === 'joined');
+/** After 5s of syncing, guide the person to keep Lody open on the approving device. */
+const SYNC_SLOW_HINT_MS = 5_000;
+/** After 15s of syncing without key failure, surface explicit retry and cancel exits. */
+const SYNC_TIMEOUT_MS = 15_000;
 const cameraSupported = () =>
   typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
-const parsePairCodeLink = (url: string): string | null => {
-  const trimmed = url.trim();
-  return /^lody:\/\/pair\//i.test(trimmed) && !localCodeError(trimmed) ? trimmed : null;
-};
-const hexBytes = (bytes: Uint8Array) =>
-  Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-const lookupIdFromPairingString = (pairingString: string): string | null => {
-  const secret = parsePairingString(pairingString);
-  if (Result.isFailure(secret)) return null;
-  try {
-    const keys = derivePairingKeys(secret.success);
-    if (Result.isFailure(keys)) return null;
-    try {
-      return hexBytes(keys.success.lookupId);
-    } finally {
-      disposePairingKeys(keys.success);
-    }
-  } finally {
-    secret.success.fill(0);
-  }
-};
-
 /** The first service or host code carried by a failure, through wrappers. */
 function carriedCode(cause: unknown, depth = 0): string | null {
   if (!cause || typeof cause !== 'object' || depth > 3) return null;
@@ -180,7 +149,6 @@ export function E2eeAutomaticPairingPage({
 }) {
   usePairingPrivacy();
   const { t, i18n } = useTranslation();
-  const [lostAllOpen, setLostAllOpen] = useState(false);
   const [approvalChoice, setApprovalChoice] = useState<{
     runtime: E2eeWorkspaceRuntime;
     workspaceId: string;
@@ -202,71 +170,31 @@ export function E2eeAutomaticPairingPage({
   const completed = useRef(false);
   const joinedRef = useRef(onJoined);
   joinedRef.current = onJoined;
-  // Scanning another device's code joins through that code instead; while it runs the
-  // automatic request is left alone, so neither flow cancels the other.
-  const [qr, setQr] = useState<'idle' | 'scanning' | 'joining' | 'joined'>('idle');
-  const [qrError, setQrError] = useState<string | null>(null);
-  const [pendingLink, setPendingLink] = useState<string | null>(null);
-  const pendingLinkRef = useRef<string | null>(null);
-  pendingLinkRef.current = pendingLink;
-  const activeQr = qr !== 'idle' || pendingLink !== null;
-  const qrPaused = useRef(false);
-  qrPaused.current = activeQr;
-  /** Lookup ID of a scanned request this page submitted and has not settled. */
-  const qrSubmitted = useRef<string | null>(null);
-  // Phones scan and computers show: a laptop webcam is never the primary path.
-  const handheld = useIsHandheldScanner();
-  const mobile = handheld;
-  const qrSupported =
-    handheld &&
-    Boolean(runtime.requestAccountPairing && runtime.accountPairingRequest) &&
-    cameraSupported();
-  // This device's exact access loss here ends any earlier approval, including a joined
-  // scan on this page: it is never shown as authorized again.
+  // Every new device shows its six-digit code; a computer also shows it as a QR code a
+  // signed-in phone can scan instead of typing.
+  const mobile = useIsHandheldScanner();
+  // This device's exact access loss here ends any earlier approval: it is never shown as
+  // authorized again.
   const lost = state?.phase === 'revoked' || state?.phase === 'removed';
-  const receiving =
-    !lost && (state?.phase === 'syncing' || state?.phase === 'joined' || qr === 'joined');
-  const linkGuardRef = useRef({ busy, canStart, lostAllOpen, receiving });
-  linkGuardRef.current = { busy, canStart, lostAllOpen, receiving };
+  const receiving = !lost && (state?.phase === 'syncing' || state?.phase === 'joined');
+  const [syncSlowHint, setSyncSlowHint] = useState(false);
+  const [syncTimedOut, setSyncTimedOut] = useState(false);
+  const [syncAttempt, setSyncAttempt] = useState(0);
   useEffect(() => {
-    const currentRuntime = runtime;
-    qrPaused.current = false;
-    pendingLinkRef.current = null;
-    setPendingLink(null);
-    setQr('idle');
-    setQrError(null);
+    if (!receiving || keyFailure) {
+      setSyncSlowHint(false);
+      setSyncTimedOut(false);
+      return undefined;
+    }
+    setSyncSlowHint(false);
+    setSyncTimedOut(false);
+    const slowTimer = setTimeout(() => setSyncSlowHint(true), SYNC_SLOW_HINT_MS);
+    const timer = setTimeout(() => setSyncTimedOut(true), SYNC_TIMEOUT_MS);
     return () => {
-      const expectedLookupId = qrSubmitted.current;
-      if (!expectedLookupId) return;
-      qrSubmitted.current = null;
-      void currentRuntime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
+      clearTimeout(slowTimer);
+      clearTimeout(timer);
     };
-  }, [runtime, workspaceId]);
-  useEffect(() => {
-    if (!runtime.requestAccountPairing) return undefined;
-    return registerE2eePairLinkHandler((url) => {
-      const pairingString = parsePairCodeLink(url);
-      if (!pairingString) return false;
-      const guard = linkGuardRef.current;
-      if (!guard.canStart) return false;
-      if (
-        guard.busy ||
-        guard.receiving ||
-        guard.lostAllOpen ||
-        qrPaused.current ||
-        blockedRef.current !== null
-      )
-        return true;
-      qrPaused.current = true;
-      pendingLinkRef.current = pairingString;
-      setPendingLink(pairingString);
-      setQrError(null);
-      return true;
-    });
-  }, [runtime]);
-  useEffect(() => {
-    if (canStart) retryE2eePairLink();
-  }, [canStart, runtime, workspaceId]);
+  }, [receiving, keyFailure, syncAttempt]);
   useEffect(() => {
     if (!canStart) return undefined;
     let alive = true,
@@ -293,7 +221,7 @@ export function E2eeAutomaticPairingPage({
       }
     };
     const tick = async () => {
-      if (!alive || qrPaused.current || completed.current) return;
+      if (!alive || completed.current) return;
       if (running) {
         queued = true;
         return;
@@ -310,7 +238,7 @@ export function E2eeAutomaticPairingPage({
                 ? null
                 : await runtime.startAutomaticPairing!(workspaceId))
           );
-        } while (queued && alive && !qrPaused.current && !completed.current);
+        } while (queued && alive && !completed.current);
       } catch (cause) {
         if (alive) {
           const code = accountPairingErrorCode(cause);
@@ -348,10 +276,13 @@ export function E2eeAutomaticPairingPage({
     }
     void tick();
     const timer = setInterval(() => void tick(), POLL_MS);
+    const onOnline = () => void tick();
+    window.addEventListener('online', onOnline);
     return () => {
       alive = false;
       unsubscribe?.();
       clearInterval(timer);
+      window.removeEventListener('online', onOnline);
     };
   }, [runtime, workspaceId, generation, canStart]);
   const ownerRef = useRef({ runtime, workspaceId });
@@ -364,126 +295,6 @@ export function E2eeAutomaticPairingPage({
     },
     []
   );
-  const finishQrJoin = (next?: E2eeAccountPairingRequestState | null) => {
-    const expectedLookupId = qrSubmitted.current;
-    qrSubmitted.current = null;
-    if (
-      expectedLookupId &&
-      next &&
-      next.status !== 'joined' &&
-      next.workspaces.every((item) => item.approval !== 'approved' || item.state === 'joined')
-    ) {
-      void runtime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
-    }
-    setQr('joined');
-    const wasCompleted = completed.current;
-    completed.current = true;
-    admitted.current = true;
-    // Only now is the automatic request redundant; ending it earlier would close the
-    // other device's dialog while it is still signing for the scanned code.
-    void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
-    if (!wasCompleted) {
-      joinedRef.current();
-    }
-  };
-  const qrJoined = (next: E2eeAccountPairingRequestState | null) =>
-    next?.status === 'joined' ||
-    Boolean(
-      next?.workspaces.some((item) => item.workspaceId === workspaceId && item.state === 'joined')
-    );
-  /** Leaves a scanned join that will not finish. Its own request is ended so the
-   * automatic request resumes without finding it in the way. */
-  const abandonQr = (errorKey: string | null) => {
-    setQr('idle');
-    setQrError(errorKey);
-    const expectedLookupId = qrSubmitted.current;
-    if (!expectedLookupId) return;
-    qrSubmitted.current = null;
-    void runtime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
-  };
-  const joinWithCode = async (pairingString: string) => {
-    const expectedLookupId = lookupIdFromPairingString(pairingString);
-    if (!expectedLookupId) {
-      setQr('idle');
-      setQrError('e2ee.instantQr.notPairingCode');
-      return;
-    }
-    const owner = ownerRef.current;
-    setQrError(null);
-    setQr('joining');
-    try {
-      // Without `preserveExisting` the host replaces its retained request atomically,
-      // leaving the automatic discovery row open until this join settles.
-      qrSubmitted.current = expectedLookupId;
-      const next = await runtime.requestAccountPairing!({ pairingString });
-      if (!sameOwner(owner) || qrSubmitted.current !== expectedLookupId) {
-        if (!qrJoined(next)) {
-          void runtime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
-        }
-        return;
-      }
-      if (qrJoined(next)) finishQrJoin(next);
-    } catch (cause) {
-      if (!sameOwner(owner) || qrSubmitted.current !== expectedLookupId) {
-        if (accountPairingErrorCode(cause) !== 'pairing-used') {
-          void runtime.cancelAccountPairing?.({ expectedLookupId }).catch(() => undefined);
-        }
-        return;
-      }
-      if (accountPairingErrorCode(cause) === 'pairing-used') qrSubmitted.current = null;
-      abandonQr(failureKey(cause));
-    }
-  };
-  const acceptScan = (scanned: string) => {
-    // A signed-in device's approval code, not one for joining.
-    if (parseAutoPairQr(scanned)) {
-      setQr('idle');
-      setQrError('e2ee.instantQr.wrongRole');
-      return;
-    }
-    // The local check wipes the decoded bytes; the host parses the code again.
-    if (localCodeError(scanned)) {
-      setQr('idle');
-      setQrError('e2ee.instantQr.notPairingCode');
-      return;
-    }
-    void joinWithCode(scanned.trim());
-  };
-  const { video: qrVideo, state: cameraState } = useQrCamera(qr === 'scanning', acceptScan);
-
-  useEffect(() => {
-    if (qr !== 'joining' || !runtime.accountPairingRequest) return undefined;
-    let alive = true,
-      running = false;
-    const timer = setInterval(() => {
-      if (running) return;
-      running = true;
-      void runtime.accountPairingRequest!()
-        .then((next) => {
-          if (!alive || qrSubmitted.current === null) return;
-          if (next?.lookupId && next.lookupId !== qrSubmitted.current) return;
-          if (qrJoined(next)) {
-            finishQrJoin(next);
-          } else if (!next || next.status === 'declined' || next.status === 'expired')
-            abandonQr(
-              `e2ee.accountPair.error.${next?.status === 'expired' ? 'pairing-expired' : 'failed'}`
-            );
-          else if (leftOut(next, workspaceId)) abandonQr('e2ee.instantQr.partial');
-        })
-        .catch(() => {
-          // A failed read keeps the same scanned request; the next poll asks again.
-        })
-        .finally(() => {
-          running = false;
-        });
-    }, QR_JOIN_POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-    // The join belongs to this page's runtime and workspace; callbacks read refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qr, runtime, workspaceId]);
   const restartPrevious = async (confirmed: E2eeAccountPairingRequestState) => {
     const owner = ownerRef.current;
     const expectedLookupId = confirmed.lookupId;
@@ -529,10 +340,7 @@ export function E2eeAutomaticPairingPage({
     if (busy) return;
     setBusy(true);
     try {
-      if (replace) {
-        abandonQr(null);
-        await runtime.cancelAutomaticPairing!(workspaceId);
-      }
+      if (replace) await runtime.cancelAutomaticPairing!(workspaceId);
       const next = await runtime.startAutomaticPairing!(workspaceId);
       if (sameOwner(owner)) {
         setState(next);
@@ -547,35 +355,57 @@ export function E2eeAutomaticPairingPage({
     }
   };
   const cancel = (manual = false) => {
-    if (busy) return;
-    abandonQr(null);
+    ownerRef.current = { runtime, workspaceId };
+    setBusy(false);
     // The relay may queue the cancellation while offline: leaving never waits for it.
     // A request it misses still expires, and a new request replaces it.
     void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
     if (manual) onManual?.();
     else onBack();
   };
+  const recovery = lostAccess?.recovery;
+  const recovered = () => {
+    // Reached only when this workspace's own restore committed: its pending request is
+    // no longer needed. Another workspace's success keeps this request.
+    void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
+    recovery?.onRecovered();
+  };
   if (!canStart)
     return (
       <PairingPage>
-        <Button
-          variant="ghost"
-          onClick={() => {
-            abandonQr(null);
-            onBack();
-          }}
-        >
+        <Button variant="ghost" onClick={onBack}>
           <ChevronLeft size={16} />
           {t('e2ee.control.back')}
         </Button>
-        <E2eeAccountPairingRequest
-          key={workspaceId}
-          runtime={runtime}
-          workspaceId={workspaceId}
-          autoStart={false}
-          onJoined={onJoined}
-          onRequestApproval={() => setApprovalChoice({ runtime, workspaceId })}
-        />
+        <section {...stylex.props(themeStyles.consentColumn)}>
+          <E2eeAccountPairingRequest
+            key={workspaceId}
+            runtime={runtime}
+            workspaceId={workspaceId}
+            autoStart={false}
+            onJoined={onJoined}
+            onRequestApproval={() => setApprovalChoice({ runtime, workspaceId })}
+          />
+          {lostAccess && (
+            <div {...stylex.props(themeStyles.spaced3)} data-testid="e2ee-lost-all-entry">
+              <E2eeLostAccessEntry
+                {...lostAccess}
+                workspaceId={workspaceId}
+                workspaceName={lostAccess.workspaceName ?? state?.workspaceName}
+                {...(runtime.openBrowserRecovery
+                  ? {
+                      recovery: undefined,
+                      entryVariant: 'link' as const,
+                      entryLabel: t('e2ee.lostAccess.entrySecondary'),
+                    }
+                  : recovery
+                    ? { recovery: { ...recovery, onRecovered: recovered } }
+                    : {})}
+                disabled={busy}
+              />
+            </div>
+          )}
+        </section>
       </PairingPage>
     );
   const formatTime = (value: number) =>
@@ -583,47 +413,22 @@ export function E2eeAutomaticPairingPage({
       hour: '2-digit',
       minute: '2-digit',
     }).format(new Date(value));
-  const recovery = lostAccess?.recovery;
-  const recovered = () => {
-    setLostAllOpen(false);
-    // Reached only when this workspace's own restore committed: its pending request is
-    // no longer needed. Another workspace's success keeps this request.
-    void runtime.cancelAutomaticPairing?.(workspaceId).catch(() => undefined);
-    recovery?.onRecovered();
-  };
   const terminal =
     !receiving &&
-    !activeQr &&
     state &&
     ['declined', 'expired', 'cancelled', 'revoked', 'removed'].includes(state.phase);
-  const scanButton = (label: string) =>
-    qrSupported && (
-      <Button
-        xstyle={themeStyles.glyph2}
-        size="large"
-        disabled={busy}
-        onClick={() => {
-          setQrError(null);
-          setQr('scanning');
-        }}
-      >
-        <Camera size={18} aria-hidden="true" />
-        {t(label)}
-      </Button>
-    );
   return (
     <PairingPage>
-      <Button
-        variant="ghost"
-        onClick={() => {
-          abandonQr(null);
-          onBack();
-        }}
-      >
+      <Button variant="ghost" onClick={onBack}>
         <ChevronLeft size={16} />
         {t('e2ee.control.back')}
       </Button>
-      <section {...stylex.props(themeStyles.column)}>
+      <section {...stylex.props(themeStyles.column, receiving && themeStyles.receivingColumn)}>
+        {receiving && (
+          <div {...stylex.props(themeStyles.receivingArt)}>
+            <E2eeDevicePairArt width={196} transferring={!keyFailure} />
+          </div>
+        )}
         <h1 {...stylex.props(themeStyles.copy)}>
           {t(
             terminal
@@ -650,7 +455,36 @@ export function E2eeAutomaticPairingPage({
           </>
         ) : receiving ? (
           <>
-            <p {...stylex.props(themeStyles.hint4)}>{t('e2ee.auto.syncing.help')}</p>
+            <p role="status" {...stylex.props(themeStyles.hint3)}>
+              {t(
+                syncSlowHint && !syncTimedOut
+                  ? 'e2ee.auto.syncing.keepOpen'
+                  : 'e2ee.auto.syncing.help'
+              )}
+            </p>
+            {!keyFailure && syncTimedOut && (
+              <div {...stylex.props(themeStyles.spaced2)} data-testid="e2ee-sync-timeout">
+                <p role="status" {...stylex.props(themeStyles.hint5)}>
+                  {t('e2ee.auto.syncing.slow')}
+                </p>
+                <div {...stylex.props(themeStyles.row)}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setSyncTimedOut(false);
+                      setSyncAttempt((attempt) => attempt + 1);
+                      if (onRetryKeys) onRetryKeys();
+                      else setGeneration((g) => g + 1);
+                    }}
+                  >
+                    {t('e2ee.auto.syncing.retry')}
+                  </Button>
+                  <Button variant="ghost" onClick={() => cancel()}>
+                    {t('common.cancel')}
+                  </Button>
+                </div>
+              </div>
+            )}
             {keyFailure && (
               <div {...stylex.props(themeStyles.spaced2)}>
                 <p role="alert" {...stylex.props(themeStyles.hint5)}>
@@ -664,67 +498,19 @@ export function E2eeAutomaticPairingPage({
           </>
         ) : (
           <>
-            <p {...stylex.props(themeStyles.hint6)}>{t('e2ee.auto.requesting')}</p>
-            <p {...stylex.props(themeStyles.layout)}>{state?.workspaceName}</p>
-            {qr === 'joining' ? (
-              <div {...stylex.props(themeStyles.layout2)}>
-                <p role="status" data-testid="e2ee-qr-joining" {...stylex.props(themeStyles.hint5)}>
-                  {t('e2ee.instantQr.scannedJoining')}
-                </p>
-                <Button
-                  xstyle={themeStyles.spaced3}
-                  variant="ghost"
-                  onClick={() => abandonQr(null)}
-                >
-                  {t('common.cancel')}
-                </Button>
-              </div>
-            ) : pendingLink ? (
-              <div data-testid="e2ee-link-join" {...stylex.props(themeStyles.hint)}>
-                <p {...stylex.props(themeStyles.copy2)}>{t('e2ee.accountPair.request.title')}</p>
-                <div {...stylex.props(themeStyles.row)}>
-                  <Button
-                    data-testid="e2ee-link-join-confirm"
-                    onClick={() => {
-                      const code = pendingLink;
-                      qrPaused.current = true;
-                      pendingLinkRef.current = null;
-                      setPendingLink(null);
-                      void joinWithCode(code);
-                    }}
-                  >
-                    {t('e2ee.accountPair.request.useCode')}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      pendingLinkRef.current = null;
-                      setPendingLink(null);
-                    }}
-                  >
-                    {t('common.cancel')}
-                  </Button>
-                </div>
-              </div>
-            ) : qr === 'scanning' ? (
-              <div {...stylex.props(themeStyles.layout3)} data-testid="e2ee-qr-viewfinder">
-                <video ref={qrVideo} muted playsInline {...stylex.props(themeStyles.panel)} />
-                {cameraState === 'unavailable' && (
-                  <p role="alert" {...stylex.props(themeStyles.hint7)}>
-                    {t('e2ee.verify.cameraUnavailable')}
-                  </p>
-                )}
-                <Button xstyle={themeStyles.spaced3} variant="ghost" onClick={() => setQr('idle')}>
-                  {t('common.cancel')}
-                </Button>
-              </div>
-            ) : state?.comparisonCode ? (
+            {state?.workspaceName && (
+              <>
+                <p {...stylex.props(themeStyles.hint6)}>{t('e2ee.auto.requesting')}</p>
+                <p {...stylex.props(themeStyles.layout)}>{state.workspaceName}</p>
+              </>
+            )}
+            {state?.comparisonCode ? (
               <>
                 <p role="status" {...stylex.props(themeStyles.row2)}>
                   <CircleCheck size={15} aria-hidden="true" />
                   {t('e2ee.auto.prompted')}
                 </p>
-                {scanButton('e2ee.auto.scanPrompt')}
+                <ComparisonCode code={state.comparisonCode} hint="e2ee.auto.showCode" />
                 {!mobile && (
                   <div data-testid="e2ee-auto-pair-qr" {...stylex.props(themeStyles.column2)}>
                     <div {...stylex.props(themeStyles.panel2)}>
@@ -737,43 +523,18 @@ export function E2eeAutomaticPairingPage({
                     <p {...stylex.props(themeStyles.hint8)}>{t('e2ee.auto.desktopQr.help')}</p>
                   </div>
                 )}
-                <ComparisonCode
-                  code={state.comparisonCode}
-                  hint={mobile ? 'e2ee.auto.showCode' : 'e2ee.auto.showCode.desktop'}
-                />
                 <p {...stylex.props(themeStyles.hint9)}>{t('e2ee.auto.waiting.help')}</p>
               </>
             ) : (
               <div data-testid="e2ee-awaiting-device" {...stylex.props(themeStyles.hint10)}>
+                <div {...stylex.props(themeStyles.cardArt)}>
+                  <E2eeDevicePairArt width={152} />
+                </div>
                 <p role="status" {...stylex.props(themeStyles.copy2)}>
                   {t('e2ee.auto.awaiting.title')}
                 </p>
-                <p {...stylex.props(themeStyles.hint11)}>
-                  {t(mobile ? 'e2ee.auto.awaiting.help' : 'e2ee.auto.awaiting.desktopHelp')}
-                </p>
-                {scanButton('e2ee.auto.scanJoin')}
-                {!mobile && onManual && (
-                  <Button
-                    xstyle={themeStyles.spaced3}
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={() => cancel(true)}
-                  >
-                    {t('e2ee.auto.offline')}
-                  </Button>
-                )}
-                {qrSupported && (
-                  <p {...stylex.props(themeStyles.hint12)}>
-                    <QrCode size={12} aria-hidden="true" {...stylex.props(themeStyles.layout4)} />
-                    {t('e2ee.auto.scanJoin.hint')}
-                  </p>
-                )}
+                <p {...stylex.props(themeStyles.hint11)}>{t('e2ee.auto.awaiting.help')}</p>
               </div>
-            )}
-            {qrError && (
-              <p role="alert" {...stylex.props(themeStyles.hint13)}>
-                {t(qrError)}
-              </p>
             )}
             <details {...stylex.props(themeStyles.hint3)}>
               <summary {...stylex.props(themeStyles.row3)}>
@@ -785,14 +546,14 @@ export function E2eeAutomaticPairingPage({
                 {t('e2ee.auto.changeDevice')}
               </Button>
               {onManual && (
-                <Button variant="link" disabled={busy} onClick={() => cancel(true)}>
+                <Button variant="link" onClick={() => cancel(true)}>
                   {t('e2ee.auto.manual')}
                 </Button>
               )}
             </details>
           </>
         )}
-        {!receiving && (
+        {!receiving && state?.phase !== 'removed' && (
           <>
             {lostAccess ? (
               <div {...stylex.props(themeStyles.spaced3)} data-testid="e2ee-lost-all-entry">
@@ -802,7 +563,6 @@ export function E2eeAutomaticPairingPage({
                   workspaceName={lostAccess.workspaceName ?? state?.workspaceName}
                   {...(recovery ? { recovery: { ...recovery, onRecovered: recovered } } : {})}
                   disabled={busy}
-                  onOpenChange={setLostAllOpen}
                 />
               </div>
             ) : (
@@ -859,7 +619,7 @@ export function E2eeAutomaticPairingPage({
                   : t('e2ee.auto.expiry', { time: formatTime(state.expiresAt) })}
               </p>
             )}
-            <Button variant="ghost" disabled={busy} onClick={() => cancel()}>
+            <Button variant="ghost" onClick={() => cancel()}>
               {t('e2ee.auto.cancel')}
             </Button>
           </div>
@@ -869,15 +629,24 @@ export function E2eeAutomaticPairingPage({
   );
 }
 
-function ApprovalExpiry({ expiresAt }: { expiresAt: number }) {
+function ApprovalExpiry({ expiresAt, inline = false }: { expiresAt: number; inline?: boolean }) {
   const { t } = useTranslation();
   const seconds = useSecondsLeft(expiresAt);
   if (seconds === null || seconds >= 60 * 60) return null;
+  const label =
+    seconds === 0
+      ? t('e2ee.auto.expired.short')
+      : t('e2ee.auto.expiresIn', { time: clock(seconds) });
+  if (inline) {
+    return (
+      <span data-testid="e2ee-approval-expiry" {...stylex.props(themeStyles.expiryInline)}>
+        {label}
+      </span>
+    );
+  }
   return (
     <p data-testid="e2ee-approval-expiry" {...stylex.props(themeStyles.hint8)}>
-      {seconds === 0
-        ? t('e2ee.auto.expired.short')
-        : t('e2ee.auto.expiresIn', { time: clock(seconds) })}
+      {label}
     </p>
   );
 }
@@ -924,7 +693,7 @@ export function E2eeAutomaticPairingInbox({
   const [ended, setEnded] = useState<E2eeAutomaticPairingReview | null>(null);
   const deferred = useRef(new Set<string>());
   /** Monotonic set of request IDs that have reached a terminal outcome in this session
-   * (approved, declined, code-locked, or joined by QR); never cleared by transient poll gaps. */
+   * (approved, declined or code-locked); never cleared by transient poll gaps. */
   const settled = useRef(new Set<string>());
   const actionOwner = useRef({ runtime });
   if (actionOwner.current.runtime !== runtime) actionOwner.current = { runtime };
@@ -934,34 +703,30 @@ export function E2eeAutomaticPairingInbox({
     },
     []
   );
-  /** The request whose dialog revealed a one-time QR code. The code stays until it is
-   * used or dismissed, even if that request leaves the list mid-scan. */
-  const [qrFor, setQrFor] = useState<string | null>(null);
-  const qrSupported = supportsInstantQr(runtime);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const inboxRef = useRef(inbox);
   inboxRef.current = inbox;
-  const qrForRef = useRef(qrFor);
-  qrForRef.current = qrFor;
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const codeRef = useRef(code);
   codeRef.current = code;
   const dialog = useRef<HTMLDivElement>(null);
-  // A phone approves by scanning the new device's screen; a computer types its code.
-  const handheld = useIsHandheldScanner();
-  const mobile = handheld;
+  // Every device types the new device's code; a phone may scan that screen instead.
+  const mobile = useIsHandheldScanner();
   const [scanning, setScanning] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
+  /** The code an external auto-pair link carried for one request. While the field still
+   * holds it, the window shows the code to compare instead of an input to fill. */
+  const [linked, setLinked] = useState<{ id: string; code: string } | null>(null);
+  /** Workspaces the person unticked for the open request; every other one is approved. */
+  const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set());
   const requestsRef = useRef(requests);
   requestsRef.current = requests;
   useEffect(() => {
     let alive = true,
       running = false,
       queued = false;
-    qrForRef.current = null;
-    setQrFor(null);
     setRequests([]);
     busyRef.current = null;
     setBusy(null);
@@ -1002,19 +767,16 @@ export function E2eeAutomaticPairingInbox({
           // A visible window presents even without keyboard focus (another app or a
           // second screen); a hidden one leaves the request to the system notification.
           // It opens over Settings or the encryption console, but never over another
-          // pairing surface. On a computer with Instant QR, show the one-time QR as
-          // soon as local identity verifies while the 6-digit fallback finishes.
+          // pairing surface.
           if (
             !selectedRef.current &&
             !inboxRef.current &&
-            !qrForRef.current &&
             document.visibilityState === 'visible' &&
             !hasVisiblePairingSurface()
           ) {
-            const canPresentPreparing = !handheld && supportsInstantQr(runtime);
             const next = rows.find(
               (row) =>
-                (row.phase === 'waiting' || (canPresentPreparing && row.phase === 'preparing')) &&
+                row.phase === 'waiting' &&
                 !deferred.current.has(row.id) &&
                 !settled.current.has(row.id)
             );
@@ -1037,8 +799,6 @@ export function E2eeAutomaticPairingInbox({
       /* Live discovery is optional; scoped polling still verifies the same originals. */
     }
     void tick();
-    // A hidden window does not poll; the subscription and the system notification
-    // still run, and showing the window again checks at once.
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void tick();
     }, POLL_MS);
@@ -1047,69 +807,45 @@ export function E2eeAutomaticPairingInbox({
       if (document.visibilityState === 'visible') void tick();
     };
     document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
     return () => {
       alive = false;
       unsubscribe?.();
       clearInterval(timer);
       document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('online', wake);
     };
   }, [runtime]);
   const current = requests.find((row) => row.id === selected);
-  // A computer shows its one-time code with the request at once (owner decision
-  // 2026-11-12); a phone scans the new screen and shows its own code only on request.
-  const shownQr = qrFor ?? (!handheld && qrSupported && current ? current.id : null);
-  useEffect(() => {
-    // Latch the shown code so it survives its request leaving the list mid-scan.
-    if (shownQr && !qrFor) setQrFor(shownQr);
-  }, [shownQr, qrFor]);
-  const dismissTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(dismissTimer.current), []);
-  const qrJoined = (id: string) => {
-    clearTimeout(dismissTimer.current);
-    settled.current.add(id);
-    // Show the result briefly, then close without resurfacing the request it answered.
-    dismissTimer.current = setTimeout(() => {
-      if (qrForRef.current !== id) return;
-      deferred.current.add(id);
-      if (selectedRef.current === id) setSelected(null);
-      setQrFor(null);
-    }, 1200);
-  };
+  const currentSecondsLeft = useSecondsLeft(current?.expiresAt);
+  const candidates =
+    current?.workspaces ??
+    (current ? [{ workspaceId: current.workspaceId, name: current.workspaceName }] : []);
+  // The request's own workspace is always approved; the others follow the ticks.
+  const chosenIds = candidates
+    .map((item) => item.workspaceId)
+    .filter((id) => id === current?.workspaceId || !excluded.has(id));
+  // A wrong code clears the field, which returns the window to ordinary entry.
+  const linkedCode =
+    linked && current && linked.id === current.id && code === linked.code ? linked.code : null;
   useEffect(() => {
     if (!selected || selected === codeOwner.current) return;
     codeOwner.current = selected;
     setCode('');
     setError(null);
   }, [selected]);
-  const { video: scanVideo, state: scanState } = useQrCamera(
-    scanning && Boolean(current),
-    (scanned) => {
-      setScanning(false);
-      const parsed = parseAutoPairQr(scanned);
-      // Another request's code is not a wrong entry: nothing is sent, no attempt is used.
-      if (!parsed)
-        return setScanNotice(
-          /^lody:\/\/pair\//i.test(scanned.trim())
-            ? 'e2ee.auto.scan.wrongRole'
-            : 'e2ee.auto.scan.unreadable'
-        );
-      if (!current || parsed.id !== current.id) return setScanNotice('e2ee.auto.scan.otherRequest');
-      setScanNotice(null);
-      setCode(parsed.code);
-      void act(true, parsed.code);
-    }
-  );
   useEffect(() => {
     setScanning(false);
     setScanNotice(null);
+    setLinked((value) => (value && value.id !== selected ? null : value));
+    setExcluded(new Set());
   }, [selected]);
   const later = () => {
     if (selected) deferred.current.add(selected);
-    clearTimeout(dismissTimer.current);
-    setQrFor(null);
     setSelected(null);
     setEnded(null);
     setError(null);
+    setLinked(null);
   };
   const act = async (approve: boolean, entered = code) => {
     const target = current;
@@ -1119,12 +855,12 @@ export function E2eeAutomaticPairingInbox({
     setBusy(target.id);
     setError(null);
     try {
-      if (approve) await runtime.approveAutomaticPairing!(target.id, entered);
+      // Exactly what the window shows, so a list that changed meanwhile signs nothing unseen.
+      if (approve) await runtime.approveAutomaticPairing!(target.id, entered, chosenIds);
       else await runtime.declineAutomaticPairing!(target.id);
       if (owner !== actionOwner.current) return;
       deferred.current.add(target.id);
       setSelected(null);
-      setQrFor(null);
       if (!approve) {
         settled.current.add(target.id);
         setRequests((rows) => rows.filter((row) => row.id !== target.id));
@@ -1139,7 +875,6 @@ export function E2eeAutomaticPairingInbox({
         deferred.current.add(target.id);
         setRequests((rows) => rows.filter((row) => row.id !== target.id));
         setSelected(null);
-        setQrFor(null);
         setEnded(target);
       } else if (refusal === 'pairing-code-mismatch') {
         const left = (cause as { attemptsLeft?: unknown }).attemptsLeft;
@@ -1162,31 +897,27 @@ export function E2eeAutomaticPairingInbox({
       if (owner === actionOwner.current) setBusy(null);
     }
   };
-  // The one-time code another phone scans to join: shown at once on a computer, and on
-  // request on a phone.
-  const qrSlot = qrSupported && runtime && (shownQr || current) && (
-    <div {...stylex.props(themeStyles.panel3)} data-testid="e2ee-approval-qr">
-      {shownQr ? (
-        <E2eeInstantQrApprove key={shownQr} runtime={runtime} onJoined={() => qrJoined(shownQr)} />
-      ) : (
-        <div {...stylex.props(themeStyles.column3)}>
-          <Button
-            data-testid="e2ee-approval-show-qr"
-            variant={mobile ? 'ghost' : 'primary'}
-            disabled={Boolean(busy)}
-            onClick={() => current && setQrFor(current.id)}
-          >
-            <QrCode size={16} aria-hidden="true" />
-            {t(mobile ? 'e2ee.auto.showQr.mobile' : 'e2ee.auto.showQr')}
-          </Button>
-          <p {...stylex.props(themeStyles.hint8)}>{t('e2ee.auto.showQr.help')}</p>
-        </div>
-      )}
-    </div>
+  const { video: scanVideo, state: scanState } = useQrCamera(
+    scanning && Boolean(current),
+    (scanned) => {
+      setScanning(false);
+      const parsed = parseAutoPairQr(scanned);
+      // Another request's code is not a wrong entry: nothing is sent, no attempt is used.
+      if (!parsed)
+        return setScanNotice(
+          /^lody:\/\/pair\//i.test(scanned.trim())
+            ? 'e2ee.auto.scan.wrongRole'
+            : 'e2ee.auto.scan.unreadable'
+        );
+      if (!current || parsed.id !== current.id) return setScanNotice('e2ee.auto.scan.otherRequest');
+      setScanNotice(null);
+      setCode(parsed.code);
+      void act(true, parsed.code);
+    }
   );
   // External links (for example from a system camera or Android BROWSABLE intent) are
-  // untrusted: an approval link only opens/prefills the matching request when no other
-  // pairing surface is active, and a join link stays queued for an open join page.
+  // untrusted: an approval link only opens the matching request when no other pairing
+  // surface is active, and approving it still takes an explicit click.
   useEffect(() => {
     if (!runtime) return undefined;
     return registerE2eePairLinkHandler(
@@ -1198,20 +929,10 @@ export function E2eeAutomaticPairingInbox({
         const row = requestsRef.current.find(
           (item) => item.id === approval.id && item.phase === 'waiting'
         );
-        if (!row) {
-          return (
-            selectedRef.current !== null || qrForRef.current !== null || hasVisiblePairingSurface()
-          );
-        }
+        if (!row) return selectedRef.current !== null || hasVisiblePairingSurface();
         const sameEmpty = selectedRef.current === row.id && codeRef.current === '';
-        const idle =
-          selectedRef.current === null && qrForRef.current === null && !hasVisiblePairingSurface();
+        const idle = selectedRef.current === null && !hasVisiblePairingSurface();
         if (!sameEmpty && !idle) return true;
-        clearTimeout(dismissTimer.current);
-        if (selectedRef.current !== row.id) {
-          qrForRef.current = null;
-          setQrFor(null);
-        }
         inboxRef.current = false;
         setInbox(false);
         selectedRef.current = row.id;
@@ -1219,6 +940,7 @@ export function E2eeAutomaticPairingInbox({
         codeOwner.current = row.id;
         codeRef.current = approval.code;
         setCode(approval.code);
+        setLinked({ id: row.id, code: approval.code });
         setError(null);
         return true;
       },
@@ -1231,23 +953,12 @@ export function E2eeAutomaticPairingInbox({
       count: requestCount,
       open: () => setInbox(true),
       review: () => {
-        const ready = requestsRef.current.filter(
-          (row) =>
-            row.phase === 'waiting' || (!handheld && qrSupported && row.phase === 'preparing')
-        );
+        const ready = requestsRef.current.filter((row) => row.phase === 'waiting');
         if (ready.length === 1) setSelected(ready[0]!.id);
         else setInbox(true);
       },
-      joinedByCode: () => {
-        // The device that just scanned also has an automatic request; closing Settings
-        // or the console must not pop it up again.
-        for (const row of requestsRef.current)
-          if (row.phase === 'waiting' || row.phase === 'preparing') {
-            deferred.current.add(row.id);
-          }
-      },
     }),
-    [requestCount, handheld, qrSupported]
+    [requestCount]
   );
   return (
     <E2eeDeviceRequestsContext.Provider value={requestsUi}>
@@ -1265,14 +976,8 @@ export function E2eeAutomaticPairingInbox({
                   <Button
                     xstyle={themeStyles.glyph4}
                     variant="secondary"
-                    disabled={
-                      row.phase !== 'waiting' &&
-                      !(!handheld && qrSupported && row.phase === 'preparing')
-                    }
+                    disabled={row.phase !== 'waiting'}
                     onClick={() => {
-                      clearTimeout(dismissTimer.current);
-                      qrForRef.current = null;
-                      setQrFor(null);
                       inboxRef.current = false;
                       setInbox(false);
                       selectedRef.current = row.id;
@@ -1288,7 +993,7 @@ export function E2eeAutomaticPairingInbox({
         </Drawer.Content>
       </Drawer.Root>
       <Dialog.Root
-        open={Boolean(current || ended || qrFor)}
+        open={Boolean(current || ended)}
         onOpenChange={(open) => {
           if (!open) later();
         }}
@@ -1303,148 +1008,219 @@ export function E2eeAutomaticPairingInbox({
           initialFocus={dialog}
         >
           <PrivatePairingSurface>
-            {ended && !current && !qrFor && (
-              <>
-                <Dialog.Title>{t('e2ee.auto.codeLocked.title')}</Dialog.Title>
-                <Dialog.Description>
-                  {t('e2ee.auto.codeLocked.help', { workspace: ended.workspaceName })}
-                </Dialog.Description>
-                <Button xstyle={themeStyles.spaced5} onClick={() => setEnded(null)}>
-                  {t('e2ee.auto.codeLocked.ok')}
-                </Button>
-              </>
-            )}
-            {current && (
-              <div {...stylex.props(themeStyles.row4)}>
-                <span>{t('e2ee.auto.newRequest')}</span>
-                <Button variant="ghost" onClick={later}>
-                  {t('e2ee.auto.later')}
-                </Button>
-              </div>
-            )}
-            {current ? (
-              <>
-                <Dialog.Title>{t('e2ee.auto.approve.title')}</Dialog.Title>
-                <Dialog.Description>{t('e2ee.auto.approve.help')}</Dialog.Description>
-                <p {...stylex.props(themeStyles.copy5)}>{current.deviceName}</p>
-                <p {...stylex.props(themeStyles.hint8)}>{t('e2ee.auto.deviceNameUnverified')}</p>
-              </>
-            ) : (
-              qrFor && (
+            <div {...stylex.props(themeStyles.dialogBody)}>
+              {ended && !current && (
                 <>
-                  <Dialog.Title>{t('e2ee.instantQr.title')}</Dialog.Title>
-                  <Button xstyle={themeStyles.spaced6} variant="ghost" onClick={later}>
-                    {t('common.close')}
+                  <Dialog.Title>{t('e2ee.auto.codeLocked.title')}</Dialog.Title>
+                  <Dialog.Description>
+                    {t('e2ee.auto.codeLocked.help', { workspace: ended.workspaceName })}
+                  </Dialog.Description>
+                  <Button xstyle={themeStyles.spaced5} onClick={() => setEnded(null)}>
+                    {t('e2ee.auto.codeLocked.ok')}
                   </Button>
                 </>
-              )
-            )}
-            {/* Fixed slots, so the code survives its request leaving the list. */}
-            {!mobile && qrSlot}
-            {mobile && current && cameraSupported() && (
-              <div {...stylex.props(themeStyles.layout5)} data-testid="e2ee-approval-scan">
-                {scanning ? (
-                  <>
-                    <video
-                      ref={scanVideo}
-                      muted
-                      playsInline
-                      {...stylex.props(themeStyles.panel6)}
-                    />
-                    {scanState === 'unavailable' && (
-                      <p role="alert" {...stylex.props(themeStyles.hint14)}>
-                        {t('e2ee.verify.cameraUnavailable')}
+              )}
+              {current && (
+                <>
+                  <div {...stylex.props(themeStyles.row4)}>
+                    <span>{t('e2ee.auto.newRequest')}</span>
+                    <div {...stylex.props(themeStyles.headerRight)}>
+                      <ApprovalExpiry expiresAt={current.expiresAt} inline />
+                      <Button variant="ghost" size="small" onClick={later}>
+                        {t('e2ee.auto.later')}
+                      </Button>
+                    </div>
+                  </div>
+                  <div {...stylex.props(themeStyles.dialogHeader)}>
+                    <Dialog.Title>{t('e2ee.auto.approve.title')}</Dialog.Title>
+                    <Dialog.Description>{t('e2ee.auto.approve.help')}</Dialog.Description>
+                  </div>
+                  <div {...stylex.props(themeStyles.infoStrip)}>
+                    <div {...stylex.props(themeStyles.infoRow)}>
+                      <Smartphone
+                        size={14}
+                        aria-hidden="true"
+                        {...stylex.props(themeStyles.infoIcon)}
+                      />
+                      <div {...stylex.props(themeStyles.infoMeta)}>
+                        <span {...stylex.props(themeStyles.infoPrimary)}>{current.deviceName}</span>
+                        <span {...stylex.props(themeStyles.infoSecondary)}>
+                          {t('e2ee.auto.deviceNameUnverified')}
+                        </span>
+                      </div>
+                    </div>
+                    <div {...stylex.props(themeStyles.infoDivider)} />
+                    <div {...stylex.props(themeStyles.infoScope)}>
+                      {candidates.length > 1 ? (
+                        <ul
+                          data-testid="e2ee-approval-workspaces"
+                          {...stylex.props(themeStyles.workspaceList)}
+                        >
+                          {candidates.map((item) => {
+                            const own = item.workspaceId === current.workspaceId;
+                            return (
+                              <li key={item.workspaceId}>
+                                {own ? (
+                                  // Always included: a fixed row, not a checkbox that cannot change.
+                                  <div
+                                    {...stylex.props(themeStyles.workspaceRow, themeStyles.ownRow)}
+                                  >
+                                    <span {...stylex.props(themeStyles.infoWorkspace)}>
+                                      {item.name}
+                                    </span>
+                                    <span {...stylex.props(themeStyles.infoSecondary)}>
+                                      {t('e2ee.auto.requestedHere')}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <label {...stylex.props(themeStyles.workspaceRow)}>
+                                    <Checkbox
+                                      checked={!excluded.has(item.workspaceId)}
+                                      disabled={Boolean(busy)}
+                                      aria-label={item.name}
+                                      data-workspace-id={item.workspaceId}
+                                      onCheckedChange={(checked) =>
+                                        setExcluded((value) => {
+                                          const next = new Set(value);
+                                          if (checked) next.delete(item.workspaceId);
+                                          else next.add(item.workspaceId);
+                                          return next;
+                                        })
+                                      }
+                                    />
+                                    <span {...stylex.props(themeStyles.infoWorkspace)}>
+                                      {item.name}
+                                    </span>
+                                  </label>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <span {...stylex.props(themeStyles.infoWorkspace)}>
+                          {current.workspaceName}
+                        </span>
+                      )}
+                      <span {...stylex.props(themeStyles.infoSecondary)}>
+                        {t('e2ee.auto.scope')}
+                      </span>
+                    </div>
+                  </div>
+                  {linkedCode ? (
+                    <div role="status" data-testid="e2ee-approval-linked">
+                      <p {...stylex.props(themeStyles.linkedTitle)}>
+                        <CircleCheck size={15} aria-hidden="true" />
+                        {t('e2ee.auto.linked.title')}
                       </p>
-                    )}
-                    <Button
-                      xstyle={themeStyles.spaced6}
-                      variant="ghost"
-                      onClick={() => setScanning(false)}
+                      <p {...stylex.props(pairingStyles.code)}>
+                        {`${linkedCode.slice(0, 3)} ${linkedCode.slice(3)}`}
+                      </p>
+                      <p {...stylex.props(themeStyles.hint2)}>{t('e2ee.auto.linked.help')}</p>
+                    </div>
+                  ) : scanning ? (
+                    <div {...stylex.props(themeStyles.layout5)} data-testid="e2ee-approval-scan">
+                      <video
+                        ref={scanVideo}
+                        muted
+                        playsInline
+                        {...stylex.props(themeStyles.panel6)}
+                      />
+                      {(scanState === 'denied' || scanState === 'unavailable') && (
+                        <p role="alert" {...stylex.props(themeStyles.hint14)}>
+                          {t(
+                            scanState === 'denied'
+                              ? 'e2ee.verify.cameraDenied'
+                              : 'e2ee.verify.cameraUnavailable'
+                          )}
+                        </p>
+                      )}
+                      <Button
+                        xstyle={themeStyles.spaced6}
+                        variant="ghost"
+                        onClick={() => setScanning(false)}
+                      >
+                        {t('common.cancel')}
+                      </Button>
+                    </div>
+                  ) : (
+                    <form
+                      {...stylex.props(themeStyles.codeForm)}
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void act(true);
+                      }}
                     >
-                      {t('common.cancel')}
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    xstyle={themeStyles.glyph5}
-                    size="large"
-                    data-testid="e2ee-approval-scan-start"
-                    disabled={Boolean(busy) || error?.kind === 'refused'}
-                    onClick={() => {
-                      setScanNotice(null);
-                      setScanning(true);
-                    }}
-                  >
-                    <Camera size={18} aria-hidden="true" />
-                    {t('e2ee.auto.scanApprove')}
-                  </Button>
-                )}
-                {scanNotice && (
-                  <p role="status" {...stylex.props(themeStyles.hint14)}>
-                    {t(scanNotice)}
-                  </p>
-                )}
-              </div>
-            )}
-            {current && (
-              <>
-                {(mobile ? cameraSupported() : qrSupported) && (
-                  <p {...stylex.props(pairingStyles.alternative)}>
-                    {t(mobile ? 'e2ee.auto.orCode.mobile' : 'e2ee.auto.orCode')}
-                  </p>
-                )}
-                <form
-                  {...stylex.props(themeStyles.layout5)}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void act(true);
-                  }}
-                >
-                  <label htmlFor="e2ee-approval-code" {...stylex.props(themeStyles.copy6)}>
-                    {t('e2ee.auto.enterCode')}
-                  </label>
-                  <Input
-                    id="e2ee-approval-code"
-                    data-testid="e2ee-approval-code"
-                    size="large"
-                    value={code}
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    placeholder="000000"
-                    aria-invalid={error?.kind === 'mismatch' || undefined}
-                    aria-describedby={error ? 'e2ee-approval-code-error' : undefined}
-                    disabled={
-                      Boolean(busy) || current.phase !== 'waiting' || error?.kind === 'refused'
-                    }
-                    onChange={(event) => {
-                      // Full-width IME digits (１２３) become ASCII before filtering.
-                      setCode(event.target.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6));
-                      if (error?.kind === 'retry') setError(null);
-                    }}
-                  />
-                  {error?.kind === 'mismatch' && (
-                    <p
-                      id="e2ee-approval-code-error"
-                      role="alert"
-                      {...stylex.props(themeStyles.copy7)}
-                    >
-                      {t('e2ee.auto.codeMismatch', { count: error.attemptsLeft })}
-                    </p>
+                      <label htmlFor="e2ee-approval-code" {...stylex.props(themeStyles.copy6)}>
+                        {t('e2ee.auto.enterCode')}
+                      </label>
+                      <Input
+                        id="e2ee-approval-code"
+                        data-testid="e2ee-approval-code"
+                        size="large"
+                        value={code}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        placeholder="000000"
+                        aria-invalid={error?.kind === 'mismatch' || undefined}
+                        aria-describedby={error ? 'e2ee-approval-code-error' : undefined}
+                        disabled={
+                          Boolean(busy) || current.phase !== 'waiting' || error?.kind === 'refused'
+                        }
+                        onChange={(event) => {
+                          // Full-width IME digits (１２３) become ASCII before filtering.
+                          setCode(
+                            event.target.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6)
+                          );
+                          if (error?.kind === 'retry') setError(null);
+                        }}
+                      />
+                      {error?.kind === 'mismatch' && (
+                        <p
+                          id="e2ee-approval-code-error"
+                          role="alert"
+                          {...stylex.props(themeStyles.copy7)}
+                        >
+                          {t('e2ee.auto.codeMismatch', { count: error.attemptsLeft })}
+                        </p>
+                      )}
+                      {mobile && cameraSupported() && (
+                        <Button
+                          variant="link"
+                          size="small"
+                          data-testid="e2ee-approval-scan-start"
+                          xstyle={themeStyles.scanShortcut}
+                          disabled={Boolean(busy) || error?.kind === 'refused'}
+                          onClick={() => {
+                            setScanNotice(null);
+                            setScanning(true);
+                          }}
+                        >
+                          <Camera size={14} aria-hidden="true" />
+                          {t('e2ee.auto.scanApprove')}
+                        </Button>
+                      )}
+                      {scanNotice && (
+                        <p role="status" {...stylex.props(themeStyles.hint14)}>
+                          {t(scanNotice)}
+                        </p>
+                      )}
+                    </form>
                   )}
-                </form>
-                <div {...stylex.props(themeStyles.panel7)}>
-                  <p {...stylex.props(themeStyles.layout)}>{current.workspaceName}</p>
-                  <p {...stylex.props(themeStyles.hint18)}>{t('e2ee.auto.scope')}</p>
-                </div>
-                <p {...stylex.props(themeStyles.hint8)}>
-                  {/* The scanned code admits the phone to this device's encrypted
-                      workspaces; the typed code approves this request only. */}
-                  {t(qrSupported ? 'e2ee.auto.scopeWithQr' : 'e2ee.auto.currentWorkspaceOnly')}
-                </p>
-                <ApprovalExpiry expiresAt={current.expiresAt} />
+                  <p {...stylex.props(themeStyles.scopeFootnote)}>
+                    {t(
+                      candidates.length > 1 ? 'e2ee.auto.scopeListed' : 'e2ee.auto.scopeListedOne'
+                    )}
+                  </p>
+                </>
+              )}
+            </div>
+            {current && (
+              <div {...stylex.props(themeStyles.dialogFooter)}>
                 <div {...stylex.props(themeStyles.column4)}>
                   <Button
-                    variant="destructive"
+                    variant="secondary"
+                    tone="destructive"
                     disabled={Boolean(busy) || error?.kind === 'refused'}
                     onClick={() => void act(false)}
                   >
@@ -1460,18 +1236,22 @@ export function E2eeAutomaticPairingInbox({
                       current.phase !== 'waiting' ||
                       error?.kind === 'refused' ||
                       !/^\d{6}$/.test(code) ||
-                      current.expiresAt <= Date.now()
+                      currentSecondsLeft === 0
                     }
                     onClick={() => void act(true)}
                   >
-                    {t(busy ? 'e2ee.auto.confirming' : 'e2ee.auto.authorize')}
+                    {busy
+                      ? t('e2ee.auto.confirming')
+                      : candidates.length > 1
+                        ? t('e2ee.auto.authorizeSelected', { count: chosenIds.length })
+                        : t('e2ee.auto.authorize')}
                   </Button>
                 </div>
                 {(error?.kind === 'retry' || error?.kind === 'refused') && (
                   <p
                     id="e2ee-approval-code-error"
                     role="alert"
-                    {...stylex.props(themeStyles.hint5)}
+                    {...stylex.props(themeStyles.footerError)}
                   >
                     {t(error.key)}
                   </p>
@@ -1481,10 +1261,8 @@ export function E2eeAutomaticPairingInbox({
                     {t('common.close')}
                   </Button>
                 )}
-                <p {...stylex.props(themeStyles.hint19)}>{t('e2ee.auto.laterHint')}</p>
-              </>
+              </div>
             )}
-            {mobile && qrSlot}
           </PrivatePairingSurface>
         </Dialog.Content>
       </Dialog.Root>
@@ -1493,6 +1271,29 @@ export function E2eeAutomaticPairingInbox({
 }
 
 const themeStyles = stylex.create({
+  linkedTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: appSpace[2],
+    margin: 0,
+    fontWeight: 500,
+    color: uiColors.label,
+  },
+  workspaceList: {
+    listStyle: 'none',
+    margin: 0,
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appSpace[1],
+  },
+  workspaceRow: { display: 'flex', alignItems: 'center', gap: appSpace[2] },
+  // Aligned with the names beside the checkboxes below it.
+  ownRow: {
+    minHeight: field.boxSize,
+    paddingInlineStart: `calc(${field.boxSize} + ${appSpace[2]})`,
+  },
+  scanShortcut: { alignSelf: 'center' },
   hint: {
     marginBlock: appSpace[6],
     borderRadius: uiRadius.large,
@@ -1517,7 +1318,13 @@ const themeStyles = stylex.create({
     paddingInline: appSpace[6],
     paddingBottom: 'max(2rem,env(safe-area-inset-bottom))',
   },
-  glyph2: { marginTop: appSpace[5], width: '100%' },
+  consentColumn: {
+    marginInline: 'auto',
+    display: 'flex',
+    maxWidth: '24rem',
+    flexDirection: 'column',
+    paddingTop: appSpace[10],
+  },
   column: {
     marginInline: 'auto',
     display: 'flex',
@@ -1556,7 +1363,6 @@ const themeStyles = stylex.create({
     color: uiColors.secondaryLabel,
   },
   layout: { fontWeight: 500 },
-  layout2: { marginBlock: appSpace[8] },
   copy2: {
     fontSize: uiText.subheadlineSize,
     lineHeight: uiText.subheadlineLeading,
@@ -1569,7 +1375,6 @@ const themeStyles = stylex.create({
     justifyContent: 'center',
     gap: appSpace[2],
   },
-  layout3: { marginBlock: appSpace[6] },
   panel: {
     aspectRatio: '1',
     width: '100%',
@@ -1578,25 +1383,142 @@ const themeStyles = stylex.create({
     backgroundColor: uiColors.secondaryBackground,
     objectFit: 'cover',
   },
-  hint7: {
-    marginTop: appSpace[3],
-    fontSize: uiText.subheadlineSize,
-    lineHeight: uiText.subheadlineLeading,
-    color: uiColors.secondaryLabel,
-  },
   row2: {
     marginInline: 'auto',
     marginTop: appSpace[6],
     display: 'inline-flex',
+    maxWidth: '100%',
     alignItems: 'center',
     gap: appSpace[1.5],
     borderRadius: uiRadius.full,
     cornerShape: uiCorner.round,
     backgroundColor: uiColors.secondaryBackground,
-    paddingInline: appSpace[3],
+    paddingInline: appSpace[2.5],
     paddingBlock: appSpace[1],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    textAlign: 'start',
+  },
+  /** Receiving keys is a wait with nothing to do: the column centres on the transfer. */
+  receivingColumn: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 0,
+    paddingBottom: appSpace[10],
+  },
+  receivingArt: { display: 'flex', justifyContent: 'center', marginBottom: appSpace[8] },
+  cardArt: { display: 'flex', justifyContent: 'center', marginBottom: appSpace[4] },
+  dialogBody: {
+    flex: '1 1 auto',
+    minHeight: 0,
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appSpace[3],
+    paddingTop: '18px',
+    paddingInline: '20px',
+    paddingBottom: '14px',
+  },
+  dialogHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appSpace[1],
+  },
+  headerRight: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: appSpace[2],
+  },
+  expiryInline: {
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  infoStrip: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appSpace[2],
+    paddingBlock: '10px',
+    paddingInline: '12px',
+    borderRadius: uiRadius.medium,
+    cornerShape: uiCorner.shape,
+    backgroundColor: uiColors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: uiColors.separator,
+  },
+  infoRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: appSpace[2],
+  },
+  infoIcon: {
+    flexShrink: 0,
+    marginTop: '2px',
+    color: uiColors.secondaryLabel,
+  },
+  infoMeta: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0,
+  },
+  infoPrimary: {
     fontSize: uiText.subheadlineSize,
     lineHeight: uiText.subheadlineLeading,
+    fontWeight: 600,
+    color: uiColors.label,
+  },
+  infoWorkspace: {
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    fontWeight: 600,
+    color: uiColors.label,
+  },
+  infoSecondary: {
+    fontSize: uiText.captionSize,
+    lineHeight: uiText.captionLeading,
+    color: uiColors.secondaryLabel,
+  },
+  infoDivider: {
+    height: '1px',
+    backgroundColor: uiColors.separator,
+  },
+  infoScope: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  tabPanel: {
+    paddingTop: appSpace[2],
+  },
+  codeForm: {
+    marginBlock: appSpace[1],
+  },
+  scopeFootnote: {
+    margin: 0,
+    fontSize: uiText.captionSize,
+    lineHeight: uiText.captionLeading,
+    color: uiColors.secondaryLabel,
+  },
+  dialogFooter: {
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: appSpace[2],
+    paddingBlock: '14px',
+    paddingInline: '20px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: uiColors.separator,
+    backgroundColor: uiColors.elevatedBackground,
+  },
+  footerError: {
+    margin: 0,
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.destructive,
   },
   column2: {
     marginInline: 'auto',
@@ -1640,19 +1562,6 @@ const themeStyles = stylex.create({
     lineHeight: 1.625,
     color: uiColors.secondaryLabel,
   },
-  hint12: {
-    marginTop: appSpace[2],
-    fontSize: uiText.footnoteSize,
-    lineHeight: 1.625,
-    color: uiColors.secondaryLabel,
-  },
-  layout4: { marginRight: appSpace[1], display: 'inline' },
-  hint13: {
-    marginBottom: appSpace[3],
-    fontSize: uiText.subheadlineSize,
-    lineHeight: uiText.subheadlineLeading,
-    color: uiColors.secondaryLabel,
-  },
   row3: {
     display: { default: 'inline-flex', '::-webkit-details-marker': 'none' },
     cursor: 'pointer',
@@ -1684,21 +1593,6 @@ const themeStyles = stylex.create({
     lineHeight: uiText.footnoteLeading,
     fontVariantNumeric: 'tabular-nums',
   },
-  panel3: {
-    marginBlock: appSpace[5],
-    borderRadius: uiRadius.large,
-    cornerShape: uiCorner.shape,
-    boxShadow: uiShadow.card,
-    backgroundColor: uiColors.elevatedBackground,
-    padding: appSpace[4],
-  },
-  column3: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: appSpace[2],
-    textAlign: 'center',
-  },
   glyph3: { width: '100%', maxWidth: { default: null, '@media (min-width: 640px)': '24rem' } },
   spaced4: {
     marginTop: appSpace[6],
@@ -1721,9 +1615,14 @@ const themeStyles = stylex.create({
   },
   glyph4: { marginTop: appSpace[4], width: '100%' },
   panel5: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 0,
+    padding: 0,
     maxHeight: '90dvh',
-    maxWidth: { default: 'calc(100vw-2rem)', '@media (min-width: 640px)': '28rem' },
-    overflowY: 'auto',
+    width: '100%',
+    maxWidth: { default: 'calc(100vw - 2rem)', '@media (min-width: 640px)': '28rem' },
+    overflow: 'hidden',
     borderRadius: uiRadius.large,
     cornerShape: uiCorner.shape,
   },
@@ -1753,7 +1652,6 @@ const themeStyles = stylex.create({
     backgroundColor: uiColors.secondaryBackground,
     objectFit: 'cover',
   },
-  glyph5: { width: '100%' },
   copy6: {
     marginBottom: appSpace[2],
     display: 'block',
@@ -1780,9 +1678,8 @@ const themeStyles = stylex.create({
     color: uiColors.secondaryLabel,
   },
   column4: {
-    marginTop: appSpace[3],
     display: 'flex',
-    flexDirection: { default: 'column', '@media (min-width: 640px)': 'row' },
+    flexDirection: { default: 'column-reverse', '@media (min-width: 640px)': 'row' },
     gap: appSpace[2],
   },
   row5: { flex: { default: null, '@media (min-width: 640px)': '1 1 0%' } },
@@ -1802,11 +1699,5 @@ const pairingStyles = stylex.create({
     fontWeight: 600,
     letterSpacing: '0.15em',
     fontVariantNumeric: 'tabular-nums',
-  },
-  alternative: {
-    textAlign: 'center',
-    fontSize: uiText.footnoteSize,
-    lineHeight: uiText.footnoteLeading,
-    color: uiColors.secondaryLabel,
   },
 });

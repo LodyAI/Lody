@@ -23,9 +23,13 @@ import {
   contentSigningBytes,
   type ContentScope,
 } from '../foundation/content-format';
-import { documentKeyForScope, scopedDocumentKey } from './document-key';
-import { openContentAead } from '../crypto/content';
-import { admitDocument, authenticateDocument, openDocument, sealDocument } from './index';
+import { scopedDocumentKey } from './document-key';
+import {
+  admitDocument,
+  authenticateDocument,
+  openAuthenticatedDocument,
+  sealDocument,
+} from './index';
 import { verifySignatureEffect, NativeSignatureError } from '../foundation/signature';
 import { bytesEqual } from '../foundation/cbor';
 
@@ -253,34 +257,15 @@ export function makeStreamsUpdateBinding(input: {
             copyContentAdditionalData(request.additionalData)
           );
           const view = yield* ledger();
+          const frameScope = scope(metadata.epoch, selected.kind);
           // Untrusted epoch metadata cannot trigger key lookup until fixed historical authentication succeeds.
           const authenticated = yield* Effect.fromResult(
-            authenticateDocument(view, scope(metadata.epoch, selected.kind), frame, binding)
+            authenticateDocument(view, frameScope, frame, binding)
           );
           return yield* withKey(view, metadata.epoch, selected.kind, (key) =>
             Effect.gen(function* () {
               const opened = yield* Effect.fromResult(
-                selected.kind === 'snapshot'
-                  ? Result.gen(function* () {
-                      // frame and binding are owned copies already authenticated above.
-                      const parsed = yield* parseContentFrame(
-                        frame,
-                        scope(metadata.epoch, selected.kind).purpose
-                      );
-                      const leaf = yield* documentKeyForScope(
-                        key,
-                        scope(metadata.epoch, selected.kind)
-                      );
-                      const plaintext = yield* openContentAead(
-                        leaf,
-                        authenticated.header,
-                        parsed.nonce,
-                        parsed.ciphertext,
-                        binding
-                      );
-                      return { header: authenticated.header, plaintext };
-                    })
-                  : openDocument(view, scope(metadata.epoch, selected.kind), key, frame, binding)
+                openAuthenticatedDocument(authenticated, key)
               );
               return yield* Effect.acquireUseRelease(
                 Effect.succeed(opened.plaintext),
@@ -292,17 +277,13 @@ export function makeStreamsUpdateBinding(input: {
                     )
                       return yield* error('invalid-snapshot-offset');
                     const latest = yield* ledger();
-                    // The owned snapshot frame was authenticated before key lookup.
-                    // Genuine ledger continuation preserves its historical author.
-                    if (selected.kind !== 'snapshot')
-                      yield* Effect.fromResult(
-                        authenticateDocument(
-                          latest,
-                          scope(metadata.epoch, selected.kind),
-                          frame,
-                          binding
-                        )
-                      );
+                    // The owned frame was authenticated before key lookup; genuine ledger
+                    // continuation preserves its historical author and epoch history.
+                    yield* Effect.fromResult(
+                      Result.mapError(requireLedgerContinuation(view, latest), () =>
+                        error('unauthorized')
+                      )
+                    );
                     return { plaintext: new Uint8Array(plaintext), author: authenticated.author };
                   }),
                 (plaintext) => Effect.sync(() => plaintext.fill(0))

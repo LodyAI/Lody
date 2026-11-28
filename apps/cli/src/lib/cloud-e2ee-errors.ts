@@ -1,3 +1,5 @@
+import { isTransientGatewayStatus } from '@lody/shared/transient-gateway';
+
 /** Created only after the fixed credential endpoint authenticates whole-member removal.
  * Kept local to the CLI; it is not a wire code or a renderer deletion API. */
 export class CloudE2eeMemberRemoved extends Error {
@@ -40,13 +42,22 @@ export function isCloudE2eeDeviceRevoked(value: unknown): boolean {
 const SOCKET_FAILURE_CODES = new Set([
   'UND_ERR_SOCKET',
   'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
   'ECONNRESET',
+  'ECONNREFUSED',
   'ECONNABORTED',
   'EPIPE',
   'ETIMEDOUT',
+  'EAI_AGAIN',
+  'ENOTFOUND',
 ]);
 
-function isTransportInterruption(cause: Error): boolean {
+export function isTransientHttpStatus(status: unknown): boolean {
+  return status === 429 || status === 500 || isTransientGatewayStatus(status);
+}
+
+export function isTransportInterruption(cause: Error): boolean {
   const seen = new Set<unknown>();
   let value: unknown = cause;
   while (value instanceof Error && !seen.has(value)) {

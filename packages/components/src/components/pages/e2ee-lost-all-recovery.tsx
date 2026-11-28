@@ -6,6 +6,7 @@ import { Alert } from '@lody/ui/alert';
 import { Badge, type BadgeTone } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
+import { Spinner } from '@lody/ui/spinner';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 
@@ -28,7 +29,8 @@ export interface E2eeLostAllRecoveryProps {
   /** Restores every workspace the chosen backup covers onto this device. */
   restore: (
     method: 'file' | 'passkey' | 'password',
-    options?: { readonly password?: string }
+    options?: { readonly password?: string },
+    onResult?: (result: RestoreResult) => void
   ) => Promise<Restored>;
   /** This workspace was restored: leave the waiting page and open it. */
   onRecovered: () => void;
@@ -38,6 +40,8 @@ export interface E2eeLostAllRecoveryProps {
   onCheck?: () => void;
   /** The person has neither backup: go on to what can still be done. */
   onNoBackup?: () => void;
+  /** Exit recovery back to other workspaces when restore fails or only restores other workspaces. */
+  onBack?: () => void;
 }
 
 const styles = stylex.create({
@@ -112,7 +116,9 @@ const failureKey = (code: string, method: Method) => {
       : /e2ee_recovery_(?:authentication|invalid-input)/.test(code)
         ? method === 'password'
           ? 'e2ee.recovery.wrongPassword'
-          : 'e2ee.recovery.wrongFile'
+          : method === 'passkey'
+            ? 'e2ee.recovery.wrongPasskey'
+            : 'e2ee.recovery.wrongFile'
         : code.includes('e2ee_recovery_disabled')
           ? 'e2ee.recovery.disabled'
           : 'e2ee.lostAll.failed';
@@ -131,6 +137,7 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progressRows, setProgressRows] = useState<readonly RestoreResult[]>([]);
   const [results, setResults] = useState<readonly RestoreResult[] | null>(null);
   const choices: Method[] = [
     ...(props.passkeyAvailable ? (['passkey'] as const) : []),
@@ -156,11 +163,22 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
     if (!canSubmit) return;
     setBusy(true);
     setError(null);
+    setProgressRows([]);
+    const onResult = (row: RestoreResult) => {
+      setProgressRows((prev) => {
+        const key = row.workspaceId ?? row.name;
+        const index = prev.findIndex((item) => (item.workspaceId ?? item.name) === key);
+        if (index === -1) return [...prev, row];
+        const next = [...prev];
+        next[index] = row;
+        return next;
+      });
+    };
     try {
       const restored =
         method === 'password'
-          ? await props.restore('password', { password })
-          : await props.restore(method);
+          ? await props.restore('password', { password }, onResult)
+          : await props.restore(method, undefined, onResult);
       if (restored.outcome === 'restored') {
         setPassword('');
         setResults(restored.results);
@@ -240,6 +258,11 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
           <p {...stylex.props(styles.lead)}>{t('e2ee.lostAll.result.revokeHint')}</p>
         )}
         <div {...stylex.props(styles.actions)}>
+          {!current && props.onBack && (
+            <Button variant="secondary" onClick={props.onBack}>
+              {t('e2ee.lostAccess.back')}
+            </Button>
+          )}
           {!current && !currentWaiting && props.onNoBackup && notCovered && (
             <Button variant="secondary" onClick={props.onNoBackup}>
               {t('e2ee.lostAll.cannotRestore')}
@@ -302,6 +325,28 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
           <span {...stylex.props(styles.optionHelp)}>{t('e2ee.recovery.passwordLengthHint')}</span>
         </div>
       )}
+      {busy && (
+        <div data-testid="e2ee-lost-all-progress" role="status" {...stylex.props(styles.root)}>
+          {progressRows.length === 0 ? (
+            <p {...stylex.props(styles.lead)}>{t('e2ee.lostAll.unlocking')}</p>
+          ) : (
+            <ul {...stylex.props(styles.list)}>
+              {progressRows.map((row) => {
+                const badge =
+                  row.outcome === 'Restoring'
+                    ? { key: 'e2ee.lostAll.result.restoring', tone: 'neutral' as BadgeTone }
+                    : resultBadge(row);
+                return (
+                  <li key={row.workspaceId ?? row.name} {...stylex.props(styles.row)}>
+                    <span>{row.name}</span>
+                    <Badge tone={badge.tone}>{t(badge.key)}</Badge>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
       {error && (
         <Alert.Root tone="danger">
           <Alert.Description>{t(error)}</Alert.Description>
@@ -319,6 +364,7 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
           </Button>
         )}
         <Button disabled={!canSubmit} onClick={() => void run()}>
+          {busy && <Spinner size="small" />}
           {t('e2ee.lostAll.continue')}
         </Button>
       </div>

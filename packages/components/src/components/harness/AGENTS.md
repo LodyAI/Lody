@@ -16,6 +16,16 @@ Parent `AGENTS.md` files and the [Settings rules](../settings/AGENTS.md) also ap
 - The device switcher in the pane header is the surface's only machine selection
   (`harness.select`, keyed by `MachineId`). The Sorbet bridge, the Providers rows and
   the scoped pages all read that selection; never add a second machine picker.
+- A machine's Sorbet store answers its own daemon, or another device only over an
+  encrypted workspace's plane. Never draw a store this client cannot reach as an
+  empty machine or an old daemon: `sorbetStoreAccess` names the reason and the
+  providers, models and setup steps state it.
+- What that daemon read from the store is mirrored into the machine Flock
+  (`sorbetStore` rows: credential descriptors, endpoints, model catalog), so a
+  plaintext client draws the machine's own list as `mirrored` and disables every
+  write, sign-in included. Mirror rows are descriptors written only by the daemon
+  that read them; never write them from a client, never merge them with an RPC
+  answer, and keep a missing family as "not published" rather than "none".
 - Providers, custom endpoints and the model catalog are Sorbet's on the selected
   machine, read and written over Machine RPC. Model, effort and autonomy are the Sorbet
   Provider's `sessionDefaults`; the local harness store (`lody-harness-v1`) keeps only

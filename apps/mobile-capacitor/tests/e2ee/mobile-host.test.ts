@@ -91,9 +91,13 @@ vi.mock('@lody/e2ee-client', async (original) => {
       )) as typeof real.personalRuntimeAccountRequester,
   };
 });
-const shell = vi.hoisted(() => ({ native: true, available: false }));
+const shell = vi.hoisted(() => ({ native: true, available: false, platform: 'ios' }));
 vi.mock('@capacitor/core', () => ({
-  Capacitor: { isNativePlatform: () => shell.native, isPluginAvailable: () => shell.available },
+  Capacitor: {
+    isNativePlatform: () => shell.native,
+    isPluginAvailable: () => shell.available,
+    getPlatform: () => shell.platform,
+  },
   registerPlugin: () => {
     throw new Error('missing native plugin must not be registered');
   },
@@ -461,6 +465,7 @@ async function fixture() {
    * approval with a signed snapshot invitation, or none (`history`, a Member approver). */
   const approveAccountPairing = async (pairingString: string, delivery: 'snapshot' | 'history') => {
     const submitted = pairingSubmission!;
+    expect(submitted.deviceName).toBe('Lody iOS');
     const keys = Result.getOrThrow(
       derivePairingKeys(Result.getOrThrow(parsePairingString(pairingString)))
     );

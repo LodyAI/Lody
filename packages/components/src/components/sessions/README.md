@@ -98,7 +98,7 @@ with the full access description in its accessible name/title.
 | `scheduled-tasks-panel.tsx`                                                  | Scheduled task list reused by the schedule chip                                                      |
 | `session-usage-popover.tsx`                                                  | Context and subscription usage ([display contract](../../../../../specs/session-usage-indicator.md)) |
 | `pull-request-badge.tsx`, `pr-merge-button.tsx`, `pr-merge-method.ts`        | PR identity and merge split-button                                                                   |
-| `pr-tab-container.tsx`, `pr-tab-view.tsx`                                    | PR side-panel tab                                                                                    |
+| `pr-tab-container.tsx`, `pr-tab-view.tsx`, `pr-tab-target.ts`                | PR side-panel tab and target resolution (any GitHub PR, session-isolated)                            |
 | `create-pr-prompt.ts`, `session-pr-prompts.ts`, `session-pr-agent-action.ts` | Agent prompts behind Create PR / Fix CI / Resolve Conflicts                                          |
 | `diff-pr-analytics.ts`                                                       | Analytics for diff and PR surfaces                                                                   |
 | `use-capacity-auto-retry.ts`                                                 | Capacity-error retry behaviour                                                                       |

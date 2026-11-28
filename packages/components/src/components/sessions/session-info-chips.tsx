@@ -7,7 +7,9 @@ import { toast } from '@/lib/toast';
 import {
   AlarmClock,
   ChevronDown,
+  CircleAlert,
   CircleCheck,
+  CircleDashed,
   CircleDot,
   CircleMinus,
   CircleSlash,
@@ -1070,8 +1072,10 @@ export function ContextChip({
 } & InfoBarItemMode) {
   const { t } = useTranslation();
   const hasDiff = hasWorkspaceChanges(diffStat);
+  const hasPrLinks = Boolean(prLinks && prLinks.items.length > 0);
   const trimmedBranch = branch?.trim() || '';
-  if (!pr && !projectName && !trimmedBranch && !hasDiff && !actions?.length) return null;
+  if (!pr && !hasPrLinks && !projectName && !trimmedBranch && !hasDiff && !actions?.length)
+    return null;
 
   const status: PrStatus | null = pr ? (pr.status ?? 'open') : null;
   const statusMeta = status ? (PR_STATUS_META[status] ?? PR_STATUS_META.open) : null;
@@ -1097,9 +1101,10 @@ export function ContextChip({
     ? (parseGitHubPrNumber(pr.url) ?? getSessionPullRequestLegacyFields(pr).number)
     : null;
   const value = pr ? (prNumber ? `#${prNumber}` : 'PR') : undefined;
-  const label = pr
-    ? t('sessions.pr.openTab', 'Open pull request')
-    : trimmedBranch || projectName || t('sessions.infoBar.context', 'Work context');
+  const label =
+    pr || hasPrLinks
+      ? t('sessions.pr.openTab', 'Open pull request')
+      : trimmedBranch || projectName || t('sessions.infoBar.context', 'Work context');
 
   if (itemMode.mode === 'cluster') {
     return <ClusterChip icon={LocationIcon} label={label} onPromote={itemMode.onPromote} />;
@@ -1115,6 +1120,27 @@ export function ContextChip({
     });
   };
 
+  const leadLinkItem = !pr && hasPrLinks ? prLinks?.items[0] : undefined;
+  const fallbackPrMarker = leadLinkItem ? (
+    <>
+      {leadLinkItem.kind === 'associated' ? (
+        <SessionPrIcon prStatus={leadLinkItem.view.status} prCiState={leadLinkItem.view.ci} />
+      ) : leadLinkItem.reason === 'checking' ? (
+        <CircleDashed {...stylex.props(themeStyles.glyph)} aria-hidden="true" />
+      ) : (
+        <CircleAlert {...stylex.props(themeStyles.glyph)} aria-hidden="true" />
+      )}
+      <span {...stylex.props(themeStyles.layout)}>
+        {leadLinkItem.kind === 'associated'
+          ? leadLinkItem.view.number != null
+            ? `#${leadLinkItem.view.number}`
+            : 'PR'
+          : leadLinkItem.number != null
+            ? `#${leadLinkItem.number}`
+            : 'PR'}
+      </span>
+    </>
+  ) : null;
   const prMarker = (
     <>
       <SessionPrIcon prStatus={status ?? 'open'} prCiState={prCiState} />
@@ -1122,7 +1148,7 @@ export function ContextChip({
     </>
   );
   const prControl = pr ? (
-    prLinks ? (
+    prLinks && hasPrLinks ? (
       <LinkedPrControl links={prLinks}>{prMarker}</LinkedPrControl>
     ) : prHistory && prHistory.length > 1 ? (
       <PrHistoryControl history={prHistory} onOpenCurrent={onOpenPr} onOpenOlder={onOpenHistoryPr}>
@@ -1141,6 +1167,8 @@ export function ContextChip({
     ) : (
       <span {...stylex.props(styles.prStatic)}>{prMarker}</span>
     )
+  ) : prLinks && hasPrLinks && fallbackPrMarker ? (
+    <LinkedPrControl links={prLinks}>{fallbackPrMarker}</LinkedPrControl>
   ) : undefined;
 
   const summary = (
@@ -1204,18 +1232,20 @@ export function ContextChip({
       // No PR: the leading icon IS the worktree/folder glyph, so make it the
       // interactive copy control. When a PR takes the leading (status) icon, the
       // control rides in the `leading` slot instead so both stay reachable.
-      iconOverride={pr ? prControl : (locationControl ?? undefined)}
+      iconOverride={prControl ?? locationControl ?? undefined}
       label={label}
       textClassName={stylex.props(styles.textMuted).className}
       summary={summary}
       leading={
-        pr ? (
+        prControl ? (
           <>
             {/* CI pill stays adjacent to the PR number; the location control
                 trails it, sitting right before the repo/branch summary. */}
-            <span {...stylex.props(styles.ciSlot)}>
-              <PrCiPill runs={prCiRuns} state={prCiState} onOpenRun={onOpenPrCiRun} />
-            </span>
+            {pr ? (
+              <span {...stylex.props(styles.ciSlot)}>
+                <PrCiPill runs={prCiRuns} state={prCiState} onOpenRun={onOpenPrCiRun} />
+              </span>
+            ) : null}
             {locationControl}
           </>
         ) : undefined

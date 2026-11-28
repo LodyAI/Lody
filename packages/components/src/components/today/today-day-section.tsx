@@ -22,7 +22,7 @@ import { TodayEditorContext, useTodayEditor } from './editor/today-editor-contex
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import { TodayMentionDecorators } from './editor/today-mention-decorators';
 import { TODAY_INDENT_PX, type TodayEditorController } from './editor/today-editor-controller';
-import { TodayMention } from './today-session-mention';
+import { TodayMention, todayMentionGaps } from './today-session-mention';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
 import { formatTodayHeading } from './today-stream';
@@ -225,11 +225,11 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: colors.onAccent,
   },
   checkBoxDone: {
-    backgroundColor: colors.accent,
-    borderColor: { default: colors.accent, ':hover': colors.accent },
+    backgroundColor: colors.selectedFill,
+    borderColor: { default: colors.separator, ':hover': colors.tertiaryLabel },
+    color: colors.secondaryLabel,
   },
   textDone: { color: colors.secondaryLabel, textDecorationLine: 'line-through' },
   text: {
@@ -783,7 +783,13 @@ function TodayStaticText(props: { node: TodayNodeView }) {
   let cursor = 0;
   for (const mention of mentions) {
     if (mention.start > cursor) parts.push(text.slice(cursor, mention.start));
-    parts.push(<TodayMention key={mention.start} mention={mention} />);
+    parts.push(
+      <TodayMention
+        key={mention.start}
+        mention={mention}
+        gaps={todayMentionGaps(text, mention.start)}
+      />
+    );
     cursor = mention.start + 1;
   }
   if (cursor < text.length) parts.push(text.slice(cursor));

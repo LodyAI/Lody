@@ -2793,6 +2793,12 @@ export async function runtimeInvoke(action: string) {
           ).size,
         };
         break;
+      case 'memberRetry':
+        value = await runtime.retryMemberKeyDelivery!(
+          offer.workspaceId,
+          memberRelay.item!.requestId
+        );
+        break;
       case 'memberRecordCount':
         value = view().length;
         break;

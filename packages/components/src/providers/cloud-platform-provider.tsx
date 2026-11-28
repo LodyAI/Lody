@@ -55,6 +55,7 @@ import { installCloudHttpPort } from '@/lib/cloud-http-port';
 import { localAgentEnabledAtom } from '@/atoms/local-probe';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
 import { createCloudSessionAccess } from './cloud-session-access';
+import { currentPairingDeviceName } from './e2ee-pairing-device';
 import { mintAutomationControlProof } from '@/lib/automation-control-api';
 
 const CLOUD_HTTP_PORT = {
@@ -140,7 +141,7 @@ export function CloudPlatformProvider({
       const target = getTelemetryRouteTarget();
       if (
         identity.status !== 'authenticated' ||
-        live.session.data?.user.id !== identity.user.id ||
+        live.session.data?.user?.id !== identity.user.id ||
         organization.activeOrganization.id !== mode?.workspaceId ||
         ('contentMode' in organization.activeOrganization &&
           organization.activeOrganization.contentMode !== undefined &&
@@ -397,6 +398,18 @@ export function CloudPlatformProvider({
         describe: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.describe, request),
         history: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.history, request),
       },
+      onWorkspaceCreated: (workspace) => {
+        const current = workspacesStore.get();
+        if (
+          current.status !== 'ready' ||
+          current.workspaces.some((item) => item.id === workspace.id)
+        )
+          return;
+        workspacesStore.set({
+          ...current,
+          workspaces: [...current.workspaces, toWorkspaceSummary(workspace, 'owner')],
+        });
+      },
       refreshWorkspaces: async () => {
         await readOrganization().refetchOrganizations();
       },
@@ -440,12 +453,11 @@ export function CloudPlatformProvider({
         return session.data?.user?.id ?? atomStore.get(userAtom)?.id ?? null;
       },
       workspaces: () => accountPairingHints(workspacesStore.get()),
-      deviceName: electron ? 'Lody desktop' : 'Lody mobile',
+      deviceName: currentPairingDeviceName(Boolean(electron)),
       // A visible but unfocused window (another app in front, a second screen) still
       // answers; only a hidden window falls back to the system notification.
       canPresent: () => document.visibilityState === 'visible',
       accessLoss: e2eeAccessLoss,
-      includePreparingReviews: Boolean(electron && runtime.accountPairingCode),
       notifyPending: (id) => {
         if (!electron) return;
         void getIpcServices()
@@ -478,7 +490,7 @@ export function CloudPlatformProvider({
     electron,
     sessionStore,
     workspacesStore,
-    session.data?.user.id,
+    session.data?.user?.id,
   ]);
   useEffect(() => () => automaticPairing?.disposeAutomaticPairing(), [automaticPairing]);
   const e2eeWorkspaces = useMemo(
@@ -507,10 +519,52 @@ export function CloudPlatformProvider({
                       changed
                     )
                   : () => {},
+              ...(baseE2eeWorkspaces.runtime.accountApproval
+                ? {
+                    // A hint only: the host still reads and verifies pending requests itself.
+                    subscribePendingMemberRequests: (workspaceId: string, changed: () => void) => {
+                      const openApproval = baseE2eeWorkspaces.runtime?.accountApproval;
+                      if (!openApproval || !workspaceId) return () => {};
+                      const owner = sessionStore.get();
+                      const accountId = owner.status === 'authenticated' ? owner.user.id : null;
+                      let disposed = false;
+                      let unsubscribe: (() => void) | undefined;
+                      void (async () => {
+                        let approvalSession:
+                          | Awaited<ReturnType<NonNullable<typeof openApproval>>>
+                          | undefined;
+                        try {
+                          approvalSession = await openApproval(workspaceId);
+                          const access = await approvalSession.access();
+                          if (disposed) return;
+                          const current = sessionStore.get();
+                          if (
+                            accountId !== null &&
+                            (current.status !== 'authenticated' || current.user.id !== accountId)
+                          )
+                            return;
+                          unsubscribe = cloudClient.subscribe(
+                            cloudOperations.e2eeMembers.pending,
+                            access,
+                            changed
+                          );
+                        } catch {
+                          /* Untrusted wakeup hint; callers keep their polling fallback. */
+                        } finally {
+                          await approvalSession?.release().catch(() => {});
+                        }
+                      })();
+                      return () => {
+                        disposed = true;
+                        unsubscribe?.();
+                      };
+                    },
+                  }
+                : {}),
             },
           }
         : baseE2eeWorkspaces,
-    [automaticPairing, baseE2eeWorkspaces, cloudClient]
+    [automaticPairing, baseE2eeWorkspaces, cloudClient, sessionStore]
   );
 
   const sessionAccess = useMemo(
@@ -621,7 +675,7 @@ export function CloudPlatformProvider({
     <PlatformContext.Provider value={provider}>
       <CloudWorkspaceBridge organizationRef={organizationRef} workspacesStore={workspacesStore} />
       <E2eeAutomaticPairingInbox
-        key={session.data?.user.id ?? 'signed-out'}
+        key={session.data?.user?.id ?? 'signed-out'}
         runtime={e2eeWorkspaces.runtime}
       >
         {children}

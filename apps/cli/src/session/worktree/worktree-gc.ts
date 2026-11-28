@@ -2,16 +2,80 @@ import { toShared } from '@/platform/process-options';
 import fs from 'fs';
 import path from 'path';
 
-import type { RepoId, SessionId, SessionMeta } from '@lody/shared';
+import {
+  STATUS_VIEW_SETTLE_INACTIVITY_MS,
+  statusViewActivityAt,
+  statusViewTier,
+  type RepoId,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
 
 import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
+import {
+  cleanWorktreeArtifacts,
+  clearWorktreeArtifactsCleaned,
+  markWorktreeArtifactsCleaned,
+  type WorktreeArtifactCleanResult,
+} from './worktree-artifact-cleaner';
 import { getWorktreeManager } from './worktree-manager';
 
 const GIT_PROBE_TIMEOUT_MS = 30_000;
+
+export const SETTLED_ARTIFACT_CLEANUP_GRACE_MS = 24 * 60 * 60 * 1000;
+
+const finiteTimestamp = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+export function resolveSettledSinceMs(meta: SessionMeta, nowMs: number): number | null {
+  if (meta.parentSessionId || meta.isArchived === true || meta.isPinned === true) {
+    return null;
+  }
+
+  const isWorking = meta.status?.type === 'running' || meta.status?.type === 'initializing';
+  const isWaitingPermission = meta.status?.type === 'requestPermission';
+  const lastMessageAt = finiteTimestamp(meta.lastMessageAt);
+  const createdAtMs = Date.parse(meta.createdAt ?? '') || 0;
+  const activityAt = lastMessageAt ?? createdAtMs;
+
+  const tier = statusViewTier(
+    {
+      activityAt,
+      isWorking,
+      isWaitingPermission,
+      snoozedUntil: finiteTimestamp(meta.snoozedUntil),
+      settledAt: finiteTimestamp(meta.settledAt),
+      focusRestoredAt: finiteTimestamp(meta.focusRestoredAt),
+    },
+    nowMs
+  );
+  if (tier !== 'settled') {
+    return null;
+  }
+
+  const effectiveMessageMs = statusViewActivityAt(
+    activityAt,
+    finiteTimestamp(meta.snoozedUntil),
+    nowMs
+  );
+  const settledAt = finiteTimestamp(meta.settledAt);
+  if (settledAt !== null && settledAt > 0 && effectiveMessageMs <= settledAt) {
+    return settledAt;
+  }
+
+  const effectiveActivityMs = Math.max(
+    effectiveMessageMs,
+    finiteTimestamp(meta.focusRestoredAt) ?? 0
+  );
+  if (effectiveActivityMs <= 0) {
+    return null;
+  }
+  return effectiveActivityMs + STATUS_VIEW_SETTLE_INACTIVITY_MS;
+}
 
 /**
  * What the workspace knows about the root Session that owns a managed workdir.
@@ -19,11 +83,13 @@ const GIT_PROBE_TIMEOUT_MS = 30_000;
  * `unknown` is not evidence of anything: the same data directory serves every
  * workspace this machine joins, so a directory this workspace has never heard
  * of may belong to a live Session elsewhere. Only `archived` and `deleted`
- * make a directory eligible for removal.
+ * make a directory eligible for removal; `settled` makes only its gitignored
+ * code artifacts eligible for cleanup after the grace period.
  */
 export type WorktreeOwnerState =
   | { kind: 'unknown' }
   | { kind: 'active' }
+  | { kind: 'settled'; meta: SessionMeta; settledSinceMs: number }
   | { kind: 'archived'; meta: SessionMeta }
   | { kind: 'deleted'; meta: SessionMeta | undefined };
 
@@ -40,8 +106,8 @@ export type WorktreeGcDeps = {
    */
   hasCompleteMetadata: () => boolean;
   readOwnerState: (sessionId: SessionId) => Promise<WorktreeOwnerState>;
-  /** The Session's process is still being released; leave its directory for the next sweep. */
-  isRuntimeActive: (sessionId: SessionId) => boolean;
+  /** The Session's process or a shared worktree terminal is active; leave its directory for the next sweep. */
+  isRuntimeActive: (sessionId: SessionId, worktreePath?: string) => boolean;
   /**
    * User-configured cleanup hook, run once before the directory goes away.
    * Failures are the callee's to report; a rejection here is logged and does
@@ -59,17 +125,23 @@ export type WorktreeGcDeps = {
    */
   recordArchivedBranch: (sessionId: SessionId, branchName: string) => Promise<void>;
   archiveProjectGroup?: (input: { sessionId: SessionId; worktreePath: string }) => Promise<void>;
+  cleanArtifacts?: (
+    worktreePath: string,
+    options: {
+      shouldAbort: () => boolean | Promise<boolean>;
+      onBeforeDelete?: (targetPath: string) => Promise<void>;
+    }
+  ) => Promise<WorktreeArtifactCleanResult>;
+  settledArtifactGraceMs?: number;
   now?: () => number;
   retryBaseDelayMs?: number;
   retryMaxDelayMs?: number;
 };
 
 export type WorktreeGcSweepResult = {
-  /** Directories inspected. */
   scanned: number;
-  /** Directories removed by this sweep. */
   removed: SessionId[];
-  /** Directories whose cleanup failed and will be retried with backoff. */
+  artifactsCleaned: SessionId[];
   failed: SessionId[];
 };
 
@@ -93,6 +165,8 @@ export class WorktreeGarbageCollector {
   private readonly deps: WorktreeGcDeps;
   private readonly inFlight = new Set<string>();
   private readonly retryState = new Map<string, { attempt: number; notBeforeMs: number }>();
+  private readonly settledCleanedState = new Map<string, number>();
+  private readonly lastActiveObservedAt = new Map<string, number>();
   private sweepPromise: Promise<WorktreeGcSweepResult> | null = null;
   private rerunRequested = false;
 
@@ -112,7 +186,12 @@ export class WorktreeGarbageCollector {
     this.sweepPromise = this.sweep()
       .catch((error: unknown) => {
         this.deps.logger.debug(`[worktree-gc] Sweep failed: ${formatErrorMessage(error)}`);
-        return { scanned: 0, removed: [], failed: [] } satisfies WorktreeGcSweepResult;
+        return {
+          scanned: 0,
+          removed: [],
+          artifactsCleaned: [],
+          failed: [],
+        } satisfies WorktreeGcSweepResult;
       })
       .finally(() => {
         this.sweepPromise = null;
@@ -124,8 +203,19 @@ export class WorktreeGarbageCollector {
     return this.sweepPromise;
   }
 
+  async waitForIdle(): Promise<void> {
+    while (this.sweepPromise) {
+      await this.sweepPromise;
+    }
+  }
+
   async sweep(): Promise<WorktreeGcSweepResult> {
-    const result: WorktreeGcSweepResult = { scanned: 0, removed: [], failed: [] };
+    const result: WorktreeGcSweepResult = {
+      scanned: 0,
+      removed: [],
+      artifactsCleaned: [],
+      failed: [],
+    };
     if (!this.deps.hasCompleteMetadata()) {
       this.deps.logger.debug('[worktree-gc] Workspace metadata incomplete; skipping sweep');
       return result;
@@ -135,10 +225,21 @@ export class WorktreeGarbageCollector {
       for (const sessionId of this.listSessionDirs(worktreesDir)) {
         result.scanned += 1;
         const worktreePath = path.join(worktreesDir, sessionId);
-        if (this.inFlight.has(sessionId) || !this.isRetryDue(sessionId)) continue;
+        if (this.inFlight.has(sessionId)) continue;
 
         const state = await this.deps.readOwnerState(sessionId);
+        if (state.kind === 'active') {
+          this.lastActiveObservedAt.set(sessionId, this.now());
+          this.settledCleanedState.delete(sessionId);
+          this.retryState.delete(`settled:${sessionId}`);
+          continue;
+        }
+        if (state.kind === 'settled') {
+          await this.sweepSettledArtifacts(sessionId, worktreePath, state.settledSinceMs, result);
+          continue;
+        }
         if (state.kind !== 'archived' && state.kind !== 'deleted') continue;
+        if (!this.isRetryDue(sessionId)) continue;
         if (this.deps.isRuntimeActive(sessionId)) {
           this.deps.logger.debug(
             `[worktree-gc] ${sessionId} runtime still releasing; deferring worktree removal`
@@ -161,7 +262,11 @@ export class WorktreeGarbageCollector {
           ) {
             await this.deps.recordArchivedBranch(sessionId, branchName);
           }
+          await clearWorktreeArtifactsCleaned(worktreePath);
           this.retryState.delete(sessionId);
+          this.retryState.delete(`settled:${sessionId}`);
+          this.settledCleanedState.delete(sessionId);
+          this.lastActiveObservedAt.delete(sessionId);
           result.removed.push(sessionId);
           this.deps.logger.info(
             `[worktree-gc] Removed ${state.kind} session worktree ${worktreePath} (branch preserved)`
@@ -180,6 +285,87 @@ export class WorktreeGarbageCollector {
     // Keep the existing worktree sweep ahead of chat filesystem I/O.
     await this.sweepChatWorkdirs(result);
     return result;
+  }
+
+  private async sweepSettledArtifacts(
+    sessionId: SessionId,
+    worktreePath: string,
+    settledSinceMs: number,
+    result: WorktreeGcSweepResult
+  ): Promise<void> {
+    const graceMs = this.deps.settledArtifactGraceMs ?? SETTLED_ARTIFACT_CLEANUP_GRACE_MS;
+    const effectiveSettledSinceMs = Math.max(
+      settledSinceMs,
+      this.lastActiveObservedAt.get(sessionId) ?? 0
+    );
+    if (this.now() - effectiveSettledSinceMs < graceMs) {
+      return;
+    }
+    if (this.settledCleanedState.get(sessionId) === effectiveSettledSinceMs) {
+      return;
+    }
+    const retryKey = `settled:${sessionId}`;
+    if (!this.isRetryDue(retryKey)) {
+      return;
+    }
+    if (this.deps.isRuntimeActive(sessionId, worktreePath)) {
+      this.deps.logger.debug(
+        `[worktree-gc] ${sessionId} runtime active; deferring settled artifact cleanup`
+      );
+      return;
+    }
+
+    this.inFlight.add(sessionId);
+    try {
+      const clean = this.deps.cleanArtifacts ?? cleanWorktreeArtifacts;
+      let markedCleaned = false;
+      const cleanResult = await clean(worktreePath, {
+        shouldAbort: async () => {
+          if (this.deps.isRuntimeActive(sessionId, worktreePath)) return true;
+          const freshState = await this.deps.readOwnerState(sessionId);
+          return freshState.kind !== 'settled' || freshState.settledSinceMs !== settledSinceMs;
+        },
+        onBeforeDelete: async () => {
+          if (markedCleaned) return;
+          await markWorktreeArtifactsCleaned(worktreePath);
+          markedCleaned = true;
+        },
+      });
+      if (cleanResult.aborted) {
+        this.deps.logger.debug(
+          `[worktree-gc] Aborted settled artifact cleanup for ${sessionId}; session or runtime became active`
+        );
+        return;
+      }
+      if (cleanResult.errors.length > 0) {
+        this.scheduleRetry(retryKey);
+        result.failed.push(sessionId);
+        const summary = cleanResult.errors
+          .slice(0, 3)
+          .map((err) => `${err.path}: ${err.message}`)
+          .join('; ');
+        this.deps.logger.warn(
+          `[worktree-gc] Settled artifact cleanup for ${worktreePath} had ${cleanResult.errors.length} error(s); will retry: ${summary}`
+        );
+        return;
+      }
+      this.retryState.delete(retryKey);
+      this.settledCleanedState.set(sessionId, effectiveSettledSinceMs);
+      if (cleanResult.deletedPaths.length > 0) {
+        result.artifactsCleaned.push(sessionId);
+        this.deps.logger.info(
+          `[worktree-gc] Cleaned ${cleanResult.deletedPaths.length} gitignored artifact dir(s) from settled worktree ${worktreePath}`
+        );
+      }
+    } catch (error) {
+      this.scheduleRetry(retryKey);
+      result.failed.push(sessionId);
+      this.deps.logger.warn(
+        `[worktree-gc] Failed to clean settled worktree artifacts ${worktreePath}; will retry: ${formatErrorMessage(error)}`
+      );
+    } finally {
+      this.inFlight.delete(sessionId);
+    }
   }
 
   private async sweepChatWorkdirs(result: WorktreeGcSweepResult): Promise<void> {
@@ -345,9 +531,15 @@ export class WorktreeGarbageCollector {
     }
     const dirs: Array<{ repoId: RepoId; worktreesDir: string }> = [];
     for (const entry of repoEntries) {
-      if (!entry.isDirectory()) continue;
+      if (entry.isSymbolicLink() || !entry.isDirectory()) continue;
       const worktreesDir = path.join(this.deps.reposDir, entry.name, 'worktrees');
-      if (!fs.existsSync(worktreesDir)) continue;
+      let stat: fs.Stats;
+      try {
+        stat = fs.lstatSync(worktreesDir);
+      } catch {
+        continue;
+      }
+      if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
       dirs.push({ repoId: entry.name as RepoId, worktreesDir });
     }
     return dirs;
@@ -361,7 +553,10 @@ export class WorktreeGarbageCollector {
       return [];
     }
     return entries
-      .filter((entry) => entry.isDirectory() && SAFE_SESSION_DIR_RE.test(entry.name))
+      .filter(
+        (entry) =>
+          !entry.isSymbolicLink() && entry.isDirectory() && SAFE_SESSION_DIR_RE.test(entry.name)
+      )
       .map((entry) => entry.name as SessionId);
   }
 

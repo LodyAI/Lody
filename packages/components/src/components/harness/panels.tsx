@@ -14,6 +14,7 @@ import {
   Globe,
   HardDrive,
   Lock,
+  LogIn,
   LogOut,
   Pencil,
   Plus,
@@ -61,8 +62,23 @@ import {
 import { parts } from './parts';
 import { panelStyles as ps } from './panels.styles';
 import { settingsStyles as page } from './settings.styles';
-import { sorbet, supportsSorbetEndpointEdit, useHarnessMachine, useSorbetTarget } from './sorbet';
-import { useHarness, type Scope, type CustomProvider, type EndpointProtocol } from './store';
+import {
+  formatMirrorAge,
+  sorbet,
+  supportsSorbetEndpointEdit,
+  useHarnessMachine,
+  useSorbetTarget,
+} from './sorbet';
+import {
+  storeLocked,
+  storeMirrored,
+  storeUnreadable,
+  useHarness,
+  type HarnessState,
+  type Scope,
+  type CustomProvider,
+  type EndpointProtocol,
+} from './store';
 import { ENDPOINT_PROTOCOLS, PROTOCOL_LABEL } from './endpoint-models';
 
 /** A titled section: its name, what it is for, and the block under it. */
@@ -117,12 +133,35 @@ const PROVIDER_GROUPS: { kind: ProviderKind; label: string; hint: string }[] = [
   },
 ];
 
+/**
+ * Why a store's write controls cannot be used from here, in the page's own
+ * words. Two situations look alike and must not be told alike: a store nothing
+ * was published from, and a machine's own read that this client can see but not
+ * write back to.
+ */
+function lockedReason(state: HarnessState): string {
+  return storeMirrored(state)
+    ? 'This is the machine’s last synced list; change it on the machine that owns the store.'
+    : 'This machine’s connections cannot be read from this app.';
+}
+
 export function ProvidersPanel() {
   const state = useHarness();
   const [adding, setAdding] = useState(false);
+  const unreadable = storeUnreadable(state);
+  const mirrored = storeMirrored(state);
+  const locked = storeLocked(state);
+  const { machine } = useHarnessMachine();
+  const machineName = machine?.name || machine?.id || 'this machine';
 
   return (
     <div {...stylex.props(parts.panel)}>
+      {mirrored && state.mirroredAt !== null ? (
+        <p {...stylex.props(parts.provMeta)}>
+          Read-only · synced from {machineName} {formatMirrorAge(state.mirroredAt)}. Sign in, add or
+          edit a connection on that machine.
+        </p>
+      ) : null}
       {PROVIDER_GROUPS.map((group) => {
         const providers = PROVIDERS.filter((provider) => provider.kind === group.kind);
         const customs = group.kind === 'custom' ? state.customs : [];
@@ -134,7 +173,13 @@ export function ProvidersPanel() {
               <span {...stylex.props(ps.plugroupHint)}>{group.hint}</span>
               {group.kind === 'custom' ? (
                 <span style={{ marginInlineStart: 'auto' }}>
-                  <Button size="sm" variant="ghost" onClick={() => setAdding(true)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={locked}
+                    title={locked ? lockedReason(state) : undefined}
+                    onClick={() => setAdding(true)}
+                  >
                     <Plus size={13} /> Add endpoint
                   </Button>
                 </span>
@@ -156,7 +201,11 @@ export function ProvidersPanel() {
               ) : null}
               {group.kind === 'custom' && !customs.length && !adding ? (
                 <div {...stylex.props(parts.emptyInline)}>
-                  No endpoints yet. Add one when your gateway speaks the OpenAI or Anthropic API.
+                  {mirrored
+                    ? 'No endpoints on this machine.'
+                    : unreadable
+                      ? 'Endpoints on this machine cannot be read from this app.'
+                      : 'No endpoints yet. Add one when your gateway speaks the OpenAI or Anthropic API.'}
                 </div>
               ) : null}
             </div>
@@ -200,6 +249,7 @@ function ProviderRow({ provider, ruled }: { provider: Provider; ruled: boolean }
   const state = useHarness();
   const credential = state.credentials[provider.id];
   const [pending, setPending] = useState(false);
+  const locked = storeLocked(state);
 
   const providerModels = MODELS.filter((model) => model.provider === provider.id).length;
 
@@ -254,8 +304,8 @@ function ProviderRow({ provider, ruled }: { provider: Provider; ruled: boolean }
             type="button"
             {...stylex.props(parts.iconBtn)}
             aria-label={`Disconnect ${provider.name}`}
-            title="Disconnect"
-            disabled={pending}
+            title={locked ? lockedReason(state) : 'Disconnect'}
+            disabled={pending || locked}
             onClick={() => {
               setPending(true);
               sorbet.disconnect(provider.id).finally(() => setPending(false));
@@ -263,6 +313,10 @@ function ProviderRow({ provider, ruled }: { provider: Provider; ruled: boolean }
           >
             <LogOut size={13} />
           </button>
+        ) : locked ? (
+          <Button size="sm" variant="secondary" disabled title={lockedReason(state)}>
+            <LogIn size={13} /> Sign in
+          </Button>
         ) : (
           <>
             {provider.auth.includes('key') ? (
@@ -301,7 +355,8 @@ function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }
   const credential = state.credentials[custom.id];
   const { machine } = useHarnessMachine();
   const localMachineId = useAtomValue(localMachineIdAtom);
-  const canEdit = !!machine && supportsSorbetEndpointEdit(machine, localMachineId);
+  const locked = storeLocked(state);
+  const canEdit = !locked && !!machine && supportsSorbetEndpointEdit(machine, localMachineId);
   const [editing, setEditing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -388,11 +443,13 @@ function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }
             </>
           ) : (
             <span {...stylex.props(parts.provMeta)}>
-              {refreshing
-                ? 'Discovering models…'
-                : credential
-                  ? 'No models discovered yet — refresh to ask the endpoint again.'
-                  : 'Add a key, then refresh to discover models.'}
+              {locked
+                ? 'Models on this endpoint are read on the machine that owns it.'
+                : refreshing
+                  ? 'Discovering models…'
+                  : credential
+                    ? 'No models discovered yet — refresh to ask the endpoint again.'
+                    : 'Add a key, then refresh to discover models.'}
             </span>
           )}
         </div>
@@ -403,7 +460,11 @@ function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }
         ) : null}
       </div>
       <div {...stylex.props(parts.provActions)}>
-        {credential ? null : (
+        {credential ? null : locked ? (
+          <Button size="sm" variant="secondary" disabled title={lockedReason(state)}>
+            <LogIn size={13} /> Add key
+          </Button>
+        ) : (
           <SignInAction
             provider={
               {
@@ -423,8 +484,8 @@ function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }
           type="button"
           {...stylex.props(parts.iconBtn)}
           aria-label={`Refresh models for ${custom.name}`}
-          title="Refresh models"
-          disabled={refreshing}
+          title={locked ? lockedReason(state) : 'Refresh models'}
+          disabled={refreshing || locked}
           onClick={() => void refresh()}
         >
           {refreshing ? <Spinner size={12} /> : <RefreshCw size={13} />}
@@ -444,7 +505,8 @@ function CustomRow({ custom, ruled }: { custom: CustomProvider; ruled: boolean }
           type="button"
           {...stylex.props(parts.iconBtn)}
           aria-label={`Remove ${custom.name}`}
-          title="Remove"
+          title={locked ? lockedReason(state) : 'Remove'}
+          disabled={locked}
           onClick={() => {
             void sorbet.deleteEndpoint(custom.id);
           }}
@@ -660,6 +722,7 @@ function DefaultsStatus({ defaults }: { defaults: SessionDefaults }) {
 }
 
 export function ModelsPanel({ scope }: { scope: Scope }) {
+  const { status } = useHarness();
   const capabilities = useDeviceCapabilities();
   const defaults = useSessionDefaults(scope);
   const host = useHostSettings();
@@ -691,7 +754,11 @@ export function ModelsPanel({ scope }: { scope: Scope }) {
     return (
       <div {...stylex.props(parts.panel)}>
         <div {...stylex.props(parts.emptyInline)}>
-          Connect a provider first — the models it offers will show up here.
+          {storeMirrored({ status })
+            ? 'This machine has no models to read yet.'
+            : storeUnreadable({ status })
+              ? 'Models on this machine cannot be read from this app.'
+              : 'Connect a provider first — the models it offers will show up here.'}
         </div>
       </div>
     );

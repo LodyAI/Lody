@@ -29,6 +29,7 @@ import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
 import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
+  ownDisplayName,
   type SessionAttachmentDraft,
 } from '@/lib/session-attachment-draft';
 import { useSchedules } from '@/hooks/use-schedules';
@@ -124,6 +125,7 @@ import { mergeDropZoneHandlers, useDropZone } from '@/hooks/use-drop-zone';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
 import {
   SessionChatInputArea,
+  finishQueuedMessageEditDraft,
   type SessionChatInputAreaHandle,
   type SessionTurnAgentRoleSelection,
 } from './session-chat-input-area';
@@ -193,6 +195,7 @@ import {
   decodeProjectPreparationProgress,
   type McpServerId,
   type ScheduleDocument,
+  type WorkspaceId,
   type SessionPullRequestView,
   type SessionPullRequestLinkListItem,
   resolveSessionPullRequestLinkList,
@@ -352,7 +355,11 @@ import { useSessionDocStaleReport } from './use-session-doc-stale-report';
 import { buildFixCiErrorsPrompt, buildResolvePrConflictsPrompt } from './session-pr-prompts';
 import { resolveConflictsActionAtomFamily } from './session-pr-agent-action';
 import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge-method';
-import { PrLinkProvider } from '@/components/ai-gui/pr-link-context';
+import {
+  PrLinkProvider,
+  parseGitHubPrLinkTarget,
+  type PrLinkTarget,
+} from '@/components/ai-gui/pr-link-context';
 import { SessionLinkProvider } from '@/components/ai-gui/session-link-context';
 import {
   COMMIT_AND_PUSH_PROMPT,
@@ -387,6 +394,20 @@ import {
 } from '@/components/shared/acp-selector-options';
 import { useComposerCycleCommands } from '@/hooks/use-composer-cycle-commands';
 import { useSessionAcpSelectorContext } from '@/hooks/use-session-acp-selector-context';
+import { useDocumentVisible } from '@/hooks/use-document-visible';
+import { useWorkspaceAgentRoles } from '@/hooks/use-workspace-agent-roles';
+import { describeRunConfigSelection } from '@/lib/recent-run-configs';
+import {
+  queuedMessageEditAtomFamily,
+  queuedRunConfigDifferences,
+  queuedRunConfigOf,
+} from './message-queue/queued-message-edit';
+import {
+  queuedEditRoleScope,
+  useQueuedMessageComposerEdit,
+} from './message-queue/use-queued-message-composer-edit';
+import type { QueuedRunConfigSummary } from './message-queue/queued-message-details';
+import { QueueSenderAvatar } from './message-queue/queue-sender-avatar';
 import {
   useAcpSessionConfigSelectionState,
   useResolvedAcpSessionConfigSelection,
@@ -2572,40 +2593,7 @@ export type DispatchInputBlocksOptions = {
   skipMcpOnce?: boolean;
 };
 
-function buildEditedMessageQueueItem(item: MessageQueueItem, task: string): MessageQueueItem {
-  const nextTask = task.trim();
-  const inputBlocks = normalizeSessionInputBlocks(
-    item.acpSessionConfig?.inputBlocks,
-    item.acpSessionConfig?.prompt ?? item.task
-  );
-  const nonTextInputBlocks: SessionInputBlock[] = inputBlocks.filter(
-    (block) => block.type !== 'text'
-  );
-  const nextInputBlocks: SessionInputBlock[] = nextTask
-    ? [{ type: 'text', text: nextTask }, ...nonTextInputBlocks]
-    : nonTextInputBlocks;
-
-  if (!item.acpSessionConfig) {
-    return {
-      ...item,
-      task: nextTask || queueTask(nonTextInputBlocks),
-      isEditing: false,
-      editingStartedAt: undefined,
-    };
-  }
-
-  return {
-    ...item,
-    task: nextTask || queueTask(nonTextInputBlocks),
-    isEditing: false,
-    editingStartedAt: undefined,
-    acpSessionConfig: {
-      ...item.acpSessionConfig,
-      prompt: nextTask,
-      inputBlocks: nextInputBlocks.length > 0 ? nextInputBlocks : undefined,
-    },
-  };
-}
+const EMPTY_CONFIG_OPTION_VALUES: Record<string, AcpConfigOptionValue> = {};
 
 /**
  * Session chat interface component
@@ -2841,6 +2829,7 @@ export const SessionChatInterface = memo(
       history: conversationView,
       addHistory: addSessionHistory,
       pushMessageQueue,
+      saveMessageQueueEdit,
       removeMessageQueueItem,
       updateMessageQueueItem,
       reorderMessageQueueItem,
@@ -2849,6 +2838,7 @@ export const SessionChatInterface = memo(
       ready: sessionDocReady,
       synced: sessionDocSynced,
       syncState: sessionDocSyncState,
+      historySync,
     } = useSessionDoc(session.id, {
       enabled: !hideMessageArea,
       syncEnabled: !hideMessageArea && syncEnabled,
@@ -2979,6 +2969,62 @@ export const SessionChatInterface = memo(
         cliType: session.cliType,
         agentType: session.agentType,
       });
+    /* A queued-message edit selects its own run config, seeded from the row's
+       frozen values and keyed by the row, so the Session's unsent choices stay
+       untouched. The same pure derivation as the Session's selection. */
+    const queuedEdit = useAtomValue(queuedMessageEditAtomFamily(session.id));
+    const queuedEditTargetKey = `${sessionRunConfigTargetKey}#queue-edit:${queuedEdit?.cid ?? ''}`;
+    const queuedEditPreferences = useMemo(() => {
+      const frozen = queuedEdit ? queuedRunConfigOf(queuedEdit.original) : null;
+      return {
+        modeId: frozen?.modeId ?? null,
+        modelId: frozen?.modelId ?? null,
+        configOptionValues: frozen?.configOptionValues ?? EMPTY_CONFIG_OPTION_VALUES,
+      };
+    }, [queuedEdit]);
+    const queuedEditDraftScope = useMemo(
+      () =>
+        queuedEdit && runtime?.accountId && runtime.workspaceId
+          ? {
+              accountId: runtime.accountId,
+              workspaceId: runtime.workspaceId,
+              sessionId: session.id,
+              targetKey: queuedEditTargetKey,
+            }
+          : undefined,
+      [queuedEdit, queuedEditTargetKey, runtime?.accountId, runtime?.workspaceId, session.id]
+    );
+    const {
+      selection: queuedEditSelection,
+      candidates: queuedEditCandidates,
+      hasUserEdits: queuedEditHasUserEdits,
+      selectMode: handleQueuedEditModeChange,
+      selectModel: handleQueuedEditModelChange,
+      selectConfigOption: handleQueuedEditConfigOptionChange,
+    } = useAcpSessionConfigSelectionState({
+      enabled: queuedEdit !== undefined && !hideMessageArea,
+      targetKey: queuedEditTargetKey,
+      preferenceRevision: `queue-edit:${queuedEdit?.cid ?? ''}`,
+      preferences: queuedEditPreferences,
+      runtimePreferences: null,
+      preserveUnsentUserEdits: true,
+      draftScope: queuedEditDraftScope,
+    });
+    const queuedEditSelector = useSessionAcpSelectorContext({
+      machineId: queuedEdit ? session.machineId : null,
+      configId: session.agentConfigId,
+      cliType: session.cliType,
+      agentType: session.agentType,
+      selectedModeId: queuedEditCandidates.modeId,
+      selectedModelId: queuedEditCandidates.modelId,
+      configOptionValues: queuedEditCandidates.configOptionValues,
+      sessionCommands: sessionDoc?.acpRuntimeConfig?.availableCommands,
+    });
+    const queuedEditResolved = useResolvedAcpSessionConfigSelection(
+      queuedEditSelection,
+      queuedEditSelector.selectorOptions,
+      { cliType: session.cliType, agentType: session.agentType }
+    );
     const machineDotlodyPath = useMemo(
       () => resolveMachineDotlodyPath(machineFlockRows, isLocalSession ? localHomeDir : null),
       [isLocalSession, localHomeDir, machineFlockRows]
@@ -3120,9 +3166,6 @@ export const SessionChatInterface = memo(
     const hasHostedGitHub = usePlatformCapability('githubIntegration');
     const latestPrNumber = getPullRequestNumber(latestPr);
     const latestPrRepoFullName = getPullRequestRepoFullName(latestPr) ?? repoFullName;
-    // Stable identity: it is the PrLinkProvider value over the whole
-    // conversation, and a new function per render re-propagated that context
-    // through every row. It reads the latest PR when called.
     const openLatestPr = useStableCallback(() => {
       if (!latestPr) return;
       if (hasHostedGitHub && onOpenPrTab && latestPrRepoFullName && latestPrNumber) {
@@ -3136,9 +3179,51 @@ export const SessionChatInterface = memo(
       void openExternalUrl(latestPr.url);
     });
     const prLinkHandler = latestPr ? openLatestPr : undefined;
+    // Stable identity: it is the PrLinkProvider value over the whole
+    // conversation, and a new function per render re-propagated that context
+    // through every row. Any valid GitHub PR link opens in the PR panel when
+    // hosted GitHub integration is available.
+    const openAnyPrTarget = useStableCallback((target: PrLinkTarget) => {
+      if (!hasHostedGitHub || !onOpenPrTab) {
+        void openExternalUrl(`https://github.com/${target.repoFullName}/pull/${target.prNumber}`);
+        return;
+      }
+      const normalizedRepo = target.repoFullName.toLowerCase();
+      const matchedLatest =
+        latestPr &&
+        latestPrNumber === target.prNumber &&
+        latestPrRepoFullName?.toLowerCase() === normalizedRepo
+          ? latestPr
+          : null;
+      const matchedHistory = !matchedLatest
+        ? pullRequestHistory.find(
+            (view) =>
+              view.number === target.prNumber && view.repoFullName?.toLowerCase() === normalizedRepo
+          )
+        : undefined;
+      onOpenPrTab({
+        prNumber: target.prNumber,
+        repoFullName: matchedHistory?.repoFullName ?? target.repoFullName,
+        headCommitSha: matchedLatest
+          ? getSessionPullRequestLegacyFields(matchedLatest).headCommitSha
+          : matchedHistory
+            ? getSessionPullRequestLegacyFields(matchedHistory.pr).headCommitSha
+            : undefined,
+      });
+    });
+    const markdownPrLinkHandler = hasHostedGitHub && onOpenPrTab ? openAnyPrTarget : undefined;
     const launcherPillRef = useRef<HTMLDivElement>(null);
-    // The PR tab follows the current PR, so an earlier PR opens on GitHub.
+    // Open any associated PR in the in-app PR tab when hosted GitHub is available;
+    // otherwise fall back to opening on GitHub.
     const openHistoryPr = useStableCallback((view: SessionPullRequestView) => {
+      if (hasHostedGitHub && onOpenPrTab && view.repoFullName && view.number != null) {
+        onOpenPrTab({
+          prNumber: view.number,
+          repoFullName: view.repoFullName,
+          headCommitSha: getSessionPullRequestLegacyFields(view.pr).headCommitSha,
+        });
+        return;
+      }
       void openExternalUrl(view.url);
     });
     const preferredMergeMethod = usePreferredPrMergeMethod();
@@ -3148,7 +3233,7 @@ export const SessionChatInterface = memo(
       repoFullName: latestPrRepoFullName,
       prNumber: latestPrNumber,
       headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-      enabled: hasHostedGitHub && canShowGitHubActions && hasExistingPr,
+      enabled: hasHostedGitHub && Boolean(latestPrRepoFullName && latestPrNumber),
     });
     const {
       data: activePrData,
@@ -3266,6 +3351,17 @@ export const SessionChatInterface = memo(
     const chatStreamRef = useRef<SessionChatStreamHandle>(null);
     const shareSelection = useMessageSelection(session.id);
     const inputAreaRef = useRef<SessionChatInputAreaHandle>(null);
+    const queuedEditorUserId =
+      (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+      currentUser?.id ??
+      session.userId;
+    const queuedEditEditor = useMemo(
+      () => ({
+        userId: queuedEditorUserId,
+        userName: ownDisplayName(currentUser, queuedEditorUserId),
+      }),
+      [currentUser, queuedEditorUserId]
+    );
     const handleAnnotateImage = useCallback(
       (selection: DocumentSelection) =>
         inputAreaRef.current?.addDocumentSelection(selection) ?? false,
@@ -3320,8 +3416,22 @@ export const SessionChatInterface = memo(
       );
     });
     const openLinkedPr = useStableCallback((item: SessionPullRequestLinkListItem) => {
-      if (item.kind === 'associated' && item.primary && prLinkHandler) prLinkHandler();
-      else void openExternalUrl(item.url);
+      if (hasHostedGitHub && onOpenPrTab) {
+        if (item.kind === 'associated' && item.view.repoFullName && item.view.number != null) {
+          onOpenPrTab({
+            prNumber: item.view.number,
+            repoFullName: item.view.repoFullName,
+            headCommitSha: getSessionPullRequestLegacyFields(item.view.pr).headCommitSha,
+          });
+          return;
+        }
+        const parsed = parseGitHubPrLinkTarget(item.url);
+        if (parsed) {
+          onOpenPrTab(parsed);
+          return;
+        }
+      }
+      void openExternalUrl(item.url);
     });
     const prLinks = useMemo<SessionPullRequestLinksProps>(
       () => ({
@@ -3844,6 +3954,111 @@ export const SessionChatInterface = memo(
       [sessionDoc?.mq]
     );
     const hasPendingQueueRecords = useHasPendingQueueRecords(session.id, messageQueue);
+    const documentVisible = useDocumentVisible();
+    const queuedMessageEdit = useQueuedMessageComposerEdit({
+      sessionId: session.id,
+      items: messageQueue,
+      ready: sessionDocReady,
+      visible: isVisible && documentVisible && !hideMessageArea,
+      composerRef: inputAreaRef,
+      updateMessageQueueItem,
+      saveMessageQueueEdit,
+      editor: queuedEditEditor,
+      runConfigDraftScope: queuedEditDraftScope,
+      finishDraftWithoutComposer: finishQueuedMessageEditDraft,
+      onEvent: captureSessionEvent,
+    });
+    const focusQueuedEditComposer = useCallback(() => {
+      inputAreaRef.current?.focusInput();
+    }, []);
+    const handleQueuedEditCancel = queuedMessageEdit.cancel;
+    const queuedEditComposer = useMemo(
+      () =>
+        queuedMessageEdit.edit
+          ? {
+              position: queuedMessageEdit.position,
+              keptBlocks: queuedMessageEdit.edit.keptBlocks,
+              onRemoveKeptBlock: queuedMessageEdit.removeKeptBlock,
+            }
+          : null,
+      [queuedMessageEdit.edit, queuedMessageEdit.position, queuedMessageEdit.removeKeptBlock]
+    );
+    // Faces only when someone else has queued here; one sender needs no column.
+    const showQueueSenderAvatars =
+      isMultiMember &&
+      messageQueue.some((item) => Boolean(item.userId) && item.userId !== queuedEditorUserId);
+    const renderQueueSenderAvatar = useMemo(
+      () =>
+        showQueueSenderAvatars
+          ? (item: MessageQueueItem) => (
+              <QueueSenderAvatar
+                userId={item.userId}
+                userName={item.userName}
+                workspaceId={workspaceId as WorkspaceId | null}
+              />
+            )
+          : undefined,
+      [showQueueSenderAvatars, workspaceId]
+    );
+    const { roles: queueAgentRoles } = useWorkspaceAgentRoles();
+    const describeQueuedRunConfig = useCallback(
+      (item: MessageQueueItem): QueuedRunConfigSummary => {
+        const frozen = queuedRunConfigOf(item);
+        const face = describeRunConfigSelection({
+          modelOptions,
+          selectedModelId: frozen.modelId ?? selectedModelId,
+          configOptionSelectors: configOptionSelectors ?? [],
+          configOptionValues: { ...configOptionValues, ...frozen.configOptionValues },
+        });
+        const modeLabel = frozen.modeId
+          ? (modeOptions.find((option) => option.value === frozen.modeId)?.label ?? frozen.modeId)
+          : null;
+        const roleName = frozen.agentRoleId
+          ? (queueAgentRoles.find((role) => role.id === frozen.agentRoleId)?.name ?? null)
+          : null;
+        const differs = queuedRunConfigDifferences(frozen, {
+          modeId: selectedModeId,
+          modelId: selectedModelId,
+          configOptionValues,
+          agentRoleId: sessionConversationConfig.agentRoleId,
+        });
+        const tag =
+          differs.role && roleName
+            ? roleName
+            : [
+                differs.model ? face.modelLabel : null,
+                differs.mode ? modeLabel : null,
+                differs.options && !differs.model ? (face.reasoningLabel ?? null) : null,
+                differs.options && face.planOn
+                  ? t('sessions.messageQueue.details.plan', 'Plan')
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ') || null;
+        return {
+          agentLabel: sessionAgentConfig?.name ?? null,
+          roleName,
+          modelLabel: face.modelLabel,
+          reasoningLabel: face.reasoningLabel,
+          modeLabel,
+          planOn: face.planOn,
+          fastOn: face.fastOn,
+          differenceTag: tag,
+        };
+      },
+      [
+        configOptionSelectors,
+        configOptionValues,
+        modeOptions,
+        modelOptions,
+        queueAgentRoles,
+        selectedModeId,
+        selectedModelId,
+        sessionAgentConfig?.name,
+        sessionConversationConfig.agentRoleId,
+        t,
+      ]
+    );
     const billableSessionTurnCount = useMemo(
       () =>
         (conversationView ? countUserTurns(conversationView) : 0) +
@@ -4888,6 +5103,7 @@ export const SessionChatInterface = memo(
             const pendingHistoryEntry = buildDraftUserHistoryEntry(
               {
                 userId: derivedUserId,
+                userName: ownDisplayName(currentUser, derivedUserId),
                 inputBlocks,
                 timestamp: new Date().toISOString(),
                 inputConfig,
@@ -4999,6 +5215,81 @@ export const SessionChatInterface = memo(
       ]
     );
 
+    /** One Turn's frozen config, as a queue row carries it. */
+    const buildQueuedTurnConfig = useCallback(
+      (
+        inputBlocks: SessionInputBlock[],
+        options?: Pick<
+          DispatchInputBlocksOptions,
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'mcpServerIds'
+        >
+      ) => {
+        const turnModeId =
+          options?.modeIdOverride !== undefined ? options.modeIdOverride : selectedModeId;
+        const turnModelId =
+          options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
+        const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
+        const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
+        const issuePRMentions = prompt
+          ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
+          : undefined;
+        const inputConfig = buildSessionTurnInputConfig({
+          inputBlocks,
+          cliType: session.cliType,
+          agentType: session.agentType,
+          modeId: turnModeId,
+          modelId: turnModelId,
+          configOptionValues: turnConfigOptionValues,
+          issuePRMentions,
+          mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
+          agentRoleId:
+            options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
+          agentRoleRevision: options?.agentRole?.agentRoleRevision,
+          memory:
+            options?.agentRole === undefined
+              ? sessionConversationConfig.memory
+              : options.agentRole?.memory,
+          agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
+          resume: session.acpSessionId ?? undefined,
+        });
+        const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
+          prompt: inputConfig.prompt,
+          inputBlocks,
+          cliType: inputConfig.cliType,
+          agentType: inputConfig.agentType,
+          modeId: inputConfig.modeId ?? undefined,
+          modelId: inputConfig.modelId ?? undefined,
+          configOptionValues: inputConfig.configOptionValues ?? undefined,
+          issuePRMentions: inputConfig.issuePRMentions ?? undefined,
+          mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
+          agentRoleId: inputConfig.agentRoleId,
+          agentRoleRevision: inputConfig.agentRoleRevision,
+          memory: inputConfig.memory,
+          agentRoleSnapshot: inputConfig.agentRoleSnapshot,
+          resume: inputConfig.resume ?? undefined,
+          chainDepth: 0,
+        };
+
+        return { inputConfig, queuedInputConfig };
+      },
+      [
+        configOptionValues,
+        knownIssuePrItems,
+        sessionConversationConfig.memory,
+        mcpSelection.selectedIds,
+        repoFullName,
+        selectedModeId,
+        selectedModelId,
+        session.acpSessionId,
+        session.agentType,
+        session.cliType,
+      ]
+    );
+
     const queueInputBlocks = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
@@ -5013,55 +5304,11 @@ export const SessionChatInterface = memo(
         >
       ): Promise<boolean> => {
         try {
-          const turnModeId =
-            options?.modeIdOverride !== undefined ? options.modeIdOverride : selectedModeId;
-          const turnModelId =
-            options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
-          const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
+          const { inputConfig, queuedInputConfig } = buildQueuedTurnConfig(inputBlocks, options);
           const derivedUserId =
             (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
             currentUser?.id ??
             session.userId;
-          const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
-          const issuePRMentions = prompt
-            ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
-            : undefined;
-          const inputConfig = buildSessionTurnInputConfig({
-            inputBlocks,
-            cliType: session.cliType,
-            agentType: session.agentType,
-            modeId: turnModeId,
-            modelId: turnModelId,
-            configOptionValues: turnConfigOptionValues,
-            issuePRMentions,
-            mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
-            agentRoleId:
-              options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
-            agentRoleRevision: options?.agentRole?.agentRoleRevision,
-            memory:
-              options?.agentRole === undefined
-                ? sessionConversationConfig.memory
-                : options.agentRole?.memory,
-            agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
-            resume: session.acpSessionId ?? undefined,
-          });
-          const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
-            prompt: inputConfig.prompt,
-            inputBlocks,
-            cliType: inputConfig.cliType,
-            agentType: inputConfig.agentType,
-            modeId: inputConfig.modeId ?? undefined,
-            modelId: inputConfig.modelId ?? undefined,
-            configOptionValues: inputConfig.configOptionValues ?? undefined,
-            issuePRMentions: inputConfig.issuePRMentions ?? undefined,
-            mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
-            agentRoleId: inputConfig.agentRoleId,
-            agentRoleRevision: inputConfig.agentRoleRevision,
-            memory: inputConfig.memory,
-            agentRoleSnapshot: inputConfig.agentRoleSnapshot,
-            resume: inputConfig.resume ?? undefined,
-            chainDepth: 0,
-          };
 
           if (!guardNewBillableTurn()) {
             return false;
@@ -5073,6 +5320,7 @@ export const SessionChatInterface = memo(
               task: queueTask(inputBlocks, options?.attachments),
               project: sessionProject,
               userId: derivedUserId,
+              userName: ownDisplayName(currentUser, derivedUserId),
               userTurnId,
               acpSessionConfig: queuedInputConfig,
               attachments: options?.attachments,
@@ -5096,21 +5344,12 @@ export const SessionChatInterface = memo(
       [
         runtime?.accountId,
         runtime?.contentMode,
+        buildQueuedTurnConfig,
         captureRunConfigForSend,
         captureSessionEvent,
-        configOptionValues,
-        currentUser?.id,
+        currentUser,
         guardNewBillableTurn,
-        knownIssuePrItems,
-        sessionConversationConfig.memory,
-        mcpSelection.selectedIds,
         pushMessageQueue,
-        repoFullName,
-        selectedModeId,
-        selectedModelId,
-        session.acpSessionId,
-        session.agentType,
-        session.cliType,
         session.userId,
         sessionProject,
         t,
@@ -5373,15 +5612,58 @@ export const SessionChatInterface = memo(
       ]
     );
 
+    const saveQueuedMessageEdit = queuedMessageEdit.save;
     const handleSendMessage = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
         agentRole?: SessionTurnAgentRoleSelection,
         options?: Omit<DispatchInputBlocksOptions, 'agentRole'>
       ): Promise<boolean> => {
+        const editing = queuedEdit;
+        if (editing) {
+          // Saving an edit replaces its row; it never dispatches, queues or steers.
+          const frozen = editing.original.acpSessionConfig;
+          const runConfig = {
+            modeId: queuedEditResolved.selectedModeId,
+            modelId: queuedEditResolved.selectedModelId,
+            configOptionValues: queuedEditResolved.configOptionValues,
+            agentRoleId:
+              agentRole === undefined
+                ? queuedRunConfigOf(editing.original).agentRoleId
+                : (agentRole?.agentRoleId ?? null),
+          };
+          return await saveQueuedMessageEdit({
+            composerBlocks: normalizeSessionInputBlocks(inputBlocks, ''),
+            attachments: options?.attachments ?? [],
+            runConfig,
+            buildConfig: (blocks) => {
+              const { queuedInputConfig } = buildQueuedTurnConfig(blocks, {
+                modeIdOverride: runConfig.modeId,
+                modelIdOverride: runConfig.modelId,
+                configOptionValuesOverride: runConfig.configOptionValues,
+                agentRole,
+                // MCP selection is not part of the edit: the row keeps its own.
+                mcpServerIds: (frozen?.mcpServerIds as McpServerId[] | undefined) ?? [],
+              });
+              return {
+                ...queuedInputConfig,
+                chainDepth: frozen?.chainDepth ?? 0,
+                ...(frozen?.resume ? { resume: frozen.resume } : {}),
+              } as NonNullable<MessageQueueItem['acpSessionConfig']>;
+            },
+          });
+        }
         return await dispatchInputBlocks(inputBlocks, { ...options, agentRole });
       },
-      [dispatchInputBlocks]
+      [
+        buildQueuedTurnConfig,
+        dispatchInputBlocks,
+        queuedEdit,
+        queuedEditResolved.configOptionValues,
+        queuedEditResolved.selectedModeId,
+        queuedEditResolved.selectedModelId,
+        saveQueuedMessageEdit,
+      ]
     );
 
     /**
@@ -6796,12 +7078,14 @@ export const SessionChatInterface = memo(
             inputConfig.inputBlocks,
             inputConfig.prompt ?? item.task
           );
+          const promotedUserId = item.paused
+            ? ((runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+              currentUser?.id ??
+              session.userId)
+            : item.userId;
           const pendingHistoryEntry = buildDraftUserHistoryEntry({
-            userId: item.paused
-              ? ((runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
-                currentUser?.id ??
-                session.userId)
-              : item.userId,
+            userId: promotedUserId,
+            userName: item.paused ? ownDisplayName(currentUser, promotedUserId) : item.userName,
             inputBlocks,
             timestamp: item.paused ? new Date().toISOString() : item.timestamp,
             inputConfig,
@@ -6891,94 +7175,6 @@ export const SessionChatInterface = memo(
         }
       },
       [captureSessionEvent, reorderMessageQueueItem, t]
-    );
-
-    const handleStartQueueItemEdit = useCallback(
-      async (item: MessageQueueItem) => {
-        const isFirstItem = messageQueue[0]?.$cid === item.$cid;
-        try {
-          captureSessionEvent('session/queue_item_edit_started', {
-            queue_item_id: item.$cid,
-            is_first_queue_item: isFirstItem,
-          });
-          await updateMessageQueueItem(item.$cid, (current) =>
-            current.isEditing
-              ? current
-              : { ...current, isEditing: true, editingStartedAt: getServerNow() }
-          );
-        } catch (error) {
-          console.error('Failed to start editing queued message', error);
-          captureSessionEvent('session/queue_item_edit_start_failed', {
-            queue_item_id: item.$cid,
-            is_first_queue_item: isFirstItem,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.queueEditError', 'Failed to edit message'), {
-            description: getErrorMessage(error),
-          });
-          throw error;
-        }
-      },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
-    );
-
-    const handleCancelQueueItemEdit = useCallback(
-      async (item: MessageQueueItem) => {
-        const isFirstItem = messageQueue[0]?.$cid === item.$cid;
-        try {
-          await updateMessageQueueItem(item.$cid, (current) =>
-            current.isEditing
-              ? { ...current, isEditing: false, editingStartedAt: undefined }
-              : current
-          );
-          captureSessionEvent('session/queue_item_edit_cancelled', {
-            queue_item_id: item.$cid,
-            is_first_queue_item: isFirstItem,
-          });
-        } catch (error) {
-          console.error('Failed to cancel queued message edit', error);
-          captureSessionEvent('session/queue_item_edit_cancel_failed', {
-            queue_item_id: item.$cid,
-            is_first_queue_item: isFirstItem,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.queueEditError', 'Failed to edit message'), {
-            description: getErrorMessage(error),
-          });
-          throw error;
-        }
-      },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
-    );
-
-    const handleSaveQueueItemEdit = useCallback(
-      async (item: MessageQueueItem, task: string) => {
-        const isFirstItem = messageQueue[0]?.$cid === item.$cid;
-        try {
-          await updateMessageQueueItem(item.$cid, (current) =>
-            buildEditedMessageQueueItem(current, task)
-          );
-          captureSessionEvent('session/queue_item_edit_saved', {
-            queue_item_id: item.$cid,
-            is_first_queue_item: isFirstItem,
-          });
-        } catch (error) {
-          console.error('Failed to save queued message edit', error);
-          captureSessionEvent('session/queue_item_edit_save_failed', {
-            queue_item_id: item.$cid,
-            is_first_queue_item: isFirstItem,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.queueEditError', 'Failed to edit message'), {
-            description: getErrorMessage(error),
-          });
-          throw error;
-        }
-      },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
     );
 
     const handleRemoveQueueItem = useCallback(
@@ -7694,7 +7890,7 @@ export const SessionChatInterface = memo(
     );
 
     return (
-      <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
+      <PrLinkProvider onOpenPrTab={markdownPrLinkHandler}>
         <SessionLinkProvider enabled={!!onNavigateSession}>
           {plaintextCopyConfirmation}
           {autoDeliveryDialogOpen ? (
@@ -8097,11 +8293,11 @@ export const SessionChatInterface = memo(
                         projectName={infoBarProjectName}
                         branch={isMobile ? null : infoBarBranch}
                         workspaceLocation={infoBarWorkspaceLocation}
-                        pr={canShowGitHubActions ? latestPr : null}
+                        pr={latestPr}
                         onOpenPr={prLinkHandler}
-                        prHistory={canShowGitHubActions ? pullRequestHistory : undefined}
+                        prHistory={pullRequestHistory.length > 0 ? pullRequestHistory : undefined}
                         onOpenHistoryPr={openHistoryPr}
-                        prLinks={canShowGitHubActions ? prLinks : undefined}
+                        prLinks={prLinkItems.length > 0 ? prLinks : undefined}
                         contextActions={infoBarContextActions}
                         onOpenAllChanges={onOpenAllChanges}
                         // Opener + every Session/Tab created here: the in-stream
@@ -8114,6 +8310,11 @@ export const SessionChatInterface = memo(
                               selectedMemberId={selectedProjectMemberRow?.id}
                               onSelectMember={setSelectedProjectMemberId}
                               onOpenPullRequest={(url) => {
+                                const parsed = parseGitHubPrLinkTarget(url);
+                                if (parsed && hasHostedGitHub && onOpenPrTab) {
+                                  openAnyPrTarget(parsed);
+                                  return;
+                                }
                                 void openExternalUrl(url);
                               }}
                             />
@@ -8151,6 +8352,7 @@ export const SessionChatInterface = memo(
                             : undefined
                         }
                         diffStat={infoBarDiffStat}
+                        historySync={historySync}
                         // Desktop only: mobile already shows catch-up in its header.
                         syncStatus={
                           isMobile
@@ -8188,9 +8390,12 @@ export const SessionChatInterface = memo(
                               }}
                               onRemove={handleRemoveQueueItem}
                               onReorder={handleReorderQueueItem}
-                              onEditStart={handleStartQueueItemEdit}
-                              onEditCancel={handleCancelQueueItemEdit}
-                              onEditSave={handleSaveQueueItemEdit}
+                              onEditStart={queuedMessageEdit.start}
+                              editingCid={queuedMessageEdit.edit?.cid ?? null}
+                              onFocusEdit={focusQueuedEditComposer}
+                              onPendingEditDiscarded={queuedMessageEdit.discardPendingSave}
+                              renderSenderAvatar={renderQueueSenderAvatar}
+                              describeRunConfig={describeQueuedRunConfig}
                               onSteer={handleSteerQueuedMessage}
                               showSteerAction={!isExternalHistoryRefreshing}
                               nativeSteerAvailable={nativeSteerAvailable}
@@ -8250,6 +8455,13 @@ export const SessionChatInterface = memo(
                             }
                             ref={inputAreaRef}
                             session={session}
+                            queueEdit={queuedEditComposer}
+                            onQueueEditCancel={handleQueuedEditCancel}
+                            agentRoleSelectionScope={
+                              queuedEdit
+                                ? queuedEditRoleScope(session.id, queuedEdit.cid)
+                                : undefined
+                            }
                             messageHistory={conversationView}
                             sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
                             isMachineRemoved={isMachineRemoved}
@@ -8259,26 +8471,51 @@ export const SessionChatInterface = memo(
                             externalHistorySyncLabel={externalHistorySyncLabel}
                             isDark={isDark}
                             isEmptyConversation={isEmptyConversation}
-                            selectedModeId={selectedModeId}
-                            selectedModelId={selectedModelId}
-                            durableAgentRoleId={sessionConversationConfig.agentRoleId}
-                            durableAgentRoleRevision={sessionConversationConfig.agentRoleRevision}
-                            durableAgentRoleSourceTurnKey={
-                              sessionConversationSourceFence.currentTurnKey
-                            }
-                            durableAgentRoleKnownTurnKeys={
-                              sessionConversationSourceFence.knownTurnKeys
-                            }
-                            durableAgentRoleReady={sessionDocReady || hasPendingConfig}
-                            runConfigHasUserEdits={sessionRunConfigHasUserEdits}
-                            modeOptions={modeOptions}
-                            modelOptions={modelOptions}
+                            {...(queuedEdit
+                              ? {
+                                  // The edit shows and changes the row's own frozen run config.
+                                  selectedModeId: queuedEditResolved.selectedModeId,
+                                  selectedModelId: queuedEditResolved.selectedModelId,
+                                  durableAgentRoleId: queuedRunConfigOf(queuedEdit.original)
+                                    .agentRoleId,
+                                  durableAgentRoleRevision:
+                                    queuedEdit.original.acpSessionConfig?.agentRoleRevision,
+                                  durableAgentRoleSourceTurnKey: queuedEditTargetKey,
+                                  durableAgentRoleKnownTurnKeys: [queuedEditTargetKey],
+                                  durableAgentRoleReady: true,
+                                  runConfigHasUserEdits: queuedEditHasUserEdits,
+                                  modeOptions: queuedEditSelector.modeOptions,
+                                  modelOptions: queuedEditSelector.modelOptions,
+                                }
+                              : {
+                                  selectedModeId,
+                                  selectedModelId,
+                                  durableAgentRoleId: sessionConversationConfig.agentRoleId,
+                                  durableAgentRoleRevision:
+                                    sessionConversationConfig.agentRoleRevision,
+                                  durableAgentRoleSourceTurnKey:
+                                    sessionConversationSourceFence.currentTurnKey,
+                                  durableAgentRoleKnownTurnKeys:
+                                    sessionConversationSourceFence.knownTurnKeys,
+                                  durableAgentRoleReady: sessionDocReady || hasPendingConfig,
+                                  runConfigHasUserEdits: sessionRunConfigHasUserEdits,
+                                  modeOptions,
+                                  modelOptions,
+                                })}
                             rateLimits={sessionRateLimits}
                             quotaConfig={sessionAgentConfig}
                             showCodexResetForecast={showCodexResetForecast}
                             isContextCompacting={isContextCompacting}
-                            configOptionSelectors={configOptionSelectors}
-                            configOptionValues={configOptionValues}
+                            configOptionSelectors={
+                              queuedEdit
+                                ? queuedEditSelector.configOptionSelectors
+                                : configOptionSelectors
+                            }
+                            configOptionValues={
+                              queuedEdit
+                                ? queuedEditResolved.configOptionValues
+                                : configOptionValues
+                            }
                             isRepoPublic={isRepoPublic}
                             isRepoLinked={isRepoLinked}
                             availableCommands={availableCommands}
@@ -8290,9 +8527,17 @@ export const SessionChatInterface = memo(
                             onRetryMcpDefaults={mcpSelection.retryDefaults}
                             // The info bar above owns this gap (and seats the queue).
                             hideTopSpacer
-                            onModeChange={handleModeChange}
-                            onModelChange={handleModelChange}
-                            onConfigOptionChange={handleConfigOptionChange}
+                            onModeChange={
+                              queuedEdit ? handleQueuedEditModeChange : handleModeChange
+                            }
+                            onModelChange={
+                              queuedEdit ? handleQueuedEditModelChange : handleModelChange
+                            }
+                            onConfigOptionChange={
+                              queuedEdit
+                                ? handleQueuedEditConfigOptionChange
+                                : handleConfigOptionChange
+                            }
                             onSendMessage={handleSendMessage}
                             onRestoreSession={onRestoreSession ?? toolbarActions?.onRestoreSession}
                             onStop={() => {

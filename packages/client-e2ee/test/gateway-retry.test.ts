@@ -53,19 +53,23 @@ function fixture(
 
 for (const kind of ['network', 'pairing'] as const) {
   it.each([502, 503, 504])(
-    `${kind} recovers from transient %s within two retries`,
+    `${kind} recovers from transient %s within three retries`,
     async (status) => {
       let calls = 0;
-      const { call } = fixture(kind, async () => {
-        if (++calls < 3) throw Object.assign(new Error('gateway'), { status });
-        return null;
-      });
+      const { call } = fixture(
+        kind,
+        async () => {
+          if (++calls < 4) throw Object.assign(new Error('gateway'), { status });
+          return null;
+        },
+        { retryBackoffMs: [0, 0, 0] }
+      );
       expect(await Effect.runPromise(call())).toBeNull();
-      expect(calls).toBe(3);
+      expect(calls).toBe(4);
     }
   );
 
-  it(`${kind} stops after three failed gateway attempts even with a longer configured backoff`, async () => {
+  it(`${kind} stops after four failed gateway attempts even with a longer configured backoff`, async () => {
     let calls = 0;
     const { call } = fixture(
       kind,
@@ -73,10 +77,10 @@ for (const kind of ['network', 'pairing'] as const) {
         calls++;
         throw new Error('Server Error: 503 Service Unavailable');
       },
-      { retryBackoffMs: [0, 0, 0, 0] }
+      { retryBackoffMs: [0, 0, 0, 0, 0] }
     );
     expect(Exit.isFailure(await Effect.runPromiseExit(call()))).toBe(true);
-    expect(calls).toBe(3);
+    expect(calls).toBe(4);
   });
 
   it.each([
@@ -109,7 +113,7 @@ for (const kind of ['network', 'pairing'] as const) {
     expect(calls).toBe(1);
   });
 
-  it(`${kind} advances both default retry delays on TestClock without real sleeps`, async () => {
+  it(`${kind} advances all default retry delays on TestClock without real sleeps`, async () => {
     const runtime = ManagedRuntime.make(TestClock.layer({ warningDelay: '1 hour' }));
     try {
       await runtime.context();
@@ -123,16 +127,16 @@ for (const kind of ['network', 'pairing'] as const) {
         async () => {
           calls++;
           entered();
-          if (calls < 3) throw Object.assign(new Error('gateway'), { status: 504 });
+          if (calls < 4) throw Object.assign(new Error('gateway'), { status: 504 });
           return null;
         },
         {}
       );
       const pending = runtime.runPromiseExit(call());
       await started;
-      await runtime.runPromise(TestClock.adjust(210));
+      await runtime.runPromise(TestClock.adjust(1200));
       expect(Exit.isSuccess(await pending)).toBe(true);
-      expect(calls).toBe(3);
+      expect(calls).toBe(4);
     } finally {
       await runtime.dispose();
     }

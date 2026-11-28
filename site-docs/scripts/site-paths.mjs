@@ -9,6 +9,27 @@ export function localePrefix(locale) {
   return locale === 'en' ? '' : `/${locale}`;
 }
 
+const PREFIXED_LOCALES = SITE_LOCALES.filter((locale) => locale !== 'en').sort(
+  (a, b) => localePrefix(b).length - localePrefix(a).length
+);
+
+export function detectPathLocale(sitePath) {
+  for (const locale of PREFIXED_LOCALES) {
+    const prefix = localePrefix(locale);
+    if (sitePath === prefix || sitePath.startsWith(`${prefix}/`)) {
+      return locale;
+    }
+  }
+  return 'en';
+}
+
+export function stripLocalePrefix(sitePath) {
+  const locale = detectPathLocale(sitePath);
+  const prefix = localePrefix(locale);
+  const rest = prefix ? sitePath.slice(prefix.length) : sitePath;
+  return { locale, basePath: rest.length === 0 ? '/' : rest };
+}
+
 const BASE_STATIC_PATHS = [
   '/',
   '/home',
@@ -24,6 +45,33 @@ const BASE_STATIC_PATHS = [
   '/account-deletion',
   '/404',
 ];
+
+const STATIC_ROUTE_SOURCES = {
+  '/': [
+    'lib/landing-seo.ts',
+    'components/landing-copy.ts',
+    'components/landing.tsx',
+    'components/landing-feature-tabs.tsx',
+    'components/landing-power-i18n.ts',
+    'components/landing-preview-data.ts',
+    'src/site-pages/landing.tsx',
+  ],
+  '/price': [
+    'src/site-pages/pricing.tsx',
+    'components/pricing-copy.ts',
+    'components/pricing-page.tsx',
+  ],
+  '/download': ['src/site-pages/download.tsx', 'components/download-page.tsx'],
+  '/download/nightly': [
+    'src/site-pages/download.tsx',
+    'components/nightly-download-page.tsx',
+    'components/nightly-downloads.tsx',
+  ],
+  '/blog': ['src/site-pages/blog.tsx', 'components/blog.tsx'],
+  '/changelog': ['src/site-pages/changelog.tsx', 'components/changelog.tsx'],
+};
+
+const LEGAL_PAGE_SLUGS = new Set(['privacy', 'terms', 'support', 'account-deletion']);
 
 function localizePath(enPath, locale) {
   const prefix = localePrefix(locale);
@@ -88,7 +136,11 @@ export function slugFromMdxFile(file, rootDir) {
   return routeSegments.join('/');
 }
 
-function docsPaths(packageRoot, locale) {
+function toPosixRelative(packageRoot, file) {
+  return path.relative(packageRoot, file).replace(/\\/gu, '/');
+}
+
+function docsEntries(packageRoot, locale) {
   const dir = path.join(packageRoot, 'content', 'docs', locale);
   const base = localizePath('/docs', locale);
 
@@ -96,11 +148,14 @@ function docsPaths(packageRoot, locale) {
     .filter((file) => !hasDraftFrontmatter(file))
     .map((file) => {
       const slug = slugFromMdxFile(file, dir);
-      return slug.length === 0 ? base : `${base}/${slug}`;
+      return {
+        path: slug.length === 0 ? base : `${base}/${slug}`,
+        source: toPosixRelative(packageRoot, file),
+      };
     });
 }
 
-function collectionPaths(packageRoot, collection, locale) {
+function collectionEntries(packageRoot, collection, locale) {
   const dir = path.join(packageRoot, 'content', collection, locale);
   const base = localizePath(`/${collection}`, locale);
 
@@ -108,16 +163,75 @@ function collectionPaths(packageRoot, collection, locale) {
     .filter((file) => !hasDraftFrontmatter(file))
     .map((file) => {
       const slug = slugFromMdxFile(file, dir);
-      return slug.length === 0 ? base : `${base}/${slug}`;
+      return {
+        path: slug.length === 0 ? base : `${base}/${slug}`,
+        source: toPosixRelative(packageRoot, file),
+      };
     });
+}
+
+export function collectSitePathSources(packageRoot) {
+  const sourcesByPath = new Map();
+  const addSources = (sitePath, sources) => {
+    const existing = sourcesByPath.get(sitePath);
+    if (!existing) {
+      sourcesByPath.set(sitePath, [...sources]);
+      return;
+    }
+    for (const source of sources) {
+      if (!existing.includes(source)) existing.push(source);
+    }
+  };
+
+  for (const locale of SITE_LOCALES) {
+    const docs = docsEntries(packageRoot, locale);
+    for (const entry of docs) addSources(entry.path, [entry.source]);
+
+    const blog = collectionEntries(packageRoot, 'blog', locale);
+    for (const entry of blog) addSources(entry.path, [entry.source]);
+
+    const changelog = collectionEntries(packageRoot, 'changelog', locale);
+    for (const entry of changelog) addSources(entry.path, [entry.source]);
+
+    for (const basePath of BASE_STATIC_PATHS) {
+      const localized = localizePath(basePath, locale);
+      if (basePath === '/home' || basePath === '/404') continue;
+      if (basePath === '/docs') {
+        if (!sourcesByPath.has(localized)) addSources(localized, []);
+        continue;
+      }
+
+      const legalSlug = basePath.slice(1);
+      if (LEGAL_PAGE_SLUGS.has(legalSlug)) {
+        const legalFile = path.join(packageRoot, 'content', 'pages', locale, `${legalSlug}.mdx`);
+        addSources(localized, exists(legalFile) ? [toPosixRelative(packageRoot, legalFile)] : []);
+        continue;
+      }
+
+      const staticSources = STATIC_ROUTE_SOURCES[basePath] ?? [];
+      if (basePath === '/blog') {
+        addSources(localized, [...staticSources, ...blog.map((entry) => entry.source)]);
+      } else if (basePath === '/changelog') {
+        addSources(localized, [...staticSources, ...changelog.map((entry) => entry.source)]);
+      } else {
+        addSources(localized, staticSources);
+      }
+    }
+  }
+
+  return sourcesByPath;
 }
 
 export function collectSitePaths(packageRoot) {
   const paths = [
     ...STATIC_PATHS,
-    ...SITE_LOCALES.flatMap((locale) => docsPaths(packageRoot, locale)),
-    ...SITE_LOCALES.flatMap((locale) => collectionPaths(packageRoot, 'blog', locale)),
-    ...SITE_LOCALES.flatMap((locale) => collectionPaths(packageRoot, 'changelog', locale)),
+    ...SITE_LOCALES.flatMap((locale) => docsEntries(packageRoot, locale).map((e) => e.path)),
+    ...SITE_LOCALES.flatMap((locale) =>
+      collectionEntries(packageRoot, 'blog', locale).map((e) => e.path)
+    ),
+    ...SITE_LOCALES.flatMap((locale) =>
+      collectionEntries(packageRoot, 'changelog', locale).map((e) => e.path)
+    ),
   ];
 
   return Array.from(new Set(paths)).sort((a, b) => a.localeCompare(b));

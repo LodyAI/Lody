@@ -11,6 +11,8 @@ export const nativeRpcStore = (store: E2eeRpcOriginals): E2eeRpcStore['Service']
   return E2eeRpcStore.of({
     read: (direction, key) => attempt(() => store.read(direction, key)),
     retain: (direction, key, record) => attempt(() => store.retain(direction, key, record)),
+    replaceSent: (key, expectedFrame, record) =>
+      attempt(() => store.replaceSent(key, expectedFrame, record)),
     readResponse: (key, sequence) => attempt(() => store.readResponse(key, sequence)),
     retainResponse: (key, sequence, frame) =>
       attempt(() => store.retainResponse(key, sequence, frame)),

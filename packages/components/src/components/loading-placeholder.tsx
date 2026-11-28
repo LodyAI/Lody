@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { Spinner } from '@lody/ui/spinner';
@@ -57,6 +58,9 @@ const styles = stylex.create({
     fontSize: themeFontSize.xs,
     lineHeight: themeSpace[5],
   },
+  action: {
+    marginTop: themeSpace[3],
+  },
 });
 
 export function LoadingPlaceholder({
@@ -64,6 +68,7 @@ export function LoadingPlaceholder({
   description = '',
   variant = 'viewport',
   startsNow = false,
+  action,
 }: {
   title?: string;
   description?: string;
@@ -81,6 +86,7 @@ export function LoadingPlaceholder({
    * only the empty pane instead of flashing the mark.
    */
   startsNow?: boolean;
+  action?: ReactNode;
 }) {
   if (variant === 'boot') {
     return (
@@ -91,6 +97,7 @@ export function LoadingPlaceholder({
               {title}
             </div>
             {description ? <div>{description}</div> : null}
+            {action ? <div {...stylex.props(styles.action)}>{action}</div> : null}
           </>
         }
       />
@@ -108,6 +115,7 @@ export function LoadingPlaceholder({
                 {title}
               </div>
               {description ? <div>{description}</div> : null}
+              {action ? <div {...stylex.props(styles.action)}>{action}</div> : null}
             </>
           }
         />
@@ -122,6 +130,7 @@ export function LoadingPlaceholder({
         <div>
           <div {...stylex.props(styles.title)}>{title}</div>
           {description ? <div {...stylex.props(styles.description)}>{description}</div> : null}
+          {action ? <div {...stylex.props(styles.action)}>{action}</div> : null}
         </div>
       </div>
     </div>

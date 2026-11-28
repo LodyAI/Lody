@@ -225,6 +225,11 @@ import type {
   LoroStreamsLiveTransport,
 } from './live-mode-policy';
 import { LoroStreamsLiveModePolicy } from './live-mode-policy';
+import {
+  isTransientGatewayStatus,
+  TRANSIENT_GATEWAY_RETRY_DELAYS_MS,
+  transientGatewayRetryDelayMs,
+} from '@lody/shared/transient-gateway';
 
 const JSON_RPC_VERSION = '2.0';
 export const LORO_STREAMS_RPC_VERSION = '1';
@@ -1224,6 +1229,16 @@ const toLoroGatewayError = (
   return new Error(`Failed to ${action} ${streamId}${contextSuffix}: ${error.message}`);
 };
 
+/**
+ * Pure reads whose request append is repeated after a gateway 502/503/504. Any
+ * other method may already have been delivered when a 502/504 is returned, and
+ * the plaintext server does not deduplicate it, so it fails at once instead.
+ */
+const TRANSIENT_APPEND_RETRY_METHODS: ReadonlySet<string> = new Set([
+  'machine/status',
+  'machine/ping',
+]);
+
 const unwrapStreamResult = <T>(
   action: string,
   streamId: string,
@@ -1308,7 +1323,8 @@ export function createLoroStreamsJsonStreamClient(options: {
   liveIdleTimeoutMs?: number;
   webSocket?:
     | StreamsClientWebSocketOptions
-    | (Omit<StreamsClientWebSocketOptions, 'auth'> & {
+    | (Omit<StreamsClientWebSocketOptions, 'auth' | 'url'> & {
+        readonly url?: string;
         readonly auth?: LoroStreamsWebSocketOptions['auth'];
       });
   timeout?: Partial<TimeoutConfig>;
@@ -1338,15 +1354,22 @@ export function createLoroStreamsJsonStreamClient(options: {
   const getStreamClient = (
     streamId: string,
     operation: JsonStreamOperation = 'ensure'
-  ): JsonStreamClientBinding => {
+  ): JsonStreamClientBinding & { webSocket?: StreamsClientWebSocketOptions } => {
+    const baseUrl = normalizeLoroGatewayBaseUrl(options.getBaseUrl?.() ?? options.baseUrl);
     const url = getStreamUrl(streamId, operation);
     const method = operation === 'append' ? 'POST' : 'GET';
+    const resolvedWebSocket = wsEnabled
+      ? ({
+          ...options.webSocket,
+          url: options.webSocket?.url ?? baseUrl,
+        } as StreamsClientWebSocketOptions)
+      : undefined;
     return {
       client: new StreamsClient({
         url,
         auth: async () => await options.getToken(),
         fetch: fetchImpl as typeof fetch,
-        ...(wsEnabled ? { webSocket: options.webSocket } : {}),
+        ...(resolvedWebSocket ? { webSocket: resolvedWebSocket } : {}),
         // RPC appends retain their request deadline; SDK bulk uploads default to 60s.
         timeout:
           operation === 'append'
@@ -1362,6 +1385,7 @@ export function createLoroStreamsJsonStreamClient(options: {
         method: operation === 'ensure' ? 'PUT' : method,
         url,
       },
+      webSocket: resolvedWebSocket,
     };
   };
 
@@ -1423,7 +1447,7 @@ export function createLoroStreamsJsonStreamClient(options: {
       onBatch: LoroJsonLiveBatchHandler,
       liveOptions?: LoroJsonLiveReadOptions
     ): Promise<void> => {
-      const { client: streamClient, context } = getStreamClient(streamId, 'live');
+      const { client: streamClient, context, webSocket } = getStreamClient(streamId, 'live');
 
       const modePolicy = liveOptions?.modePolicy;
       const requestedMode = modePolicy?.selectRequestMode() ?? options.liveMode ?? 'sse';
@@ -1452,7 +1476,7 @@ export function createLoroStreamsJsonStreamClient(options: {
         for await (const event of streamClient.live({
           offset: state.nextOffset ?? 'now',
           mode: liveMode,
-          ...(wsEnabled ? { webSocket: options.webSocket } : {}),
+          ...(webSocket ? { webSocket } : {}),
           ...(liveOptions?.autoCreate !== undefined ? { autoCreate: liveOptions.autoCreate } : {}),
           signal: watchdog.signal,
         })) {
@@ -2421,11 +2445,21 @@ const parseRpcSuccessResult = async (
   return parsed.success ? (parsed.data as SessionPreviewRevokeResponse) : null;
 };
 
+export type LoroStreamsMachineRpcRawOutcome =
+  | { readonly ok: true; readonly result: unknown }
+  | {
+      readonly ok: false;
+      readonly error: string;
+      readonly code?: string;
+      readonly data?: unknown;
+    };
+
 export type LoroStreamsRpcPendingRegistration = {
   ownerId?: string;
   machineId: string;
   method: LoroStreamsRpcMethod;
   timeoutMs: number;
+  onRawResponse?: (outcome: LoroStreamsMachineRpcRawOutcome) => void;
   refreshContext?: {
     configId: AgentConfigId;
     cliType: RpcAgentConfigCliType;
@@ -2960,6 +2994,21 @@ export class LoroStreamsRpcResponseDispatcher {
       return;
     }
 
+    if (finalPending.onRawResponse) {
+      if (parsed.data.error) {
+        finalPending.onRawResponse({
+          ok: false,
+          error: parsed.data.error.message,
+          code: parsed.data.error.code,
+          ...(parsed.data.error.data !== undefined ? { data: parsed.data.error.data } : {}),
+        });
+      } else {
+        finalPending.onRawResponse({ ok: true, result: parsed.data.result });
+      }
+      finalPending.resolve(null);
+      return;
+    }
+
     if (parsed.data.error) {
       let error = parsed.data.error;
       const encryptedErrorData = CodeCollabV2RpcContentEnvelopeSchema.safeParse(error.data);
@@ -3074,6 +3123,15 @@ export class LoroStreamsMachineRpcClient {
         params: unknown,
         timeoutMs: number
       ) => Promise<E2eeQueryResult | null>;
+      /**
+       * Optional in-band proxy transport (for example, delegating through a running
+       * local daemon). Returning `'fallback'` transparently starts and uses `streamClient`.
+       */
+      proxyCall?: (
+        method: LoroStreamsRpcMethod,
+        params: unknown,
+        timeoutMs: number
+      ) => Promise<LoroStreamsMachineRpcRawOutcome | null | 'fallback'>;
       responseDispatcher?: LoroStreamsRpcResponseDispatcher;
       logger?: LoggerLike;
       now?: () => number;
@@ -3112,8 +3170,121 @@ export class LoroStreamsMachineRpcClient {
   }
 
   async start(): Promise<void> {
-    if (this.stopped || this.options.encryptedQuery) return;
+    if (this.stopped || this.options.encryptedQuery || this.options.proxyCall) return;
     await this.responseDispatcher.start();
+  }
+
+  /**
+   * Forward an already-validated method/params pair over the configured
+   * `streamClient` and `responseDispatcher`, returning the raw JSON-RPC outcome.
+   */
+  async callRaw(args: {
+    method: LoroStreamsRpcMethod;
+    params: unknown;
+    timeoutMs: number;
+    expiresAt?: number;
+    signal?: AbortSignal;
+  }): Promise<LoroStreamsMachineRpcRawOutcome | null> {
+    if (this.stopped || args.signal?.aborted) return null;
+    if (!this.options.streamClient) throw new Error('RPC transport unavailable');
+    await this.responseDispatcher.start();
+    if (this.stopped || args.signal?.aborted) return null;
+
+    const now = Math.round(this.options.now?.() ?? Date.now());
+    const expiresAt = args.expiresAt ?? now + Math.max(0, args.timeoutMs);
+    const timeoutMs = Math.max(0, expiresAt - now);
+    if (args.expiresAt !== undefined && timeoutMs <= 0) return null;
+    const requestId = crypto.randomUUID();
+    const startedAtMs = Date.now();
+    let rawOutcome: LoroStreamsMachineRpcRawOutcome | null = null;
+    const promise = this.responseDispatcher.registerPending(requestId, {
+      ownerId: this.pendingOwnerId,
+      machineId: this.options.machineId,
+      method: args.method,
+      timeoutMs,
+      onRawResponse: (outcome) => {
+        rawOutcome = outcome;
+      },
+      startedAtMs,
+    });
+
+    const handleAbort = (): void => {
+      this.responseDispatcher.takePending(requestId)?.resolve(null);
+    };
+    args.signal?.addEventListener('abort', handleAbort, { once: true });
+    if (args.signal?.aborted) {
+      handleAbort();
+      return null;
+    }
+
+    try {
+      const request = {
+        jsonrpc: JSON_RPC_VERSION,
+        id: requestId,
+        rpcVersion: this.options.rpcVersion ?? LORO_STREAMS_RPC_VERSION,
+        machineId: this.options.machineId,
+        workspaceId: this.options.workspaceId,
+        replyTo: this.responseDispatcher.getResponseStreamId(),
+        sentAt: now,
+        expiresAt,
+        method: args.method,
+        params: args.params,
+      } as LoroStreamsRpcRequest;
+      const streamClient = this.options.streamClient;
+      const retryDelays = TRANSIENT_APPEND_RETRY_METHODS.has(request.method)
+        ? TRANSIENT_GATEWAY_RETRY_DELAYS_MS
+        : [];
+      const appendPromise = (async () => {
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            await streamClient.appendJson(this.requestStreamId, request);
+            break;
+          } catch (error) {
+            const baseDelay = retryDelays[attempt];
+            const delay =
+              baseDelay === undefined ? undefined : transientGatewayRetryDelayMs(baseDelay);
+            if (
+              delay === undefined ||
+              this.stopped ||
+              args.signal?.aborted ||
+              !(error instanceof LoroStreamsGatewayError) ||
+              !isTransientGatewayStatus(error.status) ||
+              Date.now() + delay >= startedAtMs + timeoutMs
+            )
+              throw error;
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
+        }
+        this.responseDispatcher.markAppendFinished(requestId);
+      })();
+      const firstSettled = await Promise.race([
+        appendPromise.then(() => ({ type: 'append' as const })),
+        promise.then(() => ({ type: 'response' as const })),
+      ]);
+      if (firstSettled.type === 'response') {
+        void appendPromise.catch(() => undefined);
+        return rawOutcome;
+      }
+      await promise;
+      return rawOutcome;
+    } catch (error) {
+      const pending = this.responseDispatcher.takePending(requestId);
+      if (!pending) return rawOutcome;
+      const isMissingRequestStream =
+        error instanceof LoroStreamsGatewayError && error.status === 404;
+      const message = isMissingRequestStream
+        ? 'Machine RPC request stream is missing; the CLI is not accepting RPC requests.'
+        : error instanceof Error
+          ? error.message
+          : String(error);
+      return {
+        ok: false,
+        code: isMissingRequestStream ? 'machine_rpc_unavailable' : 'request_failed',
+        error: message,
+      };
+    } finally {
+      args.signal?.removeEventListener('abort', handleAbort);
+    }
   }
 
   stop(): void {
@@ -4949,6 +5120,12 @@ export class LoroStreamsMachineRpcClient {
         requestStreamId: this.requestStreamId,
         responseStreamId: this.responseDispatcher.getResponseStreamId(),
       });
+      const hasProgressCallbacks =
+        (args.method === 'machine/acp-capabilities-refresh' &&
+          args.onAcpBinaryProgress !== undefined) ||
+        (args.method === 'machine/acp-binary-install' && args.onAcpBinaryProgress !== undefined) ||
+        (args.method === 'machine/acp-authenticate' &&
+          args.onAcpAuthenticationProgress !== undefined);
       const appendPromise = (async () => {
         if (this.options.encryptedQuery) {
           const outcome = await this.options.encryptedQuery(
@@ -4965,9 +5142,60 @@ export class LoroStreamsMachineRpcClient {
               method: request.method,
               ...outcome,
             });
-        } else {
-          if (!this.options.streamClient) throw new Error('RPC transport unavailable');
-          await this.options.streamClient?.appendJson(this.requestStreamId, request);
+          return;
+        }
+        if (this.options.proxyCall && !cancellable && !hasProgressCallbacks) {
+          const outcome = await this.options.proxyCall(request.method, request.params, timeoutMs);
+          if (outcome !== 'fallback') {
+            if (outcome && !this.stopped) {
+              await this.responseDispatcher.acceptAuthenticatedResponse({
+                jsonrpc: JSON_RPC_VERSION,
+                id: requestId,
+                rpcVersion: request.rpcVersion,
+                machineId: request.machineId,
+                method: request.method,
+                ...(outcome.ok
+                  ? { result: outcome.result }
+                  : {
+                      error: {
+                        code: outcome.code ?? 'request_failed',
+                        message: outcome.error,
+                        ...(outcome.data !== undefined ? { data: outcome.data } : {}),
+                      },
+                    }),
+              });
+            } else if (!outcome && !this.stopped) {
+              this.responseDispatcher.takePending(requestId)?.resolve(null);
+            }
+            return;
+          }
+          await this.responseDispatcher.start();
+        } else if (this.options.proxyCall) {
+          await this.responseDispatcher.start();
+        }
+        const streamClient = this.options.streamClient;
+        if (!streamClient) throw new Error('RPC transport unavailable');
+        const retryDelays = TRANSIENT_APPEND_RETRY_METHODS.has(request.method)
+          ? TRANSIENT_GATEWAY_RETRY_DELAYS_MS
+          : [];
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            await streamClient.appendJson(this.requestStreamId, request);
+            break;
+          } catch (error) {
+            const baseDelay = retryDelays[attempt];
+            const delay =
+              baseDelay === undefined ? undefined : transientGatewayRetryDelayMs(baseDelay);
+            if (
+              delay === undefined ||
+              this.stopped ||
+              !(error instanceof LoroStreamsGatewayError) ||
+              !isTransientGatewayStatus(error.status) ||
+              Date.now() + delay >= startedAtMs + timeoutMs
+            )
+              throw error;
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
         }
         requestAppended = true;
         this.responseDispatcher.markAppendFinished(requestId);

@@ -2,11 +2,23 @@ import { recoveryAvailabilityMessage } from '@/lib/e2ee-actionable-failure';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  CircleAlert,
+  CircleCheck,
+  CircleMinus,
+  CircleX,
+  Clock,
+  FileKey2,
+  KeyRound,
+  Lock,
+  MoreHorizontal,
+  type LucideIcon,
+} from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Alert } from '@lody/ui/alert';
-import { Badge, type BadgeTone } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
+import { Menu } from '@lody/ui/menu';
 import { Spinner } from '@lody/ui/spinner';
 import { AlertDialog } from '@/ui/dialog';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -14,12 +26,16 @@ import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { CompactRow, CompactSection } from '../compact-layout';
+import { settingsMaterial } from '../material.stylex';
+import { SettingsInfo } from '../settings-info';
+import { settingsSurface } from '../surface';
 import {
   useRecoveryPort,
   type RecoveryPasskey,
   type RecoveryPlan,
   type RecoveryRestoreResult,
   type RecoveryReplacementPort,
+  type RecoveryReplacementStep,
   type RecoverySecurityEvent,
   type RecoveryUnlockMethod,
   type RecoveryUnlockOptions,
@@ -53,6 +69,10 @@ const validPasswordInput = (value: string) =>
   [...value.normalize('NFC')].length >= MIN_PASSWORD_CHARS &&
   new TextEncoder().encode(value.normalize('NFC')).byteLength <= 1024;
 
+const flushHeadingTheme = stylex.createTheme(settingsMaterial, {
+  headingInset: '0px',
+});
+
 const styles = stylex.create({
   body: {
     display: 'flex',
@@ -76,27 +96,213 @@ const styles = stylex.create({
     fontSize: text.footnoteSize,
   },
   actions: { display: 'flex', gap: space[2], flexWrap: 'wrap', alignItems: 'center' },
-  rowActions: { display: 'flex', gap: space[2], flexWrap: 'wrap', justifyContent: 'flex-end' },
-  stack: { display: 'flex', flexDirection: 'column', gap: space[4] },
-  line: { display: 'block' },
-  // Name and status share one column so the buttons wrap below them at the same left edge.
-  workspace: {
-    alignSelf: 'stretch',
+  methodRow: {
     display: 'flex',
-    flexWrap: 'wrap',
     alignItems: 'center',
-    columnGap: space[3],
-    rowGap: space[2],
-  },
-  workspaceLabel: {
-    display: 'flex',
-    flexDirection: 'column',
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: '16em',
+    justifyContent: 'space-between',
+    gap: space[3],
+    minHeight: '52px',
+    paddingInline: space[4],
+    paddingBlock: '10px',
     minWidth: 0,
   },
+  methodIdentity: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    flex: '1 1 0%',
+    minWidth: 0,
+  },
+  methodIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '16px',
+    height: '16px',
+    color: colors.secondaryLabel,
+  },
+  methodBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0,
+    flexGrow: 1,
+  },
+  methodHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: space[1],
+    minWidth: 0,
+  },
+  methodTitle: {
+    margin: 0,
+    minWidth: 0,
+    fontSize: text.bodySize,
+    fontWeight: 500,
+    lineHeight: 1.35,
+    color: colors.label,
+    overflowWrap: 'anywhere',
+  },
+  methodMeta: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: text.footnoteSize,
+    lineHeight: 1.35,
+    color: colors.secondaryLabel,
+  },
+  methodMetaSuccess: { color: colors.success },
+  methodMetaWarning: { color: colors.warning },
+  methodNote: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: 1.4,
+    color: colors.secondaryLabel,
+  },
+  rowActions: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: space[1],
+    flexWrap: 'nowrap',
+  },
+  workspaceRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+    minHeight: '48px',
+    paddingInline: space[4],
+    paddingBlock: '10px',
+    minWidth: 0,
+  },
+  workspaceInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    flex: '1 1 0%',
+    minWidth: 0,
+  },
+  workspaceName: {
+    margin: 0,
+    fontSize: text.bodySize,
+    fontWeight: 500,
+    lineHeight: 1.35,
+    color: colors.label,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  workspaceStatus: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: text.footnoteSize,
+    lineHeight: 1.35,
+    color: colors.secondaryLabel,
+  },
+  workspaceStatusEnd: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: '6px',
+    fontSize: text.footnoteSize,
+    lineHeight: 1.35,
+    color: colors.tertiaryLabel,
+    whiteSpace: 'nowrap',
+  },
+  workspaceStatusSuccess: { color: colors.success },
+  workspaceStatusWarning: { color: colors.warning },
+  statusDot: {
+    flexShrink: 0,
+    width: '6px',
+    height: '6px',
+    borderRadius: '9999px',
+    backgroundColor: colors.tertiaryLabel,
+  },
+  statusDotSuccess: { backgroundColor: colors.success },
+  statusDotWarning: { backgroundColor: colors.warning },
+  workspaceAction: { flexShrink: 0 },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[6], alignSelf: 'stretch' },
+  progressTitle: {
+    margin: 0,
+    paddingInline: space[4],
+    paddingTop: space[3],
+    paddingBottom: space[2],
+    fontSize: text.footnoteSize,
+    fontWeight: 500,
+    color: colors.secondaryLabel,
+  },
+  progressList: { margin: 0, padding: 0, listStyleType: 'none' },
+  progressRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minHeight: '44px',
+    justifyContent: 'center',
+    paddingInline: space[4],
+    paddingBlock: '10px',
+  },
+  progressLine: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+    minWidth: 0,
+  },
+  progressStatus: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: '6px',
+    fontSize: text.footnoteSize,
+    lineHeight: 1.35,
+    color: colors.secondaryLabel,
+    whiteSpace: 'nowrap',
+  },
+  progressStatusDanger: { color: colors.destructive },
+  line: { display: 'block' },
 });
+
+type RestoreRowView = {
+  /** `null` while the workspace is still restoring: the row shows a spinner. */
+  icon: LucideIcon | null;
+  tone: 'neutral' | 'success' | 'warning' | 'danger';
+  status: string;
+  detail?: string;
+};
+
+/** One workspace's restore outcome as a status mark, a short label and, when it needs one, a next step. */
+function restoreRowView(row: RecoveryRestoreResult): RestoreRowView {
+  if (row.outcome === 'Restoring')
+    return { icon: null, tone: 'neutral', status: 'e2ee.recovery.restoreStatus.restoring' };
+  if (row.outcome === 'Committed')
+    return row.partialEpochKey
+      ? {
+          icon: CircleAlert,
+          tone: 'warning',
+          status: 'e2ee.recovery.restoreStatus.partial',
+          detail: 'e2ee.recovery.restoreStatus.partialHelp',
+        }
+      : { icon: CircleCheck, tone: 'success', status: 'e2ee.recovery.restoreStatus.restored' };
+  if (row.outcome === 'Pending' || row.outcome === 'Unconfirmed')
+    return {
+      icon: Clock,
+      tone: 'neutral',
+      status: 'e2ee.recovery.restoreStatus.waiting',
+      detail: 'e2ee.recovery.restoreStatus.waitingHelp',
+    };
+  if (row.outcome === 'not-backed-up')
+    return {
+      icon: CircleMinus,
+      tone: 'neutral',
+      status: 'e2ee.recovery.restoreStatus.notBackedUp',
+      detail: 'e2ee.recovery.restoreStatus.notBackedUpHelp',
+    };
+  return { icon: CircleX, tone: 'danger', status: 'e2ee.recovery.restoreStatus.failed' };
+}
 
 type Result =
   | {
@@ -115,6 +321,7 @@ type Result =
         | 'e2ee.recovery.passwordRemoved'
         | 'e2ee.recovery.passwordRemoveIncomplete';
     }
+  | { kind: 'replacePending'; workspace?: string; step?: RecoveryReplacementStep }
   | {
       kind: 'restored';
       results: readonly RecoveryRestoreResult[];
@@ -161,7 +368,9 @@ export function useWorkspaceRecoveryReady(
   return enabled && ready?.scope === scope ? ready.value : undefined;
 }
 
-const statusBadge: Record<RecoveryWorkspaceStatus['kind'], { key: string; tone: BadgeTone }> = {
+type MethodMetaTone = 'neutral' | 'success' | 'warning';
+
+const statusMeta: Record<RecoveryWorkspaceStatus['kind'], { key: string; tone: MethodMetaTone }> = {
   verified: { key: 'e2ee.recovery.workspace.verified', tone: 'success' },
   saved: { key: 'e2ee.recovery.workspace.saved', tone: 'neutral' },
   notSet: { key: 'e2ee.recovery.workspace.notSet', tone: 'warning' },
@@ -179,13 +388,41 @@ export function preferredRecoveryUnlock(
   return passkey && methods.hasPasskey !== false ? 'passkey' : 'file';
 }
 
+const recoveryErrorKey = (code: string, method?: RecoveryUnlockMethod) =>
+  recoveryAvailabilityMessage(code) ??
+  (code.includes('e2ee_recovery_disabled')
+    ? 'e2ee.recovery.disabled'
+    : code.includes('e2ee_recovery_prf-unavailable')
+      ? 'e2ee.recovery.passkeyUnsupported'
+      : code.includes('e2ee_recovery_replacing')
+        ? 'e2ee.recovery.replacingElsewhere'
+        : code.includes('e2ee_recovery_exists')
+          ? 'e2ee.recovery.exists'
+          : /e2ee_recovery_(?:authentication|invalid-input)/.test(code)
+            ? method === 'password'
+              ? 'e2ee.recovery.wrongPassword'
+              : method === 'passkey'
+                ? 'e2ee.recovery.wrongPasskey'
+                : 'e2ee.recovery.wrongFile'
+            : 'e2ee.recovery.failed');
+
 /**
  * Account recovery vault controls, enabled by default; desktop main independently honors
  * `LODY_E2EE_RECOVERY_VAULT=off` as an emergency kill switch. The host's recovery port
  * owns the unlock, file, passkey ceremony and Argon2id password derivation; this view
  * receives only outcomes, and offers only the actions the port supports.
  */
-export function RecoveryVaultSection({ accountId }: { accountId?: string | null } = {}) {
+export function RecoveryVaultSection({
+  accountId,
+  onRestored,
+  onOpenWorkspace,
+  onBackToWorkspaces,
+}: {
+  accountId?: string | null;
+  onRestored?: () => void;
+  onOpenWorkspace?: () => void;
+  onBackToWorkspaces?: () => void;
+} = {}) {
   const { t, i18n } = useTranslation();
   const [checkedAt, setCheckedAt] = useState(() => readChecked(accountId));
   const markChecked = (at: number | null) => {
@@ -233,6 +470,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     run: (password: string) => Promise<Result | undefined>;
   }>();
   const [unlockPassword, setUnlockPassword] = useState('');
+  const [dialogError, setDialogError] = useState<string | null>(null);
   const [removingPassword, setRemovingPassword] = useState(false);
 
   const closePasswordDialog = () => {
@@ -240,16 +478,19 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     setCurrentPassword('');
     setNextPassword('');
     setConfirmPassword('');
+    setDialogError(null);
   };
   const openPasswordDialog = (nextMode: 'create' | 'set' | 'change') => {
     setCurrentPassword('');
     setNextPassword('');
     setConfirmPassword('');
+    setDialogError(null);
     setPasswordDialog(nextMode);
   };
   const closeUnlockPrompt = () => {
     setUnlockPrompt(undefined);
     setUnlockPassword('');
+    setDialogError(null);
   };
 
   useEffect(() => {
@@ -324,22 +565,27 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
 
   const run = async (
     work: () => Promise<Result | undefined>,
-    unlockMethod?: RecoveryUnlockMethod
-  ) => {
-    if (busy) return;
+    unlockMethod?: RecoveryUnlockMethod,
+    options?: { keepDialogOnError?: boolean }
+  ): Promise<boolean> => {
+    if (busy) return false;
     const ticket = ++operation.current;
     setBusy(true);
+    setDialogError(null);
     setRestoreProgress([]);
     try {
       const next = await work();
-      if (operation.current !== ticket) return;
+      if (operation.current !== ticket) return false;
       if (next) setResult(next);
+      return true;
     } catch (error) {
-      if (operation.current !== ticket) return;
+      if (operation.current !== ticket) return false;
       const code = error instanceof Error ? error.message : '';
       // Dismissing the system prompt is a choice, not a failure.
-      if (!code.includes('e2ee_recovery_cancelled'))
-        setResult({ kind: 'error', code, method: unlockMethod });
+      if (code.includes('e2ee_recovery_cancelled')) return true;
+      setResult({ kind: 'error', code, method: unlockMethod });
+      if (options?.keepDialogOnError) setDialogError(recoveryErrorKey(code, unlockMethod));
+      return false;
     } finally {
       if (operation.current === ticket) setBusy(false);
     }
@@ -357,12 +603,22 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     const chosen = forcedMethod ?? preferredUnlock;
     if (chosen === 'password') {
       setUnlockPassword('');
+      setDialogError(null);
       setUnlockPrompt({
         run: (pwd) => action('password', { password: pwd }),
       });
       return;
     }
     void run(() => action(chosen), chosen);
+  };
+
+  const resolvePendingWorkspace = (workspace?: string): string | undefined => {
+    const trimmed = workspace?.trim();
+    if (!trimmed) return undefined;
+    const matched =
+      plan?.covered.find((row) => row.id === trimmed || row.name === trimmed) ??
+      plan?.uncovered.find((row) => row.id === trimmed || row.name === trimmed);
+    return matched?.name.trim() || trimmed;
   };
 
   const finishReplacement = async (
@@ -375,9 +631,15 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
       markChecked(null);
       return { kind: 'notice', key: 'e2ee.recovery.replaceFinished' };
     }
-    return finished.outcome === 'Pending'
-      ? { kind: 'notice', key: 'e2ee.recovery.replacePending' }
-      : undefined;
+    if (finished.outcome === 'Pending') {
+      const workspace = resolvePendingWorkspace(finished.workspace);
+      return {
+        kind: 'replacePending',
+        ...(workspace ? { workspace } : {}),
+        ...(finished.step ? { step: finished.step } : {}),
+      };
+    }
+    return undefined;
   };
   const short = (vaultId: string) => vaultId.slice(0, 12);
   // Saved but not yet verified still needs its setup finished: a held receipt or an
@@ -533,6 +795,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
         return;
       }
       setRestoreProgress(restored.results);
+      if (restored.results.some((row) => row.outcome === 'Committed')) onRestored?.();
       return { kind: 'restored', results: restored.results };
     } finally {
       observation.abort();
@@ -544,26 +807,140 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     : result?.kind === 'restored'
       ? result.results
       : undefined;
-  const restoreButton = (method: RecoveryUnlockMethod) => (
-    <Button
-      size="small"
-      variant={restoreLeads && method === restorePrimaryMethod ? 'primary' : 'secondary'}
-      disabled={busy}
-      onClick={() => {
-        if (method === 'password') {
-          triggerWithUnlock((_m, options) => restore('password', options), 'password');
-          return;
-        }
-        void run(() => restore(method), method);
-      }}
-    >
-      {method === 'file'
+  type MethodAction = {
+    key: string;
+    label: string;
+    /** The full name, shown in menus, when `label` is a short verb completed by the row title. */
+    ariaLabel?: string;
+    variant?: 'primary' | 'secondary';
+    tone?: 'destructive';
+    onClick: () => void;
+  };
+
+  const makeRestoreAction = (method: RecoveryUnlockMethod): MethodAction => ({
+    key: `restore-${method}`,
+    label:
+      method === 'file'
         ? t('e2ee.recovery.restore')
         : method === 'passkey'
           ? t('e2ee.recovery.restorePasskey')
-          : t('e2ee.recovery.restorePassword')}
-    </Button>
-  );
+          : t('e2ee.recovery.restorePassword'),
+    variant: restoreLeads && method === restorePrimaryMethod ? 'primary' : 'secondary',
+    onClick: () => {
+      if (method === 'password') {
+        triggerWithUnlock((_m, options) => restore('password', options), 'password');
+        return;
+      }
+      void run(() => restore(method), method);
+    },
+  });
+
+  const renderMethodRow = ({
+    id,
+    icon: Icon,
+    title,
+    status,
+    info,
+    note,
+    leadActions,
+    secondaryActions,
+    restoreAction,
+  }: {
+    id: RecoveryUnlockMethod;
+    icon: LucideIcon;
+    title: string;
+    status?: { label: string; tone: MethodMetaTone };
+    info?: string;
+    note?: string;
+    leadActions: MethodAction[];
+    secondaryActions: MethodAction[];
+    restoreAction: MethodAction | null;
+  }) => {
+    const ordered =
+      restoreLeads && restoreAction
+        ? [restoreAction, ...leadActions, ...secondaryActions]
+        : [...leadActions, ...secondaryActions, ...(restoreAction ? [restoreAction] : [])];
+    const [visibleAction, ...overflowActions] = ordered;
+    return (
+      <div key={id} data-recovery-method={id} {...stylex.props(styles.methodRow)}>
+        <div {...stylex.props(styles.methodIdentity)}>
+          <span {...stylex.props(styles.methodIcon)} aria-hidden="true">
+            <Icon size={16} />
+          </span>
+          <div {...stylex.props(styles.methodBody)}>
+            <div {...stylex.props(styles.methodHeader)}>
+              <p {...stylex.props(styles.methodTitle)}>{title}</p>
+              {info && <SettingsInfo label={title}>{info}</SettingsInfo>}
+            </div>
+            {status && (
+              <span
+                {...stylex.props(
+                  styles.methodMeta,
+                  status.tone === 'success' && styles.methodMetaSuccess,
+                  status.tone === 'warning' && styles.methodMetaWarning
+                )}
+              >
+                {status.tone === 'success' && (
+                  <span
+                    aria-hidden="true"
+                    {...stylex.props(styles.statusDot, styles.statusDotSuccess)}
+                  />
+                )}
+                {status.label}
+              </span>
+            )}
+            {note && <p {...stylex.props(styles.methodNote)}>{note}</p>}
+          </div>
+        </div>
+        {(visibleAction || overflowActions.length > 0) && (
+          <div {...stylex.props(styles.rowActions)}>
+            {visibleAction && (
+              <Button
+                size="small"
+                variant={visibleAction.variant ?? 'secondary'}
+                tone={visibleAction.tone}
+                disabled={busy}
+                aria-label={visibleAction.ariaLabel}
+                onClick={visibleAction.onClick}
+              >
+                {visibleAction.label}
+              </Button>
+            )}
+            {overflowActions.length > 0 && (
+              <Menu.Root>
+                <Menu.Trigger
+                  render={
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      icon
+                      disabled={busy}
+                      data-testid={`e2ee-recovery-more-${id}`}
+                      aria-label={`${title}: ${t('common.more')}`}
+                    >
+                      <MoreHorizontal size={16} aria-hidden="true" />
+                    </Button>
+                  }
+                />
+                <Menu.Content align="end" width="compact">
+                  {overflowActions.map((item) => (
+                    <Menu.Item
+                      key={item.key}
+                      tone={item.tone}
+                      disabled={busy}
+                      onClick={item.onClick}
+                    >
+                      {item.ariaLabel ?? item.label}
+                    </Menu.Item>
+                  ))}
+                </Menu.Content>
+              </Menu.Root>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const openPasskeyCreate = () => {
     void port.passkeyDefaultLabel().then(
@@ -599,7 +976,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
   // Until the first plan answers, nothing below would be accurate: say it is loading.
   if (mode === 'loading')
     return (
-      <div {...stylex.props(styles.stack)} data-testid="e2ee-recovery" aria-busy>
+      <div {...stylex.props(flushHeadingTheme, styles.stack)} data-testid="e2ee-recovery" aria-busy>
         <CompactSection title={t('e2ee.recovery.methods')} boxed>
           <CompactRow label={t('e2ee.recovery.loading')}>
             <Spinner size="small" />
@@ -610,224 +987,341 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
   // The host has recovery turned off: no action here can work, so offer none.
   if (mode === 'disabled')
     return (
-      <div {...stylex.props(styles.stack)} data-testid="e2ee-recovery">
+      <div {...stylex.props(flushHeadingTheme, styles.stack)} data-testid="e2ee-recovery">
         <Alert.Root data-testid="e2ee-recovery-disabled">
           <Alert.Description>{t('e2ee.recovery.disabled')}</Alert.Description>
         </Alert.Root>
       </div>
     );
 
-  const fileRow = (
-    <CompactRow
-      key="file"
-      label={t('e2ee.recovery.file')}
-      helper={
-        mode === 'ready' || mode === 'replacing'
-          ? mode === 'replacing'
-            ? t('e2ee.recovery.fileReplacing')
-            : !hasFile
-              ? t('e2ee.recovery.fileNotSaved')
-              : checkedAt
-                ? t('e2ee.recovery.fileSavedChecked', {
-                    date: new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
-                      month: 'short',
-                      day: 'numeric',
-                    }).format(new Date(checkedAt)),
-                  })
-                : t('e2ee.recovery.fileSaved')
-          : mode === 'none'
-            ? canCreateFile || canCreatePasskey || canCreatePassword
-              ? t('e2ee.recovery.fileNone')
-              : t('e2ee.recovery.createElsewhere')
-            : t('e2ee.recovery.offlineHint')
-      }
-      alignTop
-    >
-      <div {...stylex.props(styles.rowActions)}>
-        {create && (mode === 'none' || mode === 'failed') && (
-          <Button
-            size="small"
-            variant={mode === 'none' && primaryCreate === 'file' ? 'primary' : 'secondary'}
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const created = await create();
-                if (created.outcome !== 'created') return undefined;
-                // Creation saves and reads the file back, so it counts as a check.
-                markChecked(Date.now());
-                return { kind: 'created', vaultId: created.vaultId, method: 'file' };
-              }, 'file')
-            }
-          >
-            {t('e2ee.recovery.create')}
-          </Button>
-        )}
-        {saveFile && mode === 'ready' && !hasFile && (
-          <Button
-            size="small"
-            variant={unfinished.length === 0 ? 'primary' : 'secondary'}
-            disabled={busy}
-            onClick={() =>
-              triggerWithUnlock(async (unlockMethod, options) => {
-                const saved = await saveFile(unlockMethod ?? 'passkey', options);
-                if (saved.outcome !== 'saved') return undefined;
-                markChecked(Date.now());
-                return { kind: 'notice', key: 'e2ee.recovery.fileSavedNotice' };
-              })
-            }
-          >
-            {t('e2ee.recovery.saveFile')}
-          </Button>
-        )}
-        {checkFile && ((mode === 'ready' && hasFile) || mode === 'failed') && (
-          <Button
-            size="small"
-            // One primary action at a time: setting up uncovered workspaces leads when
-            // there are any; otherwise checking the saved file does.
-            variant={mode === 'ready' && unfinished.length === 0 ? 'primary' : 'secondary'}
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const opened = await checkFile();
-                if (opened.outcome !== 'opened') return undefined;
-                markChecked(Date.now());
-                return { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces };
-              }, 'file')
-            }
-          >
-            {t('e2ee.recovery.check')}
-          </Button>
-        )}
-        {replacement && mode === 'ready' && (
-          <Button
-            size="small"
-            variant="secondary"
-            disabled={busy}
-            onClick={() => setDialog('begin')}
-          >
-            {t('e2ee.recovery.replace')}
-          </Button>
-        )}
-        {canRestore && (mode === 'failed' || hasFile) && restoreButton('file')}
-      </div>
-    </CompactRow>
-  );
+  const fileLeadActions: MethodAction[] = [];
+  if (saveFile && mode === 'ready' && !hasFile) {
+    fileLeadActions.push({
+      key: 'save-file',
+      label: t('e2ee.recovery.saveFile'),
+      variant: unfinished.length === 0 ? 'primary' : 'secondary',
+      onClick: () =>
+        triggerWithUnlock(async (unlockMethod, options) => {
+          const saved = await saveFile(unlockMethod ?? 'passkey', options);
+          if (saved.outcome !== 'saved') return undefined;
+          markChecked(Date.now());
+          return { kind: 'notice', key: 'e2ee.recovery.fileSavedNotice' };
+        }),
+    });
+  }
+  if (checkFile && ((mode === 'ready' && hasFile) || mode === 'failed')) {
+    fileLeadActions.push({
+      key: 'check-file',
+      label: t('e2ee.recovery.check'),
+      variant: mode === 'ready' && unfinished.length === 0 ? 'primary' : 'secondary',
+      onClick: () =>
+        void run(async () => {
+          const opened = await checkFile();
+          if (opened.outcome !== 'opened') return undefined;
+          markChecked(Date.now());
+          return { kind: 'opened', vaultId: opened.vaultId, count: opened.workspaces };
+        }, 'file'),
+    });
+  }
+  if (create && (mode === 'none' || mode === 'failed')) {
+    fileLeadActions.push({
+      key: 'create-file',
+      label: t('e2ee.recovery.createShort'),
+      ariaLabel: t('e2ee.recovery.create'),
+      variant: mode === 'none' && primaryCreate === 'file' ? 'primary' : 'secondary',
+      onClick: () =>
+        void run(async () => {
+          const created = await create();
+          if (created.outcome !== 'created') return undefined;
+          markChecked(Date.now());
+          return { kind: 'created', vaultId: created.vaultId, method: 'file' };
+        }, 'file'),
+    });
+  }
+  const fileSecondaryActions: MethodAction[] = [];
+  if (replacement && mode === 'ready') {
+    fileSecondaryActions.push({
+      key: 'replace-file',
+      label: t('e2ee.recovery.replace'),
+      onClick: () => setDialog('begin'),
+    });
+  }
+  const fileRow = renderMethodRow({
+    id: 'file',
+    icon: FileKey2,
+    title: t('e2ee.recovery.file'),
+    status:
+      mode === 'ready' && hasFile
+        ? checkedAt
+          ? { label: t('e2ee.recovery.methodVerified'), tone: 'success' }
+          : { label: t('e2ee.recovery.methodSaved'), tone: 'neutral' }
+        : undefined,
+    note:
+      mode === 'none'
+        ? !canCreateFile && !canCreatePasskey && !canCreatePassword
+          ? t('e2ee.recovery.createElsewhere')
+          : t('e2ee.recovery.fileNoneNote')
+        : mode === 'replacing'
+          ? t('e2ee.recovery.fileReplacing')
+          : undefined,
+    info:
+      mode === 'ready' || mode === 'replacing'
+        ? mode === 'replacing'
+          ? t('e2ee.recovery.fileReplacing')
+          : !hasFile
+            ? t('e2ee.recovery.fileNotSaved')
+            : checkedAt
+              ? t('e2ee.recovery.fileSavedChecked', {
+                  date: new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
+                    month: 'short',
+                    day: 'numeric',
+                  }).format(new Date(checkedAt)),
+                })
+              : t('e2ee.recovery.fileSaved')
+        : mode === 'none'
+          ? canCreateFile || canCreatePasskey || canCreatePassword
+            ? t('e2ee.recovery.fileNone')
+            : t('e2ee.recovery.createElsewhere')
+          : t('e2ee.recovery.offlineHint'),
+    leadActions: fileLeadActions,
+    secondaryActions: fileSecondaryActions,
+    restoreAction: canRestore && (mode === 'failed' || hasFile) ? makeRestoreAction('file') : null,
+  });
 
+  const passkeyLeadActions: MethodAction[] = [];
+  if (mode === 'none' && canCreatePasskey) {
+    passkeyLeadActions.push({
+      key: 'create-passkey',
+      label: t('e2ee.recovery.setUpShort'),
+      ariaLabel: t('e2ee.recovery.createWithPasskey'),
+      variant: primaryCreate === 'passkey' ? 'primary' : 'secondary',
+      onClick: openPasskeyCreate,
+    });
+  }
+  if (mode === 'ready') {
+    passkeyLeadActions.push({
+      key: 'add-passkey',
+      label: t('e2ee.recovery.passkeyAdd'),
+      variant: 'secondary',
+      onClick: openPasskeyAdd,
+    });
+  }
+  const passkeySecondaryActions: MethodAction[] = [];
+  if (mode === 'ready') {
+    passkeySecondaryActions.push({
+      key: 'manage-passkey',
+      label: t('e2ee.recovery.passkeyManage'),
+      onClick: () =>
+        triggerWithUnlock(async (unlockMethod, options) => {
+          const listed =
+            unlockMethod === undefined && options === undefined
+              ? await port.listPasskeys()
+              : options === undefined
+                ? await port.listPasskeys(unlockMethod)
+                : await port.listPasskeys(unlockMethod, options);
+          if (listed.outcome === 'listed') {
+            setPasskeys(listed.passkeys);
+            setPending(listed.pending);
+          }
+          return undefined;
+        }),
+    });
+  }
   const passkeyRow =
     passkey &&
     ((mode === 'none' && canCreatePasskey) ||
       mode === 'ready' ||
       mode === 'replacing' ||
-      (canRestore && hasPasskey !== false)) ? (
-      <CompactRow
-        key="passkey"
-        label={t('e2ee.recovery.passkey')}
-        helper={
-          mode === 'none' ? t('e2ee.recovery.passkeyNoneHelp') : t('e2ee.recovery.passkeyHelp')
-        }
-        alignTop
-      >
-        <div {...stylex.props(styles.rowActions)}>
-          {mode === 'none' && canCreatePasskey && (
-            <Button
-              size="small"
-              variant={primaryCreate === 'passkey' ? 'primary' : 'secondary'}
-              disabled={busy}
-              onClick={openPasskeyCreate}
-            >
-              {t('e2ee.recovery.createWithPasskey')}
-            </Button>
-          )}
-          {mode === 'ready' && (
-            <Button size="small" variant="secondary" disabled={busy} onClick={openPasskeyAdd}>
-              {t('e2ee.recovery.passkeyAdd')}
-            </Button>
-          )}
-          {mode === 'ready' && (
-            <Button
-              size="small"
-              variant="ghost"
-              disabled={busy}
-              onClick={() =>
-                triggerWithUnlock(async (unlockMethod, options) => {
-                  const listed =
-                    unlockMethod === undefined && options === undefined
-                      ? await port.listPasskeys()
-                      : options === undefined
-                        ? await port.listPasskeys(unlockMethod)
-                        : await port.listPasskeys(unlockMethod, options);
-                  if (listed.outcome === 'listed') {
-                    setPasskeys(listed.passkeys);
-                    setPending(listed.pending);
-                  }
-                  return undefined;
-                })
-              }
-            >
-              {t('e2ee.recovery.passkeyManage')}
-            </Button>
-          )}
-          {canRestore && hasPasskey !== false && restoreButton('passkey')}
-        </div>
-      </CompactRow>
-    ) : null;
+      (canRestore && hasPasskey !== false))
+      ? renderMethodRow({
+          id: 'passkey',
+          icon: KeyRound,
+          title: t('e2ee.recovery.passkey'),
+          status:
+            mode === 'ready' && hasPasskey === true
+              ? { label: t('e2ee.recovery.methodSaved'), tone: 'success' }
+              : undefined,
+          note: mode === 'none' ? t('e2ee.recovery.passkeyNoneNote') : undefined,
+          info:
+            mode === 'none' ? t('e2ee.recovery.passkeyNoneHelp') : t('e2ee.recovery.passkeyHelp'),
+          leadActions: passkeyLeadActions,
+          secondaryActions: passkeySecondaryActions,
+          restoreAction: canRestore && hasPasskey !== false ? makeRestoreAction('passkey') : null,
+        })
+      : null;
 
+  const passwordLeadActions: MethodAction[] = [];
+  if (mode === 'none' && canCreatePassword) {
+    passwordLeadActions.push({
+      key: 'create-password',
+      label: t('e2ee.recovery.setUpShort'),
+      ariaLabel: t('e2ee.recovery.createWithPassword'),
+      variant: primaryCreate === 'password' ? 'primary' : 'secondary',
+      onClick: () => openPasswordDialog('create'),
+    });
+  }
+  if (mode === 'ready' && setPassword) {
+    passwordLeadActions.push({
+      key: 'set-password',
+      label: hasPassword ? t('e2ee.recovery.passwordChange') : t('e2ee.recovery.passwordSet'),
+      variant: 'secondary',
+      onClick: () => openPasswordDialog(hasPassword ? 'change' : 'set'),
+    });
+  }
+  const passwordSecondaryActions: MethodAction[] = [];
+  if (mode === 'ready' && canRemovePassword) {
+    passwordSecondaryActions.push({
+      key: 'remove-password',
+      label: t('e2ee.recovery.passwordRemove'),
+      tone: 'destructive',
+      onClick: () => setRemovingPassword(true),
+    });
+  }
   const passwordRow =
     passwordSupported &&
-    ((mode === 'none' && canCreatePassword) || mode === 'ready' || canRestorePassword) ? (
-      <CompactRow
-        key="password"
-        label={t('e2ee.recovery.password')}
-        helper={
-          mode === 'none'
-            ? t('e2ee.recovery.passwordNoneHelp')
-            : hasPassword
-              ? t('e2ee.recovery.passwordSavedHelp')
-              : t('e2ee.recovery.passwordUnsetHelp')
-        }
-        alignTop
-      >
-        <div {...stylex.props(styles.rowActions)}>
-          {mode === 'none' && canCreatePassword && (
-            <Button
-              size="small"
-              variant={primaryCreate === 'password' ? 'primary' : 'secondary'}
-              disabled={busy}
-              onClick={() => openPasswordDialog('create')}
+    ((mode === 'none' && canCreatePassword) || mode === 'ready' || canRestorePassword)
+      ? renderMethodRow({
+          id: 'password',
+          icon: Lock,
+          title: t('e2ee.recovery.password'),
+          status:
+            mode === 'ready' && hasPassword
+              ? { label: t('e2ee.recovery.methodSaved'), tone: 'success' }
+              : undefined,
+          note: mode === 'none' ? t('e2ee.recovery.passwordNoneNote') : undefined,
+          info:
+            mode === 'none'
+              ? t('e2ee.recovery.passwordNoneHelp')
+              : hasPassword
+                ? t('e2ee.recovery.passwordSavedHelp')
+                : t('e2ee.recovery.passwordUnsetHelp'),
+          leadActions: passwordLeadActions,
+          secondaryActions: passwordSecondaryActions,
+          restoreAction: canRestorePassword ? makeRestoreAction('password') : null,
+        })
+      : null;
+
+  const methodRows = (
+    mode === 'none' ? [passkeyRow, passwordRow, fileRow] : [fileRow, passkeyRow, passwordRow]
+  ).filter(Boolean);
+
+  const hasRestoredWorkspace = Boolean(restoreRows?.some((row) => row.outcome === 'Committed'));
+  const resultBanners = (
+    <>
+      {result?.kind === 'notice' && <p aria-live="polite">{t(result.key)}</p>}
+      {result?.kind === 'replacePending' && (
+        <p aria-live="polite">
+          {result.workspace
+            ? t('e2ee.recovery.replacePendingWorkspace', { workspace: result.workspace })
+            : t('e2ee.recovery.replacePending')}
+        </p>
+      )}
+      {result?.kind === 'created' && (
+        <p aria-live="polite">
+          {unfinished.length > 0
+            ? t('e2ee.recovery.createdNeedsSetup', { vaultId: short(result.vaultId) })
+            : result.method === 'passkey'
+              ? t('e2ee.recovery.createdPasskey', { vaultId: short(result.vaultId) })
+              : result.method === 'password'
+                ? t('e2ee.recovery.createdPassword', { vaultId: short(result.vaultId) })
+                : t('e2ee.recovery.created', { vaultId: short(result.vaultId) })}
+        </p>
+      )}
+      {result?.kind === 'opened' && (
+        <p aria-live="polite">
+          {t('e2ee.recovery.opened', { vaultId: short(result.vaultId), count: result.count })}
+        </p>
+      )}
+      {result?.kind === 'error' && (
+        <Alert.Root tone="danger">
+          <Alert.Description>{t(recoveryErrorKey(result.code, result.method))}</Alert.Description>
+        </Alert.Root>
+      )}
+      {result?.kind === 'setupAll' && (
+        <Alert.Root tone={result.failed.length ? 'warning' : 'success'} aria-live="polite">
+          <Alert.Description>
+            {result.failed.length
+              ? t('e2ee.recovery.setupAllPartial', {
+                  done: result.done,
+                  names: result.failed.join(t('e2ee.recovery.nameSeparator')),
+                })
+              : t('e2ee.recovery.setupAllDone')}
+          </Alert.Description>
+        </Alert.Root>
+      )}
+      {restoreRows &&
+        (restoreRows.length === 0 ? (
+          <p aria-live="polite">{t('e2ee.recovery.restoreNone')}</p>
+        ) : (
+          <div {...stylex.props(styles.stack)}>
+            <section
+              aria-labelledby="e2ee-recovery-restore-progress"
+              data-testid="e2ee-recovery-restore-progress"
+              {...stylex.props(settingsSurface.card)}
             >
-              {t('e2ee.recovery.createWithPassword')}
-            </Button>
-          )}
-          {mode === 'ready' && setPassword && (
-            <Button
-              size="small"
-              variant="secondary"
-              disabled={busy}
-              onClick={() => openPasswordDialog(hasPassword ? 'change' : 'set')}
-            >
-              {hasPassword ? t('e2ee.recovery.passwordChange') : t('e2ee.recovery.passwordSet')}
-            </Button>
-          )}
-          {mode === 'ready' && canRemovePassword && (
-            <Button
-              size="small"
-              variant="secondary"
-              tone="destructive"
-              disabled={busy}
-              onClick={() => setRemovingPassword(true)}
-            >
-              {t('e2ee.recovery.passwordRemove')}
-            </Button>
-          )}
-          {canRestorePassword && restoreButton('password')}
-        </div>
-      </CompactRow>
-    ) : null;
+              <p id="e2ee-recovery-restore-progress" {...stylex.props(styles.progressTitle)}>
+                {t('e2ee.recovery.restoreProgressTitle')}
+              </p>
+              <ul aria-live="polite" {...stylex.props(styles.progressList)}>
+                {restoreRows.map((row, index) => {
+                  const view = restoreRowView(row);
+                  const Mark = view.icon;
+                  return (
+                    <li
+                      key={row.workspaceId ?? index}
+                      data-recovery-result={row.workspaceId}
+                      data-recovery-outcome={row.outcome}
+                      {...stylex.props(styles.progressRow, settingsSurface.lineRuled)}
+                    >
+                      <div {...stylex.props(styles.progressLine)}>
+                        <p {...stylex.props(styles.workspaceName)}>{row.name}</p>
+                        <span
+                          data-recovery-status=""
+                          {...stylex.props(
+                            styles.progressStatus,
+                            view.tone === 'success' && styles.workspaceStatusSuccess,
+                            view.tone === 'warning' && styles.workspaceStatusWarning,
+                            view.tone === 'danger' && styles.progressStatusDanger
+                          )}
+                        >
+                          {Mark === null ? (
+                            <Spinner size="small" />
+                          ) : (
+                            <Mark size={14} aria-hidden="true" />
+                          )}
+                          {t(view.status)}
+                        </span>
+                      </div>
+                      {view.detail && <p {...stylex.props(styles.methodNote)}>{t(view.detail)}</p>}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+            {hasRestoredWorkspace && (onOpenWorkspace || onBackToWorkspaces) && (
+              <div {...stylex.props(styles.actions)}>
+                {onOpenWorkspace && (
+                  <Button size="small" variant="primary" onClick={onOpenWorkspace}>
+                    {t('e2ee.control.openWorkspace')}
+                  </Button>
+                )}
+                {onBackToWorkspaces && (
+                  <Button size="small" variant="secondary" onClick={onBackToWorkspaces}>
+                    {t('e2ee.lostAccess.back')}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+    </>
+  );
 
   return (
-    <div {...stylex.props(styles.stack)} data-testid="e2ee-recovery">
+    <div {...stylex.props(flushHeadingTheme, styles.stack)} data-testid="e2ee-recovery">
       {mode === 'failed' && (
         <Alert.Root tone="danger">
+          <Alert.Title>{t('e2ee.recovery.planFailedTitle')}</Alert.Title>
           <Alert.Description>{t('e2ee.recovery.planFailed')}</Alert.Description>
           <Alert.Actions>
             <Button
@@ -842,6 +1336,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
           </Alert.Actions>
         </Alert.Root>
       )}
+      {resultBanners}
       {mode === 'none' && (
         <Alert.Root tone="warning" data-testid="e2ee-recovery-none">
           <Alert.Title>{t('e2ee.recovery.noneTitle')}</Alert.Title>
@@ -908,19 +1403,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
         </Alert.Root>
       )}
       <CompactSection title={t('e2ee.recovery.methods')} boxed>
-        {mode === 'none' ? (
-          <>
-            {passkeyRow}
-            {passwordRow}
-            {fileRow}
-          </>
-        ) : (
-          <>
-            {fileRow}
-            {passkeyRow}
-            {passwordRow}
-          </>
-        )}
+        {methodRows}
       </CompactSection>
       {pending.length > 0 && (
         <Alert.Root tone="warning">
@@ -969,14 +1452,38 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
       {mode === 'ready' && !!plan?.covered.length && (
         <CompactSection title={t('e2ee.recovery.workspaces')} boxed>
           {plan.covered.map((workspace) => {
-            const badge = statusBadge[workspace.status.kind];
+            const meta = statusMeta[workspace.status.kind];
+            const needsSetup =
+              workspace.status.kind === 'notSet' || workspace.status.kind === 'saved';
             return (
-              <CompactRow key={workspace.id} label={workspace.name}>
-                <div data-recovery-workspace={workspace.id} {...stylex.props(styles.rowActions)}>
-                  <Badge tone={badge.tone} data-recovery-status={workspace.status.kind}>
-                    {t(badge.key)}
-                  </Badge>
-                  {(workspace.status.kind === 'notSet' || workspace.status.kind === 'saved') && (
+              <div
+                key={workspace.id}
+                data-recovery-workspace={workspace.id}
+                {...stylex.props(styles.workspaceRow)}
+              >
+                <div {...stylex.props(styles.workspaceInfo)}>
+                  <p {...stylex.props(styles.workspaceName)}>{workspace.name}</p>
+                  {needsSetup && (
+                    <span
+                      data-recovery-status={workspace.status.kind}
+                      {...stylex.props(
+                        styles.workspaceStatus,
+                        meta.tone === 'warning' && styles.workspaceStatusWarning
+                      )}
+                    >
+                      <span
+                        aria-hidden="true"
+                        {...stylex.props(
+                          styles.statusDot,
+                          meta.tone === 'warning' && styles.statusDotWarning
+                        )}
+                      />
+                      {t(meta.key)}
+                    </span>
+                  )}
+                </div>
+                {needsSetup ? (
+                  <div {...stylex.props(styles.workspaceAction)}>
                     <Button
                       size="small"
                       variant="secondary"
@@ -1004,50 +1511,28 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                         ? t('e2ee.recovery.setupContinue')
                         : t('e2ee.recovery.setup')}
                     </Button>
-                  )}
-                </div>
-              </CompactRow>
+                  </div>
+                ) : (
+                  <span
+                    data-recovery-status={workspace.status.kind}
+                    {...stylex.props(
+                      styles.workspaceStatusEnd,
+                      meta.tone === 'success' && styles.workspaceStatusSuccess
+                    )}
+                  >
+                    {meta.tone === 'success' && (
+                      <span
+                        aria-hidden="true"
+                        {...stylex.props(styles.statusDot, styles.statusDotSuccess)}
+                      />
+                    )}
+                    {t(meta.key)}
+                  </span>
+                )}
+              </div>
             );
           })}
         </CompactSection>
-      )}
-      {restoreRows &&
-        (restoreRows.length === 0 ? (
-          <p aria-live="polite">{t('e2ee.recovery.restoreNone')}</p>
-        ) : (
-          <ul aria-live="polite">
-            {restoreRows.map((row, index) => (
-              <li
-                key={row.workspaceId ?? index}
-                data-recovery-result={row.workspaceId}
-                data-recovery-outcome={row.outcome}
-              >
-                {row.outcome === 'Restoring'
-                  ? t('e2ee.recovery.restoreWorking', { name: row.name })
-                  : row.outcome === 'Committed'
-                    ? row.partialEpochKey
-                      ? t('e2ee.recovery.restorePartial', { name: row.name })
-                      : t('e2ee.recovery.restoreDone', { name: row.name })
-                    : row.outcome === 'Pending' || row.outcome === 'Unconfirmed'
-                      ? t('e2ee.recovery.restoreWaiting', { name: row.name })
-                      : row.outcome === 'not-backed-up'
-                        ? t('e2ee.recovery.restoreNotBackedUp', { name: row.name })
-                        : t('e2ee.recovery.restoreFailed', { name: row.name })}
-              </li>
-            ))}
-          </ul>
-        ))}
-      {result?.kind === 'setupAll' && (
-        <Alert.Root tone={result.failed.length ? 'warning' : 'success'} aria-live="polite">
-          <Alert.Description>
-            {result.failed.length
-              ? t('e2ee.recovery.setupAllPartial', {
-                  done: result.done,
-                  names: result.failed.join(t('e2ee.recovery.nameSeparator')),
-                })
-              : t('e2ee.recovery.setupAllDone')}
-          </Alert.Description>
-        </Alert.Root>
       )}
       {plan?.replacing &&
         !replacement && (
@@ -1071,12 +1556,17 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
               onClick={() =>
                 void run(async () => {
                   const abandoned = await replacement.abandon();
+                  if (abandoned.outcome === 'Pending') {
+                    const workspace = resolvePendingWorkspace(abandoned.workspace);
+                    return {
+                      kind: 'replacePending',
+                      ...(workspace ? { workspace } : {}),
+                      ...(abandoned.step ? { step: abandoned.step } : {}),
+                    };
+                  }
                   return {
                     kind: 'notice',
-                    key:
-                      abandoned.outcome === 'Pending'
-                        ? 'e2ee.recovery.replacePending'
-                        : 'e2ee.recovery.replaceAbandoned',
+                    key: 'e2ee.recovery.replaceAbandoned',
                   };
                 })
               }
@@ -1120,42 +1610,6 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
             </CompactRow>
           )}
         </CompactSection>
-      )}
-      {result?.kind === 'notice' && <p aria-live="polite">{t(result.key)}</p>}
-      {result?.kind === 'created' && (
-        <p aria-live="polite">
-          {result.method === 'passkey'
-            ? t('e2ee.recovery.createdPasskey', { vaultId: short(result.vaultId) })
-            : result.method === 'password'
-              ? t('e2ee.recovery.createdPassword', { vaultId: short(result.vaultId) })
-              : t('e2ee.recovery.created', { vaultId: short(result.vaultId) })}
-        </p>
-      )}
-      {result?.kind === 'opened' && (
-        <p aria-live="polite">
-          {t('e2ee.recovery.opened', { vaultId: short(result.vaultId), count: result.count })}
-        </p>
-      )}
-      {result?.kind === 'error' && (
-        <Alert.Root tone="danger">
-          <Alert.Description>
-            {recoveryAvailabilityMessage(result.code)
-              ? t(recoveryAvailabilityMessage(result.code)!)
-              : result.code.includes('e2ee_recovery_disabled')
-                ? t('e2ee.recovery.disabled')
-                : result.code.includes('e2ee_recovery_prf-unavailable')
-                  ? t('e2ee.recovery.passkeyUnsupported')
-                  : result.code.includes('e2ee_recovery_replacing')
-                    ? t('e2ee.recovery.replacingElsewhere')
-                    : result.code.includes('e2ee_recovery_exists')
-                      ? t('e2ee.recovery.exists')
-                      : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
-                        ? result.method === 'password'
-                          ? t('e2ee.recovery.wrongPassword')
-                          : t('e2ee.recovery.wrongFile')
-                        : t('e2ee.recovery.failed')}
-          </Alert.Description>
-        </Alert.Root>
       )}
       <AlertDialog.Root
         open={removing !== undefined}
@@ -1291,116 +1745,51 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
       <AlertDialog.Root
         open={passwordDialog !== undefined}
         onOpenChange={(open) => {
-          if (!open) closePasswordDialog();
+          if (!open && !busy) closePasswordDialog();
         }}
       >
         <AlertDialog.Content>
-          <AlertDialog.Header>
-            <AlertDialog.Title>
-              {passwordDialog === 'create'
-                ? t('e2ee.recovery.passwordCreateTitle')
-                : passwordDialog === 'change'
-                  ? t('e2ee.recovery.passwordChangeTitle')
-                  : t('e2ee.recovery.passwordSetTitle')}
-            </AlertDialog.Title>
-            <AlertDialog.Description>
-              {passwordDialog === 'create'
-                ? t('e2ee.recovery.passwordCreateHelp')
-                : passwordDialog === 'change'
-                  ? t('e2ee.recovery.passwordChangeHelp')
-                  : t('e2ee.recovery.passwordSetHelp')}
-            </AlertDialog.Description>
-          </AlertDialog.Header>
-          <div {...stylex.props(styles.dialogFields)}>
-            {changeNeedsCurrentPassword && (
-              <Input
-                type="password"
-                autoComplete="current-password"
-                data-testid="e2ee-recovery-current-password"
-                aria-label={t('e2ee.recovery.passwordCurrentLabel')}
-                placeholder={t('e2ee.recovery.passwordCurrentLabel')}
-                disabled={busy}
-                value={currentPassword}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-              />
-            )}
-            <Input
-              type="password"
-              autoComplete="new-password"
-              data-testid="e2ee-recovery-new-password"
-              aria-label={t('e2ee.recovery.passwordLabel')}
-              placeholder={t('e2ee.recovery.passwordPlaceholder')}
-              disabled={busy}
-              value={nextPassword}
-              onChange={(event) => setNextPassword(event.target.value)}
-            />
-            <Input
-              type="password"
-              autoComplete="new-password"
-              data-testid="e2ee-recovery-confirm-password"
-              aria-label={t('e2ee.recovery.passwordConfirmLabel')}
-              placeholder={t('e2ee.recovery.passwordConfirmPlaceholder')}
-              disabled={busy}
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-            />
-            <span {...stylex.props(styles.fieldHint)}>{t('e2ee.recovery.passwordLengthHint')}</span>
-            {passwordMismatch && (
-              <span {...stylex.props(styles.fieldError)}>
-                {t('e2ee.recovery.passwordMismatch')}
-              </span>
-            )}
-          </div>
-          <AlertDialog.Footer>
-            <AlertDialog.Cancel disabled={busy}>{t('common.cancel')}</AlertDialog.Cancel>
-            {changeNeedsCurrentPassword && hasFile && setPassword && (
-              <Button
-                variant="secondary"
-                disabled={
-                  busy || !validPasswordInput(nextPassword) || nextPassword !== confirmPassword
-                }
-                onClick={() => {
-                  const chosen = nextPassword;
-                  closePasswordDialog();
-                  void run(async () => {
-                    const updated = await setPassword({ password: chosen, method: 'file' });
-                    return updated.outcome === 'updated'
-                      ? { kind: 'notice', key: 'e2ee.recovery.passwordSetNotice' }
-                      : undefined;
-                  }, 'file');
-                }}
-              >
-                {t('e2ee.recovery.passwordResetWithFile')}
-              </Button>
-            )}
-            <Button
-              disabled={!canSubmitPasswordDialog}
-              onClick={() => {
-                const action = passwordDialog;
-                const chosen = nextPassword;
-                const current = currentPassword;
-                closePasswordDialog();
-                if (action === 'create') {
-                  if (!createWithPassword) return;
-                  void run(async () => {
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!canSubmitPasswordDialog) return;
+              const action = passwordDialog;
+              const chosen = nextPassword;
+              const current = currentPassword;
+              if (action === 'create') {
+                if (!createWithPassword) return;
+                void run(
+                  async () => {
                     const created = await createWithPassword(chosen);
                     return created.outcome === 'created'
                       ? { kind: 'created', vaultId: created.vaultId, method: 'password' }
                       : undefined;
-                  }, 'password');
-                  return;
-                }
-                if (!setPassword) return;
-                if (action === 'change') {
-                  if (passkey && hasPasskey === true) {
-                    void run(async () => {
+                  },
+                  'password',
+                  { keepDialogOnError: true }
+                ).then((ok) => {
+                  if (ok) closePasswordDialog();
+                });
+                return;
+              }
+              if (!setPassword) return;
+              if (action === 'change') {
+                if (passkey && hasPasskey === true) {
+                  void run(
+                    async () => {
                       const updated = await setPassword({ password: chosen, method: 'passkey' });
                       return updated.outcome === 'updated'
                         ? { kind: 'notice', key: 'e2ee.recovery.passwordSetNotice' }
                         : undefined;
-                    }, 'passkey');
-                  } else {
-                    void run(async () => {
+                    },
+                    'passkey',
+                    { keepDialogOnError: true }
+                  ).then((ok) => {
+                    if (ok) closePasswordDialog();
+                  });
+                } else {
+                  void run(
+                    async () => {
                       const updated = await setPassword({
                         password: chosen,
                         method: 'password',
@@ -1409,70 +1798,192 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                       return updated.outcome === 'updated'
                         ? { kind: 'notice', key: 'e2ee.recovery.passwordSetNotice' }
                         : undefined;
-                    }, 'password');
-                  }
-                  return;
+                    },
+                    'password',
+                    { keepDialogOnError: true }
+                  ).then((ok) => {
+                    if (ok) closePasswordDialog();
+                  });
                 }
-                const setUnlock: RecoveryUnlockMethod =
-                  passkey && hasPasskey === true ? 'passkey' : 'file';
-                void run(async () => {
+                return;
+              }
+              const setUnlock: RecoveryUnlockMethod =
+                passkey && hasPasskey === true ? 'passkey' : 'file';
+              void run(
+                async () => {
                   const updated = await setPassword({ password: chosen, method: setUnlock });
                   return updated.outcome === 'updated'
                     ? { kind: 'notice', key: 'e2ee.recovery.passwordSetNotice' }
                     : undefined;
-                }, setUnlock);
-              }}
-            >
-              {passwordDialog === 'create'
-                ? t('e2ee.recovery.createWithPassword')
-                : passwordDialog === 'change'
-                  ? t('e2ee.recovery.passwordChange')
-                  : t('e2ee.recovery.passwordSet')}
-            </Button>
-          </AlertDialog.Footer>
+                },
+                setUnlock,
+                { keepDialogOnError: true }
+              ).then((ok) => {
+                if (ok) closePasswordDialog();
+              });
+            }}
+          >
+            <AlertDialog.Header>
+              <AlertDialog.Title>
+                {passwordDialog === 'create'
+                  ? t('e2ee.recovery.passwordCreateTitle')
+                  : passwordDialog === 'change'
+                    ? t('e2ee.recovery.passwordChangeTitle')
+                    : t('e2ee.recovery.passwordSetTitle')}
+              </AlertDialog.Title>
+              <AlertDialog.Description>
+                {passwordDialog === 'create'
+                  ? t('e2ee.recovery.passwordCreateHelp')
+                  : passwordDialog === 'change'
+                    ? t('e2ee.recovery.passwordChangeHelp')
+                    : t('e2ee.recovery.passwordSetHelp')}
+              </AlertDialog.Description>
+            </AlertDialog.Header>
+            <div {...stylex.props(styles.dialogFields)}>
+              {changeNeedsCurrentPassword && (
+                <Input
+                  type="password"
+                  autoComplete="current-password"
+                  data-testid="e2ee-recovery-current-password"
+                  aria-label={t('e2ee.recovery.passwordCurrentLabel')}
+                  placeholder={t('e2ee.recovery.passwordCurrentLabel')}
+                  disabled={busy}
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                />
+              )}
+              <Input
+                type="password"
+                autoComplete="new-password"
+                data-testid="e2ee-recovery-new-password"
+                aria-label={t('e2ee.recovery.passwordLabel')}
+                placeholder={t('e2ee.recovery.passwordPlaceholder')}
+                disabled={busy}
+                value={nextPassword}
+                onChange={(event) => setNextPassword(event.target.value)}
+              />
+              <Input
+                type="password"
+                autoComplete="new-password"
+                data-testid="e2ee-recovery-confirm-password"
+                aria-label={t('e2ee.recovery.passwordConfirmLabel')}
+                placeholder={t('e2ee.recovery.passwordConfirmPlaceholder')}
+                disabled={busy}
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+              />
+              <span {...stylex.props(styles.fieldHint)}>
+                {t('e2ee.recovery.passwordLengthHint')}
+              </span>
+              {passwordMismatch && (
+                <span {...stylex.props(styles.fieldError)}>
+                  {t('e2ee.recovery.passwordMismatch')}
+                </span>
+              )}
+              {dialogError && (
+                <Alert.Root tone="danger">
+                  <Alert.Description>{t(dialogError)}</Alert.Description>
+                </Alert.Root>
+              )}
+            </div>
+            <AlertDialog.Footer>
+              <AlertDialog.Cancel type="button" disabled={busy}>
+                {t('common.cancel')}
+              </AlertDialog.Cancel>
+              {changeNeedsCurrentPassword && hasFile && setPassword && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    busy || !validPasswordInput(nextPassword) || nextPassword !== confirmPassword
+                  }
+                  onClick={() => {
+                    const chosen = nextPassword;
+                    void run(
+                      async () => {
+                        const updated = await setPassword({ password: chosen, method: 'file' });
+                        return updated.outcome === 'updated'
+                          ? { kind: 'notice', key: 'e2ee.recovery.passwordSetNotice' }
+                          : undefined;
+                      },
+                      'file',
+                      { keepDialogOnError: true }
+                    ).then((ok) => {
+                      if (ok) closePasswordDialog();
+                    });
+                  }}
+                >
+                  {t('e2ee.recovery.passwordResetWithFile')}
+                </Button>
+              )}
+              <Button type="submit" disabled={!canSubmitPasswordDialog}>
+                {busy && <Spinner size="small" />}
+                {passwordDialog === 'create'
+                  ? t('e2ee.recovery.createWithPassword')
+                  : passwordDialog === 'change'
+                    ? t('e2ee.recovery.passwordChange')
+                    : t('e2ee.recovery.passwordSet')}
+              </Button>
+            </AlertDialog.Footer>
+          </form>
         </AlertDialog.Content>
       </AlertDialog.Root>
       <AlertDialog.Root
         open={unlockPrompt !== undefined}
         onOpenChange={(open) => {
-          if (!open) closeUnlockPrompt();
+          if (!open && !busy) closeUnlockPrompt();
         }}
       >
         <AlertDialog.Content>
-          <AlertDialog.Header>
-            <AlertDialog.Title>{t('e2ee.recovery.passwordUnlockTitle')}</AlertDialog.Title>
-            <AlertDialog.Description>
-              {t('e2ee.recovery.passwordUnlockHelp')}
-            </AlertDialog.Description>
-          </AlertDialog.Header>
-          <div {...stylex.props(styles.dialogFields)}>
-            <Input
-              type="password"
-              autoComplete="current-password"
-              data-testid="e2ee-recovery-unlock-password"
-              aria-label={t('e2ee.recovery.passwordLabel')}
-              placeholder={t('e2ee.recovery.passwordPlaceholder')}
-              disabled={busy}
-              value={unlockPassword}
-              onChange={(event) => setUnlockPassword(event.target.value)}
-            />
-            <span {...stylex.props(styles.fieldHint)}>{t('e2ee.recovery.passwordLengthHint')}</span>
-          </div>
-          <AlertDialog.Footer>
-            <AlertDialog.Cancel disabled={busy}>{t('common.cancel')}</AlertDialog.Cancel>
-            <Button
-              disabled={busy || !validPasswordInput(unlockPassword)}
-              onClick={() => {
-                const pendingAction = unlockPrompt;
-                const entered = unlockPassword;
-                closeUnlockPrompt();
-                if (!pendingAction) return;
-                void run(() => pendingAction.run(entered), 'password');
-              }}
-            >
-              {t('e2ee.lostAll.continue')}
-            </Button>
-          </AlertDialog.Footer>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (busy || !validPasswordInput(unlockPassword) || !unlockPrompt) return;
+              const pendingAction = unlockPrompt;
+              const entered = unlockPassword;
+              void run(() => pendingAction.run(entered), 'password', {
+                keepDialogOnError: true,
+              }).then((ok) => {
+                if (ok) closeUnlockPrompt();
+              });
+            }}
+          >
+            <AlertDialog.Header>
+              <AlertDialog.Title>{t('e2ee.recovery.passwordUnlockTitle')}</AlertDialog.Title>
+              <AlertDialog.Description>
+                {t('e2ee.recovery.passwordUnlockHelp')}
+              </AlertDialog.Description>
+            </AlertDialog.Header>
+            <div {...stylex.props(styles.dialogFields)}>
+              <Input
+                type="password"
+                autoComplete="current-password"
+                data-testid="e2ee-recovery-unlock-password"
+                aria-label={t('e2ee.recovery.passwordLabel')}
+                placeholder={t('e2ee.recovery.passwordPlaceholder')}
+                disabled={busy}
+                value={unlockPassword}
+                onChange={(event) => setUnlockPassword(event.target.value)}
+              />
+              <span {...stylex.props(styles.fieldHint)}>
+                {t('e2ee.recovery.passwordLengthHint')}
+              </span>
+              {dialogError && (
+                <Alert.Root tone="danger">
+                  <Alert.Description>{t(dialogError)}</Alert.Description>
+                </Alert.Root>
+              )}
+            </div>
+            <AlertDialog.Footer>
+              <AlertDialog.Cancel type="button" disabled={busy}>
+                {t('common.cancel')}
+              </AlertDialog.Cancel>
+              <Button type="submit" disabled={busy || !validPasswordInput(unlockPassword)}>
+                {busy && <Spinner size="small" />}
+                {t('e2ee.lostAll.continue')}
+              </Button>
+            </AlertDialog.Footer>
+          </form>
         </AlertDialog.Content>
       </AlertDialog.Root>
       <AlertDialog.Root

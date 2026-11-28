@@ -6,6 +6,7 @@ import {
   ACP_CAPABILITY_REFRESH_CACHE_TTL_MS,
   getAcpCapabilityCacheEntryAuthority,
   getSessionRoomId,
+  hasPendingUserTurnActivation,
   quotaReservationIdentity,
   SessionStatusFactory,
   type AcpCapabilityCacheEntry,
@@ -2604,6 +2605,178 @@ describe('Operation Inbox execution boundary', () => {
       }
     }
   );
+
+  describe('promoted automation input', () => {
+    const automationOrigin = {
+      invocationId: 'invocation',
+      ruleId: 'rule',
+      ruleRevision: 1,
+      eventRef: 'event',
+      authorizationUserId: 'user-1',
+    };
+    const automationFixture = (
+      prompt: (blocks: ContentBlock[]) => Promise<unknown> = async () => ({
+        stopReason: 'end_turn',
+      })
+    ) => {
+      const prompts: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        prompts.push(blocks);
+        return prompt(blocks);
+      });
+      const inputConfig = { ...f.message.acpSessionConfig, _lodyAutomation: automationOrigin };
+      const waits: Array<string | undefined> = [];
+      const dispatch = (userTurnId = f.message.userTurnId) =>
+        f.service.dispatchPreparedSessionTurn({
+          sessionId: f.message.sessionId,
+          sessionDoc: f.doc,
+          userTurnId,
+          invocation: { sourceTurnId: userTurnId, requesterUserId: 'user-1', inputConfig },
+          dispatchSource: 'history',
+          accessPromise: Promise.resolve({ outcome: 'allowed' }),
+          requestPromise: Promise.resolve({
+            mode: 'continue',
+            request: { ...f.message, userTurnId, acpSessionConfig: inputConfig },
+          }),
+          onExecutionDeferred: async (wait) => {
+            waits.push(wait);
+          },
+          onAccessAllowed: async () => {},
+          onAccessDenied: async () => {},
+          onAccessIndeterminate: async () => {},
+        });
+      const status = async (turnId = f.message.userTurnId) =>
+        (await (await createSessionBackend(f.doc)).readHistory()).find(
+          (turn) => turn.id === turnId
+        )?.status;
+      const cancellingAdmission = () =>
+        f.service.setAutomationAdmission(async ({ sessionId, turnId }) => {
+          await f.service.cancelAutomationInput(sessionId, turnId);
+          return false;
+        });
+      const pending = async () => {
+        const meta = await f.doc.getMetaState();
+        return !!meta && hasPendingUserTurnActivation(meta as SessionMeta);
+      };
+      return { f, prompts, waits, dispatch, status, cancellingAdmission, pending };
+    };
+
+    it('hands a transient refusal to the dispatch retry owner instead of leaving it hot', async () => {
+      const { f, prompts, waits, dispatch, status } = automationFixture();
+      f.service.setAutomationAdmission(async () => false);
+      try {
+        await dispatch();
+        expect(prompts).toHaveLength(0);
+        expect(waits).toEqual(['automation-admission']);
+        expect(['handled', 'failed', 'canceled']).not.toContain(await status());
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      } finally {
+        await f.close();
+      }
+    });
+
+    it('cancels the history turn end to end when admission cancels its input', async () => {
+      const { f, prompts, waits, dispatch, status, cancellingAdmission, pending } =
+        automationFixture();
+      await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(f.message.sessionId), {
+        latestUserMsgId: f.message.userTurnId,
+      });
+      cancellingAdmission();
+      try {
+        expect(await pending()).toBe(true);
+        await dispatch();
+        expect(prompts).toHaveLength(0);
+        expect(waits).toEqual([]);
+        expect(await status()).toBe('canceled');
+        expect((await f.doc.getMetaState())?.lastHandledUserMsgId).toBe(f.message.userTurnId);
+        expect(await pending()).toBe(false);
+      } finally {
+        await f.close();
+      }
+    });
+
+    it('cancels a promoted turn that has not started when the engine cancels its input', async () => {
+      const { f, prompts, waits, dispatch, status, cancellingAdmission, pending } =
+        automationFixture();
+      await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(f.message.sessionId), {
+        latestUserMsgId: f.message.userTurnId,
+      });
+      try {
+        expect(
+          await f.service.cancelAutomationInput(f.message.sessionId, f.message.userTurnId)
+        ).toBe(true);
+        expect(await status()).toBe('canceled');
+        expect((await f.doc.getMetaState())?.lastHandledUserMsgId).toBe(f.message.userTurnId);
+        expect(await pending()).toBe(false);
+
+        cancellingAdmission();
+        await dispatch();
+        expect(prompts).toHaveLength(0);
+        expect(waits).toEqual([]);
+        expect(await status()).toBe('canceled');
+      } finally {
+        await f.close();
+      }
+    });
+
+    it('leaves a running turn untouched when another promoted input is cancelled', async () => {
+      const started = createDeferred();
+      const finish = createDeferred();
+      const { f, prompts, waits, dispatch, status, cancellingAdmission, pending } =
+        automationFixture(async () => {
+        started.resolve();
+        await finish.promise;
+        return { stopReason: 'end_turn' };
+      });
+      f.service.setAutomationAdmission(
+        async () => true,
+        () => true
+      );
+      try {
+        const running = dispatch();
+        await started.promise;
+        await (
+          await createSessionBackend(f.doc)
+        ).appendUserTurn({
+          id: 'later-automation',
+          role: 'user',
+          userId: 'user-1',
+          timestamp: '2026-10-12T00:00:01Z',
+          status: 'pending',
+          read: false,
+          items: [{ type: 'text', text: 'LATER' }],
+          inputConfig: { ...f.message.acpSessionConfig, _lodyAutomation: automationOrigin },
+          finished: true,
+          fileDiff: [],
+        });
+        await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(f.message.sessionId), {
+          latestUserMsgId: 'later-automation',
+        });
+
+        expect(
+          await f.service.cancelAutomationInput(f.message.sessionId, 'later-automation')
+        ).toBe(true);
+        expect(await status('later-automation')).toBe('canceled');
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(true);
+        expect((await f.doc.getMetaState())?.processingUserMsgId).toBe(f.message.userTurnId);
+
+        finish.resolve();
+        await running;
+        expect(prompts).toHaveLength(1);
+        expect(await status()).toBe('handled');
+        expect(await status('later-automation')).toBe('canceled');
+
+        cancellingAdmission();
+        await dispatch('later-automation');
+        expect(prompts).toHaveLength(1);
+        expect(waits).toEqual([]);
+        expect(await pending()).toBe(false);
+      } finally {
+        finish.resolve();
+        await f.close();
+      }
+    });
+  });
 
   it.each([true, false])(
     'checks current worktree HEAD before delivering CI evidence (match=%s)',

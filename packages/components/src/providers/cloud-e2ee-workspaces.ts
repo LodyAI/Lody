@@ -22,6 +22,58 @@ export class E2eeClientUpgradeRequiredError extends Error {
   }
 }
 
+export const E2EE_WORKSPACE_ACTION_TIMEOUT_MS = 30_000;
+
+/** Bounded timeout for critical Convex E2EE actions so a half-open socket cannot lock forms. */
+export class E2eeActionTimeoutError extends Error {
+  readonly code = 'e2ee_timeout';
+  constructor(action: 'create' | 'deleteWorkspace', timeoutMs: number) {
+    super(`e2ee_timeout: ${action} did not respond within ${timeoutMs}ms`);
+    this.name = 'E2eeActionTimeoutError';
+  }
+}
+
+export function isE2eeActionTimeoutError(error: unknown): boolean {
+  if (error instanceof E2eeActionTimeoutError) return true;
+  if (!error || typeof error !== 'object') return false;
+  const record = error as { code?: unknown; name?: unknown; message?: unknown };
+  return (
+    record.code === 'e2ee_timeout' ||
+    record.name === 'E2eeActionTimeoutError' ||
+    (typeof record.message === 'string' && record.message.includes('e2ee_timeout'))
+  );
+}
+
+function withActionTimeout<T>(
+  action: 'create' | 'deleteWorkspace',
+  promise: Promise<T>,
+  timeoutMs: number
+): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new E2eeActionTimeoutError(action, timeoutMs));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
 /** Bind the native creation intent and cloud receipt to the same live account.
  * Raw network calls retain ownership until settlement; a logout only invalidates
  * their UI result. It never deletes a potentially committed local key or intent.
@@ -40,10 +92,21 @@ export function createCloudE2eeWorkspaces(input: {
   >;
   prepareCreation?: PlatformE2eeWorkspaces['prepareCreation'];
   runtime?: PlatformE2eeWorkspaces['runtime'];
+  onWorkspaceCreated?: (workspace: {
+    id: string;
+    name: string;
+    slug: string;
+    contentMode: 'e2ee';
+    contentModeVersion: number;
+    cryptoOrgId: string;
+    genesisHash: string;
+  }) => void;
   refreshWorkspaces: () => Promise<void>;
+  actionTimeoutMs?: number;
 }): PlatformE2eeWorkspaces {
   const prepared = new Map<string, E2eeWorkspacePrepared>();
   const prepareCreation = input.prepareCreation;
+  const actionTimeoutMs = input.actionTimeoutMs ?? E2EE_WORKSPACE_ACTION_TIMEOUT_MS;
   const account = () => {
     const session = input.session();
     if (session.status !== 'authenticated') throw new E2eeAccountUnavailableError();
@@ -153,7 +216,11 @@ export function createCloudE2eeWorkspaces(input: {
       ) {
         throw new Error('e2ee_preparation_required');
       }
-      const result = await input.remote.create({ ...request });
+      const result = await withActionTimeout(
+        'create',
+        input.remote.create({ ...request }),
+        actionTimeoutMs
+      );
       assertAccount(owner);
       if (
         result.contentMode !== 'e2ee' ||
@@ -178,19 +245,33 @@ export function createCloudE2eeWorkspaces(input: {
         });
         assertAccount(owner);
       }
-      // Listing is a projection: its failure must not turn a committed, validated
-      // creation into an error. The next listing refresh shows the workspace.
-      try {
-        await input.refreshWorkspaces();
-      } catch {
-        console.warn('Encrypted workspace list refresh pending', { code: 'e2ee_listing_pending' });
-      }
+      // Listing is a projection: show the validated workspace now, refresh in the background.
+      input.onWorkspaceCreated?.({
+        id: result.workspaceId,
+        name: result.name,
+        slug: result.slug,
+        contentMode: result.contentMode,
+        contentModeVersion: result.contentModeVersion,
+        cryptoOrgId: result.cryptoOrgId,
+        genesisHash: result.genesisHash,
+      });
+      void Promise.resolve()
+        .then(() => input.refreshWorkspaces())
+        .catch(() => {
+          console.warn('Encrypted workspace list refresh pending', {
+            code: 'e2ee_listing_pending',
+          });
+        });
       assertAccount(owner);
       return result;
     },
     deleteWorkspace: async ({ workspaceId }) => {
       const owner = account();
-      const receipt = await input.remote.deleteWorkspace({ workspaceId });
+      const receipt = await withActionTimeout(
+        'deleteWorkspace',
+        input.remote.deleteWorkspace({ workspaceId }),
+        actionTimeoutMs
+      );
       assertAccount(owner);
       if (receipt.workspaceId !== workspaceId || receipt.deleted !== true)
         throw new Error('e2ee_deletion_receipt_mismatch');

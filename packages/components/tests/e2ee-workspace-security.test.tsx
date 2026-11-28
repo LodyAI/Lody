@@ -97,7 +97,8 @@ describe('recovery vault settings', () => {
         );
       });
       for (let tick = 0; tick < 20; tick++) await act(async () => {});
-      expect(container.textContent).toContain('e2ee.recovery.replace');
+      expect(container.textContent).toContain('e2ee.recovery.check');
+      expect(container.querySelector('[data-testid="e2ee-recovery-more-file"]')).not.toBeNull();
       expect(calls.get('e2ee.recoveryReplacementPlan')).toBe(1);
     } finally {
       act(() => root.unmount());
@@ -131,7 +132,9 @@ describe('recovery vault settings', () => {
         );
       });
       for (let tick = 0; tick < 10; tick++) await act(async () => {});
-      expect(container.textContent).toContain('e2ee.recovery.createWithPassword');
+      expect(
+        container.querySelector('button[aria-label="e2ee.recovery.createWithPassword"]')
+      ).not.toBeNull();
     } finally {
       act(() => root.unmount());
       container.remove();
@@ -178,6 +181,7 @@ describe('desktop account recovery page', () => {
     return {
       calls,
       text: container.textContent ?? '',
+      hasButton: (name: string) => container.querySelector(`button[aria-label="${name}"]`) !== null,
       dispose: () => {
         act(() => root.unmount());
         container.remove();
@@ -189,7 +193,7 @@ describe('desktop account recovery page', () => {
   it('manages recovery from Settings > Account without opening an encrypted workspace', async () => {
     const page = await renderPage(TEST_CLOUD_PLATFORM, true);
     try {
-      expect(page.text).toContain('e2ee.recovery.createWithPassword');
+      expect(page.hasButton('e2ee.recovery.createWithPassword')).toBe(true);
       expect(page.calls).toContain('e2ee.recoveryReplacementPlan');
     } finally {
       page.dispose();
@@ -280,22 +284,52 @@ describe('recovery vault settings actions', () => {
     };
     await settle();
     const buttons = () => [...container.querySelectorAll('button')];
+    const name = (button: HTMLButtonElement) =>
+      button.textContent ? (button.getAttribute('aria-label') ?? button.textContent) : '';
     return {
       get labels() {
-        return buttons().map((button) => button.textContent);
+        return buttons().map(name).filter(Boolean);
+      },
+      get visibleLabels() {
+        return buttons()
+          .map((button) => button.textContent)
+          .filter(Boolean);
       },
       get primary() {
         return buttons()
           .filter((button) => button.dataset.variant === 'primary')
-          .map((b) => b.textContent);
+          .map(name);
       },
       get text() {
         return container.textContent ?? '';
       },
       click: async (label: string) => {
-        const button = buttons().find((b) => b.textContent === label);
+        const button = buttons().find((b) => name(b) === label);
         if (!button) throw new Error(`no ${label} button`);
         await act(async () => button.click());
+        await settle();
+      },
+      openMore: async (method: 'file' | 'passkey' | 'password') => {
+        const trigger = container.querySelector<HTMLButtonElement>(
+          `[data-testid="e2ee-recovery-more-${method}"]`
+        );
+        if (!trigger) throw new Error(`no overflow trigger for ${method}`);
+        await act(async () => trigger.click());
+        await settle();
+        return [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent);
+      },
+      clickMenuItem: async (method: 'file' | 'passkey' | 'password', label: string) => {
+        const trigger = container.querySelector<HTMLButtonElement>(
+          `[data-testid="e2ee-recovery-more-${method}"]`
+        );
+        if (!trigger) throw new Error(`no overflow trigger for ${method}`);
+        await act(async () => trigger.click());
+        await settle();
+        const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+          (el) => el.textContent === label
+        );
+        if (!item) throw new Error(`no ${label} menuitem`);
+        await act(async () => item.click());
         await settle();
       },
       done: () => {
@@ -322,6 +356,10 @@ describe('recovery vault settings actions', () => {
         'e2ee.recovery.create',
       ]);
       expect(withPasskey.primary).toEqual(['e2ee.recovery.createWithPasskey']);
+      expect(withPasskey.visibleLabels).toEqual(
+        expect.arrayContaining(['e2ee.recovery.setUpShort', 'e2ee.recovery.createShort'])
+      );
+      expect(withPasskey.visibleLabels).not.toContain('e2ee.recovery.createWithPasskey');
     } finally {
       withPasskey.done();
     }
@@ -463,13 +501,10 @@ describe('recovery vault settings actions', () => {
     });
     try {
       expect(view.labels).not.toContain('e2ee.recovery.create');
-      for (const label of [
-        'e2ee.recovery.check',
-        'e2ee.recovery.replace',
-        'e2ee.recovery.restore',
-        'e2ee.recovery.passkeyAdd',
-      ])
+      for (const label of ['e2ee.recovery.check', 'e2ee.recovery.passkeyAdd'])
         expect(view.labels).toContain(label);
+      const fileOverflow = await view.openMore('file');
+      expect(fileOverflow).toEqual(['e2ee.recovery.replace', 'e2ee.recovery.restore']);
       expect(view.primary).toHaveLength(1);
       for (const status of [
         'e2ee.recovery.workspace.notSet',
@@ -635,10 +670,10 @@ describe('recovery vault settings actions', () => {
       }
     );
     try {
-      expect(view.text).toContain('e2ee.recovery.fileSaved');
-      expect(view.text).not.toContain('e2ee.recovery.fileSavedChecked');
+      expect(view.text).toContain('e2ee.recovery.methodSaved');
+      expect(view.text).not.toContain('e2ee.recovery.methodVerified');
       await view.click('e2ee.recovery.check');
-      expect(view.text).toContain('e2ee.recovery.fileSavedChecked');
+      expect(view.text).toContain('e2ee.recovery.methodVerified');
     } finally {
       view.done();
     }
@@ -658,14 +693,10 @@ describe('recovery vault settings actions', () => {
     });
     try {
       expect(view.text).toContain('e2ee.recovery.planFailed');
-      for (const label of [
-        'common.retry',
-        'e2ee.recovery.check',
-        'e2ee.recovery.restore',
-        'e2ee.recovery.restorePasskey',
-        'e2ee.recovery.create',
-      ])
+      for (const label of ['common.retry', 'e2ee.recovery.check', 'e2ee.recovery.restorePasskey'])
         expect(view.labels).toContain(label);
+      const fileOverflow = await view.openMore('file');
+      expect(fileOverflow).toEqual(['e2ee.recovery.create', 'e2ee.recovery.restore']);
       expect(view.primary).toEqual(['common.retry']);
       fail = false;
       await view.click('common.retry');
@@ -804,10 +835,12 @@ describe('recovery vault settings actions', () => {
       expect(view.primary).toEqual(['e2ee.recovery.restore']);
       await view.click('e2ee.recovery.restore');
       // A wait that timed out is still waiting, and an uncovered workspace is not a failure.
-      expect(view.text).toContain('e2ee.recovery.restoreWaiting');
-      expect(view.text).toContain('e2ee.recovery.restorePartial');
-      expect(view.text).toContain('e2ee.recovery.restoreNotBackedUp');
-      expect(view.text).not.toContain('e2ee.recovery.restoreFailed');
+      expect(view.text).toContain('e2ee.recovery.restoreProgressTitle');
+      expect(view.text).toContain('e2ee.recovery.restoreStatus.waiting');
+      expect(view.text).toContain('e2ee.recovery.restoreStatus.partial');
+      expect(view.text).toContain('e2ee.recovery.restoreStatus.partialHelp');
+      expect(view.text).toContain('e2ee.recovery.restoreStatus.notBackedUp');
+      expect(view.text).not.toContain('e2ee.recovery.restoreStatus.failed');
     } finally {
       view.done();
     }
@@ -850,7 +883,7 @@ describe('recovery vault settings actions', () => {
     );
     const view = await mount(undefined, {}, port);
     try {
-      await view.click('e2ee.recovery.passkeyManage');
+      await view.clickMenuItem('passkey', 'e2ee.recovery.passkeyManage');
       expect(view.text).toContain('Kept passkey');
       await view.click('e2ee.recovery.passkeyRemoveRetry');
       expect(view.text).toContain('e2ee.recovery.passkeyRemoved');
@@ -858,7 +891,7 @@ describe('recovery vault settings actions', () => {
       // The old lists may no longer be true; they are dropped until read anew.
       expect(view.text).not.toContain('Kept passkey');
       expect(view.labels).not.toContain('e2ee.recovery.passkeyRemoveRetry');
-      expect(view.labels).toContain('e2ee.recovery.passkeyManage');
+      expect(await view.openMore('passkey')).toContain('e2ee.recovery.passkeyManage');
     } finally {
       view.done();
     }
@@ -1485,35 +1518,19 @@ describe('encrypted workspace settings', () => {
     );
     expect(revoke?.disabled).toBe(true);
   });
-  it('adds a device from the General card and keeps one way to add it on the Devices tab', async () => {
-    const personalPairing = () =>
-      document.body.querySelector('[data-testid="e2ee-personal-pairing-state"]');
-    Object.assign(platform.e2eeWorkspaces!.runtime!, {
-      preparePersonalJoin: async () => ({}),
-      claimPersonalJoin: async () => ({}),
-      cancelPersonalJoin: async () => {},
-    });
+  it('adds a device from the General card and opens the Devices tab with its device list', async () => {
+    platform.e2eeWorkspaces!.runtime!.inspectAccountPairing = async () => null;
     await render();
     await click('e2ee.security.addDevice');
     for (let tick = 0; tick < 5; tick++) await act(async () => {});
     expect(
       document.body.querySelector('[data-console-tab="devices"]')?.getAttribute('aria-current')
     ).toBe('page');
-    // A host without account pairing keeps the per-workspace exchange.
-    expect(personalPairing()).not.toBeNull();
-    await act(async () => root.unmount());
-    root = createRoot(container);
-    platform.e2eeWorkspaces!.runtime!.inspectAccountPairing = async () => null;
-    await render();
-    await click('e2ee.security.addDevice');
-    for (let tick = 0; tick < 5; tick++) await act(async () => {});
-    // The device list is still there, alone with the one way to add a device.
     expect(
       document.body.querySelector(
         `[data-testid="e2ee-device-details"][data-device-key="${'ab'.repeat(32)}"]`
       )
     ).not.toBeNull();
-    expect(personalPairing()).toBeNull();
   });
   it('keeps the ordinary General page and leaves encrypted team management to the console', async () => {
     state = { ...state, rotationRequired: false };
@@ -1779,6 +1796,15 @@ describe('authorized device identities', () => {
       expect(container.textContent).not.toContain('Spoof');
       await act(async () =>
         (container.querySelector('[data-testid="e2ee-device-revoke"]') as HTMLButtonElement).click()
+      );
+      expect(revoked).toEqual([]);
+      expect(document.querySelector('[data-testid="e2ee-revoke-self-warning"]')).not.toBeNull();
+      await act(async () =>
+        (
+          document.querySelector(
+            '[data-testid="e2ee-device-revoke-confirm-action"]'
+          ) as HTMLButtonElement
+        ).click()
       );
       expect(revoked).toEqual([device.key]);
       const detail = container.querySelector(

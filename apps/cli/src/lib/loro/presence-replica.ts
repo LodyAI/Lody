@@ -5,6 +5,7 @@ import {
   getLodyMachinePresenceKey,
   getLodySessionPresenceKey,
   parseLodyPresenceStates,
+  type LodyMachinePresenceResources,
   type LodyPresenceInstanceId,
   type LodyPresenceState,
   type LodyPresenceStateMap,
@@ -27,7 +28,10 @@ export class PresenceReplica {
 
   constructor(
     readonly instanceId: LodyPresenceInstanceId,
-    private readonly options: { minimal?: boolean } = {}
+    private readonly options: {
+      minimal?: boolean;
+      machineResources?: () => LodyMachinePresenceResources | undefined;
+    } = {}
   ) {}
 
   private write(key: string, state: LodyPresenceState): void {
@@ -64,11 +68,13 @@ export class PresenceReplica {
   }
   heartbeat(now: number): boolean {
     if (this.closed || !this.machineId || !this.machineKey) return false;
+    const resources = this.options.minimal ? undefined : this.options.machineResources?.();
     this.write(this.machineKey, {
       kind: 'machine',
       machineId: this.machineId,
       instanceId: this.instanceId,
       updatedAt: now,
+      ...(resources ? { r: resources } : {}),
     });
     return true;
   }

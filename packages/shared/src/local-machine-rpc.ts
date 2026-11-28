@@ -89,6 +89,7 @@ import {
 } from './message-schemas';
 
 export const LOCAL_MACHINE_RPC_PATH = '/machine-rpc';
+export const LOCAL_MACHINE_RPC_PROXY_PATH = '/machine-rpc-proxy';
 
 const BaseLocalMachineRpcRequestSchema = z
   .object({
@@ -899,6 +900,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
     })
     .strict(),
 ]);
+export type SessionLiveStatusResponse = z.infer<typeof SessionLiveStatusResponseSchema>;
 
 export const LocalMachineRpcResultSchema = z.union([
   SessionHistoryReadResponseSchema,
@@ -1003,6 +1005,48 @@ export function safeParseLocalMachineRpcRequest(
   try {
     const parsed = JSON.parse(raw) as unknown;
     const result = LocalMachineRpcRequestSchema.safeParse(parsed);
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
+    return { success: true, data: result.data };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof z.ZodError
+          ? error
+          : new z.ZodError([
+              {
+                code: z.ZodIssueCode.custom,
+                path: [],
+                message: 'Invalid JSON',
+              },
+            ]),
+    };
+  }
+}
+
+export const LocalMachineRpcProxyRequestSchema = z
+  .object({
+    requesterUserId: z.string().trim().min(1),
+    requesterMachineId: z.string().trim().min(1),
+    deadlineAtMs: z.number().int().positive().optional(),
+    request: LocalMachineRpcRequestSchema,
+  })
+  .strict();
+export type LocalMachineRpcProxyRequest = z.input<typeof LocalMachineRpcProxyRequestSchema>;
+export type LocalMachineRpcProxyRequestValidated = z.infer<
+  typeof LocalMachineRpcProxyRequestSchema
+>;
+
+export function safeParseLocalMachineRpcProxyRequest(
+  raw: string
+):
+  | { readonly success: true; readonly data: LocalMachineRpcProxyRequestValidated }
+  | { readonly success: false; readonly error: z.ZodError } {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const result = LocalMachineRpcProxyRequestSchema.safeParse(parsed);
     if (!result.success) {
       return { success: false, error: result.error };
     }

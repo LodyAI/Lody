@@ -19,7 +19,11 @@ import type { Logger } from '@/utils/logger';
 import { WorkspaceCatalogSyncLegacy } from '@/lib/loro/workspace-catalog-sync-legacy';
 import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
 import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
-import { loadSessionMcpCatalog } from './session-mcp-resolver';
+import {
+  loadSessionMcpCatalog,
+  readSessionMcpConfigFingerprint,
+  type SessionMcpMount,
+} from './session-mcp-resolver';
 
 const connectionMocks = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -49,6 +53,9 @@ vi.mock('@agentclientprotocol/sdk', async (importOriginal) => ({
 }));
 
 import { AgentClient } from './agent-client';
+import { Effect } from 'effect';
+import { McpAuthenticationLegacy } from '@/mcp/authentication/legacy';
+import { makeMcpAuthenticationIO } from '@/mcp/authentication/io';
 import { applyAcpSessionRunConfig } from '@/session/acp-session-config-applier';
 
 function deferred<T>() {
@@ -972,6 +979,148 @@ describe('AgentClient session startup', () => {
         }),
       ],
     });
+  });
+
+  it('keeps the live MCP mount until an edit-and-resend candidate is adopted', async () => {
+    const workspaceId = 'synthetic-replacement' as WorkspaceId;
+    const selectedId = 'selected-mcp' as McpServerId;
+    const repo = await LoroRepo.create({});
+    const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+    const configure = (command: string) =>
+      writeWorkspaceMcpServerToFlock(handle.flock, {
+        id: selectedId,
+        name: 'Selected MCP',
+        transport: 'stdio',
+        connection: { transport: 'stdio', command },
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    configure('command-a');
+    const logger = createLogger();
+    const current = () =>
+      readSessionMcpConfigFingerprint({ repo, workspaceId, selectedIds: [selectedId], env: {} });
+    let live: SessionMcpMount | undefined;
+    const client = new AgentClient({
+      logger,
+      sessionId: 'session-replacement' as SessionId,
+      terminalManager: {} as never,
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+      loadExternalMcpServers: () =>
+        loadSessionMcpCatalog({
+          repo,
+          workspaceId,
+          sessionId: 'session-replacement' as SessionId,
+          selectedIds: [selectedId],
+          logger,
+          env: {},
+        }),
+      onExternalMcpServersMounted: (mount) => {
+        live = mount;
+      },
+    });
+    await client.startSession({} as never, '/workdir');
+    const mountedA = live?.fingerprint;
+    expect(mountedA).toBe(await current());
+
+    configure('command-b');
+    connectionMocks.newSession.mockRejectedValueOnce(new Error('provider refused'));
+    await expect(client.prepareReplacementSession()).rejects.toThrow('ACP_SESSION_PREPARE_FAILED');
+    connectionMocks.newSession.mockResolvedValueOnce({ sessionId: 'discarded-candidate' });
+    await client.prepareReplacementSession();
+    expect(live?.fingerprint).toBe(mountedA);
+    expect(live?.fingerprint).not.toBe(await current());
+
+    connectionMocks.newSession.mockResolvedValueOnce({ sessionId: 'adopted-candidate' });
+    client.adoptPreparedSession(await client.prepareReplacementSession());
+    expect(live?.fingerprint).toBe(await current());
+  });
+
+  it('mounts a renamed HTTP MCP under its new name once an edit-and-resend candidate is adopted', async () => {
+    connectionMocks.initialize.mockResolvedValue({
+      agentCapabilities: { mcpCapabilities: { http: true } },
+    });
+    const workspaceId = 'synthetic-rename' as WorkspaceId;
+    const selectedId = 'selected-http' as McpServerId;
+    const repo = await LoroRepo.create({});
+    const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+    const rename = (name: string) =>
+      writeWorkspaceMcpServerToFlock(handle.flock, {
+        id: selectedId,
+        name,
+        transport: 'http',
+        connection: { transport: 'http', url: 'https://resource.example/mcp' },
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    rename('Before');
+    const authentication = new McpAuthenticationLegacy({
+      machineId: 'machine',
+      workspaceId,
+      userId: 'owner',
+      store: {
+        read: () => Effect.succeed(undefined),
+        write: () => Effect.void,
+        remove: () => Effect.void,
+      },
+      io: {
+        ...makeMcpAuthenticationIO(),
+        relay: async () => ({
+          url: 'http://127.0.0.1:12346/mcp',
+          capability: 'session-capability',
+          close: async () => {},
+        }),
+      },
+    });
+    const logger = createLogger();
+    const requests: { mcpServers: { name: string }[] }[] = [];
+    connectionMocks.newSession.mockImplementation(async (request) => {
+      requests.push(request);
+      return { sessionId: `acp-${requests.length}` };
+    });
+    let live: SessionMcpMount | undefined;
+    const client = new AgentClient({
+      logger,
+      sessionId: 'session-rename' as SessionId,
+      terminalManager: {} as never,
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+      loadExternalMcpServers: () =>
+        loadSessionMcpCatalog({
+          repo,
+          workspaceId,
+          sessionId: 'session-rename' as SessionId,
+          selectedIds: [selectedId],
+          logger,
+          env: {},
+          prepare: (entry, resolved) =>
+            authentication.prepare(entry, resolved, 'session-owner', 'owner'),
+        }),
+      onExternalMcpServersMounted: (mount) => {
+        live = mount;
+      },
+    });
+    const names = () => requests.at(-1)?.mcpServers.map((server) => server.name);
+    try {
+      await client.startSession({} as never, '/workdir');
+      expect(names()).toContain('Before');
+
+      rename('After');
+      client.adoptPreparedSession(await client.prepareReplacementSession());
+
+      expect(names()).toContain('After');
+      expect(names()).not.toContain('Before');
+      expect(live?.fingerprint).toBe(
+        await readSessionMcpConfigFingerprint({
+          repo,
+          workspaceId,
+          selectedIds: [selectedId],
+          env: {},
+        })
+      );
+    } finally {
+      await authentication.close();
+    }
   });
 
   it('prepares a turn-addressed fork before adopting it', async () => {

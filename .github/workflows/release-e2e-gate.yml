@@ -1,0 +1,568 @@
+name: Release E2E gate
+
+on:
+  workflow_call:
+    inputs:
+      source-sha:
+        description: Full 40-char commit SHA of LodyAI/Lody to test
+        required: true
+        type: string
+      target-environment:
+        description: GitHub Environment providing optional read-only private self-host E2E credentials
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  oss-e2e:
+    name: OSS desktop E2E (shard ${{ matrix.shard }}/3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      NODE_VERSION: '22.23.4'
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - name: Checkout LodyAI/Lody
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Check desktop E2E contract
+        if: matrix.shard == 1
+        run: corepack pnpm --filter @lody/e2e check
+
+      - name: Build OSS desktop and bundled CLI
+        run: corepack pnpm --dir apps/electron build
+
+      - name: Run sharded OSS desktop E2E under Xvfb
+        shell: bash
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: '3'
+        run: |
+          set -euo pipefail
+          mkdir -p e2e/artifacts
+          mapfile -t ALL_FEATURES < <(find e2e/src/features -maxdepth 1 -name '*.feature' | LC_ALL=C sort)
+          SHARD_FEATURES=()
+          for i in "${!ALL_FEATURES[@]}"; do
+            if (( (i % SHARD_TOTAL) + 1 == SHARD_INDEX )); then
+              SHARD_FEATURES+=("${ALL_FEATURES[$i]#e2e/}")
+            fi
+          done
+          if (( ${#SHARD_FEATURES[@]} == 0 )); then
+            echo "No feature files assigned to shard ${SHARD_INDEX}/${SHARD_TOTAL}"
+            exit 1
+          fi
+          printf 'Shard %s/%s running %s features:\n' "${SHARD_INDEX}" "${SHARD_TOTAL}" "${#SHARD_FEATURES[@]}"
+          printf '  - %s\n' "${SHARD_FEATURES[@]}"
+          LODY_E2E_RETRY='1' \
+          LODY_E2E_PATHS="$(IFS=,; echo "${SHARD_FEATURES[*]}")" \
+            xvfb-run -a corepack pnpm --filter @lody/e2e full 2>&1 | tee e2e/artifacts/cucumber-output.log
+
+  cloud-smoke:
+    name: Cloud Electron startup smoke
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.target-environment }}
+    timeout-minutes: 30
+    env:
+      NODE_VERSION: '22.23.4'
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - name: Checkout LodyAI/Lody
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Build Cloud Electron for startup smoke
+        env:
+          LODY_ENV: production
+          VITE_LODY_ENV: production
+          LODY_PLATFORM: cloud
+          VITE_LODY_PLATFORM: cloud
+          LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL || 'https://placeholder.convex.cloud' }}
+          LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || 'https://placeholder.convex.site' }}
+          LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL || 'https://placeholder.lody.ai' }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://placeholder.lody.ai' }}
+          VITE_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL || 'https://placeholder.lody.ai' }}
+          VITE_CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL || 'https://placeholder.convex.site' }}
+          VITE_CONVEX_DEPLOY_URL: ${{ vars.LODY_AUTH_URL || 'https://placeholder.convex.cloud' }}
+          VITE_SITE_URL: ${{ vars.SITE_URL || 'https://placeholder.lody.ai' }}
+          VITE_ELECTRON_UPDATE_URL: ${{ vars.ELECTRON_UPDATE_URL || 'https://placeholder.updates.lody.ai/production' }}
+          VITE_ELECTRON_UPDATE_CHANNEL: latest
+          ELECTRON_UPDATE_CHANNEL: latest
+          LODY_LORO_STREAMS_WS_ENABLED: '1'
+        run: corepack pnpm --dir apps/electron build
+
+      - name: Run Cloud Electron startup smoke under Xvfb
+        shell: bash
+        run: |
+          set -euo pipefail
+          xvfb-run -a node .github/scripts/cloud-electron-smoke.mjs
+
+  mobile-ios-smoke:
+    name: Mobile iOS Simulator startup smoke
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      NODE_VERSION: '22.23.4'
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - name: Checkout LodyAI/Lody
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install mobile dependencies
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+
+      - name: Ensure CocoaPods
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v pod >/dev/null 2>&1 || brew install cocoapods
+
+      - name: Run iOS Simulator startup smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack pnpm --filter @lody/mobile-capacitor run test:smoke:ios -- \
+            --artifact-dir "${RUNNER_TEMP}/ios-simulator-smoke"
+
+      - name: Upload iOS Simulator smoke diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-gate-ios-smoke-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/ios-simulator-smoke
+          if-no-files-found: ignore
+
+  mobile-android-smoke:
+    name: Mobile Android Emulator startup smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      NODE_VERSION: '22.23.4'
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - name: Checkout LodyAI/Lody
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+
+      - name: Setup Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            apps/mobile-capacitor/android/**/*.gradle*
+            apps/mobile-capacitor/android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Install mobile dependencies
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+
+      - name: Prepare Android Emulator AVD
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm
+          fi
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
+          emulator="$ANDROID_HOME/emulator/emulator"
+          "$emulator" -accel-check
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/lody-android-avds"
+          mkdir -p "$ANDROID_AVD_HOME"
+          avdmanager create avd --force --name lody-smoke --device pixel_6 \
+            --path "$ANDROID_AVD_HOME/lody-smoke.avd" \
+            --package "system-images;android-35;google_apis;x86_64"
+          test -f "$ANDROID_AVD_HOME/lody-smoke.ini"
+          "$emulator" -list-avds | grep -Fx lody-smoke
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+
+      - name: Run Android Emulator startup smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack pnpm --filter @lody/mobile-capacitor run test:smoke:android -- \
+            --avd lody-smoke \
+            --artifact-dir "${RUNNER_TEMP}/android-emulator-smoke"
+
+      - name: Upload Android Emulator smoke diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-gate-android-smoke-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/android-emulator-smoke
+          if-no-files-found: ignore
+
+  selfhost-cloud:
+    name: Self-host Cloud Electron E2E
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.target-environment }}
+    timeout-minutes: 45
+    env:
+      NODE_VERSION: '22.23.4'
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - name: Checkout LodyAI/Lody
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Setup Bun
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install self-host prerequisites (mkcert + convex-local-backend)
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        shell: bash
+        env:
+          CONVEX_BACKEND_VERSION: precompiled-2026-10-22-1447815
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mkcert libnss3-tools
+          CONVEX_DIR="${HOME}/.cache/convex/binaries/${CONVEX_BACKEND_VERSION}"
+          mkdir -p "${CONVEX_DIR}"
+          curl -fsSL \
+            "https://github.com/get-convex/convex-backend/releases/download/${CONVEX_BACKEND_VERSION}/convex-local-backend-x86_64-unknown-linux-gnu.zip" \
+            -o "${RUNNER_TEMP}/convex-local-backend.zip"
+          unzip -q -o "${RUNNER_TEMP}/convex-local-backend.zip" -d "${CONVEX_DIR}"
+          chmod +x "${CONVEX_DIR}/convex-local-backend"
+          rm -f "${RUNNER_TEMP}/convex-local-backend.zip"
+
+      - name: Checkout self-host E2E harness (read-only deploy key)
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: loro-dev/lody
+          ref: main
+          path: .selfhost-e2e
+          ssh-key: ${{ secrets.PRIVATE_SOURCE_SSH_KEY }}
+          persist-credentials: false
+
+      - name: Run self-host Cloud Electron E2E (redacted public logs)
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.source-sha }}
+          SELFHOST_DIR: ${{ github.workspace }}/.selfhost-e2e
+          SELFHOST_LOG: ${{ runner.temp }}/selfhost-cloud.log
+          SELFHOST_SUITE_LABEL: selfhost-cloud
+          LODY_LORO_STREAMS_WS_ENABLED: '1'
+          LODY_E2E_RETRY: '1'
+          FEISHU_ALERT_WEBHOOK_URL: ${{ secrets.FEISHU_ALERT_WEBHOOK_URL }}
+          FEISHU_ALERT_WEBHOOK_SECRET: ${{ secrets.FEISHU_ALERT_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          OSS_WORKTREE="$(pwd)"
+          set +e
+          (
+            set -euo pipefail
+            rm -rf "${SELFHOST_DIR}/lody-oss"
+            git clone --no-checkout "${OSS_WORKTREE}" "${SELFHOST_DIR}/lody-oss"
+            git -C "${SELFHOST_DIR}/lody-oss" checkout --detach "${CANDIDATE_SHA}"
+            git -C "${SELFHOST_DIR}/lody-oss" submodule update --init --depth 1 -- packages
+            cd "${SELFHOST_DIR}"
+            corepack pnpm install --frozen-lockfile --prefer-offline
+            corepack pnpm --filter acp-extension-core --filter acp-extension-dsh build
+            corepack pnpm --dir lody-oss/e2e exec playwright install --with-deps chromium
+            xvfb-run -a corepack pnpm verify:release -- --only cloud
+          ) >"${SELFHOST_LOG}" 2>&1
+          EXIT_CODE=$?
+          set -e
+          node .github/scripts/selfhost-e2e-report.mjs "${SELFHOST_DIR}" "${EXIT_CODE}" "${SELFHOST_LOG}"
+
+      - name: Cleanup self-host E2E checkout and logs
+        if: always() && vars.SELFHOST_E2E_ENABLED == 'true'
+        shell: bash
+        run: rm -rf "${{ github.workspace }}/.selfhost-e2e" "${{ runner.temp }}/selfhost-cloud.log"
+
+  selfhost-e2e:
+    name: Self-host E2EE & sync E2E (shard ${{ matrix.shard }}/3)
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.target-environment }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      NODE_VERSION: '22.23.4'
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - name: Checkout LodyAI/Lody
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Setup Bun
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install self-host prerequisites (mkcert + convex-local-backend)
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        shell: bash
+        env:
+          CONVEX_BACKEND_VERSION: precompiled-2026-10-22-1447815
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mkcert libnss3-tools
+          CONVEX_DIR="${HOME}/.cache/convex/binaries/${CONVEX_BACKEND_VERSION}"
+          mkdir -p "${CONVEX_DIR}"
+          curl -fsSL \
+            "https://github.com/get-convex/convex-backend/releases/download/${CONVEX_BACKEND_VERSION}/convex-local-backend-x86_64-unknown-linux-gnu.zip" \
+            -o "${RUNNER_TEMP}/convex-local-backend.zip"
+          unzip -q -o "${RUNNER_TEMP}/convex-local-backend.zip" -d "${CONVEX_DIR}"
+          chmod +x "${CONVEX_DIR}/convex-local-backend"
+          rm -f "${RUNNER_TEMP}/convex-local-backend.zip"
+
+      - name: Checkout self-host E2E harness (read-only deploy key)
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: loro-dev/lody
+          ref: main
+          path: .selfhost-e2e
+          ssh-key: ${{ secrets.PRIVATE_SOURCE_SSH_KEY }}
+          persist-credentials: false
+
+      - name: Run self-host E2EE & sync E2E (redacted public logs)
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.source-sha }}
+          SELFHOST_DIR: ${{ github.workspace }}/.selfhost-e2e
+          SELFHOST_LOG: ${{ runner.temp }}/selfhost-e2e.log
+          SELFHOST_SUITE_LABEL: selfhost-e2e-${{ matrix.shard }}of3
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: '3'
+          LODY_LORO_STREAMS_WS_ENABLED: '1'
+          FEISHU_ALERT_WEBHOOK_URL: ${{ secrets.FEISHU_ALERT_WEBHOOK_URL }}
+          FEISHU_ALERT_WEBHOOK_SECRET: ${{ secrets.FEISHU_ALERT_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          OSS_WORKTREE="$(pwd)"
+          set +e
+          (
+            set -euo pipefail
+            rm -rf "${SELFHOST_DIR}/lody-oss"
+            git clone --no-checkout "${OSS_WORKTREE}" "${SELFHOST_DIR}/lody-oss"
+            git -C "${SELFHOST_DIR}/lody-oss" checkout --detach "${CANDIDATE_SHA}"
+            git -C "${SELFHOST_DIR}/lody-oss" submodule update --init --depth 1 -- packages
+            cd "${SELFHOST_DIR}"
+            corepack pnpm install --frozen-lockfile --prefer-offline
+            corepack pnpm --filter acp-extension-core --filter acp-extension-dsh build
+            corepack pnpm verify:release -- --only e2e --shard "${SHARD_INDEX}/${SHARD_TOTAL}"
+          ) >"${SELFHOST_LOG}" 2>&1
+          EXIT_CODE=$?
+          set -e
+          node .github/scripts/selfhost-e2e-report.mjs "${SELFHOST_DIR}" "${EXIT_CODE}" "${SELFHOST_LOG}"
+
+      - name: Cleanup self-host E2E checkout and logs
+        if: always() && vars.SELFHOST_E2E_ENABLED == 'true'
+        shell: bash
+        run: rm -rf "${{ github.workspace }}/.selfhost-e2e" "${{ runner.temp }}/selfhost-e2e.log"
+
+  selfhost-mobile-ios-smoke:
+    name: Self-host Mobile iOS authenticated startup smoke
+    runs-on: xcode-27
+    environment: ${{ inputs.target-environment }}
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      NODE_VERSION: '22.23.4'
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - name: Checkout LodyAI/Lody
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Setup Bun
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install self-host mobile prerequisites (mkcert + CocoaPods + convex-local-backend)
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        shell: bash
+        env:
+          CONVEX_BACKEND_VERSION: precompiled-2026-10-22-1447815
+        run: |
+          set -euo pipefail
+          command -v mkcert >/dev/null 2>&1 || brew install mkcert
+          command -v pod >/dev/null 2>&1 || brew install cocoapods
+          if [[ "$(uname -m)" == "arm64" ]]; then
+            CONVEX_TARGET="aarch64-apple-darwin"
+          else
+            CONVEX_TARGET="x86_64-apple-darwin"
+          fi
+          CONVEX_DIR="${HOME}/.cache/convex/binaries/${CONVEX_BACKEND_VERSION}"
+          mkdir -p "${CONVEX_DIR}"
+          curl -fsSL \
+            "https://github.com/get-convex/convex-backend/releases/download/${CONVEX_BACKEND_VERSION}/convex-local-backend-${CONVEX_TARGET}.zip" \
+            -o "${RUNNER_TEMP}/convex-local-backend.zip"
+          unzip -q -o "${RUNNER_TEMP}/convex-local-backend.zip" -d "${CONVEX_DIR}"
+          chmod +x "${CONVEX_DIR}/convex-local-backend"
+          rm -f "${RUNNER_TEMP}/convex-local-backend.zip"
+
+      - name: Checkout self-host E2E harness (read-only deploy key)
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: loro-dev/lody
+          ref: main
+          path: .selfhost-e2e
+          ssh-key: ${{ secrets.PRIVATE_SOURCE_SSH_KEY }}
+          persist-credentials: false
+
+      - name: Run self-host Mobile iOS authenticated startup smoke (redacted public logs)
+        if: vars.SELFHOST_E2E_ENABLED == 'true'
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.source-sha }}
+          SELFHOST_DIR: ${{ github.workspace }}/.selfhost-e2e
+          SELFHOST_LOG: ${{ runner.temp }}/selfhost-mobile-ios-smoke.log
+          SELFHOST_SUITE_LABEL: selfhost-mobile-ios-smoke
+          LODY_LORO_STREAMS_WS_ENABLED: '1'
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+          FEISHU_ALERT_WEBHOOK_URL: ${{ secrets.FEISHU_ALERT_WEBHOOK_URL }}
+          FEISHU_ALERT_WEBHOOK_SECRET: ${{ secrets.FEISHU_ALERT_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          OSS_WORKTREE="$(pwd)"
+          set +e
+          (
+            set -euo pipefail
+            rm -rf "${SELFHOST_DIR}/lody-oss"
+            git clone --no-checkout "${OSS_WORKTREE}" "${SELFHOST_DIR}/lody-oss"
+            git -C "${SELFHOST_DIR}/lody-oss" checkout --detach "${CANDIDATE_SHA}"
+            git -C "${SELFHOST_DIR}/lody-oss" submodule update --init --depth 1 -- packages
+            cd "${SELFHOST_DIR}"
+            corepack pnpm install --frozen-lockfile --prefer-offline
+            corepack pnpm --filter acp-extension-core --filter acp-extension-dsh build
+            corepack pnpm verify:release -- --only mobile-ios-smoke
+          ) >"${SELFHOST_LOG}" 2>&1
+          EXIT_CODE=$?
+          set -e
+          node .github/scripts/selfhost-e2e-report.mjs "${SELFHOST_DIR}" "${EXIT_CODE}" "${SELFHOST_LOG}"
+
+      - name: Cleanup self-host E2E checkout and logs
+        if: always() && vars.SELFHOST_E2E_ENABLED == 'true'
+        shell: bash
+        run: rm -rf "${{ github.workspace }}/.selfhost-e2e" "${{ runner.temp }}/selfhost-mobile-ios-smoke.log"

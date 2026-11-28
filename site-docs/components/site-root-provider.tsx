@@ -1,6 +1,7 @@
 import { Link as RouterLink, useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { RootProvider } from 'fumadocs-ui/provider/tanstack';
-import type { ComponentProps, ReactNode } from 'react';
+import { useEffect, type ComponentProps, type ReactNode } from 'react';
+import { installSiteAnalyticsListeners } from '@site/lib/site-analytics';
 import {
   detectSiteLocaleFromPath,
   SITE_LOCALE_META,
@@ -9,7 +10,14 @@ import {
   type SiteLocale,
 } from '@site/src/site-pages/shared';
 
-import { isSitePageHref, SITE_URL, siteHref } from '../lib/site-url.mjs';
+import {
+  APP_OWNED_PATHS,
+  appOwnedRel,
+  isAppOwnedHref,
+  isSitePageHref,
+  SITE_URL,
+  siteHref,
+} from '../lib/site-url.mjs';
 import { OptionalEnhancement } from './optional-enhancement';
 import { CookieConsentBanner } from './cookie-consent-banner';
 import { DocsSearchDialog } from './docs-search-dialog';
@@ -132,24 +140,22 @@ const translationsByLocale: Record<
  * the web app through hand-written anchors; this keeps Fumadocs-rendered links
  * (docs Cards, MDX links) on the same real navigation.
  */
-const APP_OWNED_PATHS = ['/login'];
-
-function isAppOwnedHref(href: string) {
-  const path = href.split(/[?#]/u)[0] ?? href;
-  return APP_OWNED_PATHS.some((owned) => path === owned || path.startsWith(`${owned}/`));
-}
+export { APP_OWNED_PATHS };
 
 function SiteFrameworkLink({
   href = '#',
   prefetch = true,
+  rel,
   ...props
 }: ComponentProps<'a'> & { prefetch?: boolean }) {
   const router = useRouter();
-  if (isAppOwnedHref(href) || !isSitePageHref(href)) return <a href={href} {...props} />;
+  if (isAppOwnedHref(href) || !isSitePageHref(href)) {
+    return <a href={href} rel={appOwnedRel(href, rel)} {...props} />;
+  }
 
   const normalizedHref = siteHref(href);
   // Absolute hrefs keep the native navigation semantics of RouterLink's external branch.
-  if (!href.startsWith('/')) return <a href={normalizedHref} {...props} />;
+  if (!href.startsWith('/')) return <a href={normalizedHref} rel={rel} {...props} />;
 
   const url = new URL(normalizedHref, SITE_URL);
   // `to` is a pathname: trailingSlash must never process a query or fragment.
@@ -159,6 +165,7 @@ function SiteFrameworkLink({
       to={url.pathname as never}
       search={router.options.parseSearch(url.search) as never}
       hash={url.hash.slice(1)}
+      rel={rel}
       {...props}
     />
   );
@@ -171,6 +178,14 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const pathname = location.pathname;
   const locale = detectSiteLocaleFromPath(pathname);
+
+  useEffect(
+    () =>
+      installSiteAnalyticsListeners({
+        nightlyBaseUrl: import.meta.env.VITE_NIGHTLY_UPDATE_URL,
+      }),
+    []
+  );
 
   return (
     <RootProvider

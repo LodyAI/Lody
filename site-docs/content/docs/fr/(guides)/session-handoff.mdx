@@ -41,7 +41,7 @@ Le transfert est une action propre aux espaces de travail d'équipe. L'autre per
 3. Saisissez son adresse e-mail et choisissez un rôle.
 4. Elle peut accepter depuis l'e-mail, ou vous pouvez copier le lien d'invitation et le lui envoyer vous-même.
 
-Détails : [Inviter des membres](/fr/docs/team#invite-members).
+Détails : [Inviter des membres](/fr/docs/team#inviter-des-membres).
 
 ### 2. Rendre la session visible pour l'équipe
 
@@ -53,7 +53,7 @@ Depuis la session :
 2. Choisissez **Partager avec l'équipe…** (le libellé peut indiquer **Partager l'appareil avec l'équipe…** ou **Partager le projet avec l'équipe…** lorsque ce sont ces autorisations qui manquent).
 3. Confirmez. Lody partage la machine requise ainsi que, dans le cas d'un projet local, le projet, puis copie un lien.
 
-Seul le **propriétaire de l'appareil** peut partager. Si l'appareil n'est pas enregistré pour l'accès en équipe, enregistrez-le d'abord. Vous pouvez également partager une machine depuis **Paramètres** -> **Machines** -> **Partager la machine** sans ouvrir une session particulière. Voir [Visibilité des machines en équipe](/fr/docs/team#team-machine-visibility).
+Seul le **propriétaire de l'appareil** peut partager. Si l'appareil n'est pas enregistré pour l'accès en équipe, enregistrez-le d'abord. Vous pouvez également partager une machine depuis **Paramètres** -> **Machines** -> **Partager la machine** sans ouvrir une session particulière. Voir [Visibilité des machines en équipe](/fr/docs/team#visibilité-des-machines-déquipe).
 
 <Callout type="warn" title="Le partage peut élargir la visibilité au-delà d'une seule conversation">
   Le partage d'une session peut partager sa machine et/ou son projet local avec tous les membres de l'espace de travail.
@@ -79,7 +79,7 @@ Une fois dans la session, votre coéquipier peut :
 - Continuer à travailler dans le même [worktree](/fr/docs/worktrees) et sur la même branche
 - Envoyer le prompt suivant et orienter la même [configuration d'agent](/fr/docs/quickstart)
 
-Forker une session est un autre outil : cela copie l'historique dans une **nouvelle** session. **Espace de travail actuel** conserve les mêmes fichiers ; **Nouveau worktree** (lorsqu'il est proposé) s'isole à partir du `HEAD` validé. Utilisez le fork lorsque vous souhaitez une branche privée de la conversation, et non lorsque vous voulez faire entrer un coéquipier dans la session d'origine. Voir [Forker une session](/fr/docs/session#fork-a-session).
+Forker une session est un autre outil : cela copie l'historique dans une **nouvelle** session. **Espace de travail actuel** conserve les mêmes fichiers ; **Nouveau worktree** (lorsqu'il est proposé) s'isole à partir du `HEAD` validé. Utilisez le fork lorsque vous souhaitez une branche privée de la conversation, et non lorsque vous voulez faire entrer un coéquipier dans la session d'origine. Voir [Forker une session](/fr/docs/session#forker-une-session).
 
 Pour exécuter plusieurs sessions isolées en équipe, voir [Agents de code en parallèle](/fr/docs/parallel-agents).
 Pour coordonner plusieurs conversations depuis un seul agent, voir [Contrôle de session par l'agent](/fr/docs/session-orchestration).
@@ -89,7 +89,7 @@ Pour coordonner plusieurs conversations depuis un seul agent, voir [Contrôle de
 | Contrôle                           | À qui il s'applique                                                                                      | Effet                                                                                                                                                  |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Appartenance à l'espace de travail | Toute personne que vous invitez                                                                          | Requise avant que quiconque puisse ouvrir des sessions d'équipe                                                                                         |
-| Rôle de membre                     | Les propriétaires et administrateurs gèrent les membres                                                  | Détermine qui peut inviter, modifier ou supprimer des personnes — voir [Modifier les permissions des membres](/fr/docs/team#change-member-permissions) |
+| Rôle de membre                     | Les propriétaires et administrateurs gèrent les membres                                                  | Détermine qui peut inviter, modifier ou supprimer des personnes — voir [Modifier les permissions des membres](/fr/docs/team#modifier-les-permissions-des-membres) |
 | Partage de machine                 | Propriétaire de la machine uniquement                                                                    | Les sessions sur une machine non partagée n'apparaissent pas dans la barre latérale des autres membres                                                 |
 | Partage de projet local            | Propriétaire de la machine, lorsque la session utilise un projet local                                   | Les coéquipiers ont besoin de l'autorisation sur le projet en plus de celle sur la machine                                                             |
 | URL de session                     | Toujours pour le propriétaire ; pour les coéquipiers uniquement une fois la session visible par l'équipe | Copier l'URL n'équivaut pas à **Partager avec l'équipe…**                                                                                              |

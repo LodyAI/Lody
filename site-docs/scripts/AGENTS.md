@@ -3,8 +3,10 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
 
-- `site-paths.mjs` enumerates prerender paths for docs/blog/changelog and is the one
-  path source. `generate-sitemap.mjs` writes `public/sitemap.xml` from it.
+- `site-paths.mjs` enumerates prerender paths and source-file mappings for docs/blog/changelog
+  and is the one path source. `generate-sitemap.mjs` writes the Sitemap Index `public/sitemap.xml`
+  and per-locale `public/sitemap-<locale>.xml` files with content-derived `<lastmod>` dates from
+  git history and MDX frontmatter (omitting `<lastmod>` when no reliable content date exists).
 - `generate-docs-search.mjs` writes the multilingual, browser-side docs index to
   `public/docs-search.json`. Docs search stays local and must not depend on a runtime
   API or hosted search service.

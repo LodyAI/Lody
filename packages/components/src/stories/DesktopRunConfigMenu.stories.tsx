@@ -313,10 +313,13 @@ function StoryShell({
   isEmptyConversation,
   machineSelected = true,
   configuredSelectors = selectors,
+  withPermissionDefault = false,
 }: {
   isEmptyConversation: boolean;
   machineSelected?: boolean;
   configuredSelectors?: AcpConfigOptionSelector[];
+  /** Offers "Use for new conversations" in the permission menu. */
+  withPermissionDefault?: boolean;
 }) {
   const store = useMemo(() => {
     const s = createStore();
@@ -332,6 +335,7 @@ function StoryShell({
   const [values, setValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
     Object.fromEntries(configuredSelectors.map((sel) => [sel.configId, sel.currentValue]))
   );
+  const [permissionDefault, setPermissionDefault] = useState<string | null>(null);
 
   return (
     <Provider store={store}>
@@ -359,6 +363,11 @@ function StoryShell({
             configOptionSelectors={configuredSelectors}
             configOptionValues={values}
             onConfigOptionChange={(id, v) => setValues((p) => ({ ...p, [id]: v }))}
+            permissionDefault={
+              withPermissionDefault
+                ? { value: () => permissionDefault, onChange: (_, v) => setPermissionDefault(v) }
+                : undefined
+            }
           />
         </div>
       </div>
@@ -371,13 +380,77 @@ function MachineScopeShell() {
   const [selectedMachineId, setSelectedMachineId] = useState(machineId);
 
   return (
-    <div {...stylex.props(storyLayout.row3)}>
+    <div {...stylex.props(storyLayout.row)}>
       <div {...stylex.props(storyLayout.row4)}>
         <DesktopMachineMenu
           value={selectedMachineId}
           options={[
             { value: machineId, label: 'zx-macbook' },
             { value: secondMachineId, label: 'build-machine' },
+          ]}
+          onChange={setSelectedMachineId}
+          onAddMachine={fn()}
+        />
+        <div {...stylex.props(storyLayoutStyles.row)}>lody</div>
+      </div>
+    </div>
+  );
+}
+
+function MachineScopeResourcesShell() {
+  const buildMachineId = 'machine-build' as MachineId;
+  const gpuMachineId = 'machine-gpu' as MachineId;
+  const legacyMachineId = 'machine-legacy' as MachineId;
+  const [selectedMachineId, setSelectedMachineId] = useState(machineId);
+
+  return (
+    <div {...stylex.props(storyLayout.row)}>
+      <div {...stylex.props(storyLayout.row4)}>
+        <DesktopMachineMenu
+          value={selectedMachineId}
+          visibleLocalMachineId={machineId}
+          options={[
+            {
+              value: machineId,
+              label: 'zx-macbook',
+              resources: {
+                cp: 340,
+                cc: 14,
+                mu: 184,
+                mt: 360,
+                df: 4120,
+                dt: 10240,
+              },
+            },
+            {
+              value: buildMachineId,
+              label: 'build-runner-shanghai',
+              resources: {
+                cp: 2816,
+                cc: 32,
+                mu: 560,
+                mt: 640,
+                df: 2400,
+                dt: 20480,
+              },
+            },
+            {
+              value: gpuMachineId,
+              label: 'ubuntu-gpu-workstation-02',
+              isPrivate: true,
+              resources: {
+                cp: 6200,
+                cc: 64,
+                mu: 2480,
+                mt: 2560,
+                df: 42,
+                dt: 5120,
+              },
+            },
+            {
+              value: legacyMachineId,
+              label: 'raspi-edge-node',
+            },
           ]}
           onChange={setSelectedMachineId}
           onAddMachine={fn()}
@@ -638,6 +711,10 @@ type Story = StoryObj<typeof meta>;
 
 export const LockedAgent: Story = { args: { isEmptyConversation: false } };
 export const EmptyConversationAgentPickable: Story = { args: { isEmptyConversation: true } };
+/** The permission menu's last row makes the current permission the default. */
+export const PermissionDefault: Story = {
+  args: { isEmptyConversation: true, withPermissionDefault: true },
+};
 export const MachineRequired: Story = {
   args: { isEmptyConversation: true, machineSelected: false },
 };
@@ -652,6 +729,22 @@ export const DeepSeekModels: Story = {
 export const MachineScope: Story = {
   args: { isEmptyConversation: true },
   render: () => <MachineScopeShell />,
+};
+export const MachineScopeWithResources: Story = {
+  args: { isEmptyConversation: true },
+  globals: { theme: 'dark' },
+  render: () => <MachineScopeResourcesShell />,
+  play: async ({ canvasElement }) => {
+    const trigger = canvasElement.querySelector<HTMLButtonElement>(
+      '[data-testid="chat-machine-trigger"]'
+    );
+    if (!trigger) throw new Error('Machine trigger is missing');
+    await userEvent.click(trigger);
+  },
+};
+export const MachineScopeWithResourcesLight: Story = {
+  ...MachineScopeWithResources,
+  globals: { theme: 'light' },
 };
 export const MachineScopeOffline: Story = {
   args: { isEmptyConversation: true },

@@ -3,6 +3,7 @@ import { expect, userEvent, within } from 'storybook/test';
 import type { E2eeAccountPairingPreview, E2eeAccountPairingRequestState } from '@lody/platform';
 import {
   E2eeAccountPairingApprove,
+  E2eeAccountPairingKeyRetry,
   E2eeAccountPairingRequest,
 } from '@/components/pages/e2ee-account-pairing';
 
@@ -34,7 +35,6 @@ const requester = (state: E2eeAccountPairingRequestState | null) => ({
   cancelAccountPairing: async () => {},
 });
 const approver = {
-  accountPairingCode: async () => ({ pairingString: CODE, expiresAt: NOW + 600_000 }),
   inspectAccountPairing: async () => preview,
   approveAccountPairing: async (input: { workspaceIds: string[] }) => ({
     workspaces: input.workspaceIds.map((workspaceId) => ({
@@ -61,7 +61,7 @@ export const RequestExpired: Story = {
 };
 
 export const ApproverConfirms: Story = {
-  render: () => <E2eeAccountPairingApprove runtime={approver} pollMs={60_000} />,
+  render: () => <E2eeAccountPairingApprove runtime={approver} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.type(canvas.getByRole('textbox'), CODE);
@@ -69,20 +69,6 @@ export const ApproverConfirms: Story = {
     await expect(await canvas.findByText('Synthetic phone')).toBeVisible();
   },
 };
-export const ApproverShowsCode: Story = {
-  render: () => (
-    <E2eeAccountPairingApprove
-      runtime={{ ...approver, inspectAccountPairing: async () => null }}
-      pollMs={60_000}
-    />
-  ),
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await userEvent.click(
-      canvas.getByRole('button', {
-        name: /Show a code on this device instead|改为在这台设备上显示配对码/,
-      })
-    );
-    await expect(await canvas.findByText(CODE)).toBeVisible();
-  },
+export const KeyRetryBanner: Story = {
+  render: () => <E2eeAccountPairingKeyRetry onRetry={() => {}} />,
 };

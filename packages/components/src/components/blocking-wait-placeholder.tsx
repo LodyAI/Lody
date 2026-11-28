@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { triggerDocMetaRescanAtom } from '../atoms/doc-meta';
 import { AlertTriangle } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -313,12 +314,14 @@ export function BlockingWaitPlaceholder({
   variant,
   title,
   description,
+  action,
   recoveryDelayMs = BLOCKING_WAIT_RECOVERY_DELAY_MS,
 }: {
   gate: string;
   variant: 'content' | 'boot';
   title: string;
   description?: string;
+  action?: ReactNode;
   recoveryDelayMs?: number;
 }) {
   const observation = useWorkspaceDataScopeState();
@@ -326,7 +329,14 @@ export function BlockingWaitPlaceholder({
   const [waitStartedAt] = useState(() => Date.now());
 
   if (state === 'waiting') {
-    return <LoadingPlaceholder variant={variant} title={title} description={description} />;
+    return (
+      <LoadingPlaceholder
+        variant={variant}
+        title={title}
+        description={description}
+        action={action}
+      />
+    );
   }
   return (
     <RecoveryPage
@@ -354,6 +364,7 @@ export function RecoveryPage({
   waitStartedAt: number;
 }) {
   const { t } = useTranslation();
+  const triggerDocMetaRescan = useSetAtom(triggerDocMetaRescanAtom);
   const connectionUiState = useAtomValue(lodyConnectionUiStateAtom);
   const controlConnectionState = useAtomValue(lodyControlConnectionStateAtom);
   const [clearOpen, setClearOpen] = useState(false);
@@ -459,7 +470,17 @@ export function RecoveryPage({
       }
     >
       <StatusPageActions>
-        <Button type="button" size="small" onClick={() => reloadApp()}>
+        {blocker === 'doc_meta_scan_failed' ? (
+          <Button type="button" size="small" onClick={() => triggerDocMetaRescan()}>
+            {t('common.retry')}
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant={blocker === 'doc_meta_scan_failed' ? 'secondary' : 'primary'}
+          size="small"
+          onClick={() => reloadApp()}
+        >
           {t('errorBoundary.reload')}
         </Button>
         <Button type="button" variant="secondary" size="small" onClick={() => setClearOpen(true)}>

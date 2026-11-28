@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
+import { userEvent, within } from 'storybook/test';
 import { useState } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 
@@ -160,7 +161,48 @@ export const RoleLocked: Story = {
   render: () => <Harness locked />,
 };
 
+const machinesWithResources: MobileProjectMachine[] = [
+  {
+    id: spikes,
+    name: 'spikes-PowerBook.local',
+    online: true,
+    resources: {
+      cp: 340,
+      cc: 14,
+      mu: 184,
+      mt: 360,
+      df: 4120,
+      dt: 10240,
+    },
+  },
+  {
+    id: zx,
+    name: 'build-runner-shanghai',
+    online: true,
+    resources: {
+      cp: 2912,
+      cc: 32,
+      mu: 580,
+      mt: 640,
+      df: 120,
+      dt: 5120,
+    },
+  },
+  { id: lab, name: 'lab-m2', online: false, disabledReason: 'Offline' },
+];
+
 export const TwoMachines: Story = {
   args: Open.args,
   render: () => <Harness initialMachines={machines.slice(0, 2)} />,
+};
+
+export const WithMachineResources: Story = {
+  args: Open.args,
+  render: () => <Harness initialMachines={machinesWithResources} />,
+  play: async () => {
+    const machineButton = await within(document.body).findByRole('button', {
+      name: /Machine/i,
+    });
+    await userEvent.click(machineButton);
+  },
 };

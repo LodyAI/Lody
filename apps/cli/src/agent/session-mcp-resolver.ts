@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   getWorkspaceFlockDocId,
   getWorkspaceMcpCatalog,
@@ -22,7 +23,27 @@ import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
  */
 export type SessionMcpCatalogSelector = (
   agentCapabilities: ResolveSessionMcpServersInput['agentCapabilities']
-) => ResolveSessionMcpServersResult & { warnings?: string[] };
+) => ResolveSessionMcpServersResult & { warnings?: string[]; mount?: SessionMcpMount };
+
+/** In-memory identity of a mounted load (hashes resolved secrets; never persist, sync or log). */
+export type SessionMcpMount = {
+  /** `undefined` means no catalog was read, so the next readable catalog differs. */
+  readonly fingerprint: string | undefined;
+  readonly authRevisions: Readonly<Record<string, number>>;
+};
+
+export const readSessionMcpAuthRevisions = (
+  selectedIds: readonly McpServerId[],
+  getAuthRevision: ((serverId: string) => number) | undefined
+): Record<string, number> =>
+  Object.fromEntries(selectedIds.map((id) => [id, getAuthRevision?.(id) ?? 0]));
+
+/** Local credentials are compared before the catalog, so an unreadable catalog cannot keep a signed-out mount. */
+export const sessionMcpAuthRevisionsChanged = (
+  mounted: SessionMcpMount | undefined,
+  current: Readonly<Record<string, number>>
+): boolean =>
+  Object.entries(current).some(([id, revision]) => (mounted?.authRevisions[id] ?? 0) !== revision);
 
 export type LoadSessionMcpCatalogInput = {
   repo: {
@@ -38,9 +59,83 @@ export type LoadSessionMcpCatalogInput = {
     entry: WorkspaceMcpServerMeta,
     resolved: ResolvedMcpServer
   ) => Promise<ResolvedMcpServer>;
+  getAuthRevision?: (serverId: string) => number;
 };
 
-const EMPTY_SELECTION: SessionMcpCatalogSelector = () => ({ servers: [], problems: [] });
+export const EMPTY_MCP_CONFIG_FINGERPRINT = 'mcp-config:empty';
+
+const EMPTY_SELECTION: SessionMcpCatalogSelector = () => ({
+  servers: [],
+  problems: [],
+  mount: { fingerprint: EMPTY_MCP_CONFIG_FINGERPRINT, authRevisions: {} },
+});
+
+const canonical = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(canonical)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(
+          Object.entries(value)
+            .filter(([, child]) => child !== undefined)
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .map(([key, child]) => [key, canonical(child)])
+        )
+      : value;
+
+const byName = (entries: readonly { name: string; value: string }[]) =>
+  Object.fromEntries(entries.map(({ name, value }) => [name, value]));
+
+/** In-memory fingerprint of what `selectedIds` would mount (hashes secrets; never persist, sync or log). */
+export const computeSessionMcpConfigFingerprint = (input: {
+  catalog: Readonly<Record<string, WorkspaceMcpServerMeta>>;
+  selectedIds: readonly McpServerId[];
+  env: Readonly<Record<string, string | undefined>>;
+}): string => {
+  const ids = [...(normalizeMcpServerIdSelection(input.selectedIds) ?? [])].sort();
+  if (ids.length === 0) return EMPTY_MCP_CONFIG_FINGERPRINT;
+  const servers = ids.map((id) => {
+    const entry = input.catalog[id];
+    const resolved = resolveSessionMcpServers({
+      catalog: input.catalog,
+      selectedIds: [id],
+      agentCapabilities: { http: true },
+      env: input.env,
+    }).servers[0];
+    return {
+      id,
+      entry: entry
+        ? { name: entry.name, transport: entry.transport, connection: entry.connection ?? null }
+        : null,
+      resolved: !resolved
+        ? null
+        : 'type' in resolved
+          ? { ...resolved, headers: byName(resolved.headers) }
+          : { ...resolved, env: byName(resolved.env) },
+    };
+  });
+  return createHash('sha256')
+    .update(JSON.stringify(canonical(servers)))
+    .digest('hex');
+};
+
+/** Current fingerprint from the local catalog replica, or `undefined` when it is unreadable. */
+export const readSessionMcpConfigFingerprint = async (input: {
+  repo: LoadSessionMcpCatalogInput['repo'];
+  workspaceId: WorkspaceId;
+  selectedIds: readonly McpServerId[];
+  env: Readonly<Record<string, string | undefined>>;
+}): Promise<string | undefined> => {
+  if (input.selectedIds.length === 0) return EMPTY_MCP_CONFIG_FINGERPRINT;
+  try {
+    const handle = await input.repo.openFlockDoc(getWorkspaceFlockDocId(input.workspaceId));
+    return computeSessionMcpConfigFingerprint({
+      ...input,
+      catalog: getWorkspaceMcpCatalog(readWorkspaceFlockRowsFromFlock(handle.flock)),
+    });
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * Loads the workspace MCP catalog for an ACP session start.
@@ -63,6 +158,7 @@ export const loadSessionMcpCatalog = async (
 
   const docId = getWorkspaceFlockDocId(input.workspaceId);
   let baselineError: WorkspaceSyncUnavailableError | undefined;
+  const authRevisions = readSessionMcpAuthRevisions(selectedIds, input.getAuthRevision);
   try {
     await input.waitForCatalogBaseline?.();
   } catch (error) {
@@ -82,9 +178,14 @@ export const loadSessionMcpCatalog = async (
         ]
       : undefined;
     const env = input.env ?? process.env;
+    const mount: SessionMcpMount = {
+      fingerprint: computeSessionMcpConfigFingerprint({ catalog, selectedIds, env }),
+      authRevisions,
+    };
     const withWarnings: SessionMcpCatalogSelector = (agentCapabilities) => ({
       ...resolveSessionMcpServers({ catalog, selectedIds, agentCapabilities, env }),
       ...(warnings ? { warnings } : {}),
+      mount,
     });
     if (!input.prepare) return withWarnings;
     const prepared = new Map<string, ResolvedMcpServer>();
@@ -125,12 +226,16 @@ export const loadSessionMcpCatalog = async (
               'Local MCP authentication is unavailable. Configure it on this machine in Settings → MCP.',
           });
       }
-      return { ...result, ...(warnings ? { warnings } : {}) };
+      return { ...result, ...(warnings ? { warnings } : {}), mount };
     };
   } catch (error) {
     if (baselineError && error === baselineError) throw error;
     const reason = formatErrorMessage(error);
     logger.debug(`[${sessionId}] Workspace MCP catalog read failed: ${reason}`);
-    return () => ({ servers: [], problems: [{ kind: 'catalog_unavailable', reason }] });
+    return () => ({
+      servers: [],
+      problems: [{ kind: 'catalog_unavailable', reason }],
+      mount: { fingerprint: undefined, authRevisions },
+    });
   }
 };

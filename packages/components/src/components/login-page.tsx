@@ -51,6 +51,7 @@ import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scrol
 import { hasUsableSessionUser } from '@/hooks/stable-session-state';
 import {
   buildElectronRedirectUrl,
+  buildElectronRedirectUrlFromCookie,
   buildElectronWebLoginCallbackUrl,
   clearElectronAuthorizationCode,
   type ElectronOAuthQuery,
@@ -647,7 +648,22 @@ export function LoginPage({
   useKeyboardAwareScrollIntoView(panelRef);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const focusEmailInput = useCallback(() => {
-    emailInputRef.current?.focus({ preventScroll: true });
+    const input = emailInputRef.current;
+    if (!input) return;
+    // Never steal focus when the user already moved into the email panel during
+    // the 320ms view-slot transition (e.g. focused the password field); doing so
+    // redirects password keystrokes into the email input in plaintext.
+    const activeElement = typeof document === 'undefined' ? null : document.activeElement;
+    if (
+      activeElement &&
+      activeElement !== document.body &&
+      activeElement !== document.documentElement &&
+      (input.form?.contains(activeElement) ||
+        activeElement.closest('[data-login-panel="1"]') !== null)
+    ) {
+      return;
+    }
+    input.focus({ preventScroll: true });
   }, []);
   const loginViewedRef = useRef(false);
   const electronOAuthQuery = getElectronOAuthQuery();
@@ -1276,8 +1292,10 @@ export function LoginPage({
           query: electronOAuthQuery,
         },
       });
-      const authorizationCode =
-        result?.data?.electron_authorization_code ?? readElectronAuthorizationCode();
+      const responseAuthorizationCode = result?.data?.electron_authorization_code ?? null;
+      const cookieAuthorizationValue = responseAuthorizationCode
+        ? null
+        : readElectronAuthorizationCode();
       clearElectronAuthorizationCode();
       if (!isCurrentAccount()) {
         logElectronOAuthDebug('login page discarded transferUser result after account switch');
@@ -1288,23 +1306,30 @@ export function LoginPage({
         });
         return;
       }
-      if (!authorizationCode) {
+      const authorizationPayload = responseAuthorizationCode ?? cookieAuthorizationValue;
+      if (!authorizationPayload) {
         throw new Error('Missing Electron authorization code');
       }
 
       logElectronOAuthDebug('login page received electron authorization code from transferUser', {
-        authorizationCodeLength: authorizationCode.length,
+        authorizationCodeLength: authorizationPayload.length,
       });
       capturePostHogEvent(postHog, 'auth/electron_session_transfer_succeeded', {
         login_surface: loginSurface,
         launch_mode: detectAppLaunchMode(isElectronRenderer),
       });
       setElectronHandoffUrl(
-        buildElectronRedirectUrl(
-          authorizationCode,
-          electronOAuthQuery.state,
-          electronOAuthQuery.desktop_channel
-        )
+        responseAuthorizationCode
+          ? buildElectronRedirectUrl(
+              responseAuthorizationCode,
+              electronOAuthQuery.state,
+              electronOAuthQuery.desktop_channel
+            )
+          : buildElectronRedirectUrlFromCookie(
+              cookieAuthorizationValue!,
+              electronOAuthQuery.state,
+              electronOAuthQuery.desktop_channel
+            )
       );
     } catch (err) {
       if (!isCurrentAccount()) {
@@ -1826,6 +1851,7 @@ export function LoginPage({
 
       {electronHandoffUrl ? (
         <Button
+          nativeButton={false}
           render={<a href={electronHandoffUrl} data-electron-handoff-link />}
           height="calc(var(--spacing) * 10)"
           width="100%"

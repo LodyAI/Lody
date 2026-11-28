@@ -13,7 +13,14 @@ const meta = {
     },
     onReset: () => {},
   },
-  parameters: { layout: 'centered' },
+  parameters: { layout: 'fullscreen' },
+  decorators: [
+    (Story) => (
+      <div style={{ height: '100dvh', minHeight: '100dvh' }}>
+        <Story />
+      </div>
+    ),
+  ],
 } satisfies Meta<typeof E2eeIdentityRecovery>;
 export default meta;
 type Story = StoryObj<typeof meta>;

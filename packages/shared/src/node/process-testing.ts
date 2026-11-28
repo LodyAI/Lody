@@ -133,8 +133,12 @@ export class FakeProcessTable {
 
   /**
    * `taskkill /PID <root> /T [/F]` over the tree rooted at `<root>`. Without
-   * `/F` a member that ignores SIGTERM makes it fail (a console process that
-   * can only be terminated forcefully); an unknown root exits with 128.
+   * `/F` a member that ignores SIGTERM survives (a windowless process that can
+   * only be terminated forcefully). Two graceful statuses were measured on
+   * Windows 11: 255 for a refusing root with no live descendant, and 128, the
+   * same as for an unknown root, when a descendant refuses, which also leaves
+   * the root running ("one or more child processes of this process were still
+   * running"). A refusing root whose descendants complied is modelled as 255.
    */
   private runTaskkill(args: readonly string[]): ChildProcess {
     const child = new FakeChildProcess(this.nextPid++, this);
@@ -148,8 +152,10 @@ export class FakeProcessTable {
     } else {
       const signal: NodeJS.Signals = force ? 'SIGKILL' : 'SIGTERM';
       this.delivered.push({ target: root, signal });
+      const descendantSurvives = members.some((m) => m.pid !== root && m.ignores.has(signal));
       for (const member of members) {
-        if (member.ignores.has(signal)) code = 1;
+        if (member.ignores.has(signal)) code = descendantSurvives ? 128 : 255;
+        else if (member.pid === root && descendantSurvives) code = 128;
         else this.terminate(member, signal, null);
       }
     }

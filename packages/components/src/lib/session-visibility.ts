@@ -217,6 +217,55 @@ export function isSessionInMyScope(
   return !!currentUserId && session.userId === currentUserId;
 }
 
+/**
+ * The sidebar's task filter: My Tasks, All Tasks (`team` with no people), or
+ * the tasks owned by the chosen people (`team` with `memberIds`). Ownership is
+ * the Session's current, transferable `userId`.
+ */
+export type TaskOwnerSelection = {
+  scope: 'my' | 'team';
+  memberIds: readonly string[];
+};
+
+/** Owners the selection admits; `null` admits every owner. */
+export function resolveTaskOwnerFilter(
+  selection: TaskOwnerSelection,
+  currentUserId: string | null | undefined,
+  workspaceMemberIds: readonly string[]
+): ReadonlySet<string> | null {
+  if (selection.scope === 'my') return new Set(currentUserId ? [currentUserId] : []);
+  // People who left drop out; an unloaded directory keeps the choice as stored.
+  const known = workspaceMemberIds.length > 0 ? new Set(workspaceMemberIds) : null;
+  const chosen = selection.memberIds.filter((id) => !known || known.has(id));
+  return chosen.length > 0 ? new Set(chosen) : null;
+}
+
+export function isSessionInTaskOwnerFilter(
+  session: SessionMachineRecord,
+  filter: ReadonlySet<string> | null
+): boolean {
+  return filter === null || (!!session.userId && filter.has(session.userId));
+}
+
+/**
+ * Ticks or unticks one person. Only yourself folds to My Tasks and nobody
+ * folds to All Tasks, so the two presets stay the one spelling of each.
+ */
+export function toggleTaskOwnerSelection(
+  selection: TaskOwnerSelection,
+  userId: string,
+  currentUserId: string | null | undefined
+): TaskOwnerSelection {
+  const current =
+    selection.scope === 'my' ? (currentUserId ? [currentUserId] : []) : selection.memberIds;
+  const next = current.includes(userId)
+    ? current.filter((id) => id !== userId)
+    : [...current, userId];
+  if (next.length === 0) return { scope: 'team', memberIds: [] };
+  if (next.length === 1 && next[0] === currentUserId) return { scope: 'my', memberIds: [] };
+  return { scope: 'team', memberIds: next };
+}
+
 /** Assignment may use existing access only; it never changes sharing. */
 export function getSessionOwnerAccessReason(
   session: SessionMachineRecord,

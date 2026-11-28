@@ -579,6 +579,31 @@ describe('session sandbox', () => {
     expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGTERM' }]);
   });
 
+  it('forces a Windows noop tree whose graceful taskkill leaves a running descendant', async () => {
+    const table = new FakeProcessTable('win32');
+    table.queueSpawn({ ignores: ['SIGTERM'] });
+    const sandbox = await createProcessTableSandbox(table);
+    const handle = await sandbox.spawn('lody.exe', ['claude-acp.js'], {
+      cwd: process.cwd(),
+      env: {},
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const root = handle.child.pid ?? -1;
+    const descendant = table.addDescendant(root, { ignores: ['SIGTERM'] });
+    const exits: Array<[number | null, NodeJS.Signals | null]> = [];
+    handle.onExit((code, signal) => exits.push([code, signal]));
+
+    await handle.terminate(false);
+
+    expect(table.isAlive(root)).toBe(false);
+    expect(table.isAlive(descendant)).toBe(false);
+    expect(table.delivered).toEqual([
+      { target: root, signal: 'SIGTERM' },
+      { target: root, signal: 'SIGKILL' },
+    ]);
+    expect(exits).toEqual([[null, 'SIGKILL']]);
+  });
+
   it('buffers noop sandbox exits that happen while applying process resource profiles', async () => {
     const cgroupMount = path.join(path.sep, 'mock', 'sys', 'fs', 'cgroup');
     const missingCgroupMount = path.join(path.sep, 'missing', 'sys', 'fs', 'cgroup');

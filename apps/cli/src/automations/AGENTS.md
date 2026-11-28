@@ -52,6 +52,12 @@
   settles when its delivered input settles; other Session group work never un-settles
   it. Terminal waits retire after the retention window, and inspection defaults to
   live rows.
+- `_lodyAutomation` identifies only the input an Automation queued. Delegated-result
+  continuations of that Turn are ordinary system input, so Inbox storage and launch
+  strip the origin: re-running its admission refuses every relaunch. A refused Automation input
+  in history stays dispatchable under the dispatch watcher's bounded retry owner, at
+  most 30 seconds apart because Automation conditions recover without a Session
+  document change, and is never redispatched on every Session check.
 - Session actions use normal admission/queue/Stop/permission owners. Idle maintenance
   expires on new input. Settled groups include unfinished automation and native work.
   Stop blocks continuation admission, not authorized condition reads; only explicit
@@ -74,7 +80,9 @@
   earliest durable deadline, capped at 15 seconds for staged-outcome reconciliation
   and auto delivery — no polling probe and no work-remaining rescan. A durable
   denial — revoked grant or authorization, superseded or deleted work — cancels the
-  queued input end to end; only transient denials re-verify. Guard predicates share
+  queued input end to end; only transient denials re-verify. An input already promoted
+  to history is cancelled there by the Session execution owner while no runtime has
+  started it; a running Turn follows Stop. Guard predicates share
   one `guard:` reason namespace at engine check and resource admission, so the same
   durable classifier converges both; cancellation preserves that reason. Capacity
   wake scans resolve candidates by the observed binding/model through normalized

@@ -1592,3 +1592,39 @@ it('encrypted runtime notifications deliver only to their own account and keep H
   expect(port.sessionSharing).toBeNull();
   await expect(port.remotePreview!.verifyControl({} as never)).rejects.toThrow('unavailable');
 });
+
+it('createCloudRemoteMachinePairingClaim preserves HTTP status and terminal codes so 4xx never retries while 503 does', async () => {
+  vi.stubEnv('LODY_PLATFORM', 'cloud');
+  vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+  const { createCloudRemoteMachinePairingClaim } = await import('../src/lib/cloud-cli-port');
+  const { isTransientHttpStatus } = await import('../src/lib/cloud-e2ee-errors');
+  const originalFetch = globalThis.fetch;
+  try {
+    const cases: Array<[number, string | null, string, boolean]> = [
+      [401, JSON.stringify({ code: 'http_401' }), 'http_401', false],
+      [403, JSON.stringify({ code: 'http_403' }), 'http_403', false],
+      [409, null, 'e2ee_pairing_conflict_create_new_command', false],
+      [410, null, 'e2ee_pairing_expired_create_new_command', false],
+      [503, 'unavailable', 'e2ee_pairing_unavailable_retry_same_command', true],
+    ];
+    for (const [status, body, expectedMessage, expectedTransient] of cases) {
+      globalThis.fetch = (async () =>
+        new Response(body, {
+          status,
+          headers: body?.startsWith('{') ? { 'Content-Type': 'application/json' } : undefined,
+        })) as typeof fetch;
+      const claim = createCloudRemoteMachinePairingClaim({
+        ingressUrl: 'https://ingress.invalid',
+        logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } as never,
+      });
+      const err = await claim('{}', new AbortController().signal).catch((e) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toBe(expectedMessage);
+      expect((err as { status?: number }).status).toBe(status);
+      expect(isTransientHttpStatus((err as { status?: number }).status)).toBe(expectedTransient);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  }
+});

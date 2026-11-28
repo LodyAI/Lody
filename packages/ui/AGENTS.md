@@ -18,9 +18,10 @@ StyleX rules must land in the initial renderer stylesheet: `index` for Web and
 - Text sizes/leading derive from document `--ui-font-size` (14px fallback), not nested `em`.
 - A focus or invalid ring is a `box-shadow` composed with the control's own
   shadow, never an `outline` (the shell resets outlines with `!important`); a
-  control whose edge changes with state restates it. Focus rings read
+  control whose edge changes with state restates it. Non-field focus rings read
   `focus.ringWidth`, zero under `installFocusModality`'s pointer mode; fields
-  keep 2px.
+  use a crisp 1px neutral focus edge (`field.ringWidth: 1px`, neutral `label`
+  tint) — never a saturated blue or 2px solid accent ring on text inputs.
 - Checkbox, Radio and Switch render a real `<button>` through Base UI's
   `nativeButton`, so `:disabled`, `:focus-visible` and a `<label>` reach them.
 - Controls in the field family read validity and disabled from `Field.Root`

@@ -225,6 +225,7 @@ function createHarness(options?: {
       () => childSessionIds
     ),
     hasSession: vi.fn((id: SessionId) => activeSessionIds.has(id)),
+    isWorktreeSessionBusy: vi.fn((id: SessionId) => activeSessionIds.has(id)),
     terminateSession: vi.fn(async (id: SessionId) => {
       activeSessionIds.delete(id);
     }),

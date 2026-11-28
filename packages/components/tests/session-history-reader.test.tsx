@@ -9,6 +9,7 @@ import { createStaticStore, type PlatformProvider } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import {
   getSessionRoomId,
+  type RoostHistorySyncState,
   type SessionHistory,
   type SessionId,
   type WorkspaceId,
@@ -49,6 +50,9 @@ vi.mock('../src/components/ai-gui', () => ({
   default: ({ sessionId }: { sessionId: string }) => <div data-history-stream={sessionId} />,
 }));
 vi.mock('../src/lib/toast', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('../src/hooks/use-machine-online-status', () => ({
+  useMachineOnlineStatus: () => machineStatus,
+}));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const sessionId = 'owner-history' as SessionId;
@@ -77,6 +81,8 @@ const writes: string[] = [];
 let machineOperations = 0;
 let activeReaders = 0;
 let documentAcquisitions = 0;
+let machineStatus: 'unknown' | 'offline';
+let historySync: RoostHistorySyncState | undefined;
 let syncState: 'syncing' | 'synced' = 'synced';
 const syncListeners = new Set<(state: typeof syncState) => void>();
 const platform: PlatformProvider = {
@@ -92,6 +98,8 @@ beforeEach(async () => {
   machineOperations = 0;
   activeReaders = 0;
   documentAcquisitions = 0;
+  machineStatus = 'unknown';
+  historySync = undefined;
   syncState = 'synced';
   syncListeners.clear();
   view = createConversationViewFromHistory({
@@ -101,12 +109,14 @@ beforeEach(async () => {
   });
   const state = { session: { id: sessionId }, mq: [] };
   const sessionStore = {
+    sessionId,
     doc: {},
     get history() {
       return view;
     },
     getState: () => state,
     getSyncState: () => syncState,
+    getHistorySync: () => historySync,
     subscribe: () => () => {},
     subscribeSyncState: (listener: (next: typeof syncState) => void) => {
       syncListeners.add(listener);
@@ -224,6 +234,36 @@ async function selectCopy() {
       .click()
   );
 }
+
+it.each([true, false])(
+  'opens published read-only Roost history with an offline owner (publication hint: %s)',
+  async (hint) => {
+    const runtime = store.get(runtimeAtom)!;
+    const admission = store.get(workspaceContentModeAtom)!;
+    store.set(runtimeAtom, { ...runtime, contentMode: 'plaintext', cloudStreamsEnabled: true });
+    store.set(workspaceContentModeAtom, {
+      ...admission,
+      descriptor: { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+    });
+    const metadata = store.get(sessionMetaCacheAtom);
+    const roomId = getSessionRoomId(sessionId);
+    store.set(sessionMetaCacheAtom, {
+      ...metadata,
+      [roomId]: {
+        ...metadata[roomId]!,
+        historyBackend: 'roost',
+        ...(hint && { roostCloudGeneration: 'root', roostCloudAuthor: 'A'.repeat(43) }),
+      },
+    });
+    machineStatus = 'offline';
+    historySync = { source: 'streams', phase: 'ready', newerVersionPending: true };
+    await render();
+
+    expect(container.querySelector('[data-history-stream]')).toBeTruthy();
+    expect(container.textContent).not.toContain('History from');
+    expect(container.textContent).toContain('Showing the previous version');
+  }
+);
 
 it('reads history without a composer or machine operation and requires explicit consent for copying', async () => {
   await render();

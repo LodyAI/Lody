@@ -47,7 +47,7 @@ export type SessionInputHistoryItem =
 export type PendingUserHistoryEntry = {
   userId: string;
   role: 'user';
-  author: { v: 1; kind: 'human'; userId: string };
+  author: { v: 1; kind: 'human'; userId: string; name?: string };
   items: NonNullable<SessionHistoryInput['items']>;
   timestamp: string;
   status: 'pending' | 'pending_apply';
@@ -832,8 +832,18 @@ export const compactRedundantUserTurnInputBlocks = (
   return compacted;
 };
 
+export const buildHumanMessageAuthor = (
+  userId: string,
+  userName?: string
+): PendingUserHistoryEntry['author'] => {
+  const name = userName?.replace(/\s+/g, ' ').trim().slice(0, 256);
+  return name ? { v: 1, kind: 'human', userId, name } : { v: 1, kind: 'human', userId };
+};
+
 export const buildPendingUserHistoryEntry = (args: {
   userId: string | undefined;
+  /** The sender's own display name; omit when the sender is not the local user. */
+  userName?: string;
   inputBlocks: readonly SessionInputBlock[];
   timestamp: string;
   inputConfig?: SessionTurnInputConfig;
@@ -852,7 +862,7 @@ export const buildPendingUserHistoryEntry = (args: {
   return {
     userId,
     role: 'user',
-    author: { v: 1, kind: 'human', userId },
+    author: buildHumanMessageAuthor(userId, args.userName),
     items,
     timestamp: args.timestamp,
     status: args.status ?? 'pending',

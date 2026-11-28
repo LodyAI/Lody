@@ -47,6 +47,7 @@ import {
 } from './primitives';
 import { parts } from './parts';
 import { useSessionDefaults } from './session-defaults';
+import { useHarnessMachine } from './sorbet';
 import { harness, useHarness, type Scope } from './store';
 import { settingsStyles } from './settings.styles';
 
@@ -242,6 +243,8 @@ function NavRows({
  */
 function ProvidersStatus() {
   const state = useHarness();
+  const { machine } = useHarnessMachine();
+  const name = machine?.name || machine?.id || 'this machine';
   const text =
     state.status === 'loading'
       ? 'Reading connections from this machine…'
@@ -249,11 +252,13 @@ function ProvidersStatus() {
         ? 'Could not read this machine’s connections.'
         : state.status === 'unsupported'
           ? 'This machine’s daemon is older; update it to manage connections.'
-          : state.status === 'no-agent'
-            ? 'Lody Agent is not set up on this machine yet.'
-            : state.status === 'no-runtime'
-              ? 'The workspace runtime is unavailable.'
-              : null;
+          : state.status === 'unreachable'
+            ? `These connections stay in Sorbet on ${name}. Lody reads another device’s store only in an end-to-end encrypted workspace, so open Lody on that machine to manage them.`
+            : state.status === 'no-agent'
+              ? 'Lody Agent is not set up on this machine yet.'
+              : state.status === 'no-runtime'
+                ? 'The workspace runtime is unavailable.'
+                : null;
   if (!text) return null;
   return <p {...stylex.props(parts.provMeta)}>{text}</p>;
 }

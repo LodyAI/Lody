@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { copyFileSync, renameSync } from 'node:fs'
+import { classifySafeStorageFailure } from './safe-storage-classification'
 
 // The desktop auth store (`userData/config.json`) only caches Better Auth
 // credentials; the durable identity lives on the server. A value in it that can
@@ -56,9 +57,16 @@ export function createRecoveringAuthStorage(
         verified.set(key, value)
         return value
       } catch (error) {
-        // The OS key that encrypted this value is gone (for example a replaced
-        // Windows `Local State` key or a profile moved to another machine).
-        // Every request would otherwise throw before reaching the network.
+        // A temporarily locked OS keychain or user-denied prompt must not destroy
+        // stored credentials; only definite ciphertext corruption drops the entry.
+        if (
+          classifySafeStorageFailure({
+            error,
+            available: () => cipher.isEncryptionAvailable(),
+            value
+          }) !== 'corrupt'
+        )
+          return null
         const backupPath = backup(backend.path)
         backend.delete(key)
         verified.delete(key)

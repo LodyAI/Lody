@@ -26,6 +26,20 @@ const UNRESERVED_REFUSALS = new Set([
   'free_workspace_limit_reached',
 ]);
 
+/** Server refusal codes that have translated `e2ee.create.reason.<code>` copy. */
+export const KNOWN_E2EE_CREATE_REFUSAL_CODES: ReadonlySet<string> = UNRESERVED_REFUSALS;
+
+/** Return the translation key for a known creation refusal, never leaking raw codes. */
+export function e2eeCreateRefusalReasonKey(
+  refusalCode: string | undefined,
+  i18n?: { exists?: (key: string) => boolean }
+): string | undefined {
+  if (!refusalCode) return undefined;
+  const key = `e2ee.create.reason.${refusalCode}`;
+  if (typeof i18n?.exists === 'function') return i18n.exists(key) ? key : undefined;
+  return KNOWN_E2EE_CREATE_REFUSAL_CODES.has(refusalCode) ? key : undefined;
+}
+
 /** The server error code of a Convex error, if any. */
 export function e2eeCreationErrorCode(error: unknown): string | undefined {
   if (typeof error !== 'object' || error === null || !('data' in error)) return undefined;
@@ -143,6 +157,36 @@ export async function createPreparedE2eeWorkspace(
   retainWorkspaceModeProof(storage, pending.accountId, pending.slug, result);
   clearPendingE2eeWorkspace(storage, pending);
   return result;
+}
+
+/** Silently reconcile any leftover pending creation from an interrupted session.
+ * Returns the created workspace on success; clears an intent only when the server
+ * proves it holds no reservation, keeping unknown or cancelled outcomes for retry. */
+export async function reconcilePendingE2eeWorkspaces(
+  port: PlatformE2eeWorkspaces,
+  storage: Storage,
+  accountId: string,
+  isCurrent: () => boolean = () => true
+): Promise<Awaited<ReturnType<PlatformE2eeWorkspaces['create']>> | null> {
+  if (!port.prepareCreation) return null;
+  let pendingList: PendingE2eeWorkspace[];
+  try {
+    pendingList = listPendingE2eeWorkspaces(storage, accountId);
+  } catch {
+    return null;
+  }
+  for (const pending of pendingList) {
+    if (!isCurrent()) return null;
+    try {
+      return await createPreparedE2eeWorkspace(port, storage, pending);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'e2ee_creation_cancelled') return null;
+      const code = e2eeCreationErrorCode(error);
+      if (code !== undefined && UNRESERVED_REFUSALS.has(code)) continue;
+      return null;
+    }
+  }
+  return null;
 }
 
 /** Creation stays behind both developer toggles. A saved request whose result may

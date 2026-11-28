@@ -15,11 +15,14 @@ import type {
 
 const githubMocks = vi.hoisted(() => ({
   githubBranchExists: vi.fn(),
+  githubCompareCommits: vi.fn(),
   githubCreatePRIssueComment: vi.fn(),
   githubDeleteBranch: vi.fn(),
   githubFetchCheckRuns: vi.fn(),
+  githubFetchFileBytesAtCommit: vi.fn(),
   githubFetchPRIssueComments: vi.fn(),
   githubFetchPRReviewComments: vi.fn(),
+  githubFetchPullRequestCommits: vi.fn(),
   githubFetchPullRequestDetails: vi.fn(),
   githubFetchPullRequestReviews: vi.fn(),
   githubMarkPullRequestReadyForReview: vi.fn(),
@@ -123,11 +126,14 @@ vi.mock('@lody/shared', async (importOriginal) => {
     getServerNow: () => Date.now(),
     GitHubPermissionError,
     githubBranchExists: githubMocks.githubBranchExists,
+    githubCompareCommits: githubMocks.githubCompareCommits,
     githubCreatePRIssueComment: githubMocks.githubCreatePRIssueComment,
     githubDeleteBranch: githubMocks.githubDeleteBranch,
     githubFetchCheckRuns: githubMocks.githubFetchCheckRuns,
+    githubFetchFileBytesAtCommit: githubMocks.githubFetchFileBytesAtCommit,
     githubFetchPRIssueComments: githubMocks.githubFetchPRIssueComments,
     githubFetchPRReviewComments: githubMocks.githubFetchPRReviewComments,
+    githubFetchPullRequestCommits: githubMocks.githubFetchPullRequestCommits,
     githubFetchPullRequestDetails: githubMocks.githubFetchPullRequestDetails,
     githubFetchPullRequestReviews: githubMocks.githubFetchPullRequestReviews,
     githubMarkPullRequestReadyForReview: githubMocks.githubMarkPullRequestReadyForReview,
@@ -144,6 +150,7 @@ import type {
 
 const { getAuthRecoveryBackoffMs, useGitHubPrDetails } =
   await import('../src/hooks/use-github-pr-details');
+const { useGitHubPrDiff } = await import('../src/hooks/use-github-pr-diff');
 const { TestCloudPlatformProvider, TestOrdinaryWorkspaceProvider } =
   await import('./test-platform');
 
@@ -995,5 +1002,159 @@ describe('useGitHubPrDetails target isolation', () => {
       error: 'Required status check failed',
     });
     clearSessionPrMergeStatus(store, 'session-fail');
+  });
+
+  it('falls back to anonymous read-only mode when an unassociated cross-repo PR is public and not linked', async () => {
+    identityMocks.versions = null;
+    cacheMocks.readPrCacheEntry.mockResolvedValue(null);
+    const unlinkedError = Object.assign(new Error('Repository is not linked to this workspace'), {
+      code: 'repo_not_linked',
+    });
+    githubTokenMockModule.withGitHubTokenRetry.mockRejectedValueOnce(unlinkedError);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, options: RequestInit) => {
+        expect(options.credentials).toBe('omit');
+        return new Response(
+          JSON.stringify({ id: 555, private: false, full_name: 'external/public-repo' })
+        );
+      })
+    );
+
+    await renderHook({
+      workspaceId: 'workspace-1',
+      repoFullName: 'external/public-repo',
+      prNumber: 300,
+    });
+    await waitForResult((result) => result.state === 'ready');
+
+    expect(currentResult?.data?.pullRequest.number).toBe(300);
+    expect(currentResult?.canWrite).toBe(false);
+    expect(currentResult?.error).toBeNull();
+    expect(githubMocks.githubFetchPullRequestDetails.mock.calls.at(-1)?.[0]).toBe('');
+    expect(identityMocks.repair).not.toHaveBeenCalled();
+    await act(async () => {
+      await expect(currentResult!.postComment('nope')).rejects.toThrow('repository identity');
+      await expect(currentResult!.mergePullRequest('merge')).rejects.toThrow('repository identity');
+    });
+  });
+
+  it('surfaces the access error without session repair when an unassociated cross-repo PR is private and not linked', async () => {
+    identityMocks.versions = null;
+    cacheMocks.readPrCacheEntry.mockResolvedValue(null);
+    const unlinkedError = Object.assign(new Error('Repository is not linked to this workspace'), {
+      code: 'repo_not_linked',
+    });
+    githubTokenMockModule.withGitHubTokenRetry.mockRejectedValueOnce(unlinkedError);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 404 }))
+    );
+
+    await renderHook({
+      workspaceId: 'workspace-1',
+      repoFullName: 'external/private-repo',
+      prNumber: 301,
+    });
+    await waitForResult((result) => result.state === 'error');
+
+    expect(currentResult?.error?.message).toBe('Repository is not linked to this workspace');
+    expect(currentResult?.canWrite).toBe(false);
+    expect(identityMocks.repair).not.toHaveBeenCalled();
+  });
+
+  it('does not touch session merge status when merging an unassociated PR', async () => {
+    identityMocks.versions = null;
+    githubMocks.githubMergePullRequest.mockResolvedValueOnce({
+      sha: 'merged-sha',
+      merged: true,
+      message: 'merged',
+    });
+
+    await renderHook({
+      workspaceId: 'workspace-1',
+      repoFullName: 'other/linked-repo',
+      prNumber: 88,
+    });
+    await waitForResult((result) => result.state === 'ready');
+    const store = currentStore!;
+
+    await act(async () => {
+      await currentResult?.mergePullRequest('squash');
+    });
+
+    expect(store.get(sessionPrMergeStatusesAtom)).toEqual({});
+    expect(identityMocks.repair).not.toHaveBeenCalled();
+  });
+
+  it('loads PR diffs for an unassociated cross-repo PR even without a pre-existing cache row', async () => {
+    identityMocks.versions = null;
+    githubMocks.githubFetchPullRequestCommits.mockResolvedValueOnce([
+      {
+        sha: 'head-1',
+        message: 'feat',
+        authorLogin: 'alice',
+        authoredAt: '2026-11-01T00:00:00Z',
+        htmlUrl: null,
+        parentSha: 'base-1',
+      },
+    ]);
+    githubMocks.githubCompareCommits.mockResolvedValueOnce({
+      mergeBaseSha: 'base-1',
+      files: [
+        {
+          path: 'src/app.ts',
+          status: 'modified',
+          additions: 2,
+          deletions: 1,
+          changes: 3,
+          patch: null,
+          previousPath: null,
+        },
+      ],
+    });
+
+    let diffResult: ReturnType<typeof useGitHubPrDiff> | null = null;
+    const selection = { type: 'all' as const };
+    function DiffProbe() {
+      const value = useGitHubPrDiff({
+        workspaceId: 'workspace-1',
+        repoFullName: 'other/linked-repo',
+        prNumber: 88,
+        baseRef: 'main',
+        baseSha: 'base-1',
+        headSha: 'head-1',
+        selection,
+      });
+      useEffect(() => {
+        diffResult = value;
+      }, [value]);
+      return null;
+    }
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(
+          TestCloudPlatformProvider,
+          null,
+          createElement(
+            TestOrdinaryWorkspaceProvider,
+            { workspaceId: 'workspace-1' },
+            createElement(DiffProbe)
+          )
+        )
+      );
+    });
+    for (let i = 0; i < 20 && diffResult?.state !== 'ready'; i++) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+
+    expect(diffResult?.state).toBe('ready');
+    expect(diffResult?.files.map((file) => file.path)).toEqual(['src/app.ts']);
   });
 });

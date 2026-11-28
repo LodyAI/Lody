@@ -1374,6 +1374,41 @@ describe('ledger-bound signed document workflows', () => {
       )
     );
   });
+  it('rejects post-decrypt ledger forks when opening update_batch frames', async () => {
+    const f = ledgerFixture(true);
+    const otherWs = ledgerFixture(true);
+    f.addPhone();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const writer = yield* makeStreamsUpdateBinding({
+            ...bindingOptions(f),
+            signer: f.phone.signer,
+          });
+          const aad = new Uint8Array([1, 2]);
+          const sealed = yield* writer.seal(updateInput);
+          let first = true;
+          const rollingBack = yield* makeStreamsUpdateBinding({
+            ...bindingOptions(f),
+            ledger: () => {
+              if (first) {
+                first = false;
+                return Effect.succeed(f.view());
+              }
+              return Effect.succeed(otherWs.view());
+            },
+          });
+          expect(
+            code(
+              yield* Effect.result(
+                rollingBack.open({ ...sealed, context: updateContext, additionalData: aad })
+              )
+            )
+          ).toBe('unauthorized');
+        })
+      )
+    );
+  });
   it.each(['restart', 'rollback', 'new-clock', 'missing-journal', 'consecutive'] as const)(
     'never renews retained-key grace across %s',
     async (scenario) => {

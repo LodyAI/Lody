@@ -195,7 +195,7 @@ any time; when off it changes none of the app's existing behavior.
   | Running                                   | Blue ring, right half filled (static, no motion)  |
   | Later                                     | Blue clock ring + countdown (same blue, baseline) |
   | Done (settled), archived                  | Dimmed grey check ring, same grey as struck title |
-  | Unread (not shown for agent-managed ones) | Small solid blue dot; title not bold              |
+  | Unread (not shown for agent-managed ones) | Blue ring with a solid centre dot; title not bold |
   | Idle                                      | Blue dashed ring                                  |
 
 - Clicking the status icon opens a status menu that changes the conversation's status (writing the same session

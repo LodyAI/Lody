@@ -295,7 +295,8 @@ export class E2eeMemberInvitationRefusedError extends BackendError {
   }
 }
 
-class E2eeSelfServiceRateLimitedError extends BackendError {
+export class E2eeSelfServiceRateLimitedError extends BackendError {
+  readonly kind = 'self-service-rate-limited' as const
   constructor(readonly retryAt: number) {
     super({ service: 'E2eeCloud', reason: 'unavailable' })
   }

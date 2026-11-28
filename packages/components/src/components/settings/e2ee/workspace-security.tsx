@@ -142,13 +142,13 @@ function SecuritySettings({
                         machines={machines}
                         onRetry={retry}
                         onUpdate={update}
-                        onRevoke={(key, confirmation) => {
-                          void perform(async () => {
+                        onRevoke={(key, confirmation) =>
+                          perform(async () => {
                             if (!scope.native?.revokeDevice)
                               throw new Error('e2ee_management_unauthorized');
                             await scope.native.revokeDevice(scope.workspaceId!, key, confirmation);
-                          });
-                        }}
+                          })
+                        }
                       />
                     </E2eeConsoleSection>
                     {RecoverySection && (

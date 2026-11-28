@@ -1169,7 +1169,7 @@ export function ProvidersScreen({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
-            sessionDefaults: dialogMode.config.sessionDefaults,
+            sessionDefaults: payload.sessionDefaults ?? dialogMode.config.sessionDefaults,
           });
           // Editing can change credentials or the launch command; keep Test as
           // an explicit optional action instead of treating save as verification.

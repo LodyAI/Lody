@@ -25,7 +25,6 @@ export const Available: Story = {
       <E2eeWorkspaceCreationOption
         selected
         supported
-        pending={false}
         disabled={false}
         paidRequired={false}
         onChange={fn()}
@@ -39,90 +38,9 @@ export const UnsupportedHost: Story = {
       <E2eeWorkspaceCreationOption
         selected={false}
         supported={false}
-        pending={false}
         disabled={false}
         paidRequired={false}
         onChange={fn()}
-      />
-    ),
-  },
-};
-export const PendingRequests: Story = {
-  args: {
-    onBackToWorkspace: fn(),
-    fieldsDisabled: true,
-    retryPendingCreation: true,
-    creationOptions: (
-      <E2eeWorkspaceCreationOption
-        selected
-        supported
-        pending
-        disabled={false}
-        paidRequired={false}
-        onChange={fn()}
-        requests={[
-          {
-            accountId: 'synthetic-account',
-            requestId: 'request-1',
-            name: 'Synthetic',
-            slug: 'synthetic',
-          },
-          {
-            accountId: 'synthetic-account',
-            requestId: 'request-2',
-            name: 'Research',
-            slug: 'research',
-          },
-        ]}
-        selectedRequestId="request-1"
-        onSelectRequest={fn()}
-        onArchiveRequest={fn()}
-        onNewRequest={fn()}
-      />
-    ),
-  },
-};
-/** One request archived: it leaves the default list and stays restorable. */
-export const ArchivedRequests: Story = {
-  args: {
-    onBackToWorkspace: fn(),
-    workspaceName: '',
-    workspaceSlug: '',
-    creationOptions: (
-      <E2eeWorkspaceCreationOption
-        selected
-        supported
-        pending={false}
-        disabled={false}
-        paidRequired={false}
-        onChange={fn()}
-        requests={[
-          {
-            accountId: 'synthetic-account',
-            requestId: 'request-2',
-            name: 'Research',
-            slug: 'research',
-          },
-        ]}
-        archivedRequests={[
-          {
-            accountId: 'synthetic-account',
-            requestId: 'request-1',
-            name: 'Synthetic',
-            slug: 'synthetic',
-          },
-          {
-            accountId: 'synthetic-account',
-            requestId: 'request-3',
-            name: 'Staging check 3',
-            slug: 'staging-check-3',
-          },
-        ]}
-        defaultArchiveOpen
-        selectedRequestId={null}
-        onSelectRequest={fn()}
-        onArchiveRequest={fn()}
-        onRestoreRequest={fn()}
       />
     ),
   },

@@ -1,8 +1,8 @@
 import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-failure';
 import * as stylex from '@stylexjs/stylex';
 import { Result } from 'effect';
-import { ScanLine } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, Copy, ScanLine } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PAIRING_URL_PREFIX, parsePairingString } from '@lody/e2ee-core/protocol';
 import {
@@ -16,13 +16,37 @@ import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
 import { Checkbox } from '@lody/ui/checkbox';
+import { Spinner } from '@lody/ui/spinner';
 import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text as type } from '@lody/ui/tokens/scales.stylex';
 import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
+import { useIsHandheldScanner } from '@/hooks/use-mobile';
 import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
+import { E2eeDevicePairArt } from '../e2ee/e2ee-illustrations';
+
+/** A card of its own, or a plain column inside the card that hosts it. */
+function Surface({
+  embedded,
+  children,
+  ...rest
+}: {
+  embedded: boolean;
+  children: ReactNode;
+  'data-testid': string;
+  'data-e2ee-pairing-surface': string;
+}) {
+  return embedded ? (
+    <div {...rest} {...stylex.props(styles.embedded)}>
+      {children}
+    </div>
+  ) : (
+    <Card.Root {...rest}>{children}</Card.Root>
+  );
+}
 
 const styles = stylex.create({
+  embedded: { display: 'flex', flexDirection: 'column', gap: space[3] },
   retryAlert: {
     display: 'flex',
     alignItems: 'center',
@@ -42,6 +66,7 @@ const styles = stylex.create({
   },
   qr: { backgroundColor: '#ffffff', padding: space[2], alignSelf: 'flex-start' },
   muted: { color: colors.secondaryLabel, margin: 0 },
+  art: { display: 'flex', justifyContent: 'center', paddingBlock: space[2] },
   list: { margin: 0, paddingInlineStart: 0, listStyle: 'none', display: 'grid', gap: space[2] },
   row: { display: 'flex', alignItems: 'center', gap: space[2] },
   facts: { margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: space[2] },
@@ -84,7 +109,8 @@ function usePoll(
   active: boolean,
   ms: number,
   tick: () => Promise<void>,
-  subscribe?: (changed: () => void) => () => void
+  subscribe?: (changed: () => void) => () => void,
+  immediate = false
 ) {
   const latest = useRef(tick);
   latest.current = tick;
@@ -107,21 +133,52 @@ function usePoll(
         }
       });
     };
-    const timer = setInterval(() => {
-      if (!running) run();
-    }, ms);
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribe?.(run);
     } catch {
       /* Live hints are optional; the poll still reads the same verified state. */
     }
+    const timer = setInterval(
+      () => {
+        if (!running) run();
+      },
+      unsubscribe === undefined ? ms : Math.max(ms, 8_000)
+    );
+    const onOnline = () => {
+      if (!running) run();
+    };
+    window.addEventListener('online', onOnline);
+    if (immediate) run();
     return () => {
       stopped = true;
       clearInterval(timer);
+      window.removeEventListener('online', onOnline);
       unsubscribe?.();
     };
-  }, [active, ms, subscribe]);
+  }, [active, ms, subscribe, immediate]);
+}
+function CopyCodeButton({ value }: { value: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return (
+    <Button
+      variant="secondary"
+      size="small"
+      onClick={() => {
+        void navigator.clipboard?.writeText(value).then(() => {
+          setCopied(true);
+          clearTimeout(timer.current);
+          timer.current = setTimeout(() => setCopied(false), 2000);
+        });
+      }}
+    >
+      {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+      {t(copied ? 'e2ee.accountPair.copied' : 'e2ee.accountPair.copyCode')}
+    </Button>
+  );
 }
 function useLive() {
   const live = useRef(true);
@@ -170,6 +227,12 @@ export function E2eeAccountPairingRequest(props: {
   const [personalComputer, setPersonalComputer] = useState(false);
   const personalRequired = Boolean(runtime.requirePersonalComputer || runtime.openBrowserRecovery);
   const [input, setInput] = useState('');
+  const [camera, setCamera] = useState(false);
+  // Phones scan the code another device shows; computers paste it.
+  const canScan =
+    useIsHandheldScanner() &&
+    typeof navigator !== 'undefined' &&
+    typeof navigator.mediaDevices?.getUserMedia === 'function';
   const joined = useRef(false);
   const accept = (next: E2eeAccountPairingRequestState | null) => {
     if (!live.current) return;
@@ -247,7 +310,8 @@ export function E2eeAccountPairingRequest(props: {
         if (live.current) setError(failureKey(failure));
       }
     },
-    subscribeRequest
+    subscribeRequest,
+    true
   );
   const restart = () =>
     run(async () => {
@@ -260,22 +324,32 @@ export function E2eeAccountPairingRequest(props: {
     setEntering(false);
     void start(input.trim());
   };
+  // A scanned code is submitted at once: the host parses it again and checks the account.
+  const { video, state: cameraState } = useQrCamera(camera, (scanned) => {
+    setCamera(false);
+    const value = scanned.trim();
+    const wrong = /^lody:\/\/auto-pair\?/i.test(value)
+      ? 'e2ee.instantQr.wrongRole'
+      : localCodeError(value);
+    if (wrong) return setError(wrong);
+    setEntering(false);
+    setInput('');
+    void start(value);
+  });
   if (!runtime.requestAccountPairing) return null;
   const terminal = state && state.status !== 'waiting' && state.status !== 'joined';
   return (
     <Card.Root data-testid="e2ee-account-pairing-request" data-e2ee-pairing-surface="">
+      {phase === 'idle' && !state && (
+        <div {...stylex.props(styles.art)}>
+          <E2eeDevicePairArt width={152} />
+        </div>
+      )}
       <Card.Title>{t('e2ee.accountPair.request.title')}</Card.Title>
       {phase === 'idle' && !state && (
-        <>
-          <p {...stylex.props(styles.muted)}>
-            {t(personalRequired ? 'e2ee.browserUnlock.help' : 'e2ee.accountPair.request.web')}
-          </p>
-          <div {...stylex.props(styles.actions)}>
-            <Button disabled={personalRequired && !personalComputer} onClick={() => void start()}>
-              {t('e2ee.accountPair.request.start')}
-            </Button>
-          </div>
-        </>
+        <p {...stylex.props(styles.muted)}>
+          {t(personalRequired ? 'e2ee.browserUnlock.help' : 'e2ee.accountPair.request.web')}
+        </p>
       )}
       {personalRequired && state?.status !== 'joined' && (
         <>
@@ -288,7 +362,43 @@ export function E2eeAccountPairingRequest(props: {
             {t('e2ee.browserUnlock.personal')}
           </label>
           <p {...stylex.props(styles.muted)}>{t('e2ee.browserUnlock.risk')}</p>
-          {runtime.openBrowserRecovery && props.workspaceId && (
+        </>
+      )}
+      {phase === 'idle' && !state && (
+        <div {...stylex.props(styles.actions)}>
+          <Button disabled={personalRequired && !personalComputer} onClick={() => void start()}>
+            {t('e2ee.accountPair.request.start')}
+          </Button>
+          {personalRequired && runtime.openBrowserRecovery && props.workspaceId && (
+            <Button
+              variant="secondary"
+              disabled={!personalComputer}
+              onClick={() =>
+                void run(async () => {
+                  if (
+                    props.workspaceId &&
+                    (await runtime.openBrowserRecovery!(props.workspaceId))
+                  ) {
+                    if (live.current && !joined.current) {
+                      joined.current = true;
+                      props.onJoined();
+                    }
+                  }
+                  if (live.current) setPhase(state ? 'ready' : 'idle');
+                })
+              }
+            >
+              {t('e2ee.browserUnlock.open')}
+            </Button>
+          )}
+        </div>
+      )}
+      {personalRequired &&
+        state &&
+        state.status !== 'joined' &&
+        runtime.openBrowserRecovery &&
+        props.workspaceId && (
+          <div {...stylex.props(styles.actions)}>
             <Button
               variant="secondary"
               disabled={!personalComputer || phase === 'busy' || phase === 'loading'}
@@ -309,9 +419,8 @@ export function E2eeAccountPairingRequest(props: {
             >
               {t('e2ee.browserUnlock.open')}
             </Button>
-          )}
-        </>
-      )}
+          </div>
+        )}
       {state?.status === 'waiting' && state.pairingString && (
         <>
           <p>{t('e2ee.accountPair.request.show')}</p>
@@ -322,9 +431,12 @@ export function E2eeAccountPairingRequest(props: {
               label={t('e2ee.accountPair.code.label')}
             />
           </div>
-          <p data-testid="e2ee-account-pairing-string" {...stylex.props(styles.code)}>
-            {state.pairingString}
-          </p>
+          <div {...stylex.props(styles.actions)}>
+            <p data-testid="e2ee-account-pairing-string" {...stylex.props(styles.code)}>
+              {state.pairingString}
+            </p>
+            <CopyCodeButton value={state.pairingString} />
+          </div>
           <p {...stylex.props(styles.muted)}>{t('e2ee.accountPair.request.private')}</p>
         </>
       )}
@@ -351,6 +463,37 @@ export function E2eeAccountPairingRequest(props: {
       {terminal && <p role="status">{t(`e2ee.accountPair.request.${state.status}`)}</p>}
       {entering && (
         <>
+          {canScan &&
+            (camera ? (
+              <>
+                <video ref={video} muted playsInline {...stylex.props(styles.video)} />
+                <div {...stylex.props(styles.actions)}>
+                  <Button variant="ghost" onClick={() => setCamera(false)}>
+                    {t('common.cancel')}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Button
+                disabled={phase === 'busy' || (personalRequired && !personalComputer)}
+                onClick={() => {
+                  setError(null);
+                  setCamera(true);
+                }}
+              >
+                <ScanLine size={16} aria-hidden="true" />
+                {t('e2ee.accountPair.request.scan')}
+              </Button>
+            ))}
+          {(cameraState === 'denied' || cameraState === 'unavailable') && (
+            <p {...stylex.props(styles.muted)}>
+              {t(
+                cameraState === 'denied'
+                  ? 'e2ee.verify.cameraDenied'
+                  : 'e2ee.verify.cameraUnavailable'
+              )}
+            </p>
+          )}
           <Textarea
             aria-label={t('e2ee.accountPair.code.label')}
             placeholder={t('e2ee.accountPair.code.placeholder')}
@@ -368,7 +511,20 @@ export function E2eeAccountPairingRequest(props: {
               }
               onClick={enterCode}
             >
+              {phase === 'busy' && <Spinner size="small" />}
               {t('e2ee.accountPair.request.useCode')}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={phase === 'busy'}
+              onClick={() => {
+                setEntering(false);
+                setCamera(false);
+                setInput('');
+                setError(null);
+              }}
+            >
+              {t('common.cancel')}
             </Button>
           </div>
         </>
@@ -413,15 +569,10 @@ export function E2eeAccountPairingKeyRetry(props: { onRetry: () => void }) {
 
 type ApproveRuntime = Pick<
   E2eeWorkspaceRuntime,
-  | 'accountPairingCode'
-  | 'subscribeAccountPairingApproval'
-  | 'inspectAccountPairing'
-  | 'approveAccountPairing'
-  | 'declineAccountPairing'
+  'inspectAccountPairing' | 'approveAccountPairing' | 'declineAccountPairing'
 >;
 type ApprovePhase =
   | { kind: 'enter' }
-  | { kind: 'showing'; pairingString: string; expiresAt: number; lookupId?: string }
   | { kind: 'confirm'; pairingString: string; preview: E2eeAccountPairingPreview }
   | { kind: 'done'; result: E2eeAccountPairingApproval; preview: E2eeAccountPairingPreview }
   | { kind: 'declined' };
@@ -431,7 +582,11 @@ type ApprovePhase =
  * request before anything is shown; the user then reads the fixed warning, sees the
  * named target and its scope, and may deselect any workspace before approving.
  */
-export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; pollMs?: number }) {
+export function E2eeAccountPairingApprove(props: {
+  runtime: ApproveRuntime;
+  /** Inside another card, under that card's own heading: no card or title of its own. */
+  embedded?: boolean;
+}) {
   const { runtime } = props;
   const { t } = useTranslation();
   const live = useLive();
@@ -475,28 +630,6 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
     setInput(scanned);
     check(scanned);
   });
-  const shownLookupId = phase.kind === 'showing' ? phase.lookupId : undefined;
-  const subscribeApproval = useMemo(
-    () =>
-      shownLookupId && runtime.subscribeAccountPairingApproval
-        ? (changed: () => void) => runtime.subscribeAccountPairingApproval!(shownLookupId, changed)
-        : undefined,
-    [shownLookupId, runtime]
-  );
-  usePoll(
-    phase.kind === 'showing' && Boolean(runtime.inspectAccountPairing),
-    props.pollMs ?? POLL_MS,
-    async () => {
-      if (phase.kind !== 'showing') return;
-      try {
-        const preview = await runtime.inspectAccountPairing!(phase.pairingString);
-        if (preview && live.current) confirm(phase.pairingString, preview);
-      } catch (failure) {
-        if (live.current) setError(failureKey(failure));
-      }
-    },
-    subscribeApproval
-  );
   if (!runtime.inspectAccountPairing || !runtime.approveAccountPairing) return null;
   const reset = () => {
     setPhase({ kind: 'enter' });
@@ -504,22 +637,39 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
     setError(null);
   };
   return (
-    <Card.Root data-testid="e2ee-account-pairing-approve" data-e2ee-pairing-surface="">
-      <Card.Title>{t('e2ee.accountPair.approve.title')}</Card.Title>
+    <Surface
+      embedded={props.embedded === true}
+      data-testid="e2ee-account-pairing-approve"
+      data-e2ee-pairing-surface=""
+    >
+      {!props.embedded && <Card.Title>{t('e2ee.accountPair.approve.title')}</Card.Title>}
       {phase.kind === 'enter' && (
         <>
           <p {...stylex.props(styles.muted)}>{t('e2ee.accountPair.approve.lead')}</p>
           {cameraSupported &&
             (camera ? (
-              <video ref={video} muted playsInline {...stylex.props(styles.video)} />
+              <>
+                <video ref={video} muted playsInline {...stylex.props(styles.video)} />
+                <div {...stylex.props(styles.actions)}>
+                  <Button variant="ghost" onClick={() => setCamera(false)}>
+                    {t('common.cancel')}
+                  </Button>
+                </div>
+              </>
             ) : (
               <Button variant="secondary" onClick={() => setCamera(true)}>
                 <ScanLine size={16} aria-hidden="true" />
                 {t('e2ee.accountPair.approve.scan')}
               </Button>
             ))}
-          {cameraState === 'unavailable' && (
-            <p {...stylex.props(styles.muted)}>{t('e2ee.verify.cameraUnavailable')}</p>
+          {(cameraState === 'denied' || cameraState === 'unavailable') && (
+            <p {...stylex.props(styles.muted)}>
+              {t(
+                cameraState === 'denied'
+                  ? 'e2ee.verify.cameraDenied'
+                  : 'e2ee.verify.cameraUnavailable'
+              )}
+            </p>
           )}
           <Textarea
             aria-label={t('e2ee.accountPair.code.label')}
@@ -533,44 +683,8 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
           />
           <div {...stylex.props(styles.actions)}>
             <Button disabled={!input.trim() || busy} onClick={() => check(input)}>
+              {busy && <Spinner size="small" />}
               {t('e2ee.accountPair.approve.check')}
-            </Button>
-            {runtime.accountPairingCode && (
-              <Button
-                variant="ghost"
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    const offer = await runtime.accountPairingCode!();
-                    if (live.current) setPhase({ kind: 'showing', ...offer });
-                  })
-                }
-              >
-                {t('e2ee.accountPair.approve.showInstead')}
-              </Button>
-            )}
-          </div>
-        </>
-      )}
-      {phase.kind === 'showing' && (
-        <>
-          <p>{t('e2ee.accountPair.approve.showing')}</p>
-          <div {...stylex.props(styles.qr)}>
-            <LedgerQrCode
-              payload={qrPayload(phase.pairingString)}
-              size={200}
-              label={t('e2ee.accountPair.code.label')}
-            />
-          </div>
-          <p data-testid="e2ee-account-pairing-string" {...stylex.props(styles.code)}>
-            {phase.pairingString}
-          </p>
-          <p role="status" {...stylex.props(styles.muted)}>
-            {t('e2ee.accountPair.request.waiting', { time: time(phase.expiresAt) })}
-          </p>
-          <div {...stylex.props(styles.actions)}>
-            <Button variant="ghost" onClick={reset}>
-              {t('common.cancel')}
             </Button>
           </div>
         </>
@@ -704,6 +818,6 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
           {t(error)}
         </p>
       )}
-    </Card.Root>
+    </Surface>
   );
 }

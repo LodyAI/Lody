@@ -55,6 +55,8 @@ export class TurnLifecyclePage {
       name: 'Deterministic Turn Lifecycle Agent',
       exact: true,
     });
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await expect(option).toBeEnabled();
     const bounds = await option.boundingBox();
     if (!bounds) throw new Error('The deterministic agent is not offered in the composer');
     // Cross the submenu gap the way a pointer does so the submenu stays open.
@@ -139,9 +141,23 @@ export class TurnLifecyclePage {
     await this.expectTurnSettled();
 
     // The new user message renders before the reply it produced.
-    const userBox = await this.page.getByText(AFTER_PROMPT, { exact: true }).last().boundingBox();
-    const replyBox = await reply.boundingBox();
-    expect(userBox && replyBox && userBox.y < replyBox.y).toBe(true);
+    const userMessage = this.page
+      .getByText(AFTER_PROMPT, { exact: true })
+      .filter({ visible: true })
+      .last();
+    await expect(userMessage).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () => {
+          const [userBox, replyBox] = await Promise.all([
+            userMessage.boundingBox(),
+            reply.boundingBox(),
+          ]);
+          return Boolean(userBox && replyBox && userBox.y < replyBox.y);
+        },
+        { timeout: 10_000 }
+      )
+      .toBe(true);
     expect(this.fixture.journeyPromptStarts().map((start) => start.mode)).toEqual([
       'before',
       'after',

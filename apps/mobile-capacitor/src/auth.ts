@@ -1,4 +1,5 @@
 import { createLodyAuthClient } from '@lody/components/lib/auth';
+import { acquireAuthSessionStore } from '@lody/components/lib/auth-session-store';
 import { capacitorClient, isNativePlatform } from 'better-auth-capacitor/client';
 import { createCapacitorAuthHygienePlugin } from './capacitor-auth-hygiene';
 
@@ -20,3 +21,15 @@ export const authClient = createLodyAuthClient({
     }),
   ],
 });
+
+const session = acquireAuthSessionStore(authClient);
+session.start();
+
+export function getAuthUserId(): string | null {
+  const id = session.getSnapshot().data?.user.id;
+  return typeof id === 'string' && id ? id : null;
+}
+
+export function subscribeAuthUserId(listener: (userId: string | null) => void): () => void {
+  return session.subscribe(() => listener(getAuthUserId()));
+}

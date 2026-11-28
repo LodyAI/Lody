@@ -1,6 +1,10 @@
 import { reconcileProjectMemberLink } from './project-member-access';
 import { existsSync } from 'node:fs';
 import { worktreeGitLegacy } from './git-execution-legacy';
+import {
+  clearWorktreeArtifactsCleaned,
+  hasWorktreeArtifactsCleaned,
+} from './worktree-artifact-cleaner';
 import path from 'node:path';
 import { mkdir, realpath } from 'node:fs/promises';
 import {
@@ -393,10 +397,15 @@ export async function materializeProjectGroup(
       );
     }
     // Scripts may depend on other members' output; retain the prior serial ordering.
+    const artifactsWereCleaned = hasWorktreeArtifactsCleaned(root);
     for (const member of setupOrder) {
-      if (!newlyCreated.has(member)) continue;
+      if (!newlyCreated.has(member) && !(artifactsWereCleaned && member.access === 'worktree'))
+        continue;
       options.onProgress?.(encodeProjectPreparationProgress({ step: 'setup', path: member.path }));
       await options.setup(member, path.join(root, member.path));
+    }
+    if (artifactsWereCleaned) {
+      await clearWorktreeArtifactsCleaned(root);
     }
     result = { workdir: root, run };
     return run;

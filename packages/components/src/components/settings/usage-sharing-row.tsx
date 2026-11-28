@@ -1,4 +1,4 @@
-import { useId, useState, useSyncExternalStore } from 'react';
+import { useId, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Switch } from '@lody/ui/switch';
 import {
@@ -10,9 +10,13 @@ import {
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import {
+  claimAccountUsageSave,
   clearPostHogLocalStorage,
-  markUsageOptOutPending,
+  hasInFlightAccountUsageSave,
+  isEnvUsageSharingDisabledClient,
+  pendingAccountChoice,
   readDeviceUsageSharing,
+  setPendingAccountChoice,
   subscribeUsageSharing,
   writeDeviceUsageSharing,
 } from '@/lib/usage-sharing';
@@ -27,68 +31,53 @@ export function UsageSharingRow({ mobile = false }: { mobile?: boolean }) {
 function SharingPreference({ mobile }: { mobile: boolean }) {
   const { t } = useTranslation();
   const session = usePlatformSession();
-  const authenticated = session.status === 'authenticated';
+  const accountId = session.status === 'authenticated' ? session.user.id : null;
   const preference = usePlatform().cloudApi?.useOptionalAuthenticatedQuery?.(
     cloudOperations.analytics.getUsageSharing,
-    session.status === 'authenticated' ? { accountId: session.user.id } : 'skip'
+    accountId ? {} : 'skip'
   );
   const account = preference?.data;
-  const loadingAccount = authenticated && preference !== undefined && typeof account !== 'boolean';
   const save = useCloudMutation(cloudOperations.analytics.setUsageSharing);
-  const device = useSyncExternalStore(subscribeUsageSharing, readDeviceUsageSharing, () => true);
-  const [pending, setPending] = useState(false);
-  const [retry, setRetry] = useState<boolean | null>(null);
-  const enabled = loadingAccount ? device : device && account !== false;
-  async function change(next: boolean) {
-    setPending(true);
-    setRetry(null);
-    try {
-      if (!next) {
-        // Opt-out fails closed: stop this renderer and desktop processes immediately,
-        // even if the server is temporarily unreachable.
-        const results = await Promise.allSettled([
-          (async () => {
-            clearPostHogLocalStorage();
-            writeDeviceUsageSharing(false);
-            if (authenticated) {
-              markUsageOptOutPending(session.user.id, true);
-            } else if (window.__LODY_ELECTRON__) {
-              markUsageOptOutPending('next-login', true);
-            }
-          })(),
-          (async () => {
-            if (!window.__LODY_ELECTRON__) return;
-            const native = getIpcServices();
-            if (!native) throw new Error('Missing desktop bridge');
-            await native.app.setUsageSharingEnabled(false);
-          })(),
-          authenticated ? save({ enabled: false, accountId: session.user.id }) : undefined,
-        ]);
-        if (results.some((result) => result.status === 'rejected')) {
-          setRetry(false);
-          return;
-        }
-        if (authenticated) markUsageOptOutPending(session.user.id, false);
-        return;
-      }
+  const snapshot = useSyncExternalStore(
+    subscribeUsageSharing,
+    () => {
+      const envOff = isEnvUsageSharingDisabledClient();
+      const device = readDeviceUsageSharing();
+      const pending = accountId ? pendingAccountChoice(accountId) : null;
+      return `${envOff ? 1 : 0}:${device ? 1 : 0}:${pending === null ? 'n' : pending ? 1 : 0}`;
+    },
+    () => '0:1:n'
+  );
+  const [envFlag, deviceFlag, pendingFlag] = snapshot.split(':');
+  const envDisabled = envFlag === '1';
+  const device = deviceFlag === '1';
+  const pendingChoice = pendingFlag === '1' ? true : pendingFlag === '0' ? false : null;
+  const enabled = !envDisabled && device && (pendingChoice === true || account !== false);
 
-      // Re-enabling waits for the cloud preference before enabling local desktop/renderer capture.
-      if (authenticated) {
-        await save({ enabled: true, accountId: session.user.id });
-        markUsageOptOutPending(session.user.id, false);
-      } else if (window.__LODY_ELECTRON__) {
-        markUsageOptOutPending('next-login', false);
+  function change(next: boolean) {
+    if (envDisabled) return;
+    if (accountId) {
+      const needsPending =
+        preference !== undefined && (account !== next || hasInFlightAccountUsageSave(accountId));
+      setPendingAccountChoice(accountId, needsPending ? next : null);
+    } else if (window.__LODY_ELECTRON__) {
+      setPendingAccountChoice('next-login', next ? null : false);
+    }
+    if (!next) clearPostHogLocalStorage();
+    writeDeviceUsageSharing(next);
+    if (window.__LODY_ELECTRON__) {
+      void getIpcServices()
+        ?.app.setUsageSharingEnabled(next)
+        .catch(() => {});
+    }
+    if (accountId) {
+      const finish = claimAccountUsageSave(accountId, next);
+      if (finish) {
+        void save({ enabled: next }).then(
+          () => finish(true),
+          () => finish(false)
+        );
       }
-      if (window.__LODY_ELECTRON__) {
-        const native = getIpcServices();
-        if (!native) throw new Error('Missing desktop bridge');
-        await native.app.setUsageSharingEnabled(true);
-      }
-      writeDeviceUsageSharing(true);
-    } catch {
-      setRetry(next);
-    } finally {
-      setPending(false);
     }
   }
 
@@ -99,20 +88,11 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
       aria-label={label}
       aria-describedby={descriptionId}
       checked={enabled}
-      disabled={pending || loadingAccount}
-      onCheckedChange={(value) => void change(value)}
+      disabled={envDisabled}
+      onCheckedChange={change}
     />
   );
-  const helper = (
-    <>
-      <span id={descriptionId}>{t('settings.general.usageSharing.helper')}</span>
-      {retry !== null && (
-        <button type="button" onClick={() => void change(retry)}>
-          {t('settings.general.usageSharing.error')}
-        </button>
-      )}
-    </>
-  );
+  const helper = <span id={descriptionId}>{t('settings.general.usageSharing.helper')}</span>;
   return mobile ? (
     <MobileSettingsRowGroup>
       <MobileSettingsRow label={label} helper={helper}>

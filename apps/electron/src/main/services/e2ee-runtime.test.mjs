@@ -1826,3 +1826,64 @@ void test('after workspace creation (verified length 1, no prior cursor), ingest
     })
   )
 })
+
+void test('manage preserves management_pending and self_service_rate_limited retryAt', async (t) => {
+  const { Fiber } = await import('effect')
+  const { LedgerLogError } = await import('@lody/e2ee-core/services')
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      const prepared = yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const started = Promise.withResolvers()
+      const release = Promise.withResolvers()
+      const first = yield* Effect.forkChild(
+        Effect.result(
+          owner.host.manage(workspaceId, { type: 'rotate' }, () => ({
+            log: {
+              read: () => Effect.die('unused'),
+              appendCas: () => Effect.die('unused')
+            },
+            staging: () => ({}),
+            mailbox: () => ({}),
+            history: () =>
+              Effect.tryPromise({
+                try: async () => {
+                  started.resolve()
+                  await release.promise
+                  throw new LedgerLogError({
+                    reason: 'self-service-rate-limited',
+                    retryAt: 1_800_000_000_000
+                  })
+                },
+                catch: (error) => error
+              })
+          }))
+        )
+      )
+      yield* Effect.promise(() => started.promise)
+      const second = yield* Effect.result(
+        owner.host.manage(workspaceId, { type: 'rotate' }, () => ({
+          log: {
+            read: () => Effect.die('unused'),
+            appendCas: () => Effect.die('unused')
+          },
+          staging: () => ({}),
+          mailbox: () => ({}),
+          history: () =>
+            Effect.succeed(
+              page([Buffer.from(prepared.genesisRecordHex, 'hex')], prepared.genesisHashHex, 0)
+            )
+        }))
+      )
+      assert.equal(Result.isFailure(second), true)
+      assert.equal(second.failure.code, 'management_pending')
+      release.resolve()
+      const firstResult = yield* Fiber.join(first)
+      assert.equal(Result.isFailure(firstResult), true)
+      assert.equal(firstResult.failure.code, 'self_service_rate_limited')
+      assert.equal(firstResult.failure.retryAt, 1_800_000_000_000)
+    })
+  )
+})

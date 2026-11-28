@@ -146,6 +146,7 @@ export type CreateAcpClientOptions = {
   onNativeWorkChanged?(work: import('./agent-client').NativeAgentWork): void;
   onAgentWarning?(warning: AgentSessionWarning): void;
   loadExternalMcpServers?: AgentClientOptions['loadExternalMcpServers'];
+  onExternalMcpServersMounted?: AgentClientOptions['onExternalMcpServersMounted'];
   onImageGenerationBegin?(event: ImageGenerationBeginEvent): void;
   onImageGenerationEnd?(event: ImageGenerationEndEvent): void;
   onWriteTextFile?(event: AcpWriteTextFileEvidence): void | Promise<void>;
@@ -184,6 +185,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     onNativeWorkChanged: options.onNativeWorkChanged,
     onAgentWarning: options.onAgentWarning,
     loadExternalMcpServers: options.loadExternalMcpServers,
+    onExternalMcpServersMounted: options.onExternalMcpServersMounted,
     onImageGenerationBegin: options.onImageGenerationBegin,
     onImageGenerationEnd: options.onImageGenerationEnd,
     onWriteTextFile: options.onWriteTextFile,

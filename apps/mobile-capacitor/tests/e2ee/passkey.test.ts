@@ -141,6 +141,13 @@ describe('iPhone recovery vault passkey boundary', () => {
         },
       }).authenticate(request)
     ).rejects.toThrow('e2ee_passkey_failed');
+    await expect(
+      fixture({
+        authenticate: async () => {
+          throw { code: 'unavailable', message: 'private native detail' };
+        },
+      }).authenticate(request)
+    ).rejects.toThrow('e2ee_passkey_unavailable');
   });
 });
 

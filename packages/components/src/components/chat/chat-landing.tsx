@@ -14,10 +14,11 @@ import { McpDefaultsRecovery } from './mcp-defaults-recovery';
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import { E2eeLocalAgentApproval, localAgentRunsWorkspace } from '../e2ee-local-agent-approval';
+import { E2eeRecoveryNotice } from '../e2ee-recovery-notice';
 import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
-import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
+import { buildDraftUserHistoryEntry, ownDisplayName } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
   Suspense,
@@ -128,7 +129,9 @@ import {
   lodyPresenceNowMsAtom,
   lodyPresenceStatesAtom,
   lodyPresenceSyncStateAtom,
+  onlineMachineResourcesAtom,
 } from '@/atoms/presence';
+import { formatMachineResourceText } from '@/components/shared/machine-resource-summary';
 import { buildAgentPrompt } from '@/lib';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
@@ -162,7 +165,8 @@ import {
   recordChatLandingProjectUse,
   resolvePreferredChatLandingAgentSelection,
 } from '@/lib/chat-landing-defaults';
-import { readAgentStartDefaults, persistAgentSessionDefaults } from '@/lib/local-storage-cache';
+import { readAgentStartDefaults, learnAgentStartDefaults } from '@/lib/local-storage-cache';
+import { useAgentPermissionDefault } from '@/hooks/use-agent-permission-default';
 import { filterAcpSessionConfigOptionValues } from '@/lib/acp-session-config-selection';
 import {
   buildRecentRunConfigItems,
@@ -2198,6 +2202,7 @@ function WorkspaceChatLanding({
     cliType: selectedConfig?.cliType,
     agentType: selectedConfig?.agentType,
   });
+  const permissionDefault = useAgentPermissionDefault(selectedConfig?.id);
   const dispatchConfigOptionValues = useMemo(
     () => filterAcpSessionConfigOptionValues(configOptionValues, resolvedConfigOptionSelectors),
     [configOptionValues, resolvedConfigOptionSelectors]
@@ -3793,6 +3798,7 @@ function WorkspaceChatLanding({
       const pendingHistoryEntry = buildDraftUserHistoryEntry(
         {
           userId,
+          userName: ownDisplayName(currentUser, userId),
           inputBlocks,
           timestamp: new Date().toISOString(),
           inputConfig,
@@ -3872,7 +3878,7 @@ function WorkspaceChatLanding({
         throw new Error(`Initial session history missing entry id (sessionId=${sessionId})`);
       }
       recordChatLandingProjectUse(workspaceId, desktopProjectSelection);
-      persistAgentSessionDefaults(selectedAgent.agentId, {
+      learnAgentStartDefaults(selectedAgent.agentId, {
         modeId: modeOptions.length > 0 ? selectedModeId : null,
         modelId: modelOptions.length > 0 ? selectedModelId : null,
         configOptionValues: dispatchConfigOptionValues,
@@ -4586,6 +4592,7 @@ function WorkspaceChatLanding({
     [handleAgentRoleSelect, recentRunConfigAgentConfigs, recentRunConfigRecords]
   );
 
+  const onlineMachineResources = useAtomValue(onlineMachineResourcesAtom);
   const desktopMachineOptions = useMemo(
     () =>
       Array.from(selectableMachines.values()).map((machine) => ({
@@ -4593,8 +4600,9 @@ function WorkspaceChatLanding({
         label: machine.name,
         isPrivate:
           showProjectSharing && accessByMachineId.get(machine.id)?.sharedWithTeam === false,
+        resources: onlineMachineResources.get(machine.id),
       })),
-    [accessByMachineId, selectableMachines, showProjectSharing]
+    [accessByMachineId, onlineMachineResources, selectableMachines, showProjectSharing]
   );
   // An offline selection stays visible and marked rather than reading as unset.
   const desktopSelectedMachineId =
@@ -4749,6 +4757,7 @@ function WorkspaceChatLanding({
             configOptionValues={configOptionValues}
             onConfigOptionChange={handleConfigOptionChange}
             menuSide={isEmbedded ? 'top' : undefined}
+            permissionDefault={permissionDefault}
           />
         )}
         <SessionUsagePopover
@@ -4797,6 +4806,7 @@ function WorkspaceChatLanding({
           !onlineIds.has(machine.id) && machine.id !== mobileProjectSelectedMachineId
             ? t('chat.machineSelector.offline', 'Offline')
             : undefined,
+        resources: onlineIds.has(machine.id) ? onlineMachineResources.get(machine.id) : undefined,
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
   }, [
@@ -4804,6 +4814,7 @@ function WorkspaceChatLanding({
     machines,
     mobileProjectSelectedMachineId,
     mobileSheetOnlineMachines,
+    onlineMachineResources,
     t,
     visibleLocalProjectMap,
   ]);
@@ -6958,12 +6969,28 @@ function WorkspaceChatLanding({
         localAgentRunning={localAgentRunsWorkspace(localCliState, runtime.workspaceId)}
       />
     ) : null;
+  const e2eeRecoveryNoticeNode =
+    !isEmbedded && runtime?.contentMode === 'e2ee' ? (
+      <E2eeRecoveryNotice
+        key={`recovery:${runtime.accountId}:${runtime.workspaceId}`}
+        workspaceId={runtime.workspaceId}
+        accountId={runtime.accountId}
+        onSetup={() =>
+          void navigate({
+            to: '/workspace/e2ee/$workspaceId',
+            params: { workspaceId: runtime.workspaceId },
+            search: { tab: 'recovery' },
+          })
+        }
+      />
+    ) : null;
   // Pi migration and the sharing review are page guidance; an embedded
   // landing keeps only the notices that concern the send itself.
   const landingSharingReviewNoticeNode = isEmbedded ? null : sharingReviewNoticeNode;
   const composerNoticeNode =
     mcpSelection.defaultsFailed ||
     e2eeLocalAgentNode ||
+    e2eeRecoveryNoticeNode ||
     landingSharingReviewNoticeNode ||
     sessionLimitNoticeNode ||
     (!isEmbedded && canMigratePi) ? (
@@ -6985,6 +7012,7 @@ function WorkspaceChatLanding({
           />
         ) : null}
         {e2eeLocalAgentNode}
+        {e2eeRecoveryNoticeNode}
         {landingSharingReviewNoticeNode}
         {sessionLimitNoticeNode}
       </>
@@ -7092,7 +7120,12 @@ function WorkspaceChatLanding({
                     'chat.mobileNewChat.switchClearsRole',
                     'Changing machine clears the selected Role'
                   )
-                : undefined),
+                : machine.resources
+                  ? formatMachineResourceText(
+                      machine.resources,
+                      t('chat.machineSelector.diskFreeSuffix', 'free')
+                    )
+                  : undefined),
           }))}
           onChange={(id) => {
             setRestoreMobileProject(false);

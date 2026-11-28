@@ -222,12 +222,30 @@ const previewMachines: MachineMeta[] = [
     sessions: [],
   },
 ];
-const previewAccess = previewMachines.map((machine) => ({
-  machineId: machine.id,
-  ownerUserId: previewOwnerId,
-  sharedWithTeam: machine.id !== 'windows-daemon-retired',
-  updatedAt: 1,
-}));
+/** A teammate's shared machine, so the fleet list's Owner column names someone else. */
+const previewTeammateId = 'settings-story-teammate';
+const previewTeammateMachine: MachineMeta = {
+  id: 'linux-build-server' as MachineId,
+  name: 'Linux 构建服务器',
+  ownerUserId: previewTeammateId,
+  os: 'Ubuntu 24.04',
+  cliVersion: '0.104.0',
+  sessions: [],
+};
+const previewAccess = [
+  ...previewMachines.map((machine) => ({
+    machineId: machine.id,
+    ownerUserId: previewOwnerId,
+    sharedWithTeam: machine.id !== 'windows-daemon-retired',
+    updatedAt: 1,
+  })),
+  {
+    machineId: previewTeammateMachine.id,
+    ownerUserId: previewTeammateId,
+    sharedWithTeam: true,
+    updatedAt: 1,
+  },
+];
 const previewQueries: Record<string, unknown> = {
   'machines:listVisibleMachines': previewAccess,
   'localProjects:listVisibleLocalProjects': [],
@@ -237,10 +255,9 @@ const previewQueries: Record<string, unknown> = {
 /** Nothing is shared: every machine is the owner's private machine. */
 const privatePreviewQueries: Record<string, unknown> = {
   ...previewQueries,
-  'machines:listVisibleMachines': previewAccess.map((access) => ({
-    ...access,
-    sharedWithTeam: false,
-  })),
+  'machines:listVisibleMachines': previewAccess
+    .filter((access) => access.ownerUserId === previewOwnerId)
+    .map((access) => ({ ...access, sharedWithTeam: false })),
 };
 const createPreviewCloudApi = (queries: Record<string, unknown>): CloudApi => ({
   useQuery: (operation, args) => (args === 'skip' ? undefined : (queries[operation.name] as never)),
@@ -254,7 +271,13 @@ const createPreviewCloudApi = (queries: Record<string, unknown>): CloudApi => ({
 const previewCloudApi = createPreviewCloudApi(previewQueries);
 const privatePreviewCloudApi = createPreviewCloudApi(privatePreviewQueries);
 
-function MachinesCatalogFixture({ allPrivate = false }: { allPrivate?: boolean }) {
+function MachinesCatalogFixture({
+  allPrivate = false,
+  initialSelectedMachineId = previewSourceId,
+}: {
+  allPrivate?: boolean;
+  initialSelectedMachineId?: MachineId | null;
+}) {
   useLayoutEffect(() => {
     const originalFetch = window.fetch;
     const previewFetch: typeof fetch = (input, init) => {
@@ -392,25 +415,32 @@ function MachinesCatalogFixture({ allPrivate = false }: { allPrivate?: boolean }
     next.set(userAtom, { id: previewOwnerId, name: '示例用户', email: 'preview@example.com' });
     next.set(settingsDialogOpenAtom, true);
     next.set(settingsActiveTabAtom, 'machines');
-    next.set(settingsSelectedMachineIdAtom, previewSourceId);
+    next.set(settingsSelectedMachineIdAtom, initialSelectedMachineId);
     next.set(
       machineMetaCacheAtom,
-      Object.fromEntries(previewMachines.map((machine) => [getMachineRoomId(machine.id), machine]))
+      Object.fromEntries(
+        [...previewMachines, ...(allPrivate ? [] : [previewTeammateMachine])].map((machine) => [
+          getMachineRoomId(machine.id),
+          machine,
+        ])
+      )
     );
     next.set(lodyPresenceSyncStateAtom, 'synced');
     next.set(lodyPresenceNowMsAtom, getServerNow());
     next.set(
       lodyPresenceStatesAtom,
       Object.fromEntries(
-        [previewSourceId, 'macbook-development' as MachineId].map((machineId) => [
-          getLodyMachinePresenceKey(machineId, 'preview' as LodyPresenceInstanceId),
-          {
-            kind: 'machine',
-            machineId,
-            instanceId: 'preview' as LodyPresenceInstanceId,
-            updatedAt: getServerNow(),
-          },
-        ])
+        [previewSourceId, 'macbook-development' as MachineId, previewTeammateMachine.id].map(
+          (machineId) => [
+            getLodyMachinePresenceKey(machineId, 'preview' as LodyPresenceInstanceId),
+            {
+              kind: 'machine',
+              machineId,
+              instanceId: 'preview' as LodyPresenceInstanceId,
+              updatedAt: getServerNow(),
+            },
+          ]
+        )
       )
     );
     return next;
@@ -439,6 +469,7 @@ function SettingsModalStory({
   prompts = storyPrompts,
   solo = false,
   noneShared = false,
+  machinesListOnly = false,
 }: {
   tab: SettingsTabId;
   roles?: readonly AgentRole[];
@@ -447,6 +478,8 @@ function SettingsModalStory({
   solo?: boolean;
   /** No machine is shared with the workspace. */
   noneShared?: boolean;
+  /** Start on the Machines fleet list instead of opening a specific machine detail. */
+  machinesListOnly?: boolean;
 }) {
   return (
     <SettingsStoryProviders
@@ -457,7 +490,10 @@ function SettingsModalStory({
     >
       <RoutedStory>
         {tab === 'machines' ? (
-          <MachinesCatalogFixture allPrivate={solo || noneShared} />
+          <MachinesCatalogFixture
+            allPrivate={solo || noneShared}
+            initialSelectedMachineId={machinesListOnly ? null : previewSourceId}
+          />
         ) : (
           <Provider>
             <OpenModalAt tab={tab}>
@@ -533,6 +569,11 @@ export const DarkModePreferencesTab: Story = {
       <SettingsModalStory tab="preferences" />
     </div>
   ),
+};
+
+/** Full production modal on the Machines fleet list (Option B). */
+export const MachinesFleetList: Story = {
+  render: () => <SettingsModalStory tab="machines" machinesListOnly />,
 };
 
 /** Full production modal with synthetic data; run Storybook with VITE_LODY_PLATFORM=cloud. */

@@ -10,7 +10,8 @@ Translation: current
 MCP 异步委派保护在因果链达到五次跳转后拒绝命令，使更深的委派工作无法在
 创建 Operation 或目标 Session 前启动。现在共享上限改为 32，可执行
 Operation 模型和 Review Automation 说明也使用同一数值。边界仍保持固定且
-不可重试，因此只是扩大可用委派深度，没有移除递归保护。
+不可重试，因此只是扩大可用委派深度，没有移除递归保护。当前上限为 16，见
+[限制 Agent 消息链](2026-10-11-bound-agent-message-chains.zh.md)。
 
 ## 决定与范围
 

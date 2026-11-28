@@ -33,9 +33,12 @@ import {
 } from './session-info-chips';
 import type { SessionStatusStripState } from './session-status-strip';
 import {
+  hasRoostHistorySyncNotice,
+  RoostHistorySyncIndicator,
   SessionSyncingIndicator,
   type SessionSyncIndicatorVariant,
 } from './session-syncing-indicator';
+import type { RoostHistorySyncState } from '@lody/shared';
 import { SessionMachineInfo } from './session-machine-info';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -114,6 +117,7 @@ export type SessionInfoBarProps = {
   syncing?: boolean;
   /** Overrides `syncing` with a specific conversation content-sync state. */
   syncStatus?: SessionSyncIndicatorVariant | null;
+  historySync?: RoostHistorySyncState;
   /** Mobile native shell only: lift the bar above the session drawer's
    *  transparent z-30 left-edge swipe-back strip, which otherwise covers the
    *  leftmost ~48px of the row and swallows taps on the first chip. Same
@@ -308,13 +312,16 @@ export function SessionInfoBar({
   diffStat,
   syncing = false,
   syncStatus,
+  historySync,
   protectFromEdgeBackZone = false,
   initialStage,
   queue,
 }: SessionInfoBarProps) {
   const { t } = useTranslation();
   const hasDiff = hasWorkspaceChanges(diffStat);
-  const hasContext = !!pr || !!projectName || !!branch || hasDiff || !!contextActions?.length;
+  const hasPrLinks = Boolean(prLinks && prLinks.items.length > 0);
+  const hasContext =
+    !!pr || hasPrLinks || !!projectName || !!branch || hasDiff || !!contextActions?.length;
   const goalObjective = goal ? sanitizeGoalObjective(goal.objective) : '';
   const hasGoal = !!goal && !!goalObjective;
   const scheduleSignature = useScheduledTaskSignature(scheduledTasks);
@@ -344,6 +351,7 @@ export function SessionInfoBar({
   const contextSignature = hasContext
     ? [
         pr?.url ?? '',
+        prLinks?.items.map((item) => item.url).join(',') ?? '',
         projectName ?? '',
         branch ?? '',
         diffStat ? `${diffStat.add}:${diffStat.del}:${diffStat.files ?? ''}` : '',
@@ -401,10 +409,11 @@ export function SessionInfoBar({
     privateAccessStatus
   );
   if (!hasSurfaceContent && !hasMachine) {
-    return queue ? (
+    return queue || hasRoostHistorySyncNotice(historySync) ? (
       <div {...stylex.props(styles.bar)}>
         <ConversationColumn>
-          <div {...stylex.props(styles.queueSheet)}>{queue}</div>
+          {historySync && <RoostHistorySyncIndicator state={historySync} />}
+          {queue ? <div {...stylex.props(styles.queueSheet)}>{queue}</div> : null}
         </ConversationColumn>
       </div>
     ) : (
@@ -509,6 +518,7 @@ export function SessionInfoBar({
       {/* Same centered width as the composer content, so the bar and the
           input box share edges. */}
       <ConversationColumn>
+        {historySync && <RoostHistorySyncIndicator state={historySync} />}
         {queue ? <div {...stylex.props(styles.queueSheet)}>{queue}</div> : null}
         <div data-info-bar-surface="" {...surfaceProps}>
           {hasMachine && machine ? (
