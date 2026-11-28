@@ -50,7 +50,9 @@ theme already in place.
   render as diagnostics, not DOM. An SVG family (`svg`, basic shapes,
   `svg:text`) admits a fixed attribute whitelist — geometry and paint only;
   resource references, scripts, embedded HTML, and events have no path to
-  the DOM.
+  the DOM. Above it, `Mock` renders a greyscale svg wireframe from a nested
+  `Mock:Col`/`Mock:Row`/`Mock:Cell`/`Mock:Box` layout — the model describes the
+  structure and the renderer computes every coordinate.
 - **Catalog delivery**: the model learns the DSL through progressive
   disclosure — a compact index (every tag, one line each: purpose and key
   props) is always in context, while full prop tables and worked examples live

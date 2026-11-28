@@ -1,4 +1,6 @@
+import { createElement } from 'react';
 import type { ReactElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { GENUI_CATALOG, resolveIcon } from './genui-catalog';
 
@@ -47,7 +49,13 @@ describe('svg catalog family', () => {
       onClick: () => 1,
       'data-x': '1',
     });
-    expect(Object.keys(el.props).sort()).toEqual(['children', 'className', 'viewBox']);
+    expect(Object.keys(el.props).sort()).toEqual([
+      'children',
+      'className',
+      'fill',
+      'fontFamily',
+      'viewBox',
+    ]);
   });
 
   it('keeps aria attributes in kebab case on the svg root', () => {
@@ -60,5 +68,67 @@ describe('svg catalog family', () => {
     for (const tag of ['image', 'foreignObject', 'use', 'script', 'animate', 'a']) {
       expect(GENUI_CATALOG[tag]).toBeUndefined();
     }
+  });
+});
+
+describe('Mock', () => {
+  const render = (props: Record<string, unknown>) =>
+    GENUI_CATALOG.Mock?.(props) as ReactElement<Record<string, unknown>>;
+
+  it('is registered alongside the namespaced layout tags', () => {
+    for (const tag of ['Mock:Col', 'Mock:Row', 'Mock:Cell', 'Mock:Box']) {
+      expect(GENUI_CATALOG[tag]).toBeTruthy();
+    }
+  });
+
+  it('carries the layout props the renderer consumes', () => {
+    const el = render({ w: 160, h: 132, children: 'x' });
+    expect(el.props.w).toBe(160);
+    expect(el.props.h).toBe(132);
+    expect(el.props.children).toBe('x');
+  });
+
+  it('lays out a nested Col/Row tree into svg rects and clipped labels', () => {
+    const tree = createElement(
+      GENUI_CATALOG.Mock as never,
+      { w: 100, h: 60 } as never,
+      createElement(
+        GENUI_CATALOG['Mock:Col'] as never,
+        null,
+        createElement(GENUI_CATALOG['Mock:Cell'] as never, { h: 16, tone: 'deep' } as never),
+        createElement(
+          GENUI_CATALOG['Mock:Row'] as never,
+          null,
+          createElement(GENUI_CATALOG['Mock:Cell'] as never, { w: 30, tone: 'band' } as never),
+          createElement(
+            GENUI_CATALOG['Mock:Box'] as never,
+            { tone: 'faint', label: 'Main', sub: 'view' } as never
+          )
+        )
+      )
+    );
+    const svg = renderToStaticMarkup(tree);
+    expect((svg.match(/<rect/g) ?? []).length).toBeGreaterThanOrEqual(4);
+    expect(svg).toContain('>Main<');
+    expect(svg).toContain('clip-path');
+  });
+
+  it('splits the free space by flex and honours fixed main-axis sizes', () => {
+    const tree = createElement(
+      GENUI_CATALOG.Mock as never,
+      { w: 90, h: 40, pad: 0, gap: 0 } as never,
+      createElement(
+        GENUI_CATALOG['Mock:Row'] as never,
+        { gap: 0 } as never,
+        createElement(GENUI_CATALOG['Mock:Cell'] as never, { w: 30 } as never),
+        createElement(GENUI_CATALOG['Mock:Cell'] as never, { flex: 1 } as never),
+        createElement(GENUI_CATALOG['Mock:Cell'] as never, { flex: 2 } as never)
+      )
+    );
+    const svg = renderToStaticMarkup(tree);
+    const widths = [
+      ...svg.matchAll(/<rect x="[\d.]+" y="[\d.]+" width="([\d.]+)"[^>]*fill-opacity/g),
+    ].map((m) => parseFloat(m[1]));
+    expect(widths).toEqual([30, 19.5, 38.5]);
   });
 });

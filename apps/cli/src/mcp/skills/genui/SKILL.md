@@ -1,120 +1,121 @@
 ---
 name: genui
-description: Author `genui` fenced blocks — declarative, stateful, interactive UI inside chat answers — or inline catalog tags in ordinary markdown. Use when a reply benefits from controls (sliders, switches, selects, buttons) instead of static text. Read a reference file only for the component families you actually use.
+description: Author `genui` fenced blocks — declarative, stateful, interactive UI inside chat answers — or inline catalog tags in ordinary markdown. Reach for it whenever the reply benefits from controls (sliders, switches, selects, buttons), status chips, or a drawn figure — wireframes, UI mock-ups, layout and architecture schematics render as clean greyscale `Mock` diagrams, far better than ASCII art. Use it when the user asks to draw, sketch, diagram, mock up, or visualise anything. Read a reference file only for the component families you actually use.
 ---
 
 # GenUI surface authoring
 
-Use ordinary Markdown for prose, lists, and tables. Embed a static `Icon` or
-`Badge` directly in that Markdown. Use a fenced `genui` block for cards, other
-catalog layouts, controls, and values that depend on state. Put every control
-and display that shares state in the same fence, even across several cards.
+Default to ordinary Markdown prose. Reach for genui only when it materially
+reduces the reader's scan cost:
 
-Use a `<Card>` wrapper when the request calls for a card, with its
-`<Column>` or `<Row>` inside. Preserve requested state slot names, exact
-button labels, and specified display text.
+- Inline `Icon` / `Badge` — real status inside a sentence or table cell, one per
+  distinct status.
+- Fenced `genui` + `Card` — a bounded panel grouping controls or side-by-side
+  options. Never wrap plain prose in a card.
+- Interactive controls — only when the reader can act on the UI itself. For
+  static data a markdown table is usually clearer.
+- `Mock` — **the default for any wireframe, UI mock-up, layout or architecture
+  schematic.** Nest `Mock:Col`/`Mock:Row` (split space), `Mock:Cell` (a labelled
+  or blank block), `Mock:Box` (a block centred on `label`/`sub`/`hint`),
+  `Mock:Lines` (placeholder content bars — nav items, form rows, body text) and the renderer computes
+  every coordinate — you never write x/y/w/h and it always comes out aligned.
+  Do not hand-place `svg` rects for a layout; `svg` is only for shapes `Mock`
+  cannot express (icons, annotations). Node→edge graphs → ```` ```mermaid ````.
+  Containers hold the leaves directly — a `Mock:Box` or `Mock:Cell` is already
+  a region; wrap it in another `Mock:Col`/`Mock:Row` only to nest a further
+  split. `tone` is a 5-step grey ramp deep→faint; `Cell` takes one `label`,
+  `Box` up to three (`label`/`sub`/`hint`, dropped when the block is too short).
 
-Start the fence with the `{@state}` directives, then write JSX-like markup.
-A fence mounts while it streams. Each element appears when its open tag
-closes, so declare state before any markup that reads it.
+  ```genui
+  <Mock w={160} h={132}>
+    <Mock:Col>
+      <Mock:Cell h={15} tone="mid"/>
+      <Mock:Row>
+        <Mock:Cell w={33} tone="band"/>
+        <Mock:Box tone="faint" label="Webview" sub="Own UI" hint="postMessage"/>
+      </Mock:Row>
+    </Mock:Col>
+  </Mock>
+  ```
+
+## Fence rules
+
+A `genui` fence is `{@state}` directives then JSX-like markup. Declare state
+before any markup that reads it — elements mount as their open tag closes.
 
 ```genui
 {@state const [tickets, setTickets] = useState(0)}
 <Card>
   <Column gap={8}>
     <Heading>Tickets</Heading>
-    <Text>{tickets}</Text>
     <Badge>{`Reserved: ${tickets}`}</Badge>
-    <Button onClick={() => {
-      setTickets(prev => prev + 1);
-      setTickets(prev => prev + 1);
-    }}>Reserve two tickets</Button>
+    <Button onClick={() => setTickets(n => n + 1)}>Reserve</Button>
   </Column>
 </Card>
 ```
 
-## Rules that are enforced, not conventions
+## Enforced rules
 
-- `{@state const [x, setX] = useState(<expr>)}` is the *only* way to declare state.
-  It must appear before the markup, never inside it. `x` is read in expressions;
-  `setX(next)` or `setX((prev) => next)` writes it. Re-declared slots keep their
-  committed value across revisions — `useState` is a *default*, not a reset.
-  Each functional setter reads the latest committed value, including writes
-  earlier in the same callback.
-- `{expr}` in markup is an *expression hole*: no `const`, `if`, or statements.
-  Event props take JS callbacks: `onChange={(v) => setV(v)}`, `onClick={() => …}`.
-- The evaluator is confined: literals, arithmetic, ternaries, template strings,
-  arrow functions, array methods (`map/filter/find/reduce/sort/…`), calls into
-  state setters and `lody.*` capabilities. No `window`/`fetch`/`import`/globals.
-- Every tag must be in the catalog below — an unknown tag renders as an
-  inline `<tag>` placeholder plus a diagnostic, never a crash.
-- Adjacent literal text is trimmed at expression boundaries. Put the full
-  label in one template literal to preserve spaces in `Text` and `Badge`.
-  For a standalone value, use just `<Text>{value}</Text>`.
-- A slider's `onChange` sends a number. Keep text input values and
-  `onValueChange` state as strings, and convert at the point of calculation
-  with `Number(value)`. Write array totals as
-  `items.reduce((sum, item) => sum + item, 0)`.
+- `{@state const [x, setX] = useState(<expr>)}` is the only state declaration —
+  before markup, never inside. `setX(next)` / `setX(prev => next)` writes it.
+- `{expr}` is an expression hole: no `const`, `if`, or statements. Event props
+  take callbacks: `onChange={(v) => setV(v)}`.
+- The evaluator is confined — literals, arithmetic, ternaries, template strings,
+  arrow fns, array methods, state setters, `lody.*`. No `window`/`fetch`/`import`.
+- Only catalog tags render — an unknown tag shows as a `<tag>` placeholder.
+- Text is trimmed at expression boundaries: put the full label in one template
+  literal (`<Badge>{`Reserved: ${n}`}</Badge>`).
 
-## Inline catalog tags (no fence)
+## Common mistakes
 
-Leaf, presentational tags also work inside ordinary markdown — sentences,
-table cells, list items — with literal props only:
+- `<strong>`/`<em>` inside `Text`/`Badge` — unknown tags; use a template literal.
+- `Badge` for emphasis — it marks real state only, one per status.
+- Prose inside `Card`, markup inside an inline `Badge` label — both break.
+- Hand-placed `svg` rects for a window/panel layout — use `Mock` so the
+  renderer computes coordinates; `svg` is for shapes `Mock` cannot express.
+
+## Inline tags (no fence)
+
+Leaf presentational tags work inside ordinary markdown with literal props:
 
 ```markdown
-| 检查项    | #2620                                        |
-| --------- | -------------------------------------------- |
-| CLI tests | <Icon name="x-circle" color="danger" /> 失败 |
-
-服务在线 <Badge tone="success">running</Badge>，一个仍在启动 <Badge tone="warning">pending</Badge>。
+服务在线 <Badge tone="success">running</Badge>，仍在启动 <Badge tone="warning">pending</Badge>。
 ```
 
-- Write a self-closing `<Icon ... />` or a pair
-  `<Badge tone="warning">Pending</Badge>` directly in Markdown. Backticks show
-  the source as code.
-- Use quoted literal prop values and a plain-text badge label. Escape Markdown
-  punctuation that should be visible, for example
-  `<Badge tone="warning">\*Pending\*</Badge>` for the label `*Pending*`.
-  Markup inside the label prevents the badge pair from rendering.
-- Inline tags have no state or callbacks. Braces in a badge label are literal
-  characters. Use a fenced badge for a dynamic label or tone.
-- Inline `Icon` takes quoted `name` and optional `color`
-  (danger/success/warning/accent). It renders at 14 px. Use a fenced icon with
-  `size={20}` for a custom size. The legacy `inline` prop has no effect.
+Self-closing `<Icon name="check" color="success" />` or a `<Badge>` pair; literal
+props only, no state or callbacks. Escape markdown punctuation inside a label
+(`\*Pending\*`). `Icon` takes `name` + `color` (danger/success/warning/accent),
+renders at 14px.
 
 ## Catalog index
-
-Props that matter per tag; full prop tables and per-family examples live in
-`references/` — read a family file only when you use it.
 
 | Tag | Purpose | Key props |
 |---|---|---|
 | `Card` | Grouped container | — |
-| `Row` / `Column` | Flex row / column | `gap` (px) |
+| `Row` / `Column` | Flex row / column | `gap` |
 | `Divider` | Horizontal rule | — |
-| `Spacer` | Pushes siblings apart | `size` |
-| `Text` | Body text | `muted` |
-| `Heading` | h1–h6 | `level` (default 3) |
+| `Spacer` | Push siblings apart | `size` |
+| `Text` | Body text | `muted`, `size` |
+| `Heading` | h1–h6 | `level` |
 | `Badge` | Status pill | `tone`: neutral/success/warning/danger/running |
-| `Icon` | Lucide icon | `name` (kebab-case), `size` |
+| `Icon` | Lucide icon | `name` (kebab), `size` |
 | `Button` | Action | `onClick`, `variant`, `size`, `disabled` |
 | `Input` | Text field | `value`, `onValueChange(v)`, `placeholder`, `disabled` |
-| `Checkbox` / `Switch` | Boolean toggle | `checked`, `onCheckedChange(v)`, `disabled` |
+| `Checkbox`/`Switch` | Toggle | `checked`, `onCheckedChange(v)`, `disabled` |
 | `Select` | Dropdown | `items`, `value`, `onValueChange(v)`, `placeholder` |
-| `Slider` | Numeric range | `value`, `min`, `max`, `step`, `disabled`, `onChange(n)` |
-| `svg` family | Custom diagrams | `viewBox`; `rect` `circle` `ellipse` `line` `polyline` `polygon` `path` `g`; labels via `svg:text` |
+| `Slider` | Range | `value`, `min`, `max`, `step`, `onChange(n)` |
+| `Mock` | Wireframe → greyscale svg | `w`, `h`, `pad`; `Mock:Col`/`Mock:Row`/`Mock:Cell`/`Mock:Box`/`Mock:Lines` |
+| `svg` | Vector shapes | `viewBox`; `rect` `circle` `ellipse` `line` `polyline` `polygon` `path` `g`; `svg:text` |
 
-## References (read on demand)
+## References (read on demand, only for families you use)
 
-- [expressions](references/expressions.md) — confined-JS subset, state semantics, `lody.*` capabilities, error shapes.
-- [layout-text](references/layout-text.md) — Card, Row, Column, Divider, Spacer, Text, Heading, Badge, Icon: props, examples, misuse patterns.
-- [controls](references/controls.md) — Button, Input, Checkbox, Switch, Select, Slider: props, event contracts, worked examples.
-- [svg](references/svg.md) — svg, shapes, svg:text: the confined diagram subset, paint attributes, examples.
+- [expressions](references/expressions.md) — confined JS, state semantics, `lody.*`.
+- [layout-text](references/layout-text.md) — Card, Row, Column, Divider, Spacer, Text, Heading, Badge, Icon.
+- [controls](references/controls.md) — Button, Input, Checkbox, Switch, Select, Slider.
+- [svg](references/svg.md) — svg shapes, `svg:text`, `Mock` wireframes.
 
-## Validate before shipping
+## Validate
 
-A surface that fails to compile degrades to its own fenced code block in chat —
-readers never see diagnostics, so write markup as if errors were invisible. When
-editing the runtime or catalog, the ground truth is `packages/genui` (parser +
-evaluator) and `packages/components/src/components/ai-gui/genui/` (catalog
-renderers); run `pnpm --filter @lody/genui test` to check a surface end-to-end.
+A surface that fails to compile degrades to its fenced code block — write markup
+as if errors were invisible. Ground truth: `packages/genui` (parser/evaluator),
+`packages/components/src/components/ai-gui/genui/` (catalog).

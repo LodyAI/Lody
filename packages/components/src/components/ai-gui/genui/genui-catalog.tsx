@@ -8,7 +8,7 @@ import { Badge, Button, Card, Checkbox, Input, Select, Separator, Switch } from 
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { icons } from 'lucide-react';
-import { createElement, type ReactNode, type SVGProps } from 'react';
+import { createElement, useId, type ReactNode, type SVGProps } from 'react';
 
 export type GenuiProps = Record<string, unknown> & { children?: ReactNode };
 export type GenuiRenderer = (props: GenuiProps) => ReactNode;
@@ -73,6 +73,234 @@ export function resolveIcon(name: string) {
     if (icon) return icon;
   }
   return undefined;
+}
+
+/* `Mock`: nested JSX layout → this flex pass computes coordinates → greyscale svg. */
+const G = '#64748b';
+const FILL: Record<string, { fill: string; op: number; dash?: boolean; stroke?: string }> = {
+  deep: { fill: G, op: 0.5 },
+  mid: { fill: G, op: 0.3 },
+  band: { fill: G, op: 0.16 },
+  soft: { fill: G, op: 0.09 },
+  faint: { fill: G, op: 0.05, dash: true, stroke: G },
+};
+
+type MockDir = 'col' | 'row' | 'cell' | 'box' | 'lines';
+const mockTag = (dir: MockDir) => {
+  const c = (props: GenuiProps) => createElement(`m:${dir}` as 'div', props);
+  (c as { genuiMock?: MockDir }).genuiMock = dir;
+  return c;
+};
+
+function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
+  const W = num(w, 160);
+  const H = num(h, 132);
+  const P = num(pad, 4);
+  type Node = { dir: MockDir; props: Record<string, unknown>; kids: Node[] };
+  const read = (el: unknown): Node | undefined => {
+    if (!el || typeof el !== 'object' || Array.isArray(el)) return undefined;
+    const e = el as { type?: unknown; props?: Record<string, unknown> };
+    const t = e.type;
+    const dir =
+      typeof t === 'function'
+        ? (t as { genuiMock?: MockDir }).genuiMock
+        : t === 'm:col'
+          ? 'col'
+          : t === 'm:row'
+            ? 'row'
+            : t === 'm:cell'
+              ? 'cell'
+              : t === 'm:box'
+                ? 'box'
+                : t === 'm:lines'
+                  ? 'lines'
+                  : undefined;
+    if (!dir) return undefined;
+    const kids = (Array.isArray(e.props?.children) ? e.props.children : [e.props?.children])
+      .map(read)
+      .filter((n): n is Node => n !== undefined);
+    return { dir, props: e.props ?? {}, kids };
+  };
+  const roots = (Array.isArray(children) ? children : [children])
+    .map(read)
+    .filter((n): n is Node => n !== undefined);
+
+  const q = (n: number) => Math.round(n * 2) / 2;
+  const rects: { x: number; y: number; w: number; h: number; tone: string; rx: number }[] = [];
+  const texts: { x: number; y: number; s: number; w: number; t: string; clip: number }[] = [];
+
+  const layout = (node: Node, x: number, y: number, w: number, h: number): void => {
+    const p = node.props;
+    const gap = num(p.gap, 1);
+    const inset = num(p.pad, 1);
+    const kids = node.kids;
+    if (node.dir === 'col' || node.dir === 'row') {
+      const main = node.dir === 'col' ? 'h' : 'w';
+      const ix = x + inset,
+        iy = y + inset,
+        iw = w - inset * 2,
+        ih = h - inset * 2;
+      const inner = node.dir === 'col' ? ih : iw;
+      const total = kids.reduce((s, k) => s + num(k.props[main], 0), 0);
+      const flexSum = kids.reduce(
+        (s, k) => s + Math.max(0, num(k.props.flex, num(k.props[main], 0) > 0 ? 0 : 1)),
+        0
+      );
+      const free = Math.max(0, inner - total - gap * Math.max(0, kids.length - 1));
+      let cur = node.dir === 'col' ? iy : ix;
+      for (const k of kids) {
+        const fixed = num(k.props[main], 0);
+        const share =
+          fixed > 0 ? fixed : free * (Math.max(0, num(k.props.flex, 1)) / Math.max(1, flexSum));
+        if (node.dir === 'col') {
+          layout(k, ix, cur, iw, share);
+          cur += share + gap;
+        } else {
+          layout(k, cur, iy, share, ih);
+          cur += share + gap;
+        }
+      }
+      return;
+    }
+    if (node.dir === 'lines') {
+      const count = Math.max(1, num(p.count, Math.floor((h + 6) / 16)));
+      const lp = num(p.pad, 6);
+      const bar = num(p.size, 7);
+      const gap = count > 1 ? Math.min(10, (h - lp * 2 - bar) / (count - 1) - bar) : 0;
+      let ly = y + lp;
+      for (let i = 0; i < count; i++) {
+        const bw = i === count - 1 && p.lastShort !== false ? w * 0.62 : w;
+        rects.push({
+          x: q(x + lp),
+          y: q(ly),
+          w: q(Math.max(8, w - lp * 2) * (bw === w ? 1 : 0.62)),
+          h: bar,
+          tone: 'soft',
+          rx: Math.min(3, bar / 2),
+        });
+        ly += bar + gap;
+      }
+      return;
+    }
+    rects.push({
+      x: q(x),
+      y: q(y),
+      w: q(w),
+      h: q(h),
+      tone: str(p.tone, 'mid'),
+      rx: Math.min(4, w / 2, h / 2),
+    });
+    const cellLabel = node.dir === 'cell' ? str(p.label) : '';
+    if (node.dir === 'cell' && cellLabel) {
+      const fs = h >= 26 ? 10 : 8;
+      texts.push({
+        x: x + w / 2,
+        y: y + h / 2 + fs * 0.35,
+        s: fs,
+        w: 500,
+        t: cellLabel,
+        clip: rects.length - 1,
+      });
+    }
+    if (node.dir === 'box') {
+      const clip = rects.length - 1;
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+      const label = str(p.label),
+        sub = str(p.sub),
+        hint = str(p.hint);
+      // Keep a line only when it still fits: a 12/9/8px slot needs ~1.7·s of box.
+      const room = Math.max(0, h - 6);
+      const fs = room >= 30 ? 12 : room >= 18 ? 10 : 8;
+      const want = [
+        label && { t: label, s: fs, b: 600, need: fs * 1.7 },
+        sub && { t: sub, s: 9, need: 15 },
+        hint && { t: hint, s: 8, need: 13 },
+      ].filter(Boolean) as { t: string; s: number; b?: number; need: number }[];
+      let used = 0;
+      const lines = want.filter((l) => {
+        used += l.need;
+        return used <= room;
+      });
+      const slots = lines.map((l) => l.s * 1.4);
+      const blockH = slots.reduce((a, b) => a + b, 0);
+      let ty = cy - blockH / 2;
+      lines.forEach((l, i) => {
+        texts.push({
+          x: cx,
+          y: Math.round((ty + slots[i] / 2 + l.s * 0.35) * 10) / 10,
+          s: l.s,
+          w: l.b ?? 400,
+          t: l.t,
+          clip,
+        });
+        ty += slots[i];
+      });
+    }
+  };
+  for (const r of roots) layout(r, P, P, W - P * 2, H - P * 2);
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      width="100%"
+      fill="currentColor"
+      fontFamily="-apple-system, system-ui, sans-serif"
+      {...stylex.props(styles.svg)}
+      role="img"
+      aria-label={str(ariaLabel, 'wireframe')}
+    >
+      <rect
+        x={P}
+        y={P}
+        width={W - P * 2}
+        height={H - P * 2}
+        rx={5}
+        stroke={G}
+        strokeOpacity={0.5}
+        fill="none"
+      />
+      <defs>
+        {rects.map((r, i) => (
+          <clipPath key={i} id={`${uid}c${i}`}>
+            <rect x={r.x} y={r.y} width={Math.max(0, r.w)} height={Math.max(0, r.h)} rx={r.rx} />
+          </clipPath>
+        ))}
+      </defs>
+      {rects.map((r, i) => {
+        const t = FILL[r.tone] ?? FILL.mid;
+        return (
+          <rect
+            key={i}
+            x={r.x}
+            y={r.y}
+            width={Math.max(0, r.w)}
+            height={Math.max(0, r.h)}
+            rx={r.rx}
+            fill={t.fill}
+            fillOpacity={t.op}
+            stroke={t.stroke}
+            strokeDasharray={t.dash ? '4 3' : undefined}
+          />
+        );
+      })}
+      {texts.map((t, i) => (
+        <text
+          key={i}
+          x={t.x}
+          y={t.y}
+          textAnchor="middle"
+          fontSize={t.s}
+          fontWeight={t.w}
+          fill="currentColor"
+          clipPath={`url(#${uid}c${t.clip})`}
+        >
+          {t.t}
+        </text>
+      ))}
+    </svg>
+  );
 }
 
 function GenuiSlider({ value, onChange, min, max, step, disabled }: GenuiProps) {
@@ -238,8 +466,13 @@ export const GENUI_CATALOG: Record<string, GenuiRenderer> = {
   ),
   Divider: () => <Separator />,
   Spacer: ({ size }) => <span style={{ flex: 1, minWidth: num(size), minHeight: num(size) }} />,
-  Text: ({ children, muted }) => (
-    <p {...stylex.props(styles.text, bool(muted) && styles.textMuted)}>{children}</p>
+  Text: ({ children, muted, size }) => (
+    <p
+      {...stylex.props(styles.text, bool(muted) && styles.textMuted)}
+      style={{ fontSize: size === undefined ? undefined : num(size) }}
+    >
+      {children}
+    </p>
   ),
   Heading: ({ children, level }) => {
     const Tag = `h${Math.min(Math.max(num(level, 3), 1), 6)}` as 'h3';
@@ -304,8 +537,16 @@ export const GENUI_CATALOG: Record<string, GenuiRenderer> = {
   ),
   Select: (props) => <GenuiSelect {...props} />,
   Slider: (props) => <GenuiSlider {...props} />,
+  Mock: (props) => <GenuiMock {...props} />,
+  'Mock:Col': mockTag('col'),
+  'Mock:Row': mockTag('row'),
+  'Mock:Cell': mockTag('cell'),
+  'Mock:Box': mockTag('box'),
+  'Mock:Lines': mockTag('lines'),
   svg: ({ children, ...rest }) => (
     <svg
+      fill="currentColor"
+      fontFamily="-apple-system, system-ui, sans-serif"
       {...(pickSvgProps(rest, SVG_ROOT) as SVGProps<SVGSVGElement>)}
       {...stylex.props(styles.svg)}
     >
