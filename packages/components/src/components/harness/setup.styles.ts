@@ -106,7 +106,11 @@ export const setupStyles = stylex.create({
   },
   lede: { margin: 0, fontSize: '13px', color: hx.muted, textWrap: 'pretty' },
 
-  /** The way on stays reachable while the step above it scrolls. */
+  /**
+   * The way on stays reachable while the step above it scrolls. Its fill is a
+   * layer rather than its own background so the bar's outline can change: see
+   * `footFill`.
+   */
   foot: {
     position: 'sticky',
     bottom: 0,
@@ -119,8 +123,29 @@ export const setupStyles = stylex.create({
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
     borderTopColor: hx.lineSoft,
-    borderRadius: `0 0 ${hx.rLg} ${hx.rLg}`,
-    backgroundColor: hx.sunken,
   },
+  /**
+   * Two of these stack under the bar's content, one per outline. Floating over a
+   * step taller than the pane, the bar ends nowhere, so its corners are square —
+   * rounded ones cut two notches out of the card's straight sides. Landed on the
+   * card's bottom it *is* the card's bottom edge and takes the card's corners,
+   * which the card cannot give it: its corner marks sit outside its box, so the
+   * box cannot be the thing that clips. The landed layer is clipped to the card's
+   * own arc instead (drawn from the bar's measured box in `setup.tsx`), and the
+   * two crossfade so the landing is not a pop.
+   */
+  footFill: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: -1,
+    backgroundColor: hx.sunken,
+    transitionProperty: 'opacity',
+    transitionDuration: '0.18s',
+    transitionTimingFunction: hx.ease,
+    '@media (prefers-reduced-motion: reduce)': { transitionDuration: '0s' },
+  },
+  footFillAway: { opacity: 0 },
+  /** The `<clipPath>` the landed layer points at: present, never painted. */
+  footClipDefs: { position: 'absolute', width: 0, height: 0 },
   footHint: { fontSize: '12.5px', color: hx.faint },
 });

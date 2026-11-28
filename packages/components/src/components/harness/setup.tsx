@@ -6,7 +6,7 @@
  *
  * Setup always writes the shared profile; per-device tweaks live in settings.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, X } from 'lucide-react';
@@ -66,6 +66,7 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
   const { device } = useActiveDevice();
   const current = STEPS[step];
   const [measure, bodyHeight] = useHeight();
+  const foot = useFootShape();
 
   const canContinue =
     current.id === 'providers'
@@ -146,7 +147,7 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
       </div>
 
       <main {...stylex.props(s.center)}>
-        <div {...stylex.props(s.card)}>
+        <div ref={foot.card} {...stylex.props(s.card)}>
           <span {...stylex.props(s.corner, s.cornerTopStart)} aria-hidden="true" />
           <span {...stylex.props(s.corner, s.cornerTopEnd)} aria-hidden="true" />
           <span {...stylex.props(s.corner, s.cornerBottomStart)} aria-hidden="true" />
@@ -186,6 +187,20 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
             </div>
           </motion.div>
           <footer {...stylex.props(s.foot)}>
+            <svg {...stylex.props(s.footClipDefs)} aria-hidden="true">
+              <defs>
+                <clipPath id={foot.clipId} clipPathUnits="userSpaceOnUse">
+                  {foot.path ? <path d={foot.path} /> : null}
+                </clipPath>
+              </defs>
+            </svg>
+            <span aria-hidden="true" {...stylex.props(s.footFill, foot.docked && s.footFillAway)} />
+            <span
+              ref={foot.fill}
+              aria-hidden="true"
+              {...stylex.props(s.footFill, !foot.docked && s.footFillAway)}
+              style={foot.path ? { clipPath: `url(#${foot.clipId})` } : undefined}
+            />
             {step > 0 ? (
               <Button variant="ghost" onClick={() => go(step - 1)}>
                 <ArrowLeft size={14} /> Back
@@ -219,6 +234,80 @@ function useHeight() {
     observer.current.observe(node);
   }, []);
   return [ref, height] as const;
+}
+
+/**
+ * The footer's two outlines: `docked` once the bar rests on the card's bottom
+ * edge, and the path that clips it to the card's own bottom corners.
+ *
+ * The card is the bar's containing block, so "resting" is exactly "the bar's
+ * bottom edge is the card's": while a step is taller than the pane, its farthest
+ * stuck position leaves the card's bottom below the scrollport. The corner radius
+ * is read from the card rather than repeated, so the bar's outline cannot drift
+ * from the card's, and the box is re-measured because a step change animates the
+ * card's height while the pane scrolls the bar against it.
+ */
+function useFootShape() {
+  const card = useRef<HTMLDivElement | null>(null);
+  const fill = useRef<HTMLSpanElement | null>(null);
+  const [docked, setDocked] = useState(false);
+  const [box, setBox] = useState<{ w: number; h: number; r: number } | null>(null);
+  const clipId = `setup-foot-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+
+  useLayoutEffect(() => {
+    const dock = () => {
+      const cardEl = card.current;
+      const fillEl = fill.current;
+      if (!cardEl || !fillEl) return;
+      const gap = cardEl.getBoundingClientRect().bottom - fillEl.getBoundingClientRect().bottom;
+      setDocked(gap <= 0.5);
+    };
+    const shape = () => {
+      const cardEl = card.current;
+      const fillEl = fill.current;
+      if (!cardEl || !fillEl) return;
+      const rect = fillEl.getBoundingClientRect();
+      const r = Number.parseFloat(getComputedStyle(cardEl).borderBottomLeftRadius);
+      setBox(Number.isFinite(r) ? { w: rect.width, h: rect.height, r } : null);
+    };
+    dock();
+    shape();
+    const observer = new ResizeObserver(() => {
+      shape();
+      dock();
+    });
+    if (card.current) observer.observe(card.current);
+    if (fill.current) observer.observe(fill.current);
+    window.addEventListener('scroll', dock, { capture: true, passive: true });
+    window.addEventListener('resize', dock);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('scroll', dock, true);
+      window.removeEventListener('resize', dock);
+    };
+  }, []);
+
+  return { card, fill, docked, clipId, path: box ? footClipPath(box) : null };
+}
+
+/**
+ * The bar's outline: square at the top and sides, the card's corner arc at the
+ * bottom. Coordinates are the bar's own box, which is what the `<clipPath>`
+ * reads them in; `2` places of a pixel keep the path stable across scrolls.
+ */
+function footClipPath({ w, h, r }: { w: number; h: number; r: number }) {
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+  if (!radius) return `M0 0H${round(w)}V${round(h)}H0Z`;
+  return [
+    'M0 0',
+    `H${round(w)}`,
+    `V${round(h - radius)}`,
+    `A${round(radius)} ${round(radius)} 0 0 1 ${round(w - radius)} ${round(h)}`,
+    `H${round(radius)}`,
+    `A${round(radius)} ${round(radius)} 0 0 1 0 ${round(h - radius)}`,
+    'Z',
+  ].join('');
 }
 
 /**
