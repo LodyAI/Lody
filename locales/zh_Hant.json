@@ -7312,5 +7312,12 @@
   "chat.machineSelector.diskFreeSuffix": "可用",
   "chat.machineSelector.cpuTitle": "CPU 使用率 {{percent}}%（共 {{cores}} 核心）",
   "chat.machineSelector.memoryTitle": "已用記憶體：{{pair}}",
-  "chat.machineSelector.diskTitle": "可用磁碟：{{pair}}"
+  "chat.machineSelector.diskTitle": "可用磁碟：{{pair}}",
+  "schedules.runNowConfirm": "仍然執行",
+  "schedules.runNowBusyTitle": "對話「{{chat}}」正在執行中",
+  "schedules.runNowBusyHelp": "立即執行「{{title}}」將依目前佇列或引導行為向此對話傳送新一輪工作。確定要繼續嗎？",
+  "schedules.runNowBusyDetailHelp": "立即執行「{{title}}」將使用上次儲存的排程（不包含未儲存的變更），並依目前佇列或引導行為向此對話傳送新一輪工作。確定要繼續嗎？",
+  "schedules.runNowStatusUnknownTitle": "無法確認「{{chat}}」是否正在執行",
+  "schedules.runNowStatusUnknownHelp": "目前無法取得此對話的即時執行狀態。立即執行「{{title}}」可能會排隊或與進行中的工作並行。確定要繼續嗎？",
+  "schedules.runNowStatusUnknownDetailHelp": "目前無法取得此對話的即時執行狀態。立即執行「{{title}}」將使用上次儲存的排程（不包含未儲存的變更），可能會排隊或與進行中的工作並行。確定要繼續嗎？"
 }

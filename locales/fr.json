@@ -7312,5 +7312,12 @@
   "chat.machineSelector.diskFreeSuffix": "libre",
   "chat.machineSelector.cpuTitle": "Utilisation CPU {{percent}} % sur {{cores}} cœurs",
   "chat.machineSelector.memoryTitle": "Mémoire utilisée : {{pair}}",
-  "chat.machineSelector.diskTitle": "Disque disponible : {{pair}}"
+  "chat.machineSelector.diskTitle": "Disque disponible : {{pair}}",
+  "schedules.runNowConfirm": "Exécuter quand même",
+  "schedules.runNowBusyTitle": "« {{chat}} » est en cours d’exécution",
+  "schedules.runNowBusyHelp": "Exécuter « {{title}} » maintenant enverra un nouveau tour à cette discussion selon son comportement actuel de file d’attente ou de guidage. Exécuter quand même ?",
+  "schedules.runNowBusyDetailHelp": "Exécuter « {{title}} » maintenant utilise la dernière planification enregistrée (les modifications non enregistrées sont exclues) et enverra un nouveau tour à cette discussion selon son comportement actuel de file d’attente ou de guidage. Exécuter quand même ?",
+  "schedules.runNowStatusUnknownTitle": "Impossible de confirmer si « {{chat}} » est en cours d’exécution",
+  "schedules.runNowStatusUnknownHelp": "L’état en direct de cette discussion est actuellement indisponible. Exécuter « {{title}} » maintenant peut mettre en file ou s’exécuter en parallèle d’un travail actif. Exécuter quand même ?",
+  "schedules.runNowStatusUnknownDetailHelp": "L’état en direct de cette discussion est actuellement indisponible. Exécuter « {{title}} » utilise la dernière planification enregistrée (les modifications non enregistrées sont exclues) et peut mettre en file ou s’exécuter en parallèle d’un travail actif. Exécuter quand même ?"
 }

@@ -102,7 +102,7 @@
   (`RotateCcw`, never `Play`) for a timed one, Delete for a finished message;
   it is visible by default and hidden only behind `@media (hover: hover)`.
   "Clear finished" deletes every finished scheduled message after one confirm.
-  Run from the list starts at once with a toast.
+  Run from the list confirms busy or unknown bound chats; otherwise it starts immediately.
 - Chrome: every control is an `@lody/ui` primitive (Button, Input, Select,
   Combobox, Menu, Popover, Switch, Tabs, Tooltip, ContextMenu, Skeleton,
   `@/ui/dialog`); `className` carries

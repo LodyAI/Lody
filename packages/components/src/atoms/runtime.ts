@@ -33,6 +33,7 @@ import type {
   SessionCancelResponse,
   SessionChatResponse,
   SessionDispatchTurnResponse,
+  SessionLiveStatusResponse,
   SessionSteerResponse,
   SessionGoalAction,
   SessionGoalResponse,
@@ -426,6 +427,11 @@ export type WorkspaceRuntime = {
       pauseInbox?: boolean;
     }
   ) => Promise<SessionCancelResponse | null>;
+  requestSessionLiveStatus?: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    options?: { timeoutMs?: number }
+  ) => Promise<SessionLiveStatusResponse | null>;
   requestSessionSteer: (
     machineId: MachineId,
     args: {

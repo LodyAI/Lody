@@ -7452,5 +7452,12 @@
   "chat.machineSelector.diskFreeSuffix": "свободно",
   "chat.machineSelector.cpuTitle": "Загрузка ЦП {{percent}}% ({{cores}} ядер)",
   "chat.machineSelector.memoryTitle": "Использовано памяти: {{pair}}",
-  "chat.machineSelector.diskTitle": "Свободно на диске: {{pair}}"
+  "chat.machineSelector.diskTitle": "Свободно на диске: {{pair}}",
+  "schedules.runNowConfirm": "Всё равно запустить",
+  "schedules.runNowBusyTitle": "Чат «{{chat}}» сейчас выполняется",
+  "schedules.runNowBusyHelp": "Запуск «{{title}}» сейчас отправит новый ход в этот чат согласно текущим правилам очереди или направления. Всё равно запустить?",
+  "schedules.runNowBusyDetailHelp": "Запуск «{{title}}» сейчас использует последнее сохранённое расписание (без несохранённых правок) и отправит новый ход в этот чат согласно текущим правилам очереди или направления. Всё равно запустить?",
+  "schedules.runNowStatusUnknownTitle": "Не удалось проверить, выполняется ли «{{chat}}»",
+  "schedules.runNowStatusUnknownHelp": "Текущий статус выполнения этого чата недоступен. Запуск «{{title}}» сейчас может встать в очередь или выполняться параллельно с активной работой. Всё равно запустить?",
+  "schedules.runNowStatusUnknownDetailHelp": "Текущий статус выполнения этого чата недоступен. Запуск «{{title}}» использует последнее сохранённое расписание (без несохранённых правок) и может встать в очередь или выполняться параллельно с активной работой. Всё равно запустить?"
 }

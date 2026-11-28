@@ -7312,5 +7312,12 @@
   "chat.machineSelector.diskFreeSuffix": "空き",
   "chat.machineSelector.cpuTitle": "CPU 使用率 {{percent}}%（全 {{cores}} コア）",
   "chat.machineSelector.memoryTitle": "使用メモリ: {{pair}}",
-  "chat.machineSelector.diskTitle": "空きディスク: {{pair}}"
+  "chat.machineSelector.diskTitle": "空きディスク: {{pair}}",
+  "schedules.runNowConfirm": "このまま実行",
+  "schedules.runNowBusyTitle": "「{{chat}}」は現在実行中です",
+  "schedules.runNowBusyHelp": "今すぐ「{{title}}」を実行すると、現在のキューまたはステア設定に従ってこのチャットに新しいターンが送信されます。実行しますか？",
+  "schedules.runNowBusyDetailHelp": "今すぐ「{{title}}」を実行すると、最後に保存されたスケジュール（未保存の変更は除く）を使用し、現在のキューまたはステア設定に従ってこのチャットに新しいターンが送信されます。実行しますか？",
+  "schedules.runNowStatusUnknownTitle": "「{{chat}}」が実行中か確認できませんでした",
+  "schedules.runNowStatusUnknownHelp": "現在このチャットのライブ状態を取得できません。今すぐ「{{title}}」を実行すると、進行中の作業とキューまたは並行して実行される場合があります。実行しますか？",
+  "schedules.runNowStatusUnknownDetailHelp": "現在このチャットのライブ状態を取得できません。「{{title}}」は最後に保存されたスケジュール（未保存の変更は除く）で実行され、進行中の作業とキューまたは並行して実行される場合があります。実行しますか？"
 }

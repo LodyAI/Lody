@@ -116,6 +116,8 @@ import {
   type SessionCancelResponse,
   type SessionDispatchTurnResponse,
   type SessionId,
+  SessionLiveStatusResponseSchema,
+  type SessionLiveStatusResponse,
   type SessionPreviewCreateResponse,
   type SessionPreviewEndpointAcquireResponse,
   type SessionPreviewEndpointReleaseResponse,
@@ -954,6 +956,59 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           timeoutMs: options?.timeoutMs ?? 30_000,
         })
     );
+
+  const requestSessionLiveStatus = async (
+    machineId: MachineId,
+    sessionId: SessionId,
+    options?: { timeoutMs?: number }
+  ): Promise<SessionLiveStatusResponse | null> => {
+    const failure = (error: string): SessionLiveStatusResponse => ({
+      type: 'session/live-status_response',
+      machineId,
+      sessionId,
+      success: false,
+      state: 'unknown',
+      error,
+    });
+    try {
+      const timeoutMs = options?.timeoutMs ?? 5_000;
+      if (await canUseLocalMachineRpc(machineId)) {
+        const response = await getLocalMachineRpcSender()?.({
+          machineId,
+          workspaceId,
+          method: 'session/live-status',
+          params: { sessionId },
+          timeoutMs,
+        });
+        if (response && !response.ok) return failure(response.error);
+        if (response?.ok) return SessionLiveStatusResponseSchema.parse(response.result);
+      }
+      if (deps.protectedContent) {
+        if (!deps.requestEncryptedFeature) {
+          return failure('Encrypted session live status is unavailable.');
+        }
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/live-status',
+          params: { sessionId },
+          timeoutMs,
+        });
+        if (!response.ok) return failure(response.error);
+        return SessionLiveStatusResponseSchema.parse(response.result);
+      }
+      const response = await (
+        await getMachineRpcClient(machineId)
+      ).requestSessionLiveStatus({
+        sessionId,
+        timeoutMs,
+      });
+      if (!response) return failure('Session live status timed out.');
+      return SessionLiveStatusResponseSchema.parse(response);
+    } catch (error) {
+      return failure(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const requestSessionCancel = async (
     machineId: MachineId,
@@ -2567,6 +2622,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionAutomationControl,
     requestLocalMcpTools,
     requestLocalMcpAuthentication,
+    requestSessionLiveStatus,
     requestSessionCancel,
     requestSessionSteer,
     requestSessionGoal,

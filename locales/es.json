@@ -7312,5 +7312,12 @@
   "chat.machineSelector.diskFreeSuffix": "libre",
   "chat.machineSelector.cpuTitle": "Uso de CPU {{percent}}% en {{cores}} núcleos",
   "chat.machineSelector.memoryTitle": "Memoria usada: {{pair}}",
-  "chat.machineSelector.diskTitle": "Disco disponible: {{pair}}"
+  "chat.machineSelector.diskTitle": "Disco disponible: {{pair}}",
+  "schedules.runNowConfirm": "Ejecutar de todos modos",
+  "schedules.runNowBusyTitle": "“{{chat}}” se está ejecutando ahora",
+  "schedules.runNowBusyHelp": "Ejecutar “{{title}}” ahora enviará un nuevo turno a este chat según su comportamiento actual de cola o dirección. ¿Ejecutar de todos modos?",
+  "schedules.runNowBusyDetailHelp": "Ejecutar “{{title}}” ahora usa la última programación guardada (se excluyen los cambios sin guardar) y enviará un nuevo turno a este chat según su comportamiento actual de cola o dirección. ¿Ejecutar de todos modos?",
+  "schedules.runNowStatusUnknownTitle": "No se pudo confirmar si “{{chat}}” está en ejecución",
+  "schedules.runNowStatusUnknownHelp": "El estado en vivo de este chat no está disponible en este momento. Ejecutar “{{title}}” ahora puede ponerse en cola o ejecutarse junto con trabajo activo. ¿Ejecutar de todos modos?",
+  "schedules.runNowStatusUnknownDetailHelp": "El estado en vivo de este chat no está disponible en este momento. Ejecutar “{{title}}” usa la última programación guardada (se excluyen los cambios sin guardar) y puede ponerse en cola o ejecutarse junto con trabajo activo. ¿Ejecutar de todos modos?"
 }
