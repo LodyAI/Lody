@@ -13037,7 +13037,6 @@ export class MessageHandler {
 
     const liveStatuses = new Map<string, SessionStatus>();
     for (const meta of sessionMetas) {
-      // Durable `idle` written on turn completion overrides lingering finalizing presence.
       if (meta.status?.type === 'idle') continue;
       if (this.pendingPermissionRequests.has(meta.id)) {
         liveStatuses.set(meta.id, SessionStatusFactory.requestPermission());
