@@ -518,3 +518,248 @@ fn late_stream_lease_expires_at_ttl_wakes_blocked_automation_and_silent_turn_ign
     );
     let _ = NativeSessionActivity::Idle;
 }
+
+#[test]
+fn schedule_planner_enforces_dst_skip_misfire_overlap_and_single_capacity_deferral() {
+    use lody_kernel::{
+        KernelMisfirePolicy, KernelOverlapPolicy, KernelScheduleDestination, KernelScheduleTrigger,
+        MisfireDisposition, PlannedSlotOutcome, ScheduleRetryInput, ScheduleRetryVerdict,
+        SlotPlanningContext, decide_planned_slot_outcome, decide_schedule_retry,
+        evaluate_schedule_slot, next_schedule_slot, parse_rfc3339_millis, schedule_run_ids,
+        schedule_run_key,
+    };
+
+    let dst_cron = KernelScheduleTrigger::Cron {
+        expression: "30 2 * * *".to_string(),
+        time_zone: "America/New_York".to_string(),
+    };
+    let before_spring_forward = parse_rfc3339_millis("2026-03-08T06:00:00Z").expect("ts");
+    let next_slot = next_schedule_slot(&dst_cron, before_spring_forward, before_spring_forward)
+        .expect("cron eval")
+        .expect("next slot");
+    let expected_march_9 = parse_rfc3339_millis("2026-03-09T06:30:00Z").expect("march 9");
+    assert_eq!(next_slot, expected_march_9);
+
+    let dom_or_dow = KernelScheduleTrigger::Cron {
+        expression: "0 9 15 * MON".to_string(),
+        time_zone: "UTC".to_string(),
+    };
+    let start_sun = parse_rfc3339_millis("2026-03-08T00:00:00Z").expect("sun");
+    let mon_march_9 = parse_rfc3339_millis("2026-03-09T09:00:00Z").expect("mon");
+    assert_eq!(
+        next_schedule_slot(&dom_or_dow, start_sun, start_sun).expect("eval"),
+        Some(mon_march_9)
+    );
+
+    let interval = KernelScheduleTrigger::Interval {
+        every_ms: 300_000,
+        anchor_at: "2026-04-08T09:00:00Z".to_string(),
+    };
+    let anchor = parse_rfc3339_millis("2026-04-08T09:00:00Z").expect("anchor");
+    let late_now = anchor + 300_000 + 180_000;
+    let skip_eval = evaluate_schedule_slot(&interval, KernelMisfirePolicy::Skip, anchor, late_now)
+        .expect("skip eval");
+    assert_eq!(skip_eval.latest_slot_ms, Some(anchor + 300_000));
+    assert_eq!(
+        skip_eval.misfire_disposition,
+        Some(MisfireDisposition::Skip)
+    );
+    assert_eq!(
+        decide_planned_slot_outcome(SlotPlanningContext {
+            misfire_disposition: MisfireDisposition::Skip,
+            overlap_policy: KernelOverlapPolicy::QueueOne,
+            has_unfinished_auto_run: false,
+            has_capacity_deferred_run: false,
+        }),
+        PlannedSlotOutcome::RecordSkipped {
+            error_code: "MISFIRE",
+        }
+    );
+
+    assert_eq!(
+        decide_planned_slot_outcome(SlotPlanningContext {
+            misfire_disposition: MisfireDisposition::Run,
+            overlap_policy: KernelOverlapPolicy::Skip,
+            has_unfinished_auto_run: true,
+            has_capacity_deferred_run: false,
+        }),
+        PlannedSlotOutcome::RecordSkipped {
+            error_code: "OVERLAP",
+        }
+    );
+    assert_eq!(
+        decide_planned_slot_outcome(SlotPlanningContext {
+            misfire_disposition: MisfireDisposition::Run,
+            overlap_policy: KernelOverlapPolicy::QueueOne,
+            has_unfinished_auto_run: true,
+            has_capacity_deferred_run: false,
+        }),
+        PlannedSlotOutcome::EnqueuePending {
+            supersede_pending_auto_runs: true,
+        }
+    );
+
+    assert_eq!(
+        decide_schedule_retry(ScheduleRetryInput {
+            attempts: 1,
+            max_attempts: 3,
+            planned_at_ms: 1_000,
+            dispatch_max_age_ms: 3_600_000,
+            now_ms: 5_000,
+            is_capacity_exhausted: true,
+            capacity_reset_at_ms: Some(90_000),
+            other_run_already_deferred_for_capacity: false,
+        }),
+        ScheduleRetryVerdict::DeferForCapacity {
+            next_attempt_at_ms: 90_000,
+        }
+    );
+    assert_eq!(
+        decide_schedule_retry(ScheduleRetryInput {
+            attempts: 1,
+            max_attempts: 3,
+            planned_at_ms: 1_000,
+            dispatch_max_age_ms: 3_600_000,
+            now_ms: 5_000,
+            is_capacity_exhausted: true,
+            capacity_reset_at_ms: Some(90_000),
+            other_run_already_deferred_for_capacity: true,
+        }),
+        ScheduleRetryVerdict::SkipDuplicateCapacityDeferral
+    );
+
+    let key = schedule_run_key("sch_1", "act_1", anchor);
+    let own_ids_a = schedule_run_ids(
+        &key,
+        "sch_1",
+        &KernelScheduleDestination::OwnSession { epoch: 2 },
+    );
+    let own_ids_b = schedule_run_ids(
+        &schedule_run_key("sch_1", "act_1", anchor + 300_000),
+        "sch_1",
+        &KernelScheduleDestination::OwnSession { epoch: 2 },
+    );
+    assert_eq!(own_ids_a.session_id, own_ids_b.session_id);
+    assert_ne!(own_ids_a.user_turn_id, own_ids_b.user_turn_id);
+}
+
+#[test]
+fn automation_and_pr_poller_rules_enforce_error_caps_stop_barrier_and_lane_fairness() {
+    use lody_kernel::{
+        AUTOMATION_MAX_CONSECUTIVE_ERRORS, ContinuationGateDecision, ManagedRunExitOutcome,
+        ManagedRunSummaryInput, PollTargetCandidate, TargetSessionGate, TokenBucketConfig,
+        TokenConsumeOutcome, WaitCheckInput, WaitTransitionDecision, decide_continuation_gate,
+        decide_wait_transition, format_managed_run_summary, select_due_targets_fairly,
+        try_consume_scope_token,
+    };
+
+    for prior in 0..(AUTOMATION_MAX_CONSECUTIVE_ERRORS - 1) {
+        let decision = decide_wait_transition(
+            10_000,
+            5_000,
+            None,
+            prior,
+            WaitCheckInput::CheckFailed {
+                error_message: "boom".to_string(),
+            },
+        );
+        assert!(matches!(
+            decision,
+            WaitTransitionDecision::RescheduleWaiting {
+                consecutive_errors,
+                ..
+            } if consecutive_errors == prior + 1
+        ));
+    }
+    let fifth_failure = decide_wait_transition(
+        10_000,
+        5_000,
+        None,
+        AUTOMATION_MAX_CONSECUTIVE_ERRORS - 1,
+        WaitCheckInput::CheckFailed {
+            error_message: "boom".to_string(),
+        },
+    );
+    assert!(matches!(
+        fifth_failure,
+        WaitTransitionDecision::FinalizeFailed {
+            consecutive_errors: 5,
+            ..
+        }
+    ));
+
+    assert_eq!(
+        decide_continuation_gate(TargetSessionGate::CollaborationStopped, 0, 20_000),
+        ContinuationGateDecision::Block {
+            reason: "target_stopped",
+        }
+    );
+
+    let interrupted = format_managed_run_summary(&ManagedRunSummaryInput {
+        command: "cargo".to_string(),
+        args: vec!["test".to_string()],
+        cwd: Some("apps/cli-rs".to_string()),
+        log_path: "/tmp/w1.log".to_string(),
+        started_at_ms: Some(1_000),
+        pid: Some(4242),
+        ended_at_ms: 6_000,
+        outcome: ManagedRunExitOutcome::Interrupted,
+        exit_code: None,
+        signal: None,
+        error: None,
+        tail: String::new(),
+        log_truncated: false,
+    });
+    assert!(interrupted.resume_text.contains("did not run it again"));
+    assert!(interrupted.resume_text.contains("(pid 4242)"));
+
+    let candidates = vec![
+        PollTargetCandidate {
+            target_key: "repo_a#1".to_string(),
+            repo_lane: "repo_a".to_string(),
+            last_success_at_ms: Some(1_000),
+            last_attempt_at_ms: None,
+            interval_ms: 1_000,
+            attempt_floor_ms: 500,
+            repo_cooldown_until_ms: None,
+        },
+        PollTargetCandidate {
+            target_key: "repo_a#2".to_string(),
+            repo_lane: "repo_a".to_string(),
+            last_success_at_ms: Some(1_100),
+            last_attempt_at_ms: None,
+            interval_ms: 1_000,
+            attempt_floor_ms: 500,
+            repo_cooldown_until_ms: None,
+        },
+        PollTargetCandidate {
+            target_key: "repo_b#9".to_string(),
+            repo_lane: "repo_b".to_string(),
+            last_success_at_ms: Some(1_500),
+            last_attempt_at_ms: None,
+            interval_ms: 1_000,
+            attempt_floor_ms: 500,
+            repo_cooldown_until_ms: None,
+        },
+    ];
+    assert_eq!(
+        select_due_targets_fairly(&candidates, 5_000, 2),
+        vec!["repo_a#1".to_string(), "repo_b#9".to_string()]
+    );
+
+    let cfg = TokenBucketConfig {
+        capacity: 2.0,
+        refill_per_sec: 1.0,
+    };
+    let TokenConsumeOutcome::Granted { next_state: s1 } =
+        try_consume_scope_token(None, cfg, 2.0, 1_000)
+    else {
+        panic!("expected initial grant");
+    };
+    let TokenConsumeOutcome::Throttled { retry_at_ms, .. } =
+        try_consume_scope_token(Some(&s1), cfg, 1.0, 1_200)
+    else {
+        panic!("expected throttle");
+    };
+    assert!(retry_at_ms >= 2_000);
+}

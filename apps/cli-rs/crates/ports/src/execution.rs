@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
 use crate::error::{PortError, PortErrorKind, PortResult};
-use crate::identity::{LocalProjectId, SessionId};
+use crate::identity::{LocalProjectId, SessionId, WorkspaceId};
+use crate::storage::{AutomationEvidenceEntry, AutomationMatchResult};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -646,4 +648,67 @@ impl PtyPort for UnavailablePtyPort {
     fn register_sink(&self, _sink_id: u64, _sink: Arc<dyn TerminalEventSink>) {}
 
     fn unregister_sink(&self, _sink_id: u64) {}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationProgramContext {
+    pub session_id: SessionId,
+    pub workspace_id: WorkspaceId,
+    #[serde(rename = "now")]
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AutomationProgramEvaluation {
+    pub matched: Option<AutomationMatchResult>,
+    pub reads: Vec<String>,
+    pub evidence: Vec<AutomationEvidenceEntry>,
+}
+
+pub trait AutomationHostOps: Send + Sync {
+    fn read_resource(&self, resource: &str, query: &Value) -> PortResult<Value>;
+    fn session_workdir(&self) -> Option<PathBuf>;
+    fn command_env(&self) -> BTreeMap<String, String>;
+    fn override_fetch(&self, _request: &Value) -> Option<PortResult<Value>> {
+        None
+    }
+}
+
+pub trait AutomationSandboxPort: Send + Sync {
+    fn validate_program(&self, source: &str, context: &AutomationProgramContext) -> PortResult<()>;
+    fn evaluate_program(
+        &self,
+        source: &str,
+        context: &AutomationProgramContext,
+        host_ops: Arc<dyn AutomationHostOps>,
+    ) -> PortResult<AutomationProgramEvaluation>;
+}
+
+#[derive(Default)]
+pub struct UnavailableAutomationSandbox;
+
+impl AutomationSandboxPort for UnavailableAutomationSandbox {
+    fn validate_program(
+        &self,
+        _source: &str,
+        _context: &AutomationProgramContext,
+    ) -> PortResult<()> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "automation sandbox unavailable",
+        ))
+    }
+
+    fn evaluate_program(
+        &self,
+        _source: &str,
+        _context: &AutomationProgramContext,
+        _host_ops: Arc<dyn AutomationHostOps>,
+    ) -> PortResult<AutomationProgramEvaluation> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "automation sandbox unavailable",
+        ))
+    }
 }

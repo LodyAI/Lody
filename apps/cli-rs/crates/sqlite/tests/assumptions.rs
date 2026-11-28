@@ -352,3 +352,169 @@ fn schedule_ledger_matches_node_schema_rejects_future_versions_and_tracks_once_m
             .unwrap()
     );
 }
+
+#[test]
+fn automation_and_pr_poller_stores_match_node_v4_layout_recover_orphan_runs_and_heal_corrupt_poller()
+ {
+    use lody_ports::{
+        AutomationMatchResult, AutomationRegistrationInput, AutomationRunInput,
+        AutomationStorePort, AutomationWaitCompletion, AutomationWaitState,
+        AutomationWorkspaceScope, PrPollerRepoCooldown, PrPollerScopeBucket, PrPollerStorePort,
+    };
+    use lody_sqlite::{
+        AUTOMATION_SCHEMA_VERSION, SqliteAutomationStore, SqlitePrPollerStore,
+        automation_workspace_storage_key, sha256_hex,
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let layout = SqliteDataLayout::with_machine_id(temp.path(), "mach_1");
+    let scope = AutomationWorkspaceScope {
+        machine_id: MachineId("mach_1".to_string()),
+        workspace_id: WorkspaceId("ws_alpha".to_string()),
+    };
+
+    let expected_key = sha256_hex(r#"["mach_1","ws_alpha"]"#);
+    assert_eq!(
+        automation_workspace_storage_key("mach_1", "ws_alpha"),
+        expected_key
+    );
+
+    let future_scope = AutomationWorkspaceScope {
+        machine_id: MachineId("mach_1".to_string()),
+        workspace_id: WorkspaceId("ws_future".to_string()),
+    };
+    let future_path = layout.automation_db_for_workspace("mach_1", "ws_future");
+    fs::create_dir_all(future_path.parent().unwrap()).unwrap();
+    {
+        let conn = Connection::open(&future_path).unwrap();
+        conn.execute_batch("PRAGMA user_version = 99;").unwrap();
+    }
+
+    let store = SqliteAutomationStore::new(layout.clone());
+    assert_eq!(
+        store.next_due_at(&future_scope).unwrap_err().kind,
+        PortErrorKind::Conflict
+    );
+
+    let sid = SessionId("00000000-0000-4000-8000-000000000099".to_string());
+    let uid = UserId("u_owner".to_string());
+    let wait = store
+        .register_wait(
+            &scope,
+            &sid,
+            &uid,
+            &AutomationRegistrationInput {
+                program: "async () => false".to_string(),
+                reason: Some("wait for CI".to_string()),
+                interval_ms: 5_000,
+                expires_at: Some(90_000),
+            },
+            1_000,
+        )
+        .unwrap();
+    assert!(
+        layout
+            .automation_db_for_workspace("mach_1", "ws_alpha")
+            .exists()
+    );
+    let db_conn =
+        Connection::open(layout.automation_db_for_workspace("mach_1", "ws_alpha")).unwrap();
+    let v: i32 = db_conn
+        .query_row("PRAGMA user_version;", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(v, AUTOMATION_SCHEMA_VERSION);
+
+    assert_eq!(store.due_waits(&scope, 1_000, 10).unwrap().len(), 1);
+    let claimed = store.claim_wait(&scope, &wait.id, 1_000).unwrap().unwrap();
+    assert_eq!(claimed.state, AutomationWaitState::Checking);
+    assert_eq!(claimed.checks, 1);
+
+    let receipt = store
+        .finish_wait_matched(
+            &scope,
+            &AutomationWaitCompletion {
+                wait_id: wait.id.clone(),
+                reads: vec!["github.pullRequests".to_string()],
+                evidence: Vec::new(),
+                now_ms: 2_000,
+            },
+            &AutomationMatchResult {
+                resume_text: "CI passed".to_string(),
+                payload: Some(serde_json::json!({ "green": true })),
+            },
+        )
+        .unwrap()
+        .expect("matched receipt");
+    assert_eq!(receipt.session_id.as_ref(), Some(&sid));
+    assert_eq!(
+        store.actionable_receipts(&scope, 2_000, 10).unwrap().len(),
+        1
+    );
+
+    let run_wait = store
+        .register_run(
+            &scope,
+            &sid,
+            &uid,
+            &AutomationRunInput {
+                command: "cargo".to_string(),
+                args: vec!["test".to_string()],
+                cwd: None,
+                env: None,
+                reason: Some("long suite".to_string()),
+            },
+            3_000,
+        )
+        .unwrap();
+    assert!(store.claim_run_start(&scope, &run_wait.id, 3_100).unwrap());
+    assert!(!store.claim_run_start(&scope, &run_wait.id, 3_200).unwrap());
+    store
+        .record_run_pid(&scope, &run_wait.id, 7777, 3_150)
+        .unwrap();
+    let _ = store.claim_wait(&scope, &run_wait.id, 3_150).unwrap();
+
+    let reopened = SqliteAutomationStore::new(layout.clone());
+    assert_eq!(reopened.orphan_started_runs(&scope, 9_000).unwrap(), 1);
+    let recovered = reopened.get_wait(&scope, &run_wait.id).unwrap().unwrap();
+    assert_eq!(recovered.state, AutomationWaitState::Waiting);
+    assert_eq!(recovered.next_check_at, 9_000);
+    assert_eq!(recovered.run.unwrap().pid, Some(7777));
+
+    let poller_path = layout.pr_poller_db();
+    fs::write(&poller_path, b"not a valid sqlite3 header at all!").unwrap();
+    let poller = SqlitePrPollerStore::open(&poller_path).expect("corrupt poller heals on open");
+    poller
+        .write_scope(
+            "github:tok_1",
+            &PrPollerScopeBucket {
+                tokens: 24.5,
+                updated_at_ms: 5_000,
+                frozen_until_ms: None,
+            },
+        )
+        .unwrap();
+    poller
+        .write_repo_cooldown(
+            "github:tok_1:lodyai/lody",
+            &PrPollerRepoCooldown {
+                consecutive_failures: 2,
+                next_retry_at_ms: 35_000,
+                last_error_kind: "rate_limited".to_string(),
+            },
+        )
+        .unwrap();
+    poller
+        .write_target_last_success("ws_alpha:pr:42", 5_500)
+        .unwrap();
+    assert_eq!(
+        poller.read_target_last_success("ws_alpha:pr:42").unwrap(),
+        Some(5_500)
+    );
+    poller
+        .clear_workspace_state(&WorkspaceId("ws_alpha".to_string()))
+        .unwrap();
+    assert_eq!(
+        poller.read_target_last_success("ws_alpha:pr:42").unwrap(),
+        None
+    );
+}

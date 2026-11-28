@@ -11,14 +11,16 @@ use lody_entry::{
 };
 use lody_env::{HostEnv, McpStdioEnv};
 use lody_ports::{
-    BackendPort, MachineIdentityPort, ManagedArtifactSource, McpEnvVar, McpServerMount,
-    McpServerTransport, PortErrorKind, PortResult, ScheduleLedgerPort, ScheduleRepoPort, SessionId,
+    AutomationSandboxPort, AutomationStorePort, BackendPort, MachineIdentityPort,
+    ManagedArtifactSource, McpEnvVar, McpServerMount, McpServerTransport, PortErrorKind,
+    PortResult, PrPollerStorePort, ScheduleLedgerPort, ScheduleRepoPort, SessionId,
     StorageLeaseMode, StorageLeasePort, WorkspaceId,
 };
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
+use lody_sandbox::QuickJsAutomationSandbox;
 use lody_sqlite::{
-    FileStorageLease, LocalMachineIdentityStore, MachineIdentityConfig, SqliteDataLayout,
-    SqliteScheduleLedgerStore, SqliteStore,
+    FileStorageLease, LocalMachineIdentityStore, MachineIdentityConfig, SqliteAutomationStore,
+    SqliteDataLayout, SqlitePrPollerStore, SqliteScheduleLedgerStore, SqliteStore,
 };
 use lody_worktree::{GitWorktreeManager, LocalTurnDiffStore};
 use std::path::PathBuf;
@@ -125,6 +127,12 @@ fn compose_runtime(
     let layout = SqliteDataLayout::with_machine_id(&effective_data_dir, machine_id.0.clone());
     let schedule_ledger = Arc::new(SqliteScheduleLedgerStore::open(&layout.schedules_db())?)
         as Arc<dyn ScheduleLedgerPort>;
+    let automation_store =
+        Arc::new(SqliteAutomationStore::new(layout.clone())) as Arc<dyn AutomationStorePort>;
+    let automation_sandbox =
+        Arc::new(QuickJsAutomationSandbox::default()) as Arc<dyn AutomationSandboxPort>;
+    let pr_poller_store =
+        Arc::new(SqlitePrPollerStore::open(layout.pr_poller_db())?) as Arc<dyn PrPollerStorePort>;
     let sqlite = Arc::new(SqliteStore::open(layout)?);
 
     let mut runtime = DaemonRuntime::new(DaemonDependencies {
@@ -144,6 +152,9 @@ fn compose_runtime(
         projects: Arc::new(FlockProjectStore),
         schedule_repo: Arc::new(EngineScheduleRepo) as Arc<dyn ScheduleRepoPort>,
         schedule_ledger,
+        automation_store,
+        automation_sandbox,
+        pr_poller_store,
         diff_store,
         artifacts: Arc::new(
             ManagedArtifactInstaller::with_install_root(artifact_source, runtimes_root)

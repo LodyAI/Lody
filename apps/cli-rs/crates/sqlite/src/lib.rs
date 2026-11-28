@@ -1,9 +1,15 @@
 #![forbid(unsafe_code)]
 
+pub mod automation;
 pub mod identity;
 pub mod lease;
+pub mod pr_poller;
 pub mod schedule;
 
+pub use automation::{
+    AUTOMATION_SCHEMA_VERSION, SqliteAutomationStore, automation_identity_json,
+    automation_workspace_storage_key,
+};
 pub use identity::{
     HardwareProbeFn, HardwareProbeResult, LocalMachineIdentityStore, MachineIdentityConfig,
     compute_host_fingerprint_hash, derive_deterministic_machine_id, generate_random_uuid_v4,
@@ -16,6 +22,7 @@ use lody_ports::{
     InboxStorePort, PortError, PortErrorKind, PortResult, SessionId, SubmissionStage, TurnId,
     UserId, WorkspaceId,
 };
+pub use pr_poller::SqlitePrPollerStore;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 pub use schedule::SqliteScheduleLedgerStore;
 use serde::{Deserialize, Serialize};
@@ -72,6 +79,16 @@ impl SqliteDataLayout {
         self.data_dir
             .join("automations")
             .join(format!("{workspace_storage_key}.sqlite"))
+    }
+
+    pub fn automation_db_for_workspace(&self, machine_id: &str, workspace_id: &str) -> PathBuf {
+        let key = automation_workspace_storage_key(machine_id, workspace_id);
+        self.automation_workspace_db(&key)
+    }
+
+    pub fn automation_run_logs_dir(&self, machine_id: &str, workspace_id: &str) -> PathBuf {
+        let key = automation_workspace_storage_key(machine_id, workspace_id);
+        self.data_dir.join("automations").join("runs").join(key)
     }
 
     pub fn data_dir(&self) -> &Path {

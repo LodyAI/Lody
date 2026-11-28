@@ -24,6 +24,7 @@ lody-env.workspace = true
 lody-kernel.workspace = true
 lody-ports.workspace = true
 lody-runtime.workspace = true
+lody-sandbox.workspace = true
 lody-sqlite.workspace = true
 lody-worktree.workspace = true
 serde_json = { workspace = true, optional = true }

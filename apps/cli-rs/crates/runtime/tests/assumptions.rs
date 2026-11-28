@@ -11,7 +11,8 @@ use lody_ports::{
     PortErrorKind, PortResult, ProjectStorePort, QueuedDraftItem, ScheduleEditPatch,
     ScheduleProposalInput, ScheduleProposalOutcome, ScheduleRecord, ScheduleRepoPort,
     SessionMetaSnapshot, SessionRunStatus, StaticMachineIdentity, SteerVerdict, StorageLeaseMode,
-    SubmissionStage, TurnDiffSummary, TurnTerminalOutcome, UnavailableScheduleLedger,
+    SubmissionStage, TurnDiffSummary, TurnTerminalOutcome, UnavailableAutomationSandbox,
+    UnavailableAutomationStore, UnavailablePrPollerStore, UnavailableScheduleLedger,
     UnavailableScheduleRepo, WorkspaceSecurityMode, WorktreeLease, WorktreePort,
 };
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
@@ -489,6 +490,9 @@ fn build_test_runtime(
             projects: Arc::new(FixedProjects),
             schedule_repo: Arc::new(UnavailableScheduleRepo),
             schedule_ledger: Arc::new(UnavailableScheduleLedger),
+            automation_store: Arc::new(UnavailableAutomationStore),
+            automation_sandbox: Arc::new(UnavailableAutomationSandbox),
+            pr_poller_store: Arc::new(UnavailablePrPollerStore),
             diff_store: Arc::new(RecordingDiff::default()),
             artifacts: Arc::new(NoopArtifacts(ManagedArtifactSource::Disabled)),
             acp: Arc::new(FakeAcpLauncher { cancel_calls }),
@@ -924,6 +928,9 @@ async fn schedule_service_boundary_rejects_non_owners_and_unwired_engine_while_p
             projects: Arc::new(FixedProjects),
             schedule_repo: Arc::new(UnavailableScheduleRepo),
             schedule_ledger: Arc::new(UnavailableScheduleLedger),
+            automation_store: Arc::new(UnavailableAutomationStore),
+            automation_sandbox: Arc::new(UnavailableAutomationSandbox),
+            pr_poller_store: Arc::new(UnavailablePrPollerStore),
             diff_store: Arc::new(RecordingDiff::default()),
             artifacts: Arc::new(NoopArtifacts(ManagedArtifactSource::Disabled)),
             acp: Arc::new(FakeAcpLauncher {
@@ -982,6 +989,9 @@ async fn schedule_service_boundary_rejects_non_owners_and_unwired_engine_while_p
             projects: Arc::new(FixedProjects),
             schedule_repo: Arc::clone(&schedule_repo) as Arc<dyn ScheduleRepoPort>,
             schedule_ledger: Arc::new(UnavailableScheduleLedger),
+            automation_store: Arc::new(UnavailableAutomationStore),
+            automation_sandbox: Arc::new(UnavailableAutomationSandbox),
+            pr_poller_store: Arc::new(UnavailablePrPollerStore),
             diff_store: Arc::clone(&diff_store) as Arc<dyn DiffStorePort>,
             artifacts: Arc::new(NoopArtifacts(ManagedArtifactSource::Disabled)),
             acp: Arc::new(FakeAcpLauncher {
@@ -1216,6 +1226,616 @@ async fn schedule_service_boundary_rejects_non_owners_and_unwired_engine_while_p
             }
         )]
     );
+
+    runtime.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn schedule_and_automation_runners_dispatch_due_slots_and_block_continuation_under_stop_barrier()
+ {
+    use lody_ports::{
+        AutomationActivityCursor, AutomationActivityPage, AutomationHostOps, AutomationMatchResult,
+        AutomationProgramContext, AutomationProgramEvaluation, AutomationReceiptPatch,
+        AutomationReceiptRecord, AutomationReceiptState, AutomationRegistrationInput,
+        AutomationRunExit, AutomationRunInput, AutomationSandboxPort, AutomationStorePort,
+        AutomationWaitCompletion, AutomationWaitRecord, AutomationWaitState,
+        AutomationWorkspaceScope, InboxCategory, ScheduleCursorRecord, ScheduleDestination,
+        ScheduleLedgerPort, ScheduleLedgerRunRecord, ScheduleMisfirePolicy, ScheduleOverlapPolicy,
+        ScheduleRetryPolicy, ScheduleRunState,
+    };
+
+    struct StaticScheduleRepo(Vec<ScheduleRecord>);
+    impl ScheduleRepoPort for StaticScheduleRepo {
+        fn list_schedules(
+            &self,
+            _: &WorkspaceId,
+            _: Option<&str>,
+            _: usize,
+            _: usize,
+        ) -> PortResult<Vec<ScheduleRecord>> {
+            Ok(self.0.clone())
+        }
+        fn get_schedule(&self, _: &WorkspaceId, id: &str) -> PortResult<Option<ScheduleRecord>> {
+            Ok(self.0.iter().find(|s| s.schedule_id == id).cloned())
+        }
+        fn propose_schedule(
+            &self,
+            _: &ScheduleProposalInput,
+        ) -> PortResult<ScheduleProposalOutcome> {
+            Err(PortError::new(PortErrorKind::Unavailable, "unused"))
+        }
+        fn propose_schedule_edit(
+            &self,
+            _: &WorkspaceId,
+            _: &SessionId,
+            _: &UserId,
+            _: &str,
+            _: &str,
+            _: &ScheduleEditPatch,
+        ) -> PortResult<ScheduleProposalOutcome> {
+            Err(PortError::new(PortErrorKind::Unavailable, "unused"))
+        }
+        fn pause_schedule(
+            &self,
+            _: &WorkspaceId,
+            _: Option<&SessionId>,
+            _: &UserId,
+            _: &str,
+            _: &str,
+        ) -> PortResult<bool> {
+            Ok(false)
+        }
+    }
+
+    #[derive(Default)]
+    struct MemoryScheduleLedger {
+        cursors: Mutex<HashMap<(WorkspaceId, String, String), ScheduleCursorRecord>>,
+        runs: Mutex<HashMap<String, ScheduleLedgerRunRecord>>,
+    }
+    impl ScheduleLedgerPort for MemoryScheduleLedger {
+        fn read_planning_cursor(
+            &self,
+            ws: &WorkspaceId,
+            sid: &str,
+            act: &str,
+        ) -> PortResult<Option<ScheduleCursorRecord>> {
+            Ok(self
+                .cursors
+                .lock()
+                .unwrap()
+                .get(&(ws.clone(), sid.to_string(), act.to_string()))
+                .cloned())
+        }
+        fn commit_planned_slot(
+            &self,
+            cursor: &ScheduleCursorRecord,
+            run: Option<&ScheduleLedgerRunRecord>,
+        ) -> PortResult<()> {
+            self.cursors.lock().unwrap().insert(
+                (
+                    cursor.workspace_id.clone(),
+                    cursor.schedule_id.clone(),
+                    cursor.activation_id.clone(),
+                ),
+                cursor.clone(),
+            );
+            if let Some(r) = run {
+                self.runs
+                    .lock()
+                    .unwrap()
+                    .insert(r.run_key.clone(), r.clone());
+            }
+            Ok(())
+        }
+        fn get_run(&self, key: &str) -> PortResult<Option<ScheduleLedgerRunRecord>> {
+            Ok(self.runs.lock().unwrap().get(key).cloned())
+        }
+        fn unfinished_runs(&self, ws: &WorkspaceId) -> PortResult<Vec<ScheduleLedgerRunRecord>> {
+            Ok(self
+                .runs
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|r| {
+                    &r.workspace_id == ws
+                        && matches!(
+                            r.state,
+                            ScheduleRunState::Pending
+                                | ScheduleRunState::Prepared
+                                | ScheduleRunState::Dispatched
+                                | ScheduleRunState::RetryWait
+                        )
+                })
+                .cloned()
+                .collect())
+        }
+        fn transition_run(
+            &self,
+            key: &str,
+            allowed: &[ScheduleRunState],
+            next: ScheduleRunState,
+            payload: &str,
+        ) -> PortResult<()> {
+            let mut guard = self.runs.lock().unwrap();
+            let rec = guard
+                .get_mut(key)
+                .ok_or_else(|| PortError::new(PortErrorKind::NotFound, "missing"))?;
+            if !allowed.contains(&rec.state) {
+                return Err(PortError::new(PortErrorKind::Conflict, "state mismatch"));
+            }
+            rec.state = next;
+            rec.payload_json = payload.to_string();
+            Ok(())
+        }
+        fn has_consumed_complete_message(&self, _: &WorkspaceId, _: &str) -> PortResult<bool> {
+            Ok(false)
+        }
+    }
+
+    #[derive(Default)]
+    struct MemoryAutomationStore {
+        waits: Mutex<HashMap<String, AutomationWaitRecord>>,
+        receipts: Mutex<HashMap<String, AutomationReceiptRecord>>,
+    }
+    impl AutomationStorePort for MemoryAutomationStore {
+        fn workspace_run_logs_dir(&self, _: &AutomationWorkspaceScope) -> PathBuf {
+            PathBuf::from("/tmp")
+        }
+        fn register_wait(
+            &self,
+            scope: &AutomationWorkspaceScope,
+            sid: &SessionId,
+            uid: &UserId,
+            input: &AutomationRegistrationInput,
+            now_ms: i64,
+        ) -> PortResult<AutomationWaitRecord> {
+            let mut guard = self.waits.lock().unwrap();
+            let id = format!("w_{}", guard.len() + 1);
+            let rec = AutomationWaitRecord {
+                id: id.clone(),
+                session_id: sid.clone(),
+                workspace_id: scope.workspace_id.clone(),
+                owner_user_id: uid.clone(),
+                owner_machine_id: scope.machine_id.clone(),
+                program: Some(input.program.clone()),
+                run: None,
+                reason: input.reason.clone(),
+                interval_ms: input.interval_ms,
+                expires_at: input.expires_at,
+                created_at: now_ms,
+                updated_at: now_ms,
+                next_check_at: now_ms,
+                checks: 0,
+                consecutive_errors: 0,
+                state: AutomationWaitState::Waiting,
+                last_error: None,
+                result: None,
+                invocation_id: None,
+                reads: None,
+                evidence: None,
+            };
+            guard.insert(id, rec.clone());
+            Ok(rec)
+        }
+        fn register_run(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: &SessionId,
+            _: &UserId,
+            _: &AutomationRunInput,
+            _: i64,
+        ) -> PortResult<AutomationWaitRecord> {
+            Err(PortError::new(PortErrorKind::Unavailable, "unused"))
+        }
+        fn get_wait(
+            &self,
+            _: &AutomationWorkspaceScope,
+            id: &str,
+        ) -> PortResult<Option<AutomationWaitRecord>> {
+            Ok(self.waits.lock().unwrap().get(id).cloned())
+        }
+        fn list_waits(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: Option<&UserId>,
+            _: Option<&SessionId>,
+        ) -> PortResult<Vec<AutomationWaitRecord>> {
+            Ok(self.waits.lock().unwrap().values().cloned().collect())
+        }
+        fn due_waits(
+            &self,
+            _: &AutomationWorkspaceScope,
+            now_ms: i64,
+            _: usize,
+        ) -> PortResult<Vec<AutomationWaitRecord>> {
+            Ok(self
+                .waits
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|w| w.state == AutomationWaitState::Waiting && w.next_check_at <= now_ms)
+                .cloned()
+                .collect())
+        }
+        fn claim_wait(
+            &self,
+            _: &AutomationWorkspaceScope,
+            id: &str,
+            now_ms: i64,
+        ) -> PortResult<Option<AutomationWaitRecord>> {
+            let mut guard = self.waits.lock().unwrap();
+            let Some(w) = guard.get_mut(id) else {
+                return Ok(None);
+            };
+            if w.state != AutomationWaitState::Waiting {
+                return Ok(None);
+            }
+            w.state = AutomationWaitState::Checking;
+            w.checks += 1;
+            w.updated_at = now_ms;
+            Ok(Some(w.clone()))
+        }
+        fn claim_run_start(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: &str,
+            _: i64,
+        ) -> PortResult<bool> {
+            Ok(false)
+        }
+        fn record_run_pid(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: &str,
+            _: u32,
+            _: i64,
+        ) -> PortResult<()> {
+            Ok(())
+        }
+        fn record_run_exit(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: &str,
+            _: &AutomationRunExit,
+            _: i64,
+        ) -> PortResult<Option<AutomationWaitRecord>> {
+            Ok(None)
+        }
+        fn orphan_started_runs(&self, _: &AutomationWorkspaceScope, _: i64) -> PortResult<usize> {
+            Ok(0)
+        }
+        fn finish_wait_not_ready(
+            &self,
+            _: &AutomationWorkspaceScope,
+            comp: &AutomationWaitCompletion,
+            next_at: i64,
+        ) -> PortResult<()> {
+            if let Some(w) = self.waits.lock().unwrap().get_mut(&comp.wait_id) {
+                w.state = AutomationWaitState::Waiting;
+                w.next_check_at = next_at;
+            }
+            Ok(())
+        }
+        fn finish_wait_matched(
+            &self,
+            _: &AutomationWorkspaceScope,
+            comp: &AutomationWaitCompletion,
+            res: &AutomationMatchResult,
+        ) -> PortResult<Option<AutomationReceiptRecord>> {
+            let mut guard = self.waits.lock().unwrap();
+            let Some(w) = guard.get_mut(&comp.wait_id) else {
+                return Ok(None);
+            };
+            let rcpt_id = format!("rcpt_{}", w.id);
+            w.state = AutomationWaitState::Matched;
+            w.result = Some(res.clone());
+            w.invocation_id = Some(rcpt_id.clone());
+            let rcpt = AutomationReceiptRecord {
+                id: rcpt_id.clone(),
+                delivery_id: format!("del_{}", w.id),
+                state: AutomationReceiptState::Accepted,
+                reason: None,
+                rule: json!({ "ownerUserId": w.owner_user_id.0 }),
+                event: json!({}),
+                intent: json!({
+                    "action": {
+                        "parameters": {
+                            "input": { "resumeText": res.resume_text }
+                        }
+                    }
+                }),
+                session_id: Some(w.session_id.clone()),
+                turn_id: Some(TurnId(format!("turn_{rcpt_id}"))),
+                attempts: 0,
+                retry_at: Some(0),
+                created_at: comp.now_ms,
+                updated_at: comp.now_ms,
+            };
+            self.receipts.lock().unwrap().insert(rcpt_id, rcpt.clone());
+            Ok(Some(rcpt))
+        }
+        fn finish_wait_error(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: &str,
+            _: &str,
+            _: bool,
+            _: i64,
+            _: i64,
+        ) -> PortResult<()> {
+            Ok(())
+        }
+        fn expire_wait(&self, _: &AutomationWorkspaceScope, _: &str, _: i64) -> PortResult<()> {
+            Ok(())
+        }
+        fn cancel_item(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: &str,
+            _: i64,
+        ) -> PortResult<Option<serde_json::Value>> {
+            Ok(None)
+        }
+        fn get_receipt(
+            &self,
+            _: &AutomationWorkspaceScope,
+            id: &str,
+        ) -> PortResult<Option<AutomationReceiptRecord>> {
+            Ok(self.receipts.lock().unwrap().get(id).cloned())
+        }
+        fn actionable_receipts(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: i64,
+            _: usize,
+        ) -> PortResult<Vec<AutomationReceiptRecord>> {
+            Ok(self
+                .receipts
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|r| r.state == AutomationReceiptState::Accepted)
+                .cloned()
+                .collect())
+        }
+        fn update_receipt(
+            &self,
+            _: &AutomationWorkspaceScope,
+            id: &str,
+            patch: &AutomationReceiptPatch,
+        ) -> PortResult<()> {
+            if let Some(r) = self.receipts.lock().unwrap().get_mut(id) {
+                r.state = patch.state;
+                r.reason = patch.reason.clone();
+                r.attempts = patch.attempts;
+            }
+            Ok(())
+        }
+        fn read_session_settings(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: &SessionId,
+        ) -> PortResult<serde_json::Value> {
+            Ok(json!({}))
+        }
+        fn configure_session_settings(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: &SessionId,
+            _: &UserId,
+            _: &serde_json::Value,
+            _: i64,
+        ) -> PortResult<serde_json::Value> {
+            Ok(json!({}))
+        }
+        fn list_activities(
+            &self,
+            _: &AutomationWorkspaceScope,
+            _: Option<&UserId>,
+            _: Option<&SessionId>,
+            _: usize,
+            _: Option<&AutomationActivityCursor>,
+        ) -> PortResult<AutomationActivityPage> {
+            Ok(AutomationActivityPage {
+                items: Vec::new(),
+                next_cursor: None,
+            })
+        }
+        fn next_due_at(&self, _: &AutomationWorkspaceScope) -> PortResult<Option<i64>> {
+            Ok(None)
+        }
+        fn erase_workspace_store(&self, _: &AutomationWorkspaceScope) -> PortResult<()> {
+            Ok(())
+        }
+    }
+
+    struct DeterministicSandbox;
+    impl AutomationSandboxPort for DeterministicSandbox {
+        fn validate_program(&self, source: &str, _: &AutomationProgramContext) -> PortResult<()> {
+            if source.contains("SYNTAX_ERR") {
+                return Err(PortError::new(
+                    PortErrorKind::InvalidInput,
+                    "AUTOMATION_PROGRAM_MUST_BE_FUNCTION",
+                ));
+            }
+            Ok(())
+        }
+        fn evaluate_program(
+            &self,
+            source: &str,
+            _: &AutomationProgramContext,
+            _: Arc<dyn AutomationHostOps>,
+        ) -> PortResult<AutomationProgramEvaluation> {
+            Ok(AutomationProgramEvaluation {
+                matched: source.contains("MATCH").then(|| AutomationMatchResult {
+                    resume_text: "Condition satisfied".to_string(),
+                    payload: None,
+                }),
+                reads: vec!["session".to_string()],
+                evidence: Vec::new(),
+            })
+        }
+    }
+
+    let mid = MachineId("m_sched_auto".to_string());
+    let ws = WorkspaceId("ws_auto".to_string());
+    let sid_sched = SessionId("sess_sched_target".to_string());
+    let sid_stopped = SessionId("sess_stopped_target".to_string());
+    let uid = UserId("u_alice".to_string());
+
+    let engine = Arc::new(TestEngine::default());
+    for target in [&sid_sched, &sid_stopped] {
+        engine
+            .upsert_session_meta(&SessionMetaSnapshot {
+                workspace_id: ws.clone(),
+                session_id: target.clone(),
+                root_session_id: target.clone(),
+                owner_user_id: uid.clone(),
+                owner_machine_id: mid.clone(),
+                deleted: false,
+                local_project_id: None,
+                base_branch: None,
+                title: None,
+                status: SessionRunStatus::Idle,
+                queue_paused: target == &sid_stopped,
+                queued_count: 0,
+            })
+            .unwrap();
+    }
+
+    let due_at_iso = "2099-04-08T09:00:00Z";
+    let due_at_ms = lody_kernel::parse_rfc3339_millis(due_at_iso).unwrap();
+    let sched_repo = Arc::new(StaticScheduleRepo(vec![ScheduleRecord {
+        schedule_id: "sched_due_1".to_string(),
+        workspace_id: ws.clone(),
+        session_id: Some(sid_sched.clone()),
+        author_user_id: uid.clone(),
+        machine_id: mid.clone(),
+        title: "Morning Check".to_string(),
+        rule: json!({ "kind": "once", "at": due_at_iso }),
+        prompt_text: "Run scheduled check".to_string(),
+        enabled: true,
+        activation_id: "act_v1".to_string(),
+        active_from: due_at_ms - 60_000,
+        misfire_policy: ScheduleMisfirePolicy::RunOnce,
+        overlap_policy: ScheduleOverlapPolicy::Skip,
+        destination: ScheduleDestination::ExistingSession {
+            session_id: sid_sched.clone(),
+        },
+        retry_policy: ScheduleRetryPolicy::default(),
+        adapter_id: "codex".to_string(),
+        definition_fingerprint: "fp_1".to_string(),
+        content_revision: 1,
+    }]));
+    let sched_ledger = Arc::new(MemoryScheduleLedger::default());
+    let auto_store = Arc::new(MemoryAutomationStore::default());
+    let inbox = Arc::new(MemoryInbox::default());
+
+    let runtime = DaemonRuntime::with_settling_timeout(
+        DaemonDependencies {
+            machine_id: mid.clone(),
+            identity: Arc::new(StaticMachineIdentity(mid.clone())),
+            default_cwd: PathBuf::from("."),
+            shell_command: ("/bin/sh".to_string(), Vec::new()),
+            agent_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
+            terminal_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
+            storage_lease_mode: StorageLeaseMode::OnlineHost,
+            storage_lease: None,
+            engine: Arc::clone(&engine) as Arc<dyn EnginePort>,
+            history: Arc::new(MemoryHistory::default()),
+            inbox: Arc::clone(&inbox) as Arc<dyn InboxStorePort>,
+            projects: Arc::new(FixedProjects),
+            schedule_repo: sched_repo,
+            schedule_ledger: Arc::clone(&sched_ledger) as Arc<dyn ScheduleLedgerPort>,
+            automation_store: Arc::clone(&auto_store) as Arc<dyn AutomationStorePort>,
+            automation_sandbox: Arc::new(DeterministicSandbox),
+            pr_poller_store: Arc::new(UnavailablePrPollerStore),
+            diff_store: Arc::new(RecordingDiff::default()),
+            artifacts: Arc::new(NoopArtifacts(ManagedArtifactSource::Disabled)),
+            acp: Arc::new(FakeAcpLauncher {
+                cancel_calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            pty: Arc::new(lody_ports::UnavailablePtyPort),
+            worktree: Arc::new(RecordingWorktree::default()),
+            backend: None,
+        },
+        Duration::from_millis(100),
+    );
+
+    let host_caller = VerifiedPrincipal::LocalHost {
+        caller_pid: None,
+        account_id: Some(uid.clone()),
+    };
+    let agent_stopped_caller = VerifiedPrincipal::AgentSession {
+        workspace_id: ws.clone(),
+        session_id: sid_stopped.clone(),
+        machine_id: mid.clone(),
+        account_id: Some(uid.clone()),
+    };
+    let reg_resp = runtime
+        .execute_async(
+            &agent_stopped_caller,
+            AppCommand::AutomationRegister {
+                workspace_id: ws.clone(),
+                invoking_session_id: Some(sid_stopped.clone()),
+                target_session_id: None,
+                registration: AutomationRegistrationInput {
+                    program: "() => MATCH".to_string(),
+                    reason: Some("test stop barrier".to_string()),
+                    interval_ms: 5_000,
+                    expires_at: None,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    let AppResponse::AutomationResult { payload: reg_json } = reg_resp else {
+        panic!("expected AutomationResult");
+    };
+    let wait_id = reg_json["id"].as_str().unwrap().to_string();
+
+    runtime
+        .execute_async(
+            &host_caller,
+            AppCommand::TickWorkspaceSchedulers {
+                workspace_id: ws.clone(),
+                now_ms: Some(due_at_ms + 1_000),
+            },
+        )
+        .await
+        .unwrap();
+
+    let sched_handle = runtime
+        .session_handle(&ws, &sid_sched)
+        .expect("scheduled turn spawned session actor");
+    wait_for_running_or_idle(&sched_handle, true).await;
+    assert_eq!(sched_ledger.unfinished_runs(&ws).unwrap().len(), 0);
+
+    let show_resp = runtime
+        .query_async(
+            &agent_stopped_caller,
+            AppQuery::AutomationShow {
+                workspace_id: ws.clone(),
+                invoking_session_id: Some(sid_stopped.clone()),
+                item_id: wait_id,
+            },
+        )
+        .await
+        .unwrap();
+    let AppResponse::AutomationResult { payload: show_json } = show_resp else {
+        panic!("expected AutomationResult");
+    };
+    assert_eq!(show_json["state"], "matched");
+    assert_eq!(show_json["continuation"]["state"], "blocked");
+    assert_eq!(show_json["continuation"]["reason"], "target_stopped");
+    assert!(
+        inbox
+            .claim_next_runnable(&ws, &sid_stopped)
+            .unwrap()
+            .is_none(),
+        "blocked continuation must never enqueue into a Stopped session"
+    );
+    let _ = InboxCategory::Schedule;
 
     runtime.shutdown().await;
 }

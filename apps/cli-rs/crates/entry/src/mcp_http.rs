@@ -7,8 +7,9 @@ use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use lody_app::{
-    AppCommand, AppQuery, AppResponse, ApplicationService, MachineId, McpHttpEndpointConfig,
-    PortError, PortErrorKind, PortResult, ScheduleEditPatch, SessionId, TurnId, VerifiedPrincipal,
+    AppCommand, AppQuery, AppResponse, ApplicationService, AutomationActivityCursor,
+    AutomationRegistrationInput, AutomationRunInput, MachineId, McpHttpEndpointConfig, PortError,
+    PortErrorKind, PortResult, ScheduleEditPatch, SessionId, TurnId, VerifiedPrincipal,
     WorkspaceId,
 };
 use serde_json::{Value, json};
@@ -389,6 +390,18 @@ fn builtin_mcp_tool_definitions() -> Value {
                     "arguments": { "type": "object" }
                 },
                 "required": ["action"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "lody_automation",
+            "description": "Run commands beyond the current turn, register background conditions, and manage Session settings.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "command": { "type": "object" }
+                },
+                "required": ["command"],
                 "additionalProperties": false
             }
         }
@@ -885,10 +898,412 @@ async fn execute_tool_call(
                 Err(err) => mcp_tool_result(&json!({ "error": err.to_string() }), true),
             }
         }
+        "lody_automation" => {
+            let Some(command_obj) = args.get("command") else {
+                return mcp_tool_result(
+                    &json!({ "ok": false, "error": "command is required" }),
+                    true,
+                );
+            };
+            match dispatch_automation_command(
+                service,
+                caller,
+                &ctx.workspace_id,
+                Some(&ctx.session_id),
+                command_obj,
+            )
+            .await
+            {
+                Ok(result_val) => mcp_tool_result(&result_val, false),
+                Err(err) => mcp_tool_result(
+                    &json!({
+                        "ok": false,
+                        "error": err.message,
+                    }),
+                    true,
+                ),
+            }
+        }
         unknown => mcp_tool_result(
             &json!({ "error": format!("unknown Lody MCP tool '{unknown}'") }),
             true,
         ),
+    }
+}
+
+pub async fn dispatch_automation_command(
+    service: Arc<dyn ApplicationService>,
+    caller: VerifiedPrincipal,
+    workspace_id: &WorkspaceId,
+    invoking_session_id: Option<&SessionId>,
+    command_val: &Value,
+) -> PortResult<Value> {
+    let Some(obj) = command_val.as_object() else {
+        return Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            "Automation command must be an object",
+        ));
+    };
+    let Some(cmd_type) = obj.get("type").and_then(Value::as_str) else {
+        return Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            "Automation command.type is required",
+        ));
+    };
+    let target_sid = match obj.get("sessionId") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) if !s.trim().is_empty() && s.len() <= 512 => {
+            Some(SessionId(s.clone()))
+        }
+        Some(_) => {
+            return Err(PortError::new(
+                PortErrorKind::InvalidInput,
+                "Invalid sessionId",
+            ));
+        }
+    };
+    let inv_sid = invoking_session_id.cloned();
+    let ws = workspace_id.clone();
+
+    match cmd_type {
+        "register" => {
+            let Some(program) = obj.get("program").and_then(Value::as_str) else {
+                return Err(PortError::new(
+                    PortErrorKind::InvalidInput,
+                    "program is required",
+                ));
+            };
+            if program.is_empty() || program.len() > 64 * 1024 {
+                return Err(PortError::new(
+                    PortErrorKind::InvalidInput,
+                    "program length out of bounds",
+                ));
+            }
+            let reason = match obj.get("reason") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(s)) if s.len() <= 2_000 => Some(s.clone()),
+                Some(_) => {
+                    return Err(PortError::new(
+                        PortErrorKind::InvalidInput,
+                        "Invalid reason",
+                    ));
+                }
+            };
+            let interval_ms = match obj.get("intervalMs") {
+                None | Some(Value::Null) => 30_000,
+                Some(v) => {
+                    let Some(n) = v.as_i64() else {
+                        return Err(PortError::new(
+                            PortErrorKind::InvalidInput,
+                            "Invalid intervalMs",
+                        ));
+                    };
+                    if !(1_000..=86_400_000).contains(&n) {
+                        return Err(PortError::new(
+                            PortErrorKind::InvalidInput,
+                            "intervalMs must be between 1000 and 86400000",
+                        ));
+                    }
+                    n
+                }
+            };
+            let expires_at = match obj.get("expiresAt") {
+                None | Some(Value::Null) => None,
+                Some(v) => {
+                    let Some(n) = v.as_i64().filter(|n| *n > 0) else {
+                        return Err(PortError::new(
+                            PortErrorKind::InvalidInput,
+                            "Invalid expiresAt",
+                        ));
+                    };
+                    Some(n)
+                }
+            };
+            let app_cmd = AppCommand::AutomationRegister {
+                workspace_id: ws,
+                invoking_session_id: inv_sid,
+                target_session_id: target_sid,
+                registration: AutomationRegistrationInput {
+                    program: program.to_string(),
+                    reason,
+                    interval_ms,
+                    expires_at,
+                },
+            };
+            match tokio::task::spawn_blocking(move || service.execute(&caller, app_cmd))
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))??
+            {
+                AppResponse::AutomationResult { payload } => Ok(payload),
+                _ => Err(PortError::new(
+                    PortErrorKind::Internal,
+                    "unexpected response",
+                )),
+            }
+        }
+        "run" => {
+            let Some(command_bin) = obj.get("command").and_then(Value::as_str) else {
+                return Err(PortError::new(
+                    PortErrorKind::InvalidInput,
+                    "command is required",
+                ));
+            };
+            if command_bin.is_empty() || command_bin.len() > 4_096 {
+                return Err(PortError::new(
+                    PortErrorKind::InvalidInput,
+                    "Invalid command length",
+                ));
+            }
+            let mut run_args = Vec::new();
+            if let Some(raw_args) = obj.get("args") {
+                let Some(arr) = raw_args.as_array() else {
+                    return Err(PortError::new(PortErrorKind::InvalidInput, "Invalid args"));
+                };
+                if arr.len() > 256 {
+                    return Err(PortError::new(PortErrorKind::InvalidInput, "Too many args"));
+                }
+                for item in arr {
+                    let Some(s) = item.as_str().filter(|s| s.len() <= 8_192) else {
+                        return Err(PortError::new(PortErrorKind::InvalidInput, "Invalid arg"));
+                    };
+                    run_args.push(s.to_string());
+                }
+            }
+            let cwd = match obj.get("cwd") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(s)) if !s.is_empty() && s.len() <= 4_096 => Some(s.clone()),
+                Some(_) => return Err(PortError::new(PortErrorKind::InvalidInput, "Invalid cwd")),
+            };
+            let env = match obj.get("env") {
+                None | Some(Value::Null) => None,
+                Some(Value::Object(map)) => {
+                    if map.len() > 64 {
+                        return Err(PortError::new(
+                            PortErrorKind::InvalidInput,
+                            "At most 64 environment variables",
+                        ));
+                    }
+                    let mut out = std::collections::BTreeMap::new();
+                    for (k, v) in map {
+                        let valid_name = !k.is_empty()
+                            && k.len() <= 128
+                            && k.bytes()
+                                .next()
+                                .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                            && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+                        let Some(val_str) = v.as_str().filter(|s| s.len() <= 8_192) else {
+                            return Err(PortError::new(
+                                PortErrorKind::InvalidInput,
+                                "Invalid env value",
+                            ));
+                        };
+                        if !valid_name {
+                            return Err(PortError::new(
+                                PortErrorKind::InvalidInput,
+                                "Invalid env variable name",
+                            ));
+                        }
+                        out.insert(k.clone(), val_str.to_string());
+                    }
+                    Some(out)
+                }
+                Some(_) => return Err(PortError::new(PortErrorKind::InvalidInput, "Invalid env")),
+            };
+            let reason = match obj.get("reason") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(s)) if s.len() <= 2_000 => Some(s.clone()),
+                Some(_) => {
+                    return Err(PortError::new(
+                        PortErrorKind::InvalidInput,
+                        "Invalid reason",
+                    ));
+                }
+            };
+            let app_cmd = AppCommand::AutomationRun {
+                workspace_id: ws,
+                invoking_session_id: inv_sid,
+                target_session_id: target_sid,
+                run_spec: AutomationRunInput {
+                    command: command_bin.to_string(),
+                    args: run_args,
+                    cwd,
+                    env,
+                    reason,
+                },
+            };
+            match tokio::task::spawn_blocking(move || service.execute(&caller, app_cmd))
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))??
+            {
+                AppResponse::AutomationResult { payload } => Ok(payload),
+                _ => Err(PortError::new(
+                    PortErrorKind::Internal,
+                    "unexpected response",
+                )),
+            }
+        }
+        "configure" => {
+            let Some(settings) = obj.get("settings").cloned() else {
+                return Err(PortError::new(
+                    PortErrorKind::InvalidInput,
+                    "settings is required",
+                ));
+            };
+            let app_cmd = AppCommand::AutomationConfigure {
+                workspace_id: ws,
+                invoking_session_id: inv_sid,
+                target_session_id: target_sid,
+                settings,
+            };
+            match tokio::task::spawn_blocking(move || service.execute(&caller, app_cmd))
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))??
+            {
+                AppResponse::AutomationResult { payload } => Ok(payload),
+                _ => Err(PortError::new(
+                    PortErrorKind::Internal,
+                    "unexpected response",
+                )),
+            }
+        }
+        "cancel" => {
+            let Some(id_str) = obj
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty() && s.len() <= 512)
+            else {
+                return Err(PortError::new(
+                    PortErrorKind::InvalidInput,
+                    "id is required",
+                ));
+            };
+            let app_cmd = AppCommand::AutomationCancel {
+                workspace_id: ws,
+                invoking_session_id: inv_sid,
+                item_id: id_str.to_string(),
+            };
+            match tokio::task::spawn_blocking(move || service.execute(&caller, app_cmd))
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))??
+            {
+                AppResponse::AutomationResult { payload } => Ok(payload),
+                _ => Err(PortError::new(
+                    PortErrorKind::Internal,
+                    "unexpected response",
+                )),
+            }
+        }
+        "settings" => {
+            let q = AppQuery::AutomationSettings {
+                workspace_id: ws,
+                invoking_session_id: inv_sid,
+                target_session_id: target_sid,
+            };
+            match tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))??
+            {
+                AppResponse::AutomationResult { payload } => Ok(payload),
+                _ => Err(PortError::new(
+                    PortErrorKind::Internal,
+                    "unexpected response",
+                )),
+            }
+        }
+        "list" => {
+            let q = AppQuery::AutomationList {
+                workspace_id: ws,
+                invoking_session_id: inv_sid,
+                target_session_id: target_sid,
+            };
+            match tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))??
+            {
+                AppResponse::AutomationResult { payload } => Ok(payload),
+                _ => Err(PortError::new(
+                    PortErrorKind::Internal,
+                    "unexpected response",
+                )),
+            }
+        }
+        "show" => {
+            let Some(id_str) = obj
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty() && s.len() <= 512)
+            else {
+                return Err(PortError::new(
+                    PortErrorKind::InvalidInput,
+                    "id is required",
+                ));
+            };
+            let q = AppQuery::AutomationShow {
+                workspace_id: ws,
+                invoking_session_id: inv_sid,
+                item_id: id_str.to_string(),
+            };
+            match tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))??
+            {
+                AppResponse::AutomationResult { payload } => Ok(payload),
+                _ => Err(PortError::new(
+                    PortErrorKind::Internal,
+                    "unexpected response",
+                )),
+            }
+        }
+        "activities" => {
+            let limit = obj
+                .get("limit")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+                .unwrap_or(50)
+                .clamp(1, 100);
+            let before = match obj.get("before") {
+                None | Some(Value::Null) => None,
+                Some(cur_val) => {
+                    let Some(updated_at) = cur_val.get("updatedAt").and_then(Value::as_i64) else {
+                        return Err(PortError::new(
+                            PortErrorKind::InvalidInput,
+                            "Invalid before.updatedAt",
+                        ));
+                    };
+                    let Some(id) = cur_val.get("id").and_then(Value::as_str) else {
+                        return Err(PortError::new(
+                            PortErrorKind::InvalidInput,
+                            "Invalid before.id",
+                        ));
+                    };
+                    Some(AutomationActivityCursor {
+                        updated_at,
+                        id: id.to_string(),
+                    })
+                }
+            };
+            let q = AppQuery::AutomationActivities {
+                workspace_id: ws,
+                invoking_session_id: inv_sid,
+                target_session_id: target_sid,
+                limit,
+                before,
+            };
+            match tokio::task::spawn_blocking(move || service.query(&caller, q))
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))??
+            {
+                AppResponse::AutomationResult { payload } => Ok(payload),
+                _ => Err(PortError::new(
+                    PortErrorKind::Internal,
+                    "unexpected response",
+                )),
+            }
+        }
+        other => Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            format!("AUTOMATION_COMMAND_UNSUPPORTED:{other}"),
+        )),
     }
 }
 

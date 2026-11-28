@@ -1396,6 +1396,97 @@ async fn handle_mcp_control(
     }
 }
 
+async fn handle_automation_control(
+    State(st): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    if let Err((code, msg)) = check_token(&headers, &st.token) {
+        return (
+            code,
+            Json(json!({
+                "ok": false,
+                "error": msg,
+            })),
+        )
+            .into_response();
+    }
+    let req_machine = payload
+        .get("machineId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !req_machine.is_empty() && req_machine != st.machine_id {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "ok": false,
+                "error": "AUTOMATION_MACHINE_MISMATCH",
+            })),
+        )
+            .into_response();
+    }
+    let Some(ws_str) = payload
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "ok": false,
+                "error": "workspaceId is required",
+            })),
+        )
+            .into_response();
+    };
+    let requester_sid = payload
+        .get("requesterSessionId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| SessionId(s.to_string()));
+    let Some(command_val) = payload.get("command") else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "ok": false,
+                "error": "command is required",
+            })),
+        )
+            .into_response();
+    };
+    let caller = VerifiedPrincipal::LocalHost {
+        caller_pid: None,
+        account_id: None,
+    };
+    let workspace_id = WorkspaceId(ws_str.to_string());
+    match crate::mcp_http::dispatch_automation_command(
+        Arc::clone(&st.service),
+        caller,
+        &workspace_id,
+        requester_sid.as_ref(),
+        command_val,
+    )
+    .await
+    {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(json!({
+                "ok": true,
+                "result": result,
+            })),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::OK,
+            Json(json!({
+                "ok": false,
+                "error": err.message,
+            })),
+        )
+            .into_response(),
+    }
+}
+
 #[cfg(unix)]
 pub async fn serve_local_daemon(
     data_dir: &Path,
@@ -1508,6 +1599,7 @@ pub async fn serve_local_daemon(
         .route("/project-control", post(handle_project_control))
         .route("/session-control", post(handle_session_control))
         .route("/mcp-control", post(handle_mcp_control))
+        .route("/automation-control", post(handle_automation_control))
         .with_state(Arc::clone(&shared));
 
     let probe_shutdown = Arc::clone(&shutdown);

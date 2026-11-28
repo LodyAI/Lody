@@ -1,4 +1,5 @@
 use crate::actor::SessionHandle;
+use crate::automation_runner::ManagedRunRegistry;
 use lody_app::AttachedWorkspaceView;
 use lody_ports::{
     PortError, PortErrorKind, PortResult, SessionId, WorkspaceId, WorkspaceSecurityMode,
@@ -6,6 +7,13 @@ use lody_ports::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Notify;
+use tokio::task::JoinHandle;
+
+pub struct DrainedSupervisor {
+    pub managed_runs: Arc<ManagedRunRegistry>,
+    pub shutdown_notify: Arc<Notify>,
+    pub task: Option<JoinHandle<()>>,
+}
 
 pub enum DetachDisposition {
     Absent,
@@ -13,6 +21,7 @@ pub enum DetachDisposition {
     Started {
         session_ids: Vec<SessionId>,
         sessions: Vec<SessionHandle>,
+        supervisor: DrainedSupervisor,
         notify: Arc<Notify>,
     },
 }
@@ -22,6 +31,10 @@ pub struct WorkspaceMount {
     pub security_mode: WorkspaceSecurityMode,
     pub detach_notify: Option<Arc<Notify>>,
     pub sessions: HashMap<SessionId, SessionHandle>,
+    pub supervisor_wake: Arc<Notify>,
+    pub supervisor_shutdown: Arc<Notify>,
+    pub managed_runs: Arc<ManagedRunRegistry>,
+    pub supervisor_task: Option<JoinHandle<()>>,
 }
 
 impl WorkspaceMount {
@@ -31,6 +44,10 @@ impl WorkspaceMount {
             security_mode,
             detach_notify: None,
             sessions: HashMap::new(),
+            supervisor_wake: Arc::new(Notify::new()),
+            supervisor_shutdown: Arc::new(Notify::new()),
+            managed_runs: Arc::new(ManagedRunRegistry::default()),
+            supervisor_task: None,
         }
     }
 
@@ -94,9 +111,15 @@ impl FleetWorkspaceTable {
             session_ids.push(sid);
             sessions.push(handle);
         }
+        let supervisor = DrainedSupervisor {
+            managed_runs: Arc::clone(&mount.managed_runs),
+            shutdown_notify: Arc::clone(&mount.supervisor_shutdown),
+            task: mount.supervisor_task.take(),
+        };
         DetachDisposition::Started {
             session_ids,
             sessions,
+            supervisor,
             notify,
         }
     }
@@ -105,12 +128,18 @@ impl FleetWorkspaceTable {
         self.mounts.remove(workspace_id);
     }
 
-    pub fn drain_all(&mut self) -> Vec<SessionHandle> {
-        let mut all = Vec::new();
+    pub fn drain_all(&mut self) -> (Vec<SessionHandle>, Vec<DrainedSupervisor>) {
+        let mut all_sessions = Vec::new();
+        let mut all_supervisors = Vec::new();
         for (_, mut mount) in self.mounts.drain() {
-            all.extend(mount.sessions.drain().map(|(_, h)| h));
+            all_sessions.extend(mount.sessions.drain().map(|(_, h)| h));
+            all_supervisors.push(DrainedSupervisor {
+                managed_runs: mount.managed_runs,
+                shutdown_notify: mount.supervisor_shutdown,
+                task: mount.supervisor_task.take(),
+            });
         }
-        all
+        (all_sessions, all_supervisors)
     }
 
     pub fn get_session(
@@ -123,6 +152,16 @@ impl FleetWorkspaceTable {
                 .then(|| m.sessions.get(session_id).cloned())
                 .flatten()
         })
+    }
+
+    pub fn get_mount(&self, workspace_id: &WorkspaceId) -> Option<&WorkspaceMount> {
+        self.mounts.get(workspace_id).filter(|m| !m.is_draining())
+    }
+
+    pub fn get_mount_mut(&mut self, workspace_id: &WorkspaceId) -> Option<&mut WorkspaceMount> {
+        self.mounts
+            .get_mut(workspace_id)
+            .filter(|m| !m.is_draining())
     }
 
     pub fn find_session_by_id(

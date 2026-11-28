@@ -76,6 +76,9 @@ pub enum ControlCommand {
     InspectDrivingUser {
         reply: oneshot::Sender<Option<UserId>>,
     },
+    InspectInboxPaused {
+        reply: oneshot::Sender<bool>,
+    },
     Shutdown {
         reply: oneshot::Sender<()>,
     },
@@ -228,6 +231,16 @@ impl SessionHandle {
             .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor dropped reply"))
     }
 
+    pub async fn inspect_inbox_paused(&self) -> PortResult<bool> {
+        let (tx, rx) = oneshot::channel();
+        self.control_tx
+            .send(ControlCommand::InspectInboxPaused { reply: tx })
+            .await
+            .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor closed"))?;
+        rx.await
+            .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor dropped reply"))
+    }
+
     pub async fn shutdown(&self) {
         let (tx, rx) = oneshot::channel();
         if self
@@ -313,6 +326,7 @@ pub struct SessionSpawnOptions {
     pub custom_acp: Option<CustomCommandSpec>,
     pub parent_delegation: Option<ParentDelegationTarget>,
     pub settling_timeout: Duration,
+    pub supervisor_wake: Option<Arc<tokio::sync::Notify>>,
 }
 
 struct LiveAgentSlot {
@@ -658,12 +672,23 @@ impl SessionActor {
             InboxCategory::Schedule => TurnSourceKind::Schedule,
             InboxCategory::Automation => TurnSourceKind::HostAutomation,
         };
+        let effective_adapter_id = if admitted.adapter_id == "default" {
+            if self.opts.custom_acp.is_some() {
+                "custom".to_string()
+            } else if !self.state.default_adapter_id.is_empty() {
+                self.state.default_adapter_id.clone()
+            } else {
+                admitted.adapter_id
+            }
+        } else {
+            admitted.adapter_id
+        };
         let invocation = FrozenTurnInvocation {
             turn_id: admitted.turn_id.0,
             requester_user_id: admitted.verified_requester.0,
             prompt_text: admitted.prompt_text,
             source,
-            adapter_id: admitted.adapter_id,
+            adapter_id: effective_adapter_id,
             mcp_selection_digest: "default".to_string(),
             signed_intent_verified: admitted.signed_intent_verified,
         };
@@ -792,6 +817,10 @@ impl SessionActor {
                 let uid = (!self.state.default_requester_user_id.is_empty())
                     .then(|| UserId(self.state.default_requester_user_id.clone()));
                 let _ = reply.send(uid);
+                false
+            }
+            ControlCommand::InspectInboxPaused { reply } => {
+                let _ = reply.send(self.state.inbox.paused);
                 false
             }
             ControlCommand::Shutdown { reply } => {
@@ -1307,6 +1336,9 @@ impl SessionActor {
                         SubmissionStage::Settled,
                     );
                     self.notify_parent_if_delegated(outcome, &reason);
+                }
+                if let Some(wake) = &self.opts.supervisor_wake {
+                    wake.notify_one();
                 }
             }
             KernelAction::PublishRunningPresence { .. }

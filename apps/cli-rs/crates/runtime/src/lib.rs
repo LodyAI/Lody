@@ -2,11 +2,16 @@
 #![deny(clippy::await_holding_lock)]
 
 pub mod actor;
+pub mod automation_runner;
+pub mod schedule_runner;
 pub mod workspace;
 
 pub use actor::{
     ChildAdmissionGrant, ControlCommand, ParentDelegationTarget, SessionHandle,
     SessionSpawnOptions, spawn_session_actor,
+};
+use automation_runner::{
+    ManagedRunRegistry, resolve_contained_workdir, tick_workspace_automations,
 };
 use lody_app::{
     AppCommand, AppQuery, AppResponse, ApplicationService, AttachedWorkspaceView, CapabilitySet,
@@ -16,20 +21,27 @@ use lody_app::{
     TurnId, UserId, VerifiedPrincipal, WorkspaceId, WorkspaceSecurityMode, enforce_command_policy,
     enforce_query_policy,
 };
-use lody_kernel::{ChildRejectReason, FrozenTurnInvocation, SessionPhase, TurnSourceKind};
+use lody_kernel::{
+    ChildRejectReason, FrozenTurnInvocation, SessionPhase, TurnSourceKind,
+    next_supervisor_wake_deadline_ms,
+};
 use lody_ports::{
-    AcpLauncherPort, AdmittedTurnInput, ArtifactRegistryPort, BackendPort, DiffStorePort,
-    EnginePort, HistoryPort, InboxCategory, InboxStorePort, MachineIdentityPort, McpServerMount,
-    ProjectStorePort, PtyPort, ScheduleLedgerPort, ScheduleProposalInput, ScheduleRepoPort,
+    AcpLauncherPort, AdmittedTurnInput, ArtifactRegistryPort, AutomationProgramContext,
+    AutomationSandboxPort, AutomationStorePort, AutomationWaitRecord, AutomationWorkspaceScope,
+    BackendPort, DiffStorePort, EnginePort, HistoryPort, InboxCategory, InboxStorePort,
+    MachineIdentityPort, McpServerMount, PrPollerStorePort, ProjectStorePort, PtyPort,
+    ScheduleLedgerPort, ScheduleProposalInput, ScheduleRepoPort, SessionRunStatus,
     StorageLeasePort, TerminalOpenSpec, WorktreePort, validate_schedule_identifier,
     validate_schedule_prompt, validate_schedule_rule, validate_schedule_title,
 };
+use schedule_runner::tick_workspace_schedules;
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::Semaphore;
-pub use workspace::{DetachDisposition, FleetWorkspaceTable, WorkspaceMount};
+use tokio::sync::{Notify, Semaphore};
+pub use workspace::{DetachDisposition, DrainedSupervisor, FleetWorkspaceTable, WorkspaceMount};
 
 const DEFAULT_SETTLING_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -53,6 +65,9 @@ pub struct DaemonDependencies {
     pub projects: Arc<dyn ProjectStorePort>,
     pub schedule_repo: Arc<dyn ScheduleRepoPort>,
     pub schedule_ledger: Arc<dyn ScheduleLedgerPort>,
+    pub automation_store: Arc<dyn AutomationStorePort>,
+    pub automation_sandbox: Arc<dyn AutomationSandboxPort>,
+    pub pr_poller_store: Arc<dyn PrPollerStorePort>,
     pub diff_store: Arc<dyn DiffStorePort>,
     pub artifacts: Arc<dyn ArtifactRegistryPort>,
     pub acp: Arc<dyn AcpLauncherPort>,
@@ -61,14 +76,15 @@ pub struct DaemonDependencies {
     pub backend: Option<Arc<dyn BackendPort>>,
 }
 
+#[derive(Clone)]
 pub struct DaemonRuntime {
     deps: Arc<DaemonDependencies>,
     mcp_endpoint: Arc<RwLock<Option<McpHttpEndpointConfig>>>,
     mcp_stdio_mount_builder: Option<Arc<McpStdioMountBuilder>>,
     acp_start_semaphore: Arc<Semaphore>,
-    workspaces: RwLock<FleetWorkspaceTable>,
+    workspaces: Arc<RwLock<FleetWorkspaceTable>>,
     settling_timeout: Duration,
-    owned_tokio: Option<tokio::runtime::Runtime>,
+    owned_tokio: Option<Arc<tokio::runtime::Runtime>>,
 }
 
 fn current_epoch_ms_u64() -> u64 {
@@ -107,13 +123,14 @@ impl DaemonRuntime {
                 .enable_all()
                 .build()
                 .ok()
+                .map(Arc::new)
         });
         Self {
             deps: Arc::new(deps),
             mcp_endpoint: Arc::new(RwLock::new(None)),
             mcp_stdio_mount_builder: None,
             acp_start_semaphore: Arc::new(Semaphore::new(max_starts)),
-            workspaces: RwLock::new(FleetWorkspaceTable::default()),
+            workspaces: Arc::new(RwLock::new(FleetWorkspaceTable::default())),
             settling_timeout,
             owned_tokio,
         }
@@ -213,10 +230,104 @@ impl DaemonRuntime {
             Some(m) => m,
             None => self.resolve_workspace_mode(workspace_id)?,
         };
-        self.workspaces
+        let view = self
+            .workspaces
             .write()
             .expect("workspaces lock")
-            .attach_or_update(workspace_id, mode)
+            .attach_or_update(workspace_id, mode)?;
+        self.ensure_workspace_supervisor(workspace_id);
+        Ok(view)
+    }
+
+    fn ensure_workspace_supervisor(&self, workspace_id: &WorkspaceId) {
+        if self.deps.storage_lease_mode != StorageLeaseMode::OnlineHost
+            || tokio::runtime::Handle::try_current().is_err()
+        {
+            return;
+        }
+        let mut guard = self.workspaces.write().expect("workspaces lock");
+        let Some(mount) = guard.get_mount_mut(workspace_id) else {
+            return;
+        };
+        if mount.supervisor_task.is_some() {
+            return;
+        }
+        let wake_notify = Arc::clone(&mount.supervisor_wake);
+        let shutdown_notify = Arc::clone(&mount.supervisor_shutdown);
+        let managed_runs = Arc::clone(&mount.managed_runs);
+        let rt_clone = self.clone();
+        let ws_clone = workspace_id.clone();
+
+        let task = tokio::spawn(async move {
+            let mut startup_reconciled = false;
+            loop {
+                let now_ms = current_epoch_ms_i64();
+                let sched_next = tick_workspace_schedules(&rt_clone, &ws_clone, now_ms)
+                    .await
+                    .ok()
+                    .flatten();
+                let auto_next = tick_workspace_automations(
+                    &rt_clone,
+                    &ws_clone,
+                    &managed_runs,
+                    &wake_notify,
+                    &mut startup_reconciled,
+                    now_ms,
+                )
+                .await
+                .ok()
+                .flatten();
+                let combined = match (sched_next, auto_next) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                };
+                let after_ms = current_epoch_ms_i64();
+                let deadline_ms = next_supervisor_wake_deadline_ms(after_ms, combined);
+                let sleep_dur = Duration::from_millis((deadline_ms - after_ms).max(10) as u64);
+
+                tokio::select! {
+                    biased;
+                    _ = shutdown_notify.notified() => break,
+                    _ = wake_notify.notified() => {}
+                    _ = tokio::time::sleep(sleep_dur) => {}
+                }
+            }
+        });
+        mount.supervisor_task = Some(task);
+    }
+
+    fn wake_workspace_supervisor(&self, workspace_id: &WorkspaceId) {
+        if let Ok(mode) = self.resolve_workspace_mode(workspace_id) {
+            let mut guard = self.workspaces.write().expect("workspaces lock");
+            let _ = guard.get_or_insert_mount(workspace_id, mode);
+        }
+        self.ensure_workspace_supervisor(workspace_id);
+        let wake_opt = self
+            .workspaces
+            .read()
+            .expect("workspaces lock")
+            .get_mount(workspace_id)
+            .map(|m| Arc::clone(&m.supervisor_wake));
+        if let Some(wake) = wake_opt {
+            wake.notify_one();
+        }
+    }
+
+    fn managed_runs_for_workspace(
+        &self,
+        workspace_id: &WorkspaceId,
+    ) -> Option<(Arc<ManagedRunRegistry>, Arc<Notify>)> {
+        if let Ok(mode) = self.resolve_workspace_mode(workspace_id) {
+            let mut guard = self.workspaces.write().expect("workspaces lock");
+            let _ = guard.get_or_insert_mount(workspace_id, mode);
+        }
+        self.workspaces
+            .read()
+            .expect("workspaces lock")
+            .get_mount(workspace_id)
+            .map(|m| (Arc::clone(&m.managed_runs), Arc::clone(&m.supervisor_wake)))
     }
 
     fn erase_local_workspace_stores(&self, workspace_id: &WorkspaceId) -> PortResult<()> {
@@ -226,6 +337,17 @@ impl DaemonRuntime {
             self.deps
                 .schedule_ledger
                 .erase_workspace_ledger(workspace_id),
+        )?;
+        ignore_unwired(self.deps.automation_store.erase_workspace_store(
+            &AutomationWorkspaceScope {
+                machine_id: self.deps.machine_id.clone(),
+                workspace_id: workspace_id.clone(),
+            },
+        ))?;
+        ignore_unwired(
+            self.deps
+                .pr_poller_store
+                .clear_workspace_state(workspace_id),
         )?;
         ignore_unwired(self.deps.history.erase_workspace_turns(workspace_id))
     }
@@ -255,9 +377,15 @@ impl DaemonRuntime {
             DetachDisposition::Started {
                 session_ids,
                 sessions,
+                supervisor,
                 notify,
             } => {
                 let drained = sessions.len();
+                supervisor.managed_runs.stop_all();
+                supervisor.shutdown_notify.notify_waiters();
+                if let Some(task) = supervisor.task {
+                    let _ = task.await;
+                }
                 for sid in &session_ids {
                     self.deps.pty.close_session_terminals(sid);
                 }
@@ -338,6 +466,7 @@ impl DaemonRuntime {
 
         let workspace_encrypted =
             matches!(mount.security_mode, WorkspaceSecurityMode::Encrypted { .. });
+        let supervisor_wake = Some(Arc::clone(&mount.supervisor_wake));
         let handle = spawn_session_actor(
             SessionSpawnOptions {
                 workspace_id: workspace_id.clone(),
@@ -351,6 +480,7 @@ impl DaemonRuntime {
                 custom_acp,
                 parent_delegation,
                 settling_timeout: self.settling_timeout,
+                supervisor_wake,
             },
             Arc::clone(&self.deps),
             Arc::clone(&self.mcp_endpoint),
@@ -358,6 +488,8 @@ impl DaemonRuntime {
             Arc::clone(&self.acp_start_semaphore),
         );
         mount.sessions.insert(session_id.clone(), handle.clone());
+        drop(guard);
+        self.ensure_workspace_supervisor(workspace_id);
         Ok(handle)
     }
 
@@ -564,6 +696,176 @@ impl DaemonRuntime {
             return dir;
         }
         self.deps.default_cwd.clone()
+    }
+
+    pub(crate) async fn resolve_automation_session_workdir(
+        &self,
+        workspace_id: &WorkspaceId,
+        session_id: &SessionId,
+    ) -> Option<PathBuf> {
+        if let Some(handle) = self.session_handle(workspace_id, session_id)
+            && let Ok(Some(dir)) = handle.inspect_workdir().await
+        {
+            return Some(dir);
+        }
+        if let Ok(Some(meta)) = self.deps.engine.read_session_meta(workspace_id, session_id)
+            && let Some(pid) = &meta.local_project_id
+            && let Ok(Some(proj)) = self.deps.projects.get_project(pid)
+        {
+            return Some(proj.root_path);
+        }
+        Some(self.deps.default_cwd.clone())
+    }
+
+    pub(crate) async fn build_automation_session_snapshot(
+        &self,
+        workspace_id: &WorkspaceId,
+        session_id: &SessionId,
+        now_ms: i64,
+    ) -> Value {
+        if let Some(handle) = self.session_handle(workspace_id, session_id)
+            && let Ok((phase, live_out_of_turn)) = handle.inspect_status(now_ms.max(0) as u64).await
+        {
+            let (exec_state, phase_str) = match phase {
+                SessionPhase::Idle { .. } if live_out_of_turn => ("busy", "running"),
+                SessionPhase::Idle { .. } => ("idle", "idle"),
+                SessionPhase::Preparing { .. } | SessionPhase::EditAndResendBarrier { .. } => {
+                    ("busy", "initializing")
+                }
+                SessionPhase::Running(ref r) => {
+                    if r.pending_permissions.is_empty() {
+                        ("busy", "running")
+                    } else {
+                        ("busy", "waiting_permission")
+                    }
+                }
+                SessionPhase::Settling { .. } => ("busy", "settling"),
+            };
+            return json!({
+                "sessionId": session_id.0,
+                "workspaceId": workspace_id.0,
+                "executionState": exec_state,
+                "phase": phase_str,
+                "now": now_ms,
+            });
+        }
+        json!({
+            "sessionId": session_id.0,
+            "workspaceId": workspace_id.0,
+            "executionState": "idle",
+            "phase": "idle",
+            "now": now_ms,
+        })
+    }
+
+    async fn verify_owned_automation_session(
+        &self,
+        workspace_id: &WorkspaceId,
+        session_id: &SessionId,
+        principal_uid: &UserId,
+    ) -> PortResult<()> {
+        match self.deps.engine.read_session_meta(workspace_id, session_id) {
+            Ok(Some(meta)) => {
+                if meta.deleted
+                    || &meta.workspace_id != workspace_id
+                    || meta.owner_machine_id != self.deps.machine_id
+                {
+                    return Err(PortError::new(
+                        PortErrorKind::NotFound,
+                        "AUTOMATION_SESSION_UNAVAILABLE",
+                    ));
+                }
+                if meta.status == SessionRunStatus::Archived {
+                    return Err(PortError::new(
+                        PortErrorKind::Conflict,
+                        "AUTOMATION_SESSION_ARCHIVED",
+                    ));
+                }
+                if &meta.owner_user_id != principal_uid {
+                    return Err(PortError::new(
+                        PortErrorKind::Forbidden,
+                        "AUTOMATION_PERMISSION_DENIED",
+                    ));
+                }
+                Ok(())
+            }
+            Ok(None) => {
+                if !self.deps.engine.is_connected()
+                    && self.session_handle(workspace_id, session_id).is_some()
+                {
+                    return Ok(());
+                }
+                Err(PortError::new(
+                    PortErrorKind::NotFound,
+                    "AUTOMATION_SESSION_UNAVAILABLE",
+                ))
+            }
+            Err(err)
+                if err.kind == PortErrorKind::Unavailable && !self.deps.engine.is_connected() =>
+            {
+                if self.session_handle(workspace_id, session_id).is_some() {
+                    Ok(())
+                } else {
+                    Err(PortError::new(
+                        PortErrorKind::NotFound,
+                        "AUTOMATION_SESSION_UNAVAILABLE",
+                    ))
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn authorize_automation_context(
+        &self,
+        caller: &VerifiedPrincipal,
+        workspace_id: &WorkspaceId,
+        invoking_session_id: Option<&SessionId>,
+        target_session_id: Option<&SessionId>,
+        require_target: bool,
+    ) -> PortResult<(UserId, Option<SessionId>)> {
+        let requester = self.resolve_session_dispatch_requester(caller).await?;
+        let effective_invoking = match caller {
+            VerifiedPrincipal::AgentSession { session_id, .. } => Some(session_id),
+            _ => invoking_session_id,
+        };
+        let resolved_target = target_session_id.or(effective_invoking).cloned();
+        if let Some(ref sid) = resolved_target {
+            self.verify_owned_automation_session(workspace_id, sid, &requester)
+                .await?;
+        } else if require_target {
+            return Err(PortError::new(
+                PortErrorKind::InvalidInput,
+                "AUTOMATION_SESSION_REQUIRED",
+            ));
+        }
+        Ok((requester, resolved_target))
+    }
+
+    fn public_wait_json(
+        &self,
+        scope: &AutomationWorkspaceScope,
+        wait: &AutomationWaitRecord,
+    ) -> PortResult<Value> {
+        let mut val = serde_json::to_value(wait)
+            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+        if let Some(inv_id) = &wait.invocation_id
+            && let Some(receipt) = self.deps.automation_store.get_receipt(scope, inv_id)?
+            && let Some(obj) = val.as_object_mut()
+        {
+            obj.insert(
+                "continuation".to_string(),
+                json!({
+                    "id": receipt.id,
+                    "state": receipt.state,
+                    "reason": receipt.reason,
+                    "turnId": receipt.turn_id,
+                    "attempts": receipt.attempts,
+                    "retryAt": receipt.retry_at,
+                }),
+            );
+        }
+        Ok(val)
     }
 
     pub async fn execute_async(
@@ -939,6 +1241,218 @@ impl DaemonRuntime {
                     changed,
                 })
             }
+            AppCommand::AutomationRegister {
+                workspace_id,
+                invoking_session_id,
+                target_session_id,
+                registration,
+            } => {
+                let now_ms = current_epoch_ms_i64();
+                let (principal_uid, sid_opt) = self
+                    .authorize_automation_context(
+                        caller,
+                        &workspace_id,
+                        invoking_session_id.as_ref(),
+                        target_session_id.as_ref(),
+                        true,
+                    )
+                    .await?;
+                let session_id = sid_opt.expect("require_target enforced");
+                if registration.expires_at.is_some_and(|exp| exp <= now_ms) {
+                    return Err(PortError::new(
+                        PortErrorKind::InvalidInput,
+                        "AUTOMATION_ALREADY_EXPIRED",
+                    ));
+                }
+                let prog_ctx = AutomationProgramContext {
+                    session_id: session_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                    now_ms,
+                };
+                let sandbox = Arc::clone(&self.deps.automation_sandbox);
+                let prog_src = registration.program.clone();
+                tokio::task::spawn_blocking(move || sandbox.validate_program(&prog_src, &prog_ctx))
+                    .await
+                    .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))??;
+
+                let scope = AutomationWorkspaceScope {
+                    machine_id: self.deps.machine_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                };
+                let wait = self.deps.automation_store.register_wait(
+                    &scope,
+                    &session_id,
+                    &principal_uid,
+                    &registration,
+                    now_ms,
+                )?;
+                let payload = self.public_wait_json(&scope, &wait)?;
+                self.wake_workspace_supervisor(&workspace_id);
+                Ok(AppResponse::AutomationResult { payload })
+            }
+            AppCommand::AutomationRun {
+                workspace_id,
+                invoking_session_id,
+                target_session_id,
+                run_spec,
+            } => {
+                let now_ms = current_epoch_ms_i64();
+                let (principal_uid, sid_opt) = self
+                    .authorize_automation_context(
+                        caller,
+                        &workspace_id,
+                        invoking_session_id.as_ref(),
+                        target_session_id.as_ref(),
+                        true,
+                    )
+                    .await?;
+                let session_id = sid_opt.expect("require_target enforced");
+                let root = self
+                    .resolve_automation_session_workdir(&workspace_id, &session_id)
+                    .await
+                    .ok_or_else(|| {
+                        PortError::new(
+                            PortErrorKind::Unavailable,
+                            "AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE",
+                        )
+                    })?;
+                let _ = resolve_contained_workdir(&root, run_spec.cwd.as_deref())?;
+                let scope = AutomationWorkspaceScope {
+                    machine_id: self.deps.machine_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                };
+                let wait = self.deps.automation_store.register_run(
+                    &scope,
+                    &session_id,
+                    &principal_uid,
+                    &run_spec,
+                    now_ms,
+                )?;
+                let payload = self.public_wait_json(&scope, &wait)?;
+                self.wake_workspace_supervisor(&workspace_id);
+                Ok(AppResponse::AutomationResult { payload })
+            }
+            AppCommand::AutomationConfigure {
+                workspace_id,
+                invoking_session_id,
+                target_session_id,
+                settings,
+            } => {
+                let now_ms = current_epoch_ms_i64();
+                let (principal_uid, sid_opt) = self
+                    .authorize_automation_context(
+                        caller,
+                        &workspace_id,
+                        invoking_session_id.as_ref(),
+                        target_session_id.as_ref(),
+                        true,
+                    )
+                    .await?;
+                let session_id = sid_opt.expect("require_target enforced");
+                let scope = AutomationWorkspaceScope {
+                    machine_id: self.deps.machine_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                };
+                let payload = self.deps.automation_store.configure_session_settings(
+                    &scope,
+                    &session_id,
+                    &principal_uid,
+                    &settings,
+                    now_ms,
+                )?;
+                self.wake_workspace_supervisor(&workspace_id);
+                Ok(AppResponse::AutomationResult { payload })
+            }
+            AppCommand::AutomationCancel {
+                workspace_id,
+                invoking_session_id: _,
+                item_id,
+            } => {
+                let now_ms = current_epoch_ms_i64();
+                let principal_uid = self.resolve_session_dispatch_requester(caller).await?;
+                let scope = AutomationWorkspaceScope {
+                    machine_id: self.deps.machine_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                };
+                if let Some(wait) = self.deps.automation_store.get_wait(&scope, &item_id)? {
+                    if wait.owner_machine_id != self.deps.machine_id {
+                        return Err(PortError::new(
+                            PortErrorKind::NotFound,
+                            "AUTOMATION_NOT_FOUND",
+                        ));
+                    }
+                    self.verify_owned_automation_session(
+                        &workspace_id,
+                        &wait.session_id,
+                        &principal_uid,
+                    )
+                    .await?;
+                    let _ = self
+                        .deps
+                        .automation_store
+                        .cancel_item(&scope, &wait.id, now_ms)?;
+                    if wait.run.is_some()
+                        && let Some((runs, _)) = self.managed_runs_for_workspace(&workspace_id)
+                    {
+                        runs.stop(&wait.id);
+                    }
+                    let updated = self
+                        .deps
+                        .automation_store
+                        .get_wait(&scope, &wait.id)?
+                        .unwrap_or(wait);
+                    let payload = self.public_wait_json(&scope, &updated)?;
+                    self.wake_workspace_supervisor(&workspace_id);
+                    return Ok(AppResponse::AutomationResult { payload });
+                }
+                if let Some(receipt) = self.deps.automation_store.get_receipt(&scope, &item_id)? {
+                    if let Some(ref sid) = receipt.session_id {
+                        self.verify_owned_automation_session(&workspace_id, sid, &principal_uid)
+                            .await?;
+                    }
+                    let payload = self
+                        .deps
+                        .automation_store
+                        .cancel_item(&scope, &item_id, now_ms)?
+                        .unwrap_or(Value::Null);
+                    self.wake_workspace_supervisor(&workspace_id);
+                    return Ok(AppResponse::AutomationResult { payload });
+                }
+                Err(PortError::new(
+                    PortErrorKind::NotFound,
+                    "AUTOMATION_NOT_FOUND",
+                ))
+            }
+            AppCommand::TickWorkspaceSchedulers {
+                workspace_id,
+                now_ms,
+            } => {
+                let effective_now = now_ms.unwrap_or_else(current_epoch_ms_i64);
+                let sched_next =
+                    tick_workspace_schedules(self, &workspace_id, effective_now).await?;
+                let auto_next =
+                    if let Some((runs, wake)) = self.managed_runs_for_workspace(&workspace_id) {
+                        let mut reconciled = false;
+                        tick_workspace_automations(
+                            self,
+                            &workspace_id,
+                            &runs,
+                            &wake,
+                            &mut reconciled,
+                            effective_now,
+                        )
+                        .await?
+                    } else {
+                        None
+                    };
+                let next_wake_ms = match (sched_next, auto_next) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                };
+                Ok(AppResponse::SchedulersTicked { next_wake_ms })
+            }
             AppCommand::TerminalOpen {
                 session_id,
                 cols,
@@ -1085,6 +1599,126 @@ impl DaemonRuntime {
                     .get_schedule(&workspace_id, &valid_id)?;
                 Ok(AppResponse::ScheduleRead { schedule })
             }
+            AppQuery::AutomationSettings {
+                workspace_id,
+                invoking_session_id,
+                target_session_id,
+            } => {
+                let (_, sid_opt) = self
+                    .authorize_automation_context(
+                        caller,
+                        &workspace_id,
+                        invoking_session_id.as_ref(),
+                        target_session_id.as_ref(),
+                        true,
+                    )
+                    .await?;
+                let session_id = sid_opt.expect("require_target enforced");
+                let scope = AutomationWorkspaceScope {
+                    machine_id: self.deps.machine_id.clone(),
+                    workspace_id,
+                };
+                let payload = self
+                    .deps
+                    .automation_store
+                    .read_session_settings(&scope, &session_id)?;
+                Ok(AppResponse::AutomationResult { payload })
+            }
+            AppQuery::AutomationList {
+                workspace_id,
+                invoking_session_id,
+                target_session_id,
+            } => {
+                let (principal_uid, sid_opt) = self
+                    .authorize_automation_context(
+                        caller,
+                        &workspace_id,
+                        invoking_session_id.as_ref(),
+                        target_session_id.as_ref(),
+                        false,
+                    )
+                    .await?;
+                let scope = AutomationWorkspaceScope {
+                    machine_id: self.deps.machine_id.clone(),
+                    workspace_id,
+                };
+                let owner_filter = sid_opt.is_none().then_some(&principal_uid);
+                let waits = self.deps.automation_store.list_waits(
+                    &scope,
+                    owner_filter,
+                    sid_opt.as_ref(),
+                )?;
+                let mut items = Vec::with_capacity(waits.len());
+                for w in &waits {
+                    items.push(self.public_wait_json(&scope, w)?);
+                }
+                Ok(AppResponse::AutomationResult {
+                    payload: Value::Array(items),
+                })
+            }
+            AppQuery::AutomationShow {
+                workspace_id,
+                invoking_session_id: _,
+                item_id,
+            } => {
+                let principal_uid = self.resolve_session_dispatch_requester(caller).await?;
+                let scope = AutomationWorkspaceScope {
+                    machine_id: self.deps.machine_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                };
+                let Some(wait) = self.deps.automation_store.get_wait(&scope, &item_id)? else {
+                    return Err(PortError::new(
+                        PortErrorKind::NotFound,
+                        "AUTOMATION_NOT_FOUND",
+                    ));
+                };
+                if wait.owner_machine_id != self.deps.machine_id {
+                    return Err(PortError::new(
+                        PortErrorKind::NotFound,
+                        "AUTOMATION_NOT_FOUND",
+                    ));
+                }
+                self.verify_owned_automation_session(
+                    &workspace_id,
+                    &wait.session_id,
+                    &principal_uid,
+                )
+                .await?;
+                let payload = self.public_wait_json(&scope, &wait)?;
+                Ok(AppResponse::AutomationResult { payload })
+            }
+            AppQuery::AutomationActivities {
+                workspace_id,
+                invoking_session_id,
+                target_session_id,
+                limit,
+                before,
+            } => {
+                let (principal_uid, sid_opt) = self
+                    .authorize_automation_context(
+                        caller,
+                        &workspace_id,
+                        invoking_session_id.as_ref(),
+                        target_session_id.as_ref(),
+                        false,
+                    )
+                    .await?;
+                let scope = AutomationWorkspaceScope {
+                    machine_id: self.deps.machine_id.clone(),
+                    workspace_id,
+                };
+                let owner_filter = sid_opt.is_none().then_some(&principal_uid);
+                let page = self.deps.automation_store.list_activities(
+                    &scope,
+                    owner_filter,
+                    sid_opt.as_ref(),
+                    limit,
+                    before.as_ref(),
+                )?;
+                let payload = serde_json::to_value(&page)
+                    .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+                Ok(AppResponse::AutomationResult { payload })
+            }
             AppQuery::ListWorktreeFiles {
                 workspace_id,
                 repo_key,
@@ -1146,11 +1780,18 @@ impl DaemonRuntime {
 
     pub async fn shutdown(&self) {
         self.deps.pty.close_all_terminals();
-        let handles = self
+        let (handles, supervisors) = self
             .workspaces
             .write()
             .expect("workspaces lock")
             .drain_all();
+        for sup in supervisors {
+            sup.managed_runs.stop_all();
+            sup.shutdown_notify.notify_waiters();
+            if let Some(task) = sup.task {
+                let _ = task.await;
+            }
+        }
         for handle in handles {
             handle.shutdown().await;
         }
@@ -1483,6 +2124,13 @@ impl DaemonRuntime {
                     .get_schedule(&workspace_id, &valid_id)?;
                 Ok(AppResponse::ScheduleRead { schedule })
             }
+            AppQuery::AutomationSettings { .. }
+            | AppQuery::AutomationList { .. }
+            | AppQuery::AutomationShow { .. }
+            | AppQuery::AutomationActivities { .. } => Err(PortError::new(
+                PortErrorKind::Internal,
+                "automation queries require async runtime execution",
+            )),
             AppQuery::ListTerminals { session_id } => {
                 let terminals = self.deps.pty.list_session_terminals(&session_id);
                 Ok(AppResponse::TerminalsListed {

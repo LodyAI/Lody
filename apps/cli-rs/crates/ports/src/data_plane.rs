@@ -203,6 +203,69 @@ pub trait HistoryPort: Send + Sync {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleMisfirePolicy {
+    #[default]
+    Skip,
+    RunOnce,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleOverlapPolicy {
+    #[default]
+    Skip,
+    QueueOne,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ScheduleDestination {
+    NewSession,
+    OwnSession {
+        epoch: u64,
+    },
+    ExistingSession {
+        #[serde(rename = "sessionId")]
+        session_id: SessionId,
+    },
+}
+
+impl Default for ScheduleDestination {
+    fn default() -> Self {
+        Self::OwnSession { epoch: 0 }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleRetryPolicy {
+    pub max_attempts: u32,
+    pub dispatch_max_age_ms: i64,
+}
+
+impl Default for ScheduleRetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            dispatch_max_age_ms: 3_600_000,
+        }
+    }
+}
+
+fn default_schedule_machine_id() -> MachineId {
+    MachineId("local".to_string())
+}
+
+fn default_schedule_activation_id() -> String {
+    "act_default".to_string()
+}
+
+fn default_schedule_adapter_id() -> String {
+    "codex".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleRecord {
@@ -210,10 +273,28 @@ pub struct ScheduleRecord {
     pub workspace_id: WorkspaceId,
     pub session_id: Option<SessionId>,
     pub author_user_id: UserId,
+    #[serde(default = "default_schedule_machine_id")]
+    pub machine_id: MachineId,
     pub title: String,
     pub rule: Value,
     pub prompt_text: String,
     pub enabled: bool,
+    #[serde(default = "default_schedule_activation_id")]
+    pub activation_id: String,
+    #[serde(default)]
+    pub active_from: i64,
+    #[serde(default)]
+    pub misfire_policy: ScheduleMisfirePolicy,
+    #[serde(default)]
+    pub overlap_policy: ScheduleOverlapPolicy,
+    #[serde(default)]
+    pub destination: ScheduleDestination,
+    #[serde(default)]
+    pub retry_policy: ScheduleRetryPolicy,
+    #[serde(default = "default_schedule_adapter_id")]
+    pub adapter_id: String,
+    #[serde(default)]
+    pub definition_fingerprint: String,
     pub content_revision: u64,
 }
 

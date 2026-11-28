@@ -506,4 +506,83 @@ fn live_daemon_mounts_mcp_stdio_fallback_and_serves_desktop_project_control_rout
         saw_parent_wakeup,
         "child delegated through lody mcp-stdio must wake parent with completion receipt"
     );
+
+    let marker_file = home_dir.join("automation-ready.txt");
+    let (auto_status, auto_reg_body) = send_unix_http(
+        control_sock,
+        "POST",
+        "/automation-control",
+        tok,
+        Some(&json!({
+            "machineId": meta.version,
+            "workspaceId": "local",
+            "requesterSessionId": "stdio-parent-1",
+            "command": { "type": "list" }
+        })),
+    )
+    .unwrap();
+    assert_eq!(auto_status, 403);
+    assert!(auto_reg_body.contains("AUTOMATION_MACHINE_MISMATCH"));
+
+    let (_, state_body) =
+        send_unix_http(Path::new(&meta.socket_path), "GET", "/state", tok, None).unwrap();
+    let state_json: Value = serde_json::from_str(&state_body).unwrap();
+    let live_machine_id = state_json["machineId"].as_str().unwrap().to_string();
+
+    let (reg_status, reg_body) = send_unix_http(
+        control_sock,
+        "POST",
+        "/automation-control",
+        tok,
+        Some(&json!({
+            "machineId": live_machine_id,
+            "workspaceId": "local",
+            "requesterSessionId": "stdio-parent-1",
+            "command": {
+                "type": "register",
+                "intervalMs": 1000,
+                "reason": "resume when marker file appears",
+                "program": "async ({ ctx }) => { const out = await ctx.exec('/bin/ls', ['automation-ready.txt']); if (out.exitCode === 0) { return { resumeText: '[MARK:resumed-by-quickjs-automation] [SCRIPTED:REPLY:done]', payload: { ok: true } }; } return false; }"
+            }
+        })),
+    )
+    .unwrap();
+    assert_eq!(reg_status, 200);
+    let reg_json: Value = serde_json::from_str(&reg_body).unwrap();
+    assert_eq!(reg_json["ok"], true, "register response: {reg_body}");
+    let registered_wait_id = reg_json["result"]["id"].as_str().unwrap().to_string();
+
+    fs::write(&marker_file, "ready\n").unwrap();
+
+    let auto_deadline = Instant::now() + Duration::from_secs(10);
+    let mut saw_automation_turn = false;
+    while Instant::now() < auto_deadline {
+        let (_, show_body) = send_unix_http(
+            control_sock,
+            "POST",
+            "/automation-control",
+            tok,
+            Some(&json!({
+                "machineId": live_machine_id,
+                "workspaceId": "local",
+                "requesterSessionId": "stdio-parent-1",
+                "command": { "type": "show", "id": registered_wait_id }
+            })),
+        )
+        .unwrap();
+        if let Ok(show_val) = serde_json::from_str::<Value>(&show_body)
+            && show_val["result"]["state"] == "matched"
+            && show_val["result"]["continuation"]["state"] == "completed"
+            && let Ok(raw_events) = fs::read_to_string(&event_log)
+            && raw_events.contains("resumed-by-quickjs-automation")
+        {
+            saw_automation_turn = true;
+            break;
+        }
+        std::thread::yield_now();
+    }
+    assert!(
+        saw_automation_turn,
+        "QuickJS automation condition must match in background supervisor and resume session turn"
+    );
 }

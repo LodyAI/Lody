@@ -69,13 +69,13 @@
         <p><code>lody-runtime</code></p>
       </td>
       <td>
-        <p><b>主干已通</b></p>
+        <p><b>已完成</b></p>
       </td>
       <td>
-        <p>单进程单 Fleet 内嵌 <code>FleetWorkspaceTable</code>（多 Workspace 动态挂载、防降级拦截、无锁排空卸载与单工作区擦除）、双通道控制优先 <code>SessionActor</code>、1s 迟到流式在场收敛与 GC 保护、跨会话子任务委派与回执自动唤醒。</p>
+        <p>单进程单 Fleet 内嵌 <code>FleetWorkspaceTable</code>（多 Workspace 动态挂载、防降级拦截、无锁排空卸载与单工作区擦除）、双通道控制优先 <code>SessionActor</code>、基于显式通知与最早到期截止时间的 Schedule 定时触发与 Automation 持续评估监督器、受管后台长命令（重启后 <code>orphan_started_runs</code> 中断上报绝不重跑）、1s 迟到流式在场收敛与 GC 保护、跨会话子任务委派与回执自动唤醒。</p>
       </td>
       <td>
-        <p>内嵌 <code>rquickjs</code> 求值与 Schedule 定时触发执行器。</p>
+        <p>接入真实 Loro/Flock 事件源后联动 PR/Workflow 事件流。</p>
       </td>
     </tr>
     <tr>
@@ -86,7 +86,7 @@
         <p><b>主干已通</b></p>
       </td>
       <td>
-        <p>纯投影层（零直接磁盘身份读写）：<code>clap</code> CLI（含 <code>lody machine restore-id</code> 与无存储锁争用的 <code>lody mcp-stdio</code> 桥接）+ <code>axum</code> 本地 Unix Socket（<code>probe</code> &amp; <code>control</code>，完整覆盖桌面端 <code>/project-control</code> 与 <code>worktree/*</code> 路由及 <code>/mcp-control</code> 转发）+ 进程内 Streamable HTTP MCP Server（<code>/mcp</code> 投影 <code>VerifiedPrincipal::AgentSession</code> 强校验会话归属，禁用 HTTP 时自动回退挂载 <code>mcp-stdio</code>）+ <code>terminal.sock</code> PTY 服务。</p>
+        <p>纯投影层（零直接磁盘身份读写）：<code>clap</code> CLI（含 <code>lody machine restore-id</code> 与无存储锁争用的 <code>lody mcp-stdio</code> 桥接）+ <code>axum</code> 本地 Unix Socket（<code>probe</code> &amp; <code>control</code>，完整覆盖桌面端 <code>/project-control</code>、<code>worktree/*</code>、<code>/mcp-control</code> 与 <code>/automation-control</code>）+ 进程内 Streamable HTTP MCP Server（<code>/mcp</code> 投影 <code>VerifiedPrincipal::AgentSession</code> 强校验会话归属，支持 <code>lody_schedule</code>、<code>lody_automation</code>、<code>lody_catalog</code>，禁用 HTTP 时自动回退挂载 <code>mcp-stdio</code>）+ <code>terminal.sock</code> PTY 服务。</p>
       </td>
       <td>
         <p>新 <code>lody-mux.sock</code> 多路复用协议与远端 Machine RPC 网关。</p>
@@ -94,16 +94,16 @@
     </tr>
     <tr>
       <td>
-        <p><code>lody-sqlite</code> / <code>acp</code> / <code>worktree</code></p>
+        <p><code>lody-sqlite</code> / <code>sandbox</code> / <code>acp</code> / <code>worktree</code></p>
       </td>
       <td>
-        <p><b>主干已通</b></p>
+        <p><b>已完成</b></p>
       </td>
       <td>
-        <p><code>FileStorageLease</code> 让位锁、5 级优先级 <code>LocalMachineIdentityStore</code>（含指纹校验备份锚点与离线恢复备份）、<code>operations.sqlite3</code> 与仅承载本地执行游标的 <code>schedules.sqlite</code>；<code>ACP over stdio</code>（含 <code>_lody/session/activity_update</code> v1、<code>steering</code> 能力协商与三态回执握手、隔离 <code>_lody/session/archive</code> 协商）+ <code>portable-pty</code> + 代理感知 SHA-256 制品安装；Git Worktree（保留显式 <code>base_branch</code>）+ 桌面端目录浏览/原子建目录/受限文件读取/受保护分支检出/技能指纹扫描 + <code>LTD1</code> v2 FastCDC <code>TurnDiffStore</code>。</p>
+        <p><code>FileStorageLease</code> 让位锁、5 级优先级 <code>LocalMachineIdentityStore</code>、<code>operations.sqlite3</code>、<code>schedules.sqlite</code> 执行游标账本、兼容 Node v4 的 <code>automations/&lt;hash&gt;.sqlite</code> 分库与损坏自愈 <code>pr-poller-state.sqlite3</code>；独立 <code>lody-sandbox</code> 基于 <code>rquickjs</code> 沙箱求值（16MiB 内存上限、中断截止、最多 32 次受限 <code>ctx.read/fetch/exec</code>）；<code>ACP over stdio</code>（含 <code>_lody/session/activity_update</code> v1、<code>steering</code> 三态回执握手、隔离 <code>_lody/session/archive</code>）+ <code>portable-pty</code> + 代理感知制品安装；Git Worktree + 桌面端目录/文件/分支/技能扫描 + <code>LTD1</code> v2 FastCDC <code>TurnDiffStore</code>。</p>
       </td>
       <td>
-        <p><code>automations</code> 与 <code>pr-poller-state</code> 分库读写。</p>
+        <p>持续跟进上游 ACP 扩展契约演进。</p>
       </td>
     </tr>
     <tr>

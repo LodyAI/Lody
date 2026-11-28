@@ -1,14 +1,16 @@
 #![forbid(unsafe_code)]
 
 pub use lody_ports::{
-    AnchorSyncStatus, BackendProfile, BranchListPage, BranchListQuery, BrowseDirectoryEntry,
-    BrowseDirectoryPage, BrowseDirectoryQuery, BrowseEntryHints, BrowseRootsInfo, CapabilitySet,
-    CheckoutBranchOutcome, CustomCommandSpec, DiffCaptureScope, DiffFileEntry, DirectoryChildEntry,
-    DirectoryListPage, EntitlementStatus, FileSearchResult, HistoryBlock, HistoryTurnRecord,
-    LocalProjectGitSummary, LocalProjectId, LocalProjectRecord, MAX_SCHEDULE_PROMPT_BYTES,
-    MachineId, MachineIdentityRestoreOutcome, McpEnvVar, McpHttpHeader, McpServerMount,
-    McpServerTransport, PermissionDecision, PlatformCapability, PortError, PortErrorKind,
-    PortResult, PreparedProjectAdd, ProfileId, ProjectFileReadResult, ProjectSkillEntry,
+    AnchorSyncStatus, AutomationActivityCursor, AutomationActivityPage,
+    AutomationRegistrationInput, AutomationRunInput, AutomationWaitRecord, BackendProfile,
+    BranchListPage, BranchListQuery, BrowseDirectoryEntry, BrowseDirectoryPage,
+    BrowseDirectoryQuery, BrowseEntryHints, BrowseRootsInfo, CapabilitySet, CheckoutBranchOutcome,
+    CustomCommandSpec, DiffCaptureScope, DiffFileEntry, DirectoryChildEntry, DirectoryListPage,
+    EntitlementStatus, FileSearchResult, HistoryBlock, HistoryTurnRecord, LocalProjectGitSummary,
+    LocalProjectId, LocalProjectRecord, MAX_SCHEDULE_PROMPT_BYTES, MachineId,
+    MachineIdentityRestoreOutcome, McpEnvVar, McpHttpHeader, McpServerMount, McpServerTransport,
+    PermissionDecision, PlatformCapability, PortError, PortErrorKind, PortResult,
+    PreparedProjectAdd, ProfileId, ProjectFileReadResult, ProjectSkillEntry,
     ProjectSkillGroupEntry, ProjectSkillsListing, ScannedFileEntry, ScannedFileIndex,
     ScheduleEditPatch, ScheduleProposalOutcome, ScheduleRecord, SessionId, SessionMetaSnapshot,
     SteerVerdict, StorageLeaseMode, TERMINAL_MAX_PER_SESSION, TerminalAttachReplay,
@@ -137,6 +139,33 @@ pub enum AppCommand {
         schedule_id: String,
         request_id: String,
     },
+    AutomationRegister {
+        workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
+        target_session_id: Option<SessionId>,
+        registration: AutomationRegistrationInput,
+    },
+    AutomationRun {
+        workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
+        target_session_id: Option<SessionId>,
+        run_spec: AutomationRunInput,
+    },
+    AutomationConfigure {
+        workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
+        target_session_id: Option<SessionId>,
+        settings: Value,
+    },
+    AutomationCancel {
+        workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
+        item_id: String,
+    },
+    TickWorkspaceSchedulers {
+        workspace_id: WorkspaceId,
+        now_ms: Option<i64>,
+    },
     TerminalOpen {
         session_id: SessionId,
         cols: u16,
@@ -179,6 +208,11 @@ impl AppCommand {
             | Self::ProposeSchedule { workspace_id, .. }
             | Self::ProposeScheduleEdit { workspace_id, .. }
             | Self::PauseSchedule { workspace_id, .. }
+            | Self::AutomationRegister { workspace_id, .. }
+            | Self::AutomationRun { workspace_id, .. }
+            | Self::AutomationConfigure { workspace_id, .. }
+            | Self::AutomationCancel { workspace_id, .. }
+            | Self::TickWorkspaceSchedulers { workspace_id, .. }
             | Self::CheckoutProjectBranch { workspace_id, .. } => Some(workspace_id),
             Self::ConfigureBackendProfile { .. }
             | Self::ClearBackendProfile
@@ -205,6 +239,7 @@ impl AppCommand {
                 | Self::RegisterProject { .. }
                 | Self::CreateLocalDirectory { .. }
                 | Self::CheckoutProjectBranch { .. }
+                | Self::TickWorkspaceSchedulers { .. }
                 | Self::TerminalOpen { .. }
                 | Self::TerminalAttach { .. }
                 | Self::TerminalInput { .. }
@@ -224,6 +259,9 @@ impl AppCommand {
                     | Self::DelegateChildSession { .. }
                     | Self::ProposeSchedule { .. }
                     | Self::ProposeScheduleEdit { .. }
+                    | Self::AutomationRegister { .. }
+                    | Self::AutomationRun { .. }
+                    | Self::AutomationConfigure { .. }
             )
     }
 }
@@ -339,6 +377,28 @@ pub enum AppQuery {
         invoking_session_id: Option<SessionId>,
         schedule_id: String,
     },
+    AutomationSettings {
+        workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
+        target_session_id: Option<SessionId>,
+    },
+    AutomationList {
+        workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
+        target_session_id: Option<SessionId>,
+    },
+    AutomationShow {
+        workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
+        item_id: String,
+    },
+    AutomationActivities {
+        workspace_id: WorkspaceId,
+        invoking_session_id: Option<SessionId>,
+        target_session_id: Option<SessionId>,
+        limit: usize,
+        before: Option<AutomationActivityCursor>,
+    },
     ListTerminals {
         session_id: SessionId,
     },
@@ -361,7 +421,11 @@ impl AppQuery {
             | Self::GetSessionHistory { workspace_id, .. }
             | Self::GetTurnDiff { workspace_id, .. }
             | Self::ListSchedules { workspace_id, .. }
-            | Self::GetSchedule { workspace_id, .. } => Some(workspace_id),
+            | Self::GetSchedule { workspace_id, .. }
+            | Self::AutomationSettings { workspace_id, .. }
+            | Self::AutomationList { workspace_id, .. }
+            | Self::AutomationShow { workspace_id, .. }
+            | Self::AutomationActivities { workspace_id, .. } => Some(workspace_id),
             Self::DaemonStatus
             | Self::MachineIdentity
             | Self::ListAttachedWorkspaces
@@ -477,6 +541,12 @@ pub enum AppResponse {
         schedule_id: String,
         changed: bool,
     },
+    AutomationResult {
+        payload: Value,
+    },
+    SchedulersTicked {
+        next_wake_ms: Option<i64>,
+    },
     TerminalsListed {
         session_id: SessionId,
         terminals: Vec<TerminalSnapshot>,
@@ -544,6 +614,27 @@ pub fn enforce_command_policy(
                     "Schedule tools require the invoking Session owner",
                 ));
             }
+            AppCommand::AutomationRegister {
+                invoking_session_id,
+                ..
+            }
+            | AppCommand::AutomationRun {
+                invoking_session_id,
+                ..
+            }
+            | AppCommand::AutomationConfigure {
+                invoking_session_id,
+                ..
+            }
+            | AppCommand::AutomationCancel {
+                invoking_session_id,
+                ..
+            } if invoking_session_id.as_ref() != Some(caller_sid) => {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "AUTOMATION_PERMISSION_DENIED",
+                ));
+            }
             _ => {}
         }
     }
@@ -595,6 +686,27 @@ pub fn enforce_query_policy(caller: &VerifiedPrincipal, query: &AppQuery) -> Por
                 return Err(PortError::new(
                     PortErrorKind::Forbidden,
                     "Schedule tools require the invoking Session owner",
+                ));
+            }
+            AppQuery::AutomationSettings {
+                invoking_session_id,
+                ..
+            }
+            | AppQuery::AutomationList {
+                invoking_session_id,
+                ..
+            }
+            | AppQuery::AutomationShow {
+                invoking_session_id,
+                ..
+            }
+            | AppQuery::AutomationActivities {
+                invoking_session_id,
+                ..
+            } if invoking_session_id.as_ref() != Some(caller_sid) => {
+                return Err(PortError::new(
+                    PortErrorKind::Forbidden,
+                    "AUTOMATION_PERMISSION_DENIED",
                 ));
             }
             _ => {}
