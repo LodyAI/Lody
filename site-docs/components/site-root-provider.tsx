@@ -1,6 +1,7 @@
 import { Link as RouterLink, useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { RootProvider } from 'fumadocs-ui/provider/tanstack';
-import type { ComponentProps, ReactNode } from 'react';
+import { useEffect, type ComponentProps, type ReactNode } from 'react';
+import { installSiteAnalyticsListeners } from '@site/lib/site-analytics';
 import {
   detectSiteLocaleFromPath,
   SITE_LOCALE_META,
@@ -177,6 +178,14 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const pathname = location.pathname;
   const locale = detectSiteLocaleFromPath(pathname);
+
+  useEffect(
+    () =>
+      installSiteAnalyticsListeners({
+        nightlyBaseUrl: import.meta.env.VITE_NIGHTLY_UPDATE_URL,
+      }),
+    []
+  );
 
   return (
     <RootProvider

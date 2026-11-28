@@ -1,5 +1,6 @@
 import { Download, Laptop, MonitorDown, Smartphone } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { SiteAnchor } from '@site/components/site-anchor';
 import type { SiteLocale } from '@site/src/site-pages/shared';
 import {
   parseNightlyRelease,
@@ -212,10 +213,14 @@ function NightlyDownloadsForPlatform({
                     {release.downloads
                       .filter((item) => item.platform === downloadPlatform)
                       .map((item) => (
-                        <a className="download-card__action" href={item.href} key={item.href}>
+                        <SiteAnchor
+                          className="download-card__action"
+                          href={item.href}
+                          key={item.href}
+                        >
                           <span>{item.label}</span>
                           <Download aria-hidden="true" />
-                        </a>
+                        </SiteAnchor>
                       ))}
                   </div>
                 </article>
