@@ -507,8 +507,6 @@ export class AutomationSessionActionsLegacy {
         return { state: 'cancelled', reason: 'session_input_cancelled' };
       if (turnRead.turn.status === 'failed')
         return { state: 'failed', reason: 'agent_turn_failed' };
-      // The receipt delivers one input; other work the Session group runs is
-      // tracked by its own owners and never un-settles this delivery.
       if (turnRead.turn.status === 'handled') return { state: 'settled' };
       if (meta.processingUserMsgId === receipt.turnId) return { state: 'running' };
       if (turnRead.turn.status !== 'prepared') return { state: 'queued' };

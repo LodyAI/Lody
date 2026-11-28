@@ -206,7 +206,8 @@ The ledger retires what has ended. Terminal waits — cancelled, expired, failed
 superseded — and their one-shot rules are pruned 48 hours after their terminal
 update; a normally matched wait retires from its continuation's settlement,
 measured from settlement time, while receipts stay inspectable through
-`activities`. Archiving or
+`activities`. One-shot rules share their wait's id; policy rules do not, so
+settling a continuation disables only its one-shot rule. Archiving or
 deleting the Session cancels its unfinished waits on the next evaluation. `list`
 returns only live rows: unfinished waits and failed waits still awaiting a
 decision; completed history is paged through `activities`.

@@ -107,7 +107,6 @@ export class Automations extends Context.Service<
                           );
                           return;
                         }
-                        // A result produced without observing is a programming error, not transient.
                         if (message.includes('AUTOMATION_RESULT_WITHOUT_OBSERVATION')) {
                           ledger.updateWait(
                             claimed.id,

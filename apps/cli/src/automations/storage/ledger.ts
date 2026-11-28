@@ -1082,7 +1082,6 @@ export class AutomationLedger {
                   : 'cancelled',
             updatedAt: now,
           });
-        // One-shot rules share their id with their wait; policy rules never do.
         const rule = this.rule(next.rule.id);
         if (rule?.enabled && this.wait(next.rule.id)) {
           const {
