@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@lody/plugin-sdk": ["./sdk/shared.d.ts"],
+      "@lody/plugin-sdk/client": ["./sdk/client.d.ts"],
+      "@lody/plugin-sdk/manifest": ["./sdk/manifest.d.ts"],
+      "@lody/ui": ["../../../packages/ui/src/index.ts"],
+      "zod": ["../../../packages/shared/node_modules/zod"],
+      "react": ["../../../packages/ui/node_modules/@types/react"],
+      "react/jsx-runtime": ["../../../packages/ui/node_modules/@types/react/jsx-runtime"]
+    }
+  },
+  "include": [
+    "./sdk/shared.d.ts",
+    "./sdk/client.d.ts",
+    "./sdk/manifest.d.ts",
+    "./examples/**/shared.ts",
+    "./examples/**/client.tsx",
+    "./contracts.ts"
+  ]
+}
