@@ -1,4 +1,4 @@
-import { Clock, Effect, Exit, Result, Semaphore } from 'effect';
+import { Clock, Deferred, Effect, Exit, Result, Semaphore } from 'effect';
 import { toHex } from './bytes';
 import {
   derivePairingKeys,
@@ -8,6 +8,7 @@ import {
 } from '@lody/e2ee-core/protocol';
 import type { E2eeAutomaticPairingCommand, E2eeAutomaticPairingRecord } from '@lody/cloud-api';
 import type {
+  E2eeAccountPairingRequestState,
   E2eeAutomaticPairingState,
   E2eeAutomaticPairingReview,
   E2eeWorkspaceRuntime,
@@ -204,6 +205,32 @@ const id = (crypto: Crypto) =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
     b.toString(16).padStart(2, '0')
   ).join('');
+const SIBLING_RETRY_INTERVAL_MS = 2_000;
+const SIBLING_RETRY_MAX_ATTEMPTS = 10;
+const hasPendingApprovedSiblings = (
+  state: E2eeAccountPairingRequestState | null | undefined,
+  primaryWorkspaceId: string
+): boolean =>
+  Boolean(
+    state &&
+    state.status === 'waiting' &&
+    state.workspaces.some(
+      (item) =>
+        item.workspaceId !== primaryWorkspaceId &&
+        item.state === 'pending' &&
+        item.approval === 'approved'
+    )
+  );
+const shouldReleaseSettledPartialApproval = (
+  state: E2eeAccountPairingRequestState | null | undefined
+): boolean =>
+  Boolean(
+    state &&
+    state.status === 'waiting' &&
+    state.workspaces.some((item) => item.approval === 'omitted') &&
+    state.workspaces.some((item) => item.state === 'joined') &&
+    !state.workspaces.some((item) => item.approval === 'approved' && item.state === 'pending')
+  );
 /** Bound for the native decline at lockout; the hosted client may hold calls while offline. */
 const LOCKOUT_DECLINE_TIMEOUT_MS = 5_000;
 /** Bound for each relay call: a hosted client queues writes while offline and would
@@ -248,6 +275,11 @@ export function makeAutomaticPairingRuntime(options: {
   readonly run: <A>(work: Effect.Effect<A, unknown>) => Promise<A>;
   /** Overrides the relay call bounds (tests). */
   readonly relayTimeoutMs?: { readonly call: number; readonly cancelNotice: number };
+  readonly siblingRetry?: {
+    readonly intervalMs?: number;
+    readonly maxAttempts?: number;
+    readonly sleep?: (ms: number) => Effect.Effect<void>;
+  };
 }) {
   const requesting = new Map<string, RequesterEntry>();
   const approving = new Map<string, ApproverEntry>();
@@ -269,6 +301,79 @@ export function makeAutomaticPairingRuntime(options: {
     exchange: (command) => bounded(options.relay.exchange(command), limits.call),
   };
   const setup = Semaphore.makeUnsafe(1);
+  const siblingIntervalMs = options.siblingRetry?.intervalMs ?? SIBLING_RETRY_INTERVAL_MS;
+  const siblingMaxAttempts = options.siblingRetry?.maxAttempts ?? SIBLING_RETRY_MAX_ATTEMPTS;
+  const siblingSleep = options.siblingRetry?.sleep ?? ((ms: number) => Effect.sleep(ms));
+  let siblingSettlement: {
+    readonly lookupId: string;
+    readonly cancel: () => void;
+  } | null = null;
+  const stopSiblingSettlement = (lookupId?: string) => {
+    if (!siblingSettlement) return;
+    if (lookupId !== undefined && siblingSettlement.lookupId !== lookupId) return;
+    const current = siblingSettlement;
+    siblingSettlement = null;
+    current.cancel();
+  };
+  const releaseSettledPartialApproval = (
+    lookupId: string,
+    state: E2eeAccountPairingRequestState | null | undefined
+  ) =>
+    shouldReleaseSettledPartialApproval(state) && runtime.cancelAccountPairing
+      ? Effect.asVoid(
+          Effect.result(
+            promise(() => runtime.cancelAccountPairing!({ expectedLookupId: lookupId }))
+          )
+        )
+      : Effect.void;
+  const ensureSiblingSettlement = (
+    lookupId: string,
+    expiresAt: number,
+    primaryWorkspaceId: string
+  ) => {
+    if (closed || !runtime.accountPairingRequest) return;
+    if (siblingSettlement?.lookupId === lookupId) return;
+    stopSiblingSettlement();
+    const cancelSignal = Deferred.makeUnsafe<void>();
+    let cancelled = false;
+    const owner = {
+      lookupId,
+      cancel: () => {
+        if (cancelled) return;
+        cancelled = true;
+        Deferred.doneUnsafe(cancelSignal, Exit.void);
+      },
+    };
+    siblingSettlement = owner;
+    void options
+      .run(
+        Effect.gen(function* () {
+          for (let attempt = 0; attempt < siblingMaxAttempts; attempt++) {
+            if (cancelled || closed || (account && options.account() !== account)) return;
+            if ((yield* now) >= expiresAt) return;
+            yield* Effect.raceFirst(siblingSleep(siblingIntervalMs), Deferred.await(cancelSignal));
+            if (cancelled || closed || (account && options.account() !== account)) return;
+            if ((yield* now) >= expiresAt) return;
+            const next = yield* Effect.result(promise(() => runtime.accountPairingRequest!()));
+            if (cancelled || closed || (account && options.account() !== account)) return;
+            if (Result.isFailure(next)) {
+              if (options.accessLoss(next.failure)) return;
+              continue;
+            }
+            const current = next.success;
+            if (!current || (current.lookupId && current.lookupId !== lookupId)) return;
+            if (!hasPendingApprovedSiblings(current, primaryWorkspaceId)) {
+              yield* releaseSettledPartialApproval(lookupId, current);
+              return;
+            }
+          }
+        })
+      )
+      .catch(() => undefined)
+      .finally(() => {
+        if (siblingSettlement === owner) siblingSettlement = null;
+      });
+  };
   let closed = false;
   /** Page listeners and the request rows watched for them. A row is watched only while a
    * listener exists and its requester entry is live; terminal or replaced entries, the
@@ -743,10 +848,16 @@ export function makeAutomaticPairingRuntime(options: {
       return snapshotRequester(value);
     }
     if (value.state._tag === 'AdmittedSyncing') {
-      yield* Effect.result(
+      const latest = yield* Effect.result(
         promise(() => runtime.accountPairingRequest?.() ?? Promise.resolve(null))
       );
       yield* updateKeys(value);
+      const lookupId = requesterLookupIdOf(value.state);
+      if (lookupId && Result.isSuccess(latest)) {
+        if (hasPendingApprovedSiblings(latest.success, value.context.workspaceId))
+          ensureSiblingSettlement(lookupId, value.context.expiresAt, value.context.workspaceId);
+        else yield* releaseSettledPartialApproval(lookupId, latest.success);
+      }
       return snapshotRequester(value);
     }
     if (value.state._tag === 'Terminal') {
@@ -848,6 +959,11 @@ export function makeAutomaticPairingRuntime(options: {
         });
       }
       yield* updateKeys(value);
+      if (lookupId) {
+        if (hasPendingApprovedSiblings(state, hint.workspaceId))
+          ensureSiblingSettlement(lookupId, value.context.expiresAt, hint.workspaceId);
+        else yield* releaseSettledPartialApproval(lookupId, state);
+      }
     } else if (value.state._tag === 'RequestSubmitted' && value.state.phase !== 'waiting') {
       advanceRequester(value, 'RequestSubmitted', {
         ...value.state,
@@ -1204,6 +1320,7 @@ export function makeAutomaticPairingRuntime(options: {
                       return yield* Effect.fail(refuse('pairing-update-required'));
                     if (current.lookupId !== input.expectedLookupId)
                       return yield* Effect.fail(refuse('pairing-elsewhere'));
+                    stopSiblingSettlement(input.expectedLookupId);
                     yield* promise(() =>
                       runtime.cancelAccountPairing!({ expectedLookupId: input.expectedLookupId })
                     );
@@ -1282,10 +1399,16 @@ export function makeAutomaticPairingRuntime(options: {
                 if (isRequesterAdmitted(value.state)) return false;
                 const lookupId = requesterLookupIdOf(value.state);
                 // A lost request's native original already settled; only detach it.
-                if (isRequesterAttempted(value.state) && lookupId && !isRequesterLost(value.state))
+                if (
+                  isRequesterAttempted(value.state) &&
+                  lookupId &&
+                  !isRequesterLost(value.state)
+                ) {
+                  stopSiblingSettlement(lookupId);
                   yield* promise(() =>
                     runtime.cancelAccountPairing!({ expectedLookupId: lookupId })
                   );
+                }
                 settleRequesterTerminal(value, 'cancelled');
                 // A detached request is never read again: the next start makes a fresh
                 // one with its own id and gate, not the dead `cancelled` original.
@@ -1403,6 +1526,7 @@ export function makeAutomaticPairingRuntime(options: {
       ),
     disposeAutomaticPairing() {
       closed = true;
+      stopSiblingSettlement();
       for (const value of requesting.values()) disposeRequesterCrypto(value.state);
       for (const value of approving.values()) disposeApproverCrypto(value.state);
       requesting.clear();

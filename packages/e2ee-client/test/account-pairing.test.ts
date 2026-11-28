@@ -1547,6 +1547,7 @@ describe('approval coverage across workspaces', () => {
       loseFirstApprovalReply?: boolean;
       /** A host whose request names only this workspace, whatever the runtime asks. */
       onlyRequest?: string;
+      siblingRetry?: Parameters<typeof makeAutomaticPairingRuntime>[0]['siblingRetry'];
     } = {}
   ) => {
     const rows = new Map<string, E2eeAutomaticPairingRecord>();
@@ -1593,6 +1594,7 @@ describe('approval coverage across workspaces', () => {
     };
     const phone = makeAutomaticPairingRuntime({
       ...common,
+      ...(options.siblingRetry ? { siblingRetry: options.siblingRetry } : {}),
       runtime: {
         requestAccountPairing: (
           input: Parameters<typeof harness.requester.requestAccountPairing>[0]
@@ -1604,11 +1606,13 @@ describe('approval coverage across workspaces', () => {
           );
         },
         accountPairingRequest: () => Effect.runPromise(harness.requester.accountPairingRequest()),
-        cancelAccountPairing: () => Effect.runPromise(harness.requester.cancelAccountPairing()),
-        status: async () => ({
+        cancelAccountPairing: (
+          input?: Parameters<typeof harness.requester.cancelAccountPairing>[0]
+        ) => Effect.runPromise(harness.requester.cancelAccountPairing(input)),
+        status: async (workspaceId: string) => ({
           deviceKind: 'personal',
-          hasDeviceCredential: harness.installed.length > 0,
-          hasCurrentKey: harness.installed.length > 0,
+          hasDeviceCredential: harness.installed.includes(workspaceId),
+          hasCurrentKey: harness.installed.includes(workspaceId),
         }),
       } as unknown as E2eeWorkspaceRuntime,
     });
@@ -1639,15 +1643,17 @@ describe('approval coverage across workspaces', () => {
       } as unknown as E2eeWorkspaceRuntime,
     });
     /** Runs the handshake until the computer sees the verified request. */
-    const review = async () => {
-      await phone.startAutomaticPairing('w1');
+    const review = async (workspaceId = 'w1') => {
+      await phone.startAutomaticPairing(workspaceId);
       for (let round = 0; round < 8; round++) {
-        const [found] = await desktop.pendingAutomaticPairing();
+        const found = (await desktop.pendingAutomaticPairing()).find(
+          (item) => item.workspaceId === workspaceId
+        );
         if (found?.workspaces) {
-          const shown = (await phone.automaticPairingState('w1'))!.comparisonCode!;
+          const shown = (await phone.automaticPairingState(workspaceId))!.comparisonCode!;
           return { review: found, shown };
         }
-        await phone.automaticPairingState('w1');
+        await phone.automaticPairingState(workspaceId);
       }
       throw new Error('the request never reached the computer');
     };
@@ -1747,6 +1753,69 @@ describe('approval coverage across workspaces', () => {
       await expect(pair.desktop.approveAutomaticPairing!(review.id, shown)).rejects.toThrow();
       expect(pair.signed).toEqual([]);
       expect(harness.installed).toEqual([]);
+    } finally {
+      pair.phone.disposeAutomaticPairing();
+      pair.desktop.disposeAutomaticPairing();
+    }
+  });
+
+  it('settles partial approvals once approved workspaces join so an omitted workspace pairs immediately without pairing-elsewhere', async () => {
+    const harness = setup({ approverHas: ['w1', 'w2'] });
+    const pair = automatic(harness);
+    try {
+      const first = await pair.review('w1');
+      await pair.desktop.approveAutomaticPairing!(first.review.id, first.shown, ['w1']);
+      expect((await pair.phone.automaticPairingState('w1'))?.phase).toBe('joined');
+      const settled = await Effect.runPromise(harness.requester.accountPairingRequest());
+      expect(settled?.status).not.toBe('waiting');
+      expect(coverageOf(settled)).toEqual({ w1: 'joined/approved', w2: 'pending/omitted' });
+
+      const second = await pair.review('w2');
+      await pair.desktop.approveAutomaticPairing!(second.review.id, second.shown, ['w2']);
+      expect((await pair.phone.automaticPairingState('w2'))?.phase).toBe('joined');
+      expect([...harness.installed].sort()).toEqual(['w1', 'w2']);
+    } finally {
+      pair.phone.disposeAutomaticPairing();
+      pair.desktop.disposeAutomaticPairing();
+    }
+  });
+
+  it('keeps retrying a transiently failing approved sibling in the background after the primary workspace joins', async () => {
+    const harness = setup({ approverHas: ['w1', 'w2'] });
+    harness.failingInstalls.set('w2', 1);
+    let sleepCalls = 0;
+    const waitStarted = Deferred.makeUnsafe<void>();
+    const releaseSleep = Deferred.makeUnsafe<void>();
+    const pair = automatic(harness, {
+      siblingRetry: {
+        intervalMs: 1,
+        maxAttempts: 5,
+        sleep: () =>
+          Effect.gen(function* () {
+            sleepCalls++;
+            yield* Deferred.succeed(waitStarted, undefined);
+            yield* Deferred.await(releaseSleep);
+          }),
+      },
+    });
+    try {
+      const { review, shown } = await pair.review('w1');
+      await pair.desktop.approveAutomaticPairing!(review.id, shown, ['w1', 'w2']);
+      expect((await pair.phone.automaticPairingState('w1'))?.phase).toBe('joined');
+      expect(harness.installed).toEqual(['w1']);
+
+      await Effect.runPromise(Deferred.await(waitStarted));
+      expect(sleepCalls).toBe(1);
+      await Effect.runPromise(Deferred.succeed(releaseSleep, undefined));
+
+      for (let i = 0; i < 20 && harness.installed.length < 2; i++) {
+        await Promise.resolve();
+      }
+      expect([...harness.installed].sort()).toEqual(['w1', 'w2']);
+      expect((await Effect.runPromise(harness.requester.accountPairingRequest()))?.status).toBe(
+        'joined'
+      );
+      expect(sleepCalls).toBe(1);
     } finally {
       pair.phone.disposeAutomaticPairing();
       pair.desktop.disposeAutomaticPairing();

@@ -66,6 +66,19 @@ export type AccountPairingRefusal =
   | 'pairing-elsewhere';
 const fail = (code: AccountPairingRefusal | 'invalid-input' | 'storage' | 'corrupt') =>
   Object.assign(new Error(`e2ee_${code}`), { code });
+const isTerminalInstallFailure = (error: unknown): boolean => {
+  if (
+    error instanceof Error &&
+    (error.message === 'e2ee_device_revoked' || error.message === 'e2ee_member_removed')
+  )
+    return true;
+  const code =
+    error && typeof error === 'object' && 'code' in error
+      ? (error as { code: unknown }).code
+      : null;
+  return code === 'revoked' || code === 'e2ee_device_revoked' || code === 'e2ee_member_removed';
+};
+
 /** Failures that refuse the whole approval rather than one workspace: the signed-in
  * account changed, the request was tampered with, or it expired. Shared by every
  * per-workspace step so refresh and signing classify the same way. */
@@ -387,6 +400,7 @@ export function makeAccountPairing(input: {
   /** Workspaces whose last install attempt found an unrelated unfinished
    * per-workspace pairing on this device; recomputed on every poll. */
   const blocked = new Map<string, Set<string>>();
+  const permanentlyFailed = new Map<string, Set<string>>();
   /** Per request: whether a verified approval arrived, and the genesis set it covers.
    * Kept across polls so a later failed claim never forgets an approval already seen. */
   const coverage = new Map<string, { seen: boolean; approved: Set<string> }>();
@@ -421,6 +435,7 @@ export function makeAccountPairing(input: {
       Effect.sync(() => {
         if (role === 'requester') secrets.get(lookupId)?.fill(0);
         secrets.delete(lookupId);
+        permanentlyFailed.delete(lookupId);
       })
     );
   const withKeys = <A, E, R>(
@@ -703,6 +718,7 @@ export function makeAccountPairing(input: {
               !workspace ||
               seenWorkspaces.has(workspace.workspaceId) ||
               alreadyJoined.has(workspace.workspaceId) ||
+              permanentlyFailed.get(row.lookup_id)?.has(workspace.workspaceId) ||
               !request.rows.some((item) => hex(item.genesis) === hex(approved.genesis))
             )
               continue;
@@ -747,10 +763,15 @@ export function makeAccountPairing(input: {
                 const set = blocked.get(row.lookup_id) ?? new Set<string>();
                 set.add(workspace.workspaceId);
                 blocked.set(row.lookup_id, set);
+              } else if (isTerminalInstallFailure(accepted.failure)) {
+                const set = permanentlyFailed.get(row.lookup_id) ?? new Set<string>();
+                set.add(workspace.workspaceId);
+                permanentlyFailed.set(row.lookup_id, set);
               }
               continue;
             }
             blocked.get(row.lookup_id)?.delete(workspace.workspaceId);
+            permanentlyFailed.get(row.lookup_id)?.delete(workspace.workspaceId);
             yield* sql(store.addJoined(row.lookup_id, workspace.workspaceId));
           }
         }
