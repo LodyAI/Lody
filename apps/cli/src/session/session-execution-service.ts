@@ -4722,6 +4722,14 @@ export class SessionExecutionService {
     );
     await sessionDoc.waitUntilSynced();
     await sessionDoc.setStatus(SessionStatusFactory.idle());
+    const requesterUserId = this.turnRuntimeBySession.get(sessionId)?.invocation?.requesterUserId;
+    if (requesterUserId) {
+      this.scheduleLiveActivitySummarySync(requesterUserId, {
+        sessionId,
+        triggerReason: 'turn_error',
+        status: 'idle',
+      });
+    }
   }
 
   private refreshCodeCollabSharedStateAfterTurn(sessionId: SessionId): void {
@@ -4907,6 +4915,14 @@ export class SessionExecutionService {
       // unpublished work behind a PR that looks current.
       await this.syncWorkspaceGitStateOnce(sessionId, turnId, session, signal);
       await sessionDoc.setStatus(SessionStatusFactory.idle());
+      const requesterUserId = this.getTurnRuntime(sessionId, turnId)?.invocation?.requesterUserId;
+      if (requesterUserId) {
+        this.scheduleLiveActivitySummarySync(requesterUserId, {
+          sessionId,
+          triggerReason: 'turn_cancelled',
+          status: 'idle',
+        });
+      }
       this.deps.touchSession(sessionId);
       return true;
     };

@@ -853,3 +853,142 @@ describe('MessageHandler permission notifications', () => {
     expect(sessionDoc.mirror.subscribe).not.toHaveBeenCalled();
   });
 });
+
+describe('MessageHandler Live Activity summary sync', () => {
+  it('keeps presence-backed long-running tasks active past heartbeat TTL while respecting durable idle and APNs item bounds', async () => {
+    const now = getServerNow();
+    const longRunningId = 's-long' as SessionId;
+    const finishedId = 's-done' as SessionId;
+    const extraIds = ['s-extra-1', 's-extra-2', 's-extra-3', 's-extra-4'] as SessionId[];
+
+    const makeDoc = (meta: Record<string, unknown>) => ({
+      getMetaState: vi.fn(async () => meta),
+    });
+
+    const sessions = new Map<SessionId, unknown>([
+      [
+        longRunningId,
+        makeDoc({
+          id: longRunningId,
+          userId: 'u-1',
+          cliType: 'builtin',
+          agentType: 'codex',
+          title: 'Long running task',
+          createdAt: new Date(now - 600_000).toISOString(),
+          status: SessionStatusFactory.running(),
+          // Older than the 180s durable heartbeat TTL; presence keeps it alive.
+          lastRunningSeen: now - 600_000,
+        }),
+      ],
+      [
+        finishedId,
+        makeDoc({
+          id: finishedId,
+          userId: 'u-1',
+          cliType: 'builtin',
+          agentType: 'claude',
+          title: 'Just finished task',
+          createdAt: new Date(now - 120_000).toISOString(),
+          lastMessageAt: now,
+          status: SessionStatusFactory.idle(),
+          lastRunningSeen: now - 10_000,
+        }),
+      ],
+      ...extraIds.map((id, idx) => [
+        id,
+        makeDoc({
+          id,
+          userId: 'u-1',
+          cliType: 'builtin',
+          agentType: 'codex',
+          title: `中文超长会话标题-${idx}-${'测'.repeat(90)}`,
+          createdAt: new Date(now - 30_000 - idx * 1000).toISOString(),
+          lastMessageAt: now - idx * 1000,
+          status: SessionStatusFactory.idle(),
+        }),
+      ]),
+    ]);
+
+    const workspaceDocument = {
+      sessions,
+      repo: {
+        watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+        getDocMeta: vi.fn(async () => ({ meta: { needToArchiveSessions: {} } })),
+      },
+      isTransportConnected: vi.fn(() => true),
+      publishSessionPresence: vi.fn(),
+      clearSessionPresence: vi.fn(),
+      getPresenceStates: vi.fn((): LodyPresenceStateMap => ({
+        [`session:${longRunningId}`]: {
+          kind: 'session',
+          sessionId: longRunningId,
+          machineId: 'm-1' as never,
+          status: SessionStatusFactory.running(),
+          updatedAt: now,
+        },
+        // Lingering finalizing presence on a session whose durable meta is already idle.
+        [`session:${finishedId}`]: {
+          kind: 'session',
+          sessionId: finishedId,
+          machineId: 'm-1' as never,
+          status: SessionStatusFactory.running(),
+          updatedAt: now,
+        },
+      })),
+    };
+
+    const syncLiveActivitySummary = vi.fn(async () => ({ sent: true as const, ended: false }));
+    const handler = new MessageHandler(
+      {
+        on: vi.fn(),
+        setRequestPermissionHandler: vi.fn(),
+        hasSession: vi.fn(() => false),
+      } as unknown as SessionManager,
+      workspaceDocument as unknown as LoroDocumentManager,
+      createSilentLogger(),
+      {
+        token: 't',
+        workspaceId: 'ws-1' as WorkspaceId,
+        workspaceSlug: 'ws-slug',
+        userId: 'u-1',
+        machineId: 'm-1',
+        machineName: 'machine',
+        cliVersion: '0.0.0',
+        cloudPort: createTestCloudPort({
+          notifications: createNotificationPort({ syncLiveActivitySummary }),
+        }),
+      }
+    );
+
+    injectActivePresence(handler, longRunningId);
+    injectActivePresence(handler, finishedId);
+
+    await (
+      handler as unknown as { syncLiveActivitySummary: (userId: string) => Promise<unknown> }
+    ).syncLiveActivitySummary('u-1');
+
+    expect(syncLiveActivitySummary).toHaveBeenCalledTimes(1);
+    const payload = syncLiveActivitySummary.mock.calls[0]?.[0] as {
+      totalCount: number;
+      statusCounts: { running: number; unread: number; permission: number; question: number };
+      items: Array<{ id: string; status: string }>;
+      updatedAt: number;
+    };
+    expect(payload.statusCounts).toEqual({ permission: 0, question: 0, running: 1, unread: 5 });
+    expect(payload.totalCount).toBe(6);
+    expect(payload.items[0]).toMatchObject({ id: longRunningId, status: 'running' });
+    expect(payload.items.find((item) => item.id === finishedId)?.status).toBe('unread');
+    expect(payload.items.length).toBeLessThanOrEqual(4);
+    expect(
+      Buffer.byteLength(
+        JSON.stringify({
+          totalCount: payload.totalCount,
+          statusCounts: payload.statusCounts,
+          items: payload.items,
+          updatedAt: payload.updatedAt,
+        }),
+        'utf8'
+      )
+    ).toBeLessThanOrEqual(3200);
+  });
+});
