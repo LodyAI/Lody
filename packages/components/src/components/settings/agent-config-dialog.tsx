@@ -2722,6 +2722,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     };
   }, [filteredOptions]);
 
+  const headerIconProvider = mode.kind === 'edit' ? mode.config : selectedOption;
   const selectedOptionLabel = selectedOption ? getOptionLabel(t, selectedOption) : undefined;
   const selectedOptionDescription = selectedOption
     ? getOptionDescription(t, selectedOption)
@@ -2878,12 +2879,15 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
             </Button>
           )}
           <span {...stylex.props(styles.headerGlyph)}>
-            {selectedOption ? (
-              <OptionIcon
-                option={selectedOption}
+            {headerIconProvider && (
+              <AgentIcon
+                cliType={headerIconProvider.cliType}
+                agentType={headerIconProvider.agentType}
+                brandId={resolvedBrandId}
+                env={mode.kind === 'edit' ? mode.config.env : undefined}
                 className={stylex.props(styles.optionIconLarge).className}
               />
-            ) : null}
+            )}
           </span>
           <div {...stylex.props(styles.headerText)}>
             <h2 {...stylex.props(styles.title)}>{dialogTitle}</h2>
