@@ -1889,6 +1889,105 @@ describe('Operation Inbox execution boundary', () => {
       await f.close();
     }
   });
+
+  it('cancelling an automatic inbox turn preserves a newer pending user turn activated for interrupt-and-send', async () => {
+    const inboxPrompting = createDeferred<void>();
+    const inboxRelease = createDeferred<void>();
+    const automaticDone = createDeferred<void>();
+    const received: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(
+      async (blocks) => {
+        received.push(structuredClone(blocks));
+        if (received.length === 2) {
+          inboxPrompting.resolve();
+          await inboxRelease.promise;
+          return { stopReason: 'cancelled' };
+        }
+        return { stopReason: 'end_turn' };
+      },
+      undefined,
+      () => automaticDone.resolve()
+    );
+    const sessionId = f.message.sessionId;
+    try {
+      await f.accept();
+      await f.service.continueSession(f.message);
+      expect(received).toHaveLength(1);
+
+      f.add('completed-child-op');
+      f.wake();
+      await inboxPrompting.promise;
+
+      const activeTurnId = f.service.getExecutionSnapshot(sessionId).activeTurnId;
+      expect(activeTurnId).toBeDefined();
+
+      // Interrupt-and-send publishes the new user turn and latestUserMsgId before
+      // requesting cancellation of the active inbox completion turn.
+      const steerTurnId = 'steer-after-inbox';
+      const steerConfig = { ...f.message.acpSessionConfig, prompt: 'STEER_AFTER_INBOX' };
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: steerTurnId,
+          role: 'user',
+          userId: 'user-1',
+          timestamp: '2026-10-12T00:01:00Z',
+          status: 'pending',
+          read: false,
+          items: [{ type: 'text', text: 'STEER_AFTER_INBOX' }],
+          inputConfig: steerConfig,
+          finished: true,
+          fileDiff: [],
+        },
+      });
+      await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+        latestUserMsgId: steerTurnId,
+        processingUserMsgId: 'unrelated-claim',
+      });
+
+      const cancelResult = await f.service.cancelSession({
+        type: 'session/cancel',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        turnId: activeTurnId!,
+        pauseInbox: false,
+      });
+      expect(cancelResult).toEqual({ success: true });
+
+      inboxRelease.resolve();
+      await automaticDone.promise;
+
+      const meta = (await f.deps.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId)))
+        ?.meta as SessionMeta | undefined;
+      const backend = await createSessionBackend(f.doc);
+      const history = await backend.readHistory();
+      expect(['pending', 'seen']).toContain(
+        history.find((turn) => turn.id === steerTurnId)?.status
+      );
+      expect(meta?.lastHandledUserMsgId).toBe('human-input');
+      expect(meta?.processingUserMsgId).toBe('unrelated-claim');
+      expect(findNextDispatchableUserTurn(history, meta as SessionMeta)?.id).toBe(steerTurnId);
+
+      // The preserved user turn can now be dispatched and completes normally.
+      await f.service.acceptInboxHumanInput({
+        sessionId,
+        inputId: steerTurnId,
+        userId: 'user-1',
+        config: steerConfig,
+      });
+      await f.service.continueSession({
+        ...f.message,
+        userTurnId: steerTurnId,
+        acpSessionConfig: steerConfig,
+      });
+      expect(received).toHaveLength(3);
+      expect((await backend.readTurn(steerTurnId)).turn).toMatchObject({ status: 'handled' });
+    } finally {
+      inboxRelease.resolve();
+      await f.close();
+    }
+  });
 });
 
 describe('Provider quota refresh', () => {

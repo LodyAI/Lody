@@ -3950,7 +3950,7 @@ export class SessionExecutionService {
       // where a cancelled turn can be durably folded as succeeded.
       // A shutdown interruption leaves the same trace as a crash: the input stays
       // `processing` and claimed in metadata until the next start continues it.
-      if (!runtime?.interruptedByProcessEnd)
+      if (!runtime?.interruptedByProcessEnd && (!runtime || options.userTurnId))
         yield* self.ignoreWithWarning(
           options.sessionId,
           'Failed to mark dispatch cancelled',
@@ -6867,9 +6867,8 @@ export class SessionExecutionService {
     sessionDoc: SessionDocument,
     userTurnId?: string
   ): Promise<void> {
-    const existingMeta = await this.getSessionMeta(sessionId);
     const cancelledUserMsgId =
-      userTurnId ?? existingMeta?.processingUserMsgId ?? existingMeta?.latestUserMsgId;
+      userTurnId ?? (await this.getSessionMeta(sessionId))?.processingUserMsgId;
     if (cancelledUserMsgId) {
       await this.setTerminalUserTurnStatus(sessionId, sessionDoc, cancelledUserMsgId, 'canceled');
       await this.upsertSessionMeta(sessionId, {
