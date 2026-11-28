@@ -17,6 +17,7 @@ export const BATCH_SWITCH_TIMEOUT_MS = 5 * 60_000;
 export type BatchMachineInput = {
   id: string;
   name: string;
+  os: string;
   isOwn: boolean;
   isOnline: boolean;
   cliVersion?: string;
@@ -48,6 +49,7 @@ export type BatchUnsupportedReason =
 export type BatchPlanRow = {
   machineId: string;
   name: string;
+  os: string;
   kind: 'update' | 'up-to-date' | 'offline' | 'unsupported';
   reason?: BatchUnsupportedReason;
   currentVersion?: string;
@@ -77,6 +79,7 @@ export function planMachineBatchUpdate(
       const row = {
         machineId: machine.id,
         name: machine.name,
+        os: machine.os,
         currentVersion: machine.cliVersion,
         channel,
         targetVersion: latestVersion,

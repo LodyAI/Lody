@@ -29,6 +29,7 @@ describe('machine-batch-update-dialog', () => {
   const studio = (isOnline: boolean, running = 1): BatchUpdateMachine => ({
     id: 'studio',
     name: 'Studio',
+    os: 'linux',
     isOwn: true,
     isOnline,
     cliVersion: '1.0.0',
@@ -72,7 +73,7 @@ describe('machine-batch-update-dialog', () => {
         root.render(
           createElement(MachineBatchUpdateDialog, {
             onOpenChange: () => {},
-            latestByChannel: { stable: '1.1.0' },
+            latestByChannel: { stable: '1.1.0', nightly: '1.1.0-nightly.2' },
             requestUpgrade: async () => {},
             ...props,
           })
@@ -80,6 +81,24 @@ describe('machine-batch-update-dialog', () => {
       });
       await flush();
     };
+
+    it('shows the local installer for each unsupported machine’s OS and channel', async () => {
+      await render({
+        open: true,
+        machines: [
+          { ...studio(true), id: 'windows', os: 'win32', cliVersion: '1.0.0-nightly.1' },
+          studio(true),
+        ],
+        probe: async () => ({
+          lifecycle: { ...daemon, canRemoteUpgrade: false, reason: 'unsupported_install' },
+        }),
+      });
+
+      const installerFor = (id: string) =>
+        document.body.querySelector(`[data-machine-id="${id}"] code`)?.textContent;
+      expect(installerFor('windows')).toMatch(/\/install\.ps1'.* -Channel 'nightly'$/);
+      expect(installerFor('studio')).toMatch(/\/install\.sh'.* --channel 'stable'$/);
+    });
 
     it('a machine going offline and new parent callbacks mid-run do not reset the dialog', async () => {
       await render({

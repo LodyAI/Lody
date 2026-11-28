@@ -312,7 +312,6 @@ export function MachineBatchUpdateDialog({
     start();
   };
 
-  const installCommand = useMemo(() => buildDaemonInstallCommands().command, []);
   const statusLabel = (status: BatchRowStatus): string =>
     ({
       requesting: t('settings.machines.batchUpdate.status.requesting', 'Sending request…'),
@@ -407,6 +406,10 @@ export function MachineBatchUpdateDialog({
           <div {...stylex.props(styles.list)}>
             {plan.map((row) => {
               const status = statusOf(row);
+              const installCommands =
+                !status && row.kind === 'unsupported' && row.reason === 'install'
+                  ? buildDaemonInstallCommands({ channel: row.channel })
+                  : undefined;
               return (
                 <div
                   key={row.machineId}
@@ -437,8 +440,12 @@ export function MachineBatchUpdateDialog({
                       )}
                     </span>
                   ) : null}
-                  {!status && row.kind === 'unsupported' && row.reason === 'install' ? (
-                    <code {...stylex.props(styles.command)}>{installCommand}</code>
+                  {installCommands ? (
+                    <code {...stylex.props(styles.command)}>
+                      {row.os === 'win32'
+                        ? installCommands.windowsCommand
+                        : installCommands.command}
+                    </code>
                   ) : null}
                   {!status &&
                   row.reason === 'unreachable' &&

@@ -16,6 +16,7 @@ const updatable: MachineLifecycleCapability = {
 const machine = (overrides: Partial<BatchMachineInput>): BatchMachineInput => ({
   id: 'm',
   name: 'machine',
+  os: 'linux',
   isOwn: true,
   isOnline: true,
   cliVersion: '1.0.0',
