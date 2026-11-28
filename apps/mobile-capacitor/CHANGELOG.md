@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.117.1](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.117.0...lody-mobile-v0.117.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* backport Capacitor session startup repair to stable ([#3521](https://github.com/LodyAI/Lody/issues/3521)) ([aadcb8b](https://github.com/LodyAI/Lody/commit/aadcb8ba7caf1bbff69b8fe6b26591537c2233ad))
+
 ## [0.117.0](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.116.1...lody-mobile-v0.117.0) (2026-11-27)
 
 

@@ -1,5 +1,5 @@
 {
-  "apps/cli": "0.117.0",
-  "apps/electron": "0.117.0",
-  "apps/mobile-capacitor": "0.117.0"
+  "apps/cli": "0.117.1",
+  "apps/electron": "0.117.1",
+  "apps/mobile-capacitor": "0.117.1"
 }
