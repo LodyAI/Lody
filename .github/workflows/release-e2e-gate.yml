@@ -237,8 +237,16 @@ jobs:
           fi
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
-          "$ANDROID_HOME/emulator/emulator" -accel-check
-          echo "no" | avdmanager create avd --force -n lody-smoke -k "system-images;android-35;google_apis;x86_64"
+          emulator="$ANDROID_HOME/emulator/emulator"
+          "$emulator" -accel-check
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/lody-android-avds"
+          mkdir -p "$ANDROID_AVD_HOME"
+          avdmanager create avd --force --name lody-smoke --device pixel_6 \
+            --path "$ANDROID_AVD_HOME/lody-smoke.avd" \
+            --package "system-images;android-35;google_apis;x86_64"
+          test -f "$ANDROID_AVD_HOME/lody-smoke.ini"
+          "$emulator" -list-avds | grep -Fx lody-smoke
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
 
       - name: Run Android Emulator startup smoke test
         shell: bash
