@@ -454,10 +454,10 @@ export function mcpAuthenticationLayer(options: {
             })
           );
         });
-      const reject = (job: McpRelayRequest) =>
+      const reject = (job: McpRelayRequest, status = 503) =>
         Effect.sync(() => {
           if (!job.response.headersSent)
-            job.response.writeHead(503, {
+            job.response.writeHead(status, {
               'content-type': 'text/plain',
               'cache-control': 'no-store',
             });
@@ -541,7 +541,7 @@ export function mcpAuthenticationLayer(options: {
                 }
                 if (response) {
                   if (own) yield* observe(server, response);
-                  yield* reject(job);
+                  yield* reject(job, response.status);
                 }
               }).pipe(
                 Effect.catch(() => reject(job)),

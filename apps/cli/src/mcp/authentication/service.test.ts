@@ -34,7 +34,7 @@ const challenge = () =>
     },
   });
 
-function fixture() {
+function fixture(forward?: typeof fetch) {
   const records = new Map<string, string>();
   const saved = Promise.withResolvers<void>();
   const callback = Promise.withResolvers<McpCallback>();
@@ -113,7 +113,7 @@ function fixture() {
         : Effect.fail(unavailable()),
   };
   const io = {
-    ...makeMcpAuthenticationIO(fetcher),
+    ...makeMcpAuthenticationIO(forward ?? fetcher),
     callback: async () => ({
       redirectUrl: 'http://127.0.0.1:12345/callback',
       wait: (signal: AbortSignal) => {
@@ -422,6 +422,72 @@ describe('local MCP authentication', () => {
       });
       expect(f.records.size).toBe(0);
       expect(f.closedCallbacks()).toBe(1);
+    } finally {
+      await f.runtime.dispose();
+    }
+  });
+
+  it('preserves a discovery rejection so the client can fall back to initialize', async () => {
+    const methods: string[] = [];
+    const f = fixture(async (_input, init) => {
+      const request = JSON.parse(new TextDecoder().decode(init?.body as ArrayBuffer));
+      methods.push(request.method);
+      if (request.method === 'server/discover')
+        return new Response('private upstream detail', { status: 422 });
+      return Response.json({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          serverInfo: { name: 'synthetic', version: '1.0.0' },
+        },
+      });
+    });
+    try {
+      await f.run((service) =>
+        service.configure(entry, { mode: 'manual', bearerToken: 'private-token' })
+      );
+      await f.run((service) =>
+        service.prepare(
+          entry,
+          { type: 'http', name: entry.name, url: 'https://resource.example/mcp', headers: [] },
+          'session-instance',
+          'owner'
+        )
+      );
+      const send = async (method: string, id: number) => {
+        const request = Object.assign(
+          Readable.from([JSON.stringify({ jsonrpc: '2.0', id, method })]),
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+          }
+        ) as unknown as IncomingMessage;
+        const response = Object.assign(new PassThrough(), {
+          headersSent: false,
+          writeHead: (status: number) => {
+            response.statusCode = status;
+            response.headersSent = true;
+            return response;
+          },
+        }) as unknown as ServerResponse;
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        const finished = Promise.withResolvers<void>();
+        response.once('finish', () => finished.resolve());
+        expect(f.offer({ request, response })).toBe(true);
+        await finished.promise;
+        return { status: response.statusCode, body: Buffer.concat(chunks).toString() };
+      };
+
+      const discovery = await send('server/discover', 1);
+      expect(discovery.status).toBe(422);
+      expect(discovery.body).not.toContain('private upstream detail');
+      const initialized = await send('initialize', 2);
+      expect(initialized.status).toBe(200);
+      expect(JSON.parse(initialized.body).result.serverInfo.name).toBe('synthetic');
+      expect(methods).toEqual(['server/discover', 'initialize']);
     } finally {
       await f.runtime.dispose();
     }
