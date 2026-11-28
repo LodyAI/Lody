@@ -2034,9 +2034,10 @@ export class AgentClient implements acp.Client {
 
     // Pi advertises loadSession only for history import; a live resume must not replay it.
     const preferResumeOverLoad =
-      this.options.agentConfig?.cliType === 'builtin' &&
-      (this.options.agentConfig.agentType === 'kimi' ||
-        this.options.agentConfig.agentType === 'pi');
+      (this.options.agentConfig?.cliType === 'builtin' &&
+        (this.options.agentConfig.agentType === 'kimi' ||
+          this.options.agentConfig.agentType === 'pi')) ||
+      this.isAntigravityServer();
     const shouldResume = Boolean(
       resumeSessionId && canResumeSession && (preferResumeOverLoad || !canLoadSession)
     );

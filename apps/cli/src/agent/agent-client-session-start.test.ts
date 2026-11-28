@@ -911,6 +911,164 @@ describe('AgentClient session startup', () => {
     expect(connectionMocks.loadSession).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      label: 'builtin antigravity',
+      agentConfig: { cliType: 'builtin' as const, agentType: 'antigravity' },
+      agentInfo: { name: 'Antigravity ACP Server', version: '1.5.10' },
+    },
+    {
+      label: 'persisted registry antigravity-acp running agy',
+      agentConfig: { cliType: 'registry' as const, agentType: 'antigravity-acp' },
+      agentInfo: { name: 'Antigravity ACP Server', version: '1.5.10' },
+    },
+    {
+      label: 'custom Antigravity ACP Server',
+      agentConfig: { cliType: 'custom' as const, agentType: 'custom-agy' },
+      agentInfo: { name: 'Antigravity ACP Server', version: '1.5.10' },
+    },
+  ])(
+    'resumes $label via session/resume without replaying history through loadSession',
+    async ({ agentConfig, agentInfo }) => {
+      connectionMocks.initialize.mockResolvedValue({
+        agentInfo,
+        agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
+      });
+      connectionMocks.resumeSession.mockResolvedValue({
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'gemini-4-neon',
+            options: [{ value: 'gemini-4-neon', name: 'Gemini 4 Neon' }],
+          },
+          {
+            id: 'mode',
+            name: 'Mode',
+            category: 'mode',
+            type: 'select',
+            currentValue: 'yolo',
+            options: [{ value: 'yolo', name: 'YOLO' }],
+          },
+        ],
+      });
+      const client = new AgentClient({
+        logger: createLogger(),
+        sessionId: 'session-agy-resume' as SessionId,
+        terminalManager: {} as never,
+        agentConfig,
+        configOptionValues: { mode: 'yolo' },
+        onUpdateMessage: vi.fn(),
+        onRequestPermission: vi.fn(),
+      });
+
+      const response = await client.startSession(
+        {} as never,
+        '/workdir',
+        'agy-session-123' as never
+      );
+
+      expect(connectionMocks.resumeSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'agy-session-123',
+          cwd: '/workdir',
+          mcpServers: expect.any(Array),
+          _meta: expect.objectContaining({
+            lody: expect.objectContaining({
+              sessionConfig: expect.objectContaining({
+                version: 1,
+                configOptionValues: { mode: 'yolo' },
+              }),
+            }),
+          }),
+        })
+      );
+      expect(connectionMocks.loadSession).not.toHaveBeenCalled();
+      expect(response.sessionId).toBe('agy-session-123');
+      expect(client.currentModel).toEqual({
+        modelId: 'gemini-4-neon',
+        name: 'Gemini 4 Neon',
+      });
+    }
+  );
+
+  it('falls back to loadSession for Antigravity when resume capability is not advertised', async () => {
+    connectionMocks.initialize.mockResolvedValue({
+      agentInfo: { name: 'Antigravity ACP Server', version: '1.5.10' },
+      agentCapabilities: { loadSession: true, sessionCapabilities: {} },
+    });
+    connectionMocks.loadSession.mockResolvedValue({});
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'session-agy-load-fallback' as SessionId,
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'antigravity' },
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+
+    const response = await client.startSession(
+      {} as never,
+      '/workdir',
+      'agy-session-fallback' as never
+    );
+
+    expect(connectionMocks.loadSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'agy-session-fallback', cwd: '/workdir' })
+    );
+    expect(connectionMocks.resumeSession).not.toHaveBeenCalled();
+    expect(response.sessionId).toBe('agy-session-fallback');
+  });
+
+  it.each([
+    {
+      label: 'legacy registry antigravity-acp',
+      agentConfig: { cliType: 'registry' as const, agentType: 'antigravity-acp' },
+      agentInfo: { name: 'antigravity-acp', version: '1.4.5' },
+    },
+    {
+      label: 'builtin claude',
+      agentConfig: { cliType: 'builtin' as const, agentType: 'claude' },
+      agentInfo: { name: 'claude-acp', version: '1.0.0' },
+    },
+    {
+      label: 'builtin codex',
+      agentConfig: { cliType: 'builtin' as const, agentType: 'codex' },
+      agentInfo: { name: 'codex-acp', version: '1.0.0' },
+    },
+  ])(
+    'keeps preferring loadSession for $label when both load and resume are advertised',
+    async ({ agentConfig, agentInfo }) => {
+      connectionMocks.initialize.mockResolvedValue({
+        agentInfo,
+        agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
+      });
+      connectionMocks.loadSession.mockResolvedValue({});
+      const client = new AgentClient({
+        logger: createLogger(),
+        sessionId: 'session-load-preserved' as SessionId,
+        terminalManager: {} as never,
+        agentConfig,
+        onUpdateMessage: vi.fn(),
+        onRequestPermission: vi.fn(),
+      });
+
+      const response = await client.startSession(
+        {} as never,
+        '/workdir',
+        'native-session-1' as never
+      );
+
+      expect(connectionMocks.loadSession).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'native-session-1', cwd: '/workdir' })
+      );
+      expect(connectionMocks.resumeSession).not.toHaveBeenCalled();
+      expect(response.sessionId).toBe('native-session-1');
+    }
+  );
+
   it.each([undefined, '/synthetic/override.sock'])(
     'starts stdio MCP without daemon discovery and preserves scoped environment (override=%s)',
     async (override) => {
