@@ -7,6 +7,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const GENERATED_FILES = [
   'public/sitemap.xml',
+  'public/sitemap-en.xml',
+  'public/sitemap-zh.xml',
+  'public/sitemap-zh-hant.xml',
+  'public/sitemap-ja.xml',
+  'public/sitemap-ko.xml',
+  'public/sitemap-es.xml',
+  'public/sitemap-fr.xml',
+  'public/sitemap-ru.xml',
   'public/docs-search.json',
   'public/llms.txt',
   'public/llms-full.txt',

@@ -80,7 +80,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: 'Get the apps',
     title: 'Download Lody',
     subtitle:
-      'Manage all your code agents in one place. Conversations sync across devices in real time.',
+      'Run Claude Code, Codex, and ACP AI coding agents in parallel across desktop, mobile, and web — with real-time session sync.',
     desktop: 'Desktop',
     mobile: 'Mobile and browser',
     detected: 'Detected platform',
@@ -102,7 +102,8 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
   zh: {
     eyebrow: '获取客户端',
     title: '下载 Lody',
-    subtitle: '轻松管理你的所有 code agent，所有对话记录多端实时同步。',
+    subtitle:
+      '在一处并行管理 Claude Code、Codex 与 ACP AI 编程 Agent，桌面端、手机与网页多端实时同步。',
     desktop: '桌面端',
     mobile: '移动端和浏览器',
     detected: '检测到的平台',
@@ -124,7 +125,8 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
   'zh-hant': {
     eyebrow: '取得應用程式',
     title: '下載 Lody',
-    subtitle: '在單一工作區管理所有程式設計 Agent，所有對話紀錄跨裝置即時同步。',
+    subtitle:
+      '在單一工作區並行管理 Claude Code、Codex 與 ACP AI 程式設計 Agent，桌面端、手機與網頁即時同步。',
     desktop: '桌面端',
     mobile: '行動裝置與瀏覽器',
     detected: '偵測到的平台',
@@ -147,7 +149,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: 'アプリを入手',
     title: 'Lody をダウンロード',
     subtitle:
-      'すべてのコーディングエージェントを一か所で管理。会話は複数デバイス間でリアルタイム同期されます。',
+      'Claude Code・Codex などの AI コーディングエージェントを一か所で並列管理。デスクトップ・スマホ・Web でセッションをリアルタイム同期します。',
     desktop: 'デスクトップ',
     mobile: 'モバイル・ブラウザー',
     detected: '検出されたプラットフォーム',
@@ -170,7 +172,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: '앱 받기',
     title: 'Lody 다운로드',
     subtitle:
-      '모든 코딩 에이전트를 한곳에서 관리하세요. 대화가 여러 기기에서 실시간으로 동기화됩니다.',
+      'Claude Code, Codex 등 AI 코딩 에이전트를 한곳에서 병렬 관리하세요. 데스크톱, 모바일, 브라우저에서 세션이 실시간으로 동기화됩니다.',
     desktop: '데스크톱',
     mobile: '모바일 및 브라우저',
     detected: '감지된 플랫폼',
@@ -193,7 +195,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: 'Consigue las aplicaciones',
     title: 'Descargar Lody',
     subtitle:
-      'Gestiona todos tus agentes de programación desde un solo lugar. Las conversaciones se sincronizan entre dispositivos en tiempo real.',
+      'Ejecuta Claude Code, Codex y agentes de código IA en paralelo desde escritorio, móvil y navegador, con sincronización en tiempo real.',
     desktop: 'Escritorio',
     mobile: 'Móvil y navegador',
     detected: 'Plataforma detectada',
@@ -216,7 +218,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: 'Télécharger les applications',
     title: 'Télécharger Lody',
     subtitle:
-      'Gérez tous vos agents de code au même endroit. Les conversations se synchronisent en temps réel sur tous vos appareils.',
+      'Pilotez Claude Code, Codex et vos agents de code IA en parallèle sur ordinateur, mobile et navigateur, avec synchronisation en temps réel.',
     desktop: 'Ordinateur',
     mobile: 'Mobile et navigateur',
     detected: 'Plateforme détectée',
@@ -239,7 +241,7 @@ const copy: Record<DownloadLocale, DownloadCopy> = {
     eyebrow: 'Скачать приложения',
     title: 'Скачать Lody',
     subtitle:
-      'Управляйте всеми агентами разработки в одном месте. Диалоги синхронизируются между устройствами в реальном времени.',
+      'Запускайте Claude Code, Codex и ACP ИИ-агентов для кода параллельно на компьютере, телефоне и в браузере с мгновенной синхронизацией сессий.',
     desktop: 'Компьютер',
     mobile: 'Мобильные устройства и браузер',
     detected: 'Определённая платформа',

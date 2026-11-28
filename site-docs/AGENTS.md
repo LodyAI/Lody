@@ -74,7 +74,7 @@ tuning shortcut are in [`README.md`](README.md).
   on the shared `index-*.css` parse. Docs keep that sheet render-blocking.
   The deployable static build output is `site-docs/out/client`; do not publish the
   SSR server bundle.
-- `src/routeTree.gen.ts`, `public/sitemap.xml`, `public/docs-search.json`, `public/llms.txt`,
+- `src/routeTree.gen.ts`, `public/sitemap.xml`, `public/sitemap-*.xml`, `public/docs-search.json`, `public/llms.txt`,
   `public/llms-full.txt`, `public/rss.xml`, `public/rss-*.xml`,
   `lib/blog-reading-time.generated.ts`, and `lib/docs-faq.generated.ts` are
   generated and ignored. `pretypecheck` runs `tsr generate`; `generate` writes

@@ -281,6 +281,24 @@ async function scan() {
       assert.deepEqual(broken, []);
       return { checkedFragments: hashLinks.length };
     });
+    await run('sitemap index and 8 locale sitemaps are published', async () => {
+      const indexResponse = await fetch(`${origin}/sitemap.xml`, { redirect: 'manual' });
+      assert.equal(indexResponse.status, 200);
+      const indexXml = await indexResponse.text();
+      assert.match(indexXml, /<sitemapindex\b/u);
+      const localeLocs = [...indexXml.matchAll(/<sitemap><loc>(.*?)<\/loc>/gu)].map(
+        (match) => match[1]
+      );
+      assert.equal(localeLocs.length, 8);
+      for (const loc of localeLocs) {
+        const pathname = new URL(loc).pathname;
+        const response = await fetch(`${origin}${pathname}`, { redirect: 'manual' });
+        assert.equal(response.status, 200, `Missing published sitemap: ${pathname}`);
+        const xml = await response.text();
+        assert.match(xml, /<urlset\b/u);
+      }
+      return { localeSitemaps: localeLocs.length };
+    });
     await run('unknown URL is a static noindex 404', async () => {
       const page = await context.newPage();
       const response = await page.goto(origin + '/static-verification-missing-page');
