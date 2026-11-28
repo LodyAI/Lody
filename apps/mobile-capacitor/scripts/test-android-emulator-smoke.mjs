@@ -8,6 +8,7 @@
  * uncaught errors or unhandled promise rejections.
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -103,8 +104,10 @@ async function waitForAndroidBoot(adbPath, emulatorProc, knownSerials, bootTimeo
   let serial = null;
 
   while (Date.now() < deadline) {
-    if (emulatorProc && emulatorProc.exitCode !== null) {
-      throw new Error(`Android emulator exited prematurely with code ${emulatorProc.exitCode}`);
+    if (emulatorProc.exitCode !== null || emulatorProc.signalCode !== null) {
+      throw new Error(
+        `Android emulator exited before boot (${emulatorProc.signalCode ?? `code ${emulatorProc.exitCode}`})`
+      );
     }
     const online = listOnlineEmulators(adbPath);
     if (!serial) {
@@ -245,12 +248,12 @@ async function main() {
             '-no-window',
             '-no-audio',
             '-no-boot-anim',
-            '-no-snapshot-save',
+            '-no-snapshot',
             '-gpu',
-            'swiftshader_indirect',
+            'software',
           ],
           {
-            stdio: 'ignore',
+            stdio: ['ignore', 'inherit', 'inherit'],
             env: {
               ...process.env,
               ANDROID_HOME: sdkRoot,
@@ -258,6 +261,7 @@ async function main() {
             },
           }
         );
+        await once(spawnedEmulator, 'spawn');
         const bootTimeoutMs = Number(process.env.LODY_ANDROID_EMULATOR_BOOT_TIMEOUT_MS || 240_000);
         activeSerial = await waitForAndroidBoot(
           adbPath,
@@ -315,11 +319,8 @@ async function main() {
         '-s',
         activeSerial,
         'shell',
-        'run-as',
-        PACKAGE_ID,
-        'sh',
-        '-c',
-        'mkdir -p shared_prefs && cat > shared_prefs/CapacitorStorage.xml',
+        '-T',
+        `run-as ${PACKAGE_ID} sh -c 'mkdir -p shared_prefs && cat > shared_prefs/CapacitorStorage.xml'`,
       ],
       {
         input: prefsXml,
