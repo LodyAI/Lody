@@ -38,6 +38,7 @@ const APP_DIR = resolve(SCRIPT_DIR, '..');
 const IOS_APP_DIR = join(APP_DIR, 'ios', 'App');
 const BUNDLE_ID = 'ai.lody.mobile';
 const SIMCTL_LIMIT = { timeout: 180_000, killSignal: 'SIGKILL' };
+const SIMCTL_INSTALL_LIMIT = { timeout: 360_000, killSignal: 'SIGKILL' };
 const CLEANUP_OPTIONS = { ...SIMCTL_LIMIT, timeout: 30_000, stdio: 'ignore' };
 
 function runInherited(command, args, options = {}) {
@@ -137,6 +138,25 @@ async function main() {
       );
     }
 
+    if (!activeUdid) {
+      const simctlJson = JSON.parse(
+        runCapture('xcrun', ['simctl', 'list', '-j', 'runtimes', 'devicetypes'])
+      );
+      const target = selectIosSimulatorTarget(simctlJson);
+      const simName = `LodySmoke-${Date.now()}`;
+      console.log(
+        `[ios-simulator-smoke] Creating ephemeral simulator ${simName} (${target.deviceTypeName}, ${target.runtimeName})...`
+      );
+      createdSimulatorUdid = runCapture('xcrun', [
+        'simctl',
+        'create',
+        simName,
+        target.deviceTypeId,
+        target.runtimeId,
+      ]).trim();
+      activeUdid = createdSimulatorUdid;
+    }
+
     console.log(
       `[ios-simulator-smoke] Building App scheme (${options.configuration}) for iphonesimulator...`
     );
@@ -152,7 +172,7 @@ async function main() {
         '-sdk',
         'iphonesimulator',
         '-destination',
-        'generic/platform=iOS Simulator',
+        `platform=iOS Simulator,id=${activeUdid}`,
         '-derivedDataPath',
         derivedDataPath,
         'CODE_SIGN_IDENTITY=-',
@@ -189,25 +209,6 @@ async function main() {
     });
     writeFileSync(scratchIndexPath, injectSmokeProbeHtml(originalHtml, probeScript), 'utf8');
 
-    if (!activeUdid) {
-      const simctlJson = JSON.parse(
-        runCapture('xcrun', ['simctl', 'list', '-j', 'runtimes', 'devicetypes'])
-      );
-      const target = selectIosSimulatorTarget(simctlJson);
-      const simName = `LodySmoke-${Date.now()}`;
-      console.log(
-        `[ios-simulator-smoke] Creating ephemeral simulator ${simName} (${target.deviceTypeName}, ${target.runtimeName})...`
-      );
-      createdSimulatorUdid = runCapture('xcrun', [
-        'simctl',
-        'create',
-        simName,
-        target.deviceTypeId,
-        target.runtimeId,
-      ]).trim();
-      activeUdid = createdSimulatorUdid;
-    }
-
     console.log(`[ios-simulator-smoke] Booting simulator ${activeUdid}...`);
     runInherited('xcrun', ['simctl', 'bootstatus', activeUdid, '-b'], {
       ...SIMCTL_LIMIT,
@@ -218,7 +219,7 @@ async function main() {
     spawnSync('xcrun', ['simctl', 'uninstall', activeUdid, BUNDLE_ID], CLEANUP_OPTIONS);
 
     console.log('[ios-simulator-smoke] Installing scratch App.app...');
-    runInherited('xcrun', ['simctl', 'install', activeUdid, scratchAppPath], SIMCTL_LIMIT);
+    runInherited('xcrun', ['simctl', 'install', activeUdid, scratchAppPath], SIMCTL_INSTALL_LIMIT);
 
     console.log('[ios-simulator-smoke] Launching scratch App.app...');
     await launchApp(activeUdid);
