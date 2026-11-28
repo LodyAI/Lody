@@ -106,8 +106,10 @@ ends where execution ownership begins.
   refusal is a durable failure rather than a retrying block.
 - A continuation whose wait was superseded or cancelled before its input
   started never reaches the Session; one already running is not undone.
-- The count of ledger rows and visible notes for one Session stays bounded by
-  its live slots plus the retention window, however long the workspace lives.
+- The count of live waits, rules and visible notes for one Session stays
+  bounded by its live slots plus the retention window; receipts and events
+  remain as inspectable audit history, one entry per continuation actually
+  delivered, rather than expiring on a clock.
 - Ledger privacy, frozen grants, admission rechecks, Stop semantics and the
   match-is-final contract are unchanged.
 

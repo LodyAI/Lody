@@ -203,10 +203,16 @@ The Spec carries the contract; the reasoning that shaped it:
 
 - The pre-change code claims were verified by reading the working tree on
   2026-11-28; incident numbers come from the reporters. Synthetic integration
-  tests cover supersession fencing, frozen causal depth with cap refusal,
-  queued withdrawal and running-turn survival, zero-observation failure,
-  settlement independence and terminal pruning including the normal-completion
-  path; no live multi-agent reproduction was run.
+  tests cover supersession fencing, frozen causal depth with cap refusal
+  (an automation-only chain ends at the shared cap with a durable failure and
+  no queued residue), queued withdrawal and running-turn survival,
+  zero-observation failure, settlement independence, terminal pruning
+  including the normal-completion path, live-inventory filtering at both the
+  register response and list, and a v4 ledger upgrade retiring its legacy
+  matched pairs through the convergent prune. The mixed ledger/message chain
+  reuses the delegation admission guard, whose depth reads the same frozen
+  `inputConfig.chainDepth` the continuation carries; no live multi-agent
+  reproduction was run.
 - `inputConfig` — including `_lodyAutomation` and `chainDepth` — is part of the
   session document schema, so provenance survives restarts and applies to
   encrypted sessions uniformly; legacy waits without frozen provenance continue

@@ -2696,7 +2696,9 @@ describe('Ledger query columns', () => {
       CREATE TABLE rules (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
       CREATE TABLE events (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT NOT NULL UNIQUE,
-        payload TEXT NOT NULL
+        payload TEXT NOT NULL,
+        type TEXT, source TEXT, subject TEXT, session_id TEXT, project_id TEXT,
+        work_id TEXT, observed_at INTEGER
       );
       CREATE TABLE sources (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
       CREATE TABLE deliveries (id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL);
@@ -2757,6 +2759,183 @@ describe('Ledger query columns', () => {
     expect(
       (rawDb(ledger).prepare('SELECT COUNT(*) AS n FROM wait_reads').get() as { n: number }).n
     ).toBe(1);
+  });
+
+  it('retires a legacy matched completion pair when upgrading a v4 ledger', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lody-automations-v4-'));
+    roots.push(root);
+    const filename = path.join(root, 'automations.sqlite');
+    const database = new OrchestrationConnection({ kind: 'disk', path: filename });
+    database.raw.exec(`
+      CREATE TABLE rules (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE events (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT NOT NULL UNIQUE,
+        payload TEXT NOT NULL,
+        type TEXT, source TEXT, subject TEXT, session_id TEXT, project_id TEXT,
+        work_id TEXT, observed_at INTEGER
+      );
+      CREATE TABLE sources (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE deliveries (
+        id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL,
+        rule_id TEXT, owner_user_id TEXT, scope_session_id TEXT, event_source TEXT,
+        event_id TEXT, event_work_id TEXT, updated_at INTEGER
+      );
+      CREATE TABLE receipts (
+        id TEXT PRIMARY KEY, delivery_id TEXT NOT NULL, state TEXT NOT NULL,
+        updated_at INTEGER NOT NULL, payload TEXT NOT NULL,
+        session_id TEXT, scope_session_id TEXT, owner_user_id TEXT, rule_id TEXT,
+        action_kind TEXT, event_type TEXT, event_source TEXT, event_id TEXT,
+        correlation_key TEXT, policy TEXT, work_id TEXT, retry_at INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE capacity (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE work (
+        id TEXT PRIMARY KEY, payload TEXT NOT NULL,
+        session_id TEXT, owner_user_id TEXT, state TEXT, turn_id TEXT, invocation_id TEXT,
+        updated_at INTEGER, binding_id TEXT, fingerprint TEXT, model_id TEXT
+      );
+      CREATE TABLE waits (
+        id TEXT PRIMARY KEY, state TEXT NOT NULL, next_check_at INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        session_id TEXT, owner_user_id TEXT, invocation_id TEXT, created_at INTEGER,
+        due_at INTEGER, run_pending INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE turn_observations (
+        id TEXT PRIMARY KEY, payload TEXT NOT NULL, retry_at INTEGER NOT NULL DEFAULT 0,
+        user_id TEXT, session_id TEXT, observed_at INTEGER
+      );
+      PRAGMA user_version = 4;
+    `);
+    const legacyRule = (waitId: string) => ({
+      id: waitId,
+      name: 'Session condition',
+      ownerUserId: 'user',
+      ownerMachineId: 'machine',
+      scope: { workspaceId: 'workspace', sessionId: 's1' },
+      selector: {
+        types: ['automation.condition.completed'],
+        sources: [`automation/${waitId}`],
+      },
+      enabled: true,
+      handler: {
+        kind: 'agent',
+        invocation: {
+          target: { kind: 'existing', sessionId: 's1', onUnavailable: 'blocked' },
+          input: { kind: 'external_event', ref: waitId },
+          ifBusy: 'enqueue',
+        },
+      },
+      grants: { actions: ['agent.invoke'], sessionIds: ['s1'] },
+      revision: 1,
+    });
+    const legacyWait = (overrides: Record<string, unknown>) => ({
+      id: 'wait-done',
+      sessionId: 's1',
+      workspaceId: 'workspace',
+      ownerUserId: 'user',
+      ownerMachineId: 'machine',
+      program: 'async () => false',
+      intervalMs: 30_000,
+      state: 'matched',
+      createdAt: 1000,
+      updatedAt: 2000,
+      nextCheckAt: 2000,
+      checks: 4,
+      consecutiveErrors: 0,
+      result: { resumeText: 'Continue' },
+      invocationId: 'receipt-done',
+      ...overrides,
+    });
+    const legacyReceipt = (overrides: Record<string, unknown> = {}) => ({
+      id: 'receipt-done',
+      deliveryId: 'delivery-1',
+      sessionId: 's1',
+      turnId: 'turn-1',
+      state: 'settled',
+      retryAt: 0,
+      attempts: 1,
+      intent: {
+        key: 'invoke',
+        action: {
+          kind: 'agent.invoke',
+          parameters: {
+            target: { kind: 'existing', sessionId: 's1' },
+            input: { kind: 'external_event', ref: 'wait-done' },
+            ifBusy: 'enqueue',
+          },
+        },
+      },
+      rule: legacyRule('wait-done'),
+      event: { id: 'e1', source: 'automation/wait-done', type: 'automation.condition.completed' },
+      ...overrides,
+    });
+    const insertWait = database.raw.prepare(
+      `INSERT INTO waits
+      (id,state,next_check_at,payload,session_id,owner_user_id,invocation_id,created_at,due_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`
+    );
+    const insertReceipt = database.raw.prepare(
+      `INSERT INTO receipts
+      (id,delivery_id,state,updated_at,payload,session_id,owner_user_id,rule_id,action_kind,
+      event_type,event_source,event_id,correlation_key,retry_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    );
+    const insertRule = database.raw.prepare('INSERT INTO rules VALUES (?,?)');
+    const insertLegacy = (
+      waitId: string,
+      receiptId: string,
+      receiptState: string,
+      receiptUpdatedAt: number
+    ) => {
+      insertWait.run(
+        waitId,
+        'matched',
+        2000,
+        JSON.stringify(legacyWait({ id: waitId, invocationId: receiptId })),
+        's1',
+        'user',
+        receiptId,
+        1000,
+        2000
+      );
+      insertReceipt.run(
+        receiptId,
+        'delivery-1',
+        receiptState,
+        receiptUpdatedAt,
+        JSON.stringify(legacyReceipt({ id: receiptId, state: receiptState })),
+        's1',
+        'user',
+        waitId,
+        'agent.invoke',
+        'automation.condition.completed',
+        `automation/${waitId}`,
+        'e1',
+        receiptId,
+        0
+      );
+    };
+    insertLegacy('wait-done', 'receipt-done', 'settled', 2000);
+    insertRule.run('wait-done', JSON.stringify(legacyRule('wait-done')));
+    insertLegacy('wait-live', 'receipt-live', 'queued', 2000);
+    database.close();
+    const ledger = new AutomationLedger({ kind: 'disk', path: filename }, 'workspace', 'machine');
+    stores.push(ledger);
+    const columns = new Set(
+      (
+        rawDb(ledger).prepare(`SELECT name FROM pragma_table_info('waits')`).all() as Array<{
+          name: string;
+        }>
+      ).map((column) => column.name)
+    );
+    expect(columns.has('slot_key')).toBe(true);
+    expect(columns.has('updated_at')).toBe(true);
+    const cutoff = 48 * 3_600_000 + 3000;
+    expect(ledger.pruneTerminalWaits(cutoff)).toBe(1);
+    expect(ledger.wait('wait-done')).toBeUndefined();
+    expect(ledger.rule('wait-done')).toBeUndefined();
+    expect(ledger.receipt('receipt-done')).toBeDefined();
+    expect(ledger.wait('wait-live')?.state).toBe('matched');
+    expect(ledger.receipt('receipt-live')?.state).toBe('queued');
   });
 
   it('keeps query columns equal to their frozen payload values', () => {

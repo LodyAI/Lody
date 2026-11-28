@@ -336,6 +336,39 @@ describe('Automation control authority', () => {
       false
     );
   });
+  it('reports only live waits in the registration inventory and list', async () => {
+    const host = await workspaceFixture({
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    });
+    const program = "async ({ctx}) => { await ctx.read('session'); return false; }";
+    const { wait: completed } = host.ledger.registerWait(
+      { program, intervalMs: 30000 },
+      'session-a',
+      'user',
+      Date.now()
+    );
+    host.ledger.updateWait(completed.id, 'waiting', { state: 'checking' }, Date.now());
+    const matched = host.ledger.finishWait(completed, { resumeText: 'done' }, Date.now());
+    const receipt = matched?.invocationId && host.ledger.receipt(matched.invocationId);
+    if (!receipt) throw new Error('missing continuation receipt');
+    host.ledger.update(receipt.id, receipt.state, { state: 'settled' }, Date.now());
+    const registered = (await host.command(
+      { type: 'register', sessionId: 'session-a', program, key: 'next', intervalMs: 30000 },
+      'session-a'
+    )) as { id: string; activeWaits: Array<{ id: string }> };
+    expect(registered.activeWaits.map((wait) => wait.id)).toEqual([registered.id]);
+    const listed = (await host.command(
+      { type: 'list', sessionId: 'session-a' },
+      'session-a'
+    )) as Array<{
+      id: string;
+    }>;
+    expect(listed.map((wait) => wait.id)).toEqual([registered.id]);
+    expect(host.ledger.wait(completed.id)?.state).toBe('matched');
+  });
   it('executes a registered condition in the Session workspace', async () => {
     const host = await workspaceFixture({
       id: 'session-a',
