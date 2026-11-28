@@ -5,8 +5,9 @@ description: Audit code comments in a scope, classify each as Tautology, Excuse,
 
 # Delete comments
 
-`scripts/check-comment-ratchet.mjs` bans comment growth per scope: counted
-comment lines may only shrink against `scripts/comment-ratchet-baseline.json`.
+`scripts/check-comment-ratchet.mjs` bans comment growth per scope: a change may
+not add counted comment lines, and the base branch stays at or below
+`scripts/comment-ratchet-baseline.json`. Rules: [scripts/AGENTS.md](../../../scripts/AGENTS.md).
 This skill is the repeatable audit procedure for that ratchet.
 
 ## Census
