@@ -617,7 +617,7 @@ type MarkdownExternalLinkProps = ComponentPropsWithoutRef<'a'> & {
 
 /**
  * Renders an `<a>` for markdown output, with an escape hatch: if the href
- * names a conversation in the current workspace or matches the active PR,
+ * names a conversation in the current workspace or a GitHub pull request,
  * clicking opens the in-app destination. Falls back to the
  * default new-tab external link when no interceptor matches.
  */
@@ -651,7 +651,7 @@ function MarkdownExternalLink({
         navigateSession({ sessionId: session.sessionId as SessionId, workspaceId });
         return;
       }
-      if (!prHandler) return;
+      if (readonly || !prHandler) return;
       event.preventDefault();
       prHandler();
     },

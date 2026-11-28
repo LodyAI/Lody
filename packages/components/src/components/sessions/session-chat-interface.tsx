@@ -355,7 +355,11 @@ import { useSessionDocStaleReport } from './use-session-doc-stale-report';
 import { buildFixCiErrorsPrompt, buildResolvePrConflictsPrompt } from './session-pr-prompts';
 import { resolveConflictsActionAtomFamily } from './session-pr-agent-action';
 import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge-method';
-import { PrLinkProvider } from '@/components/ai-gui/pr-link-context';
+import {
+  PrLinkProvider,
+  parseGitHubPrLinkTarget,
+  type PrLinkTarget,
+} from '@/components/ai-gui/pr-link-context';
 import { SessionLinkProvider } from '@/components/ai-gui/session-link-context';
 import {
   COMMIT_AND_PUSH_PROMPT,
@@ -3162,9 +3166,6 @@ export const SessionChatInterface = memo(
     const hasHostedGitHub = usePlatformCapability('githubIntegration');
     const latestPrNumber = getPullRequestNumber(latestPr);
     const latestPrRepoFullName = getPullRequestRepoFullName(latestPr) ?? repoFullName;
-    // Stable identity: it is the PrLinkProvider value over the whole
-    // conversation, and a new function per render re-propagated that context
-    // through every row. It reads the latest PR when called.
     const openLatestPr = useStableCallback(() => {
       if (!latestPr) return;
       if (hasHostedGitHub && onOpenPrTab && latestPrRepoFullName && latestPrNumber) {
@@ -3178,6 +3179,39 @@ export const SessionChatInterface = memo(
       void openExternalUrl(latestPr.url);
     });
     const prLinkHandler = latestPr ? openLatestPr : undefined;
+    // Stable identity: it is the PrLinkProvider value over the whole
+    // conversation, and a new function per render re-propagated that context
+    // through every row. Any valid GitHub PR link opens in the PR panel when
+    // hosted GitHub integration is available.
+    const openAnyPrTarget = useStableCallback((target: PrLinkTarget) => {
+      if (!hasHostedGitHub || !onOpenPrTab) {
+        void openExternalUrl(`https://github.com/${target.repoFullName}/pull/${target.prNumber}`);
+        return;
+      }
+      const normalizedRepo = target.repoFullName.toLowerCase();
+      const matchedLatest =
+        latestPr &&
+        latestPrNumber === target.prNumber &&
+        latestPrRepoFullName?.toLowerCase() === normalizedRepo
+          ? latestPr
+          : null;
+      const matchedHistory = !matchedLatest
+        ? pullRequestHistory.find(
+            (view) =>
+              view.number === target.prNumber && view.repoFullName?.toLowerCase() === normalizedRepo
+          )
+        : undefined;
+      onOpenPrTab({
+        prNumber: target.prNumber,
+        repoFullName: matchedHistory?.repoFullName ?? target.repoFullName,
+        headCommitSha: matchedLatest
+          ? getSessionPullRequestLegacyFields(matchedLatest).headCommitSha
+          : matchedHistory
+            ? getSessionPullRequestLegacyFields(matchedHistory.pr).headCommitSha
+            : undefined,
+      });
+    });
+    const markdownPrLinkHandler = hasHostedGitHub && onOpenPrTab ? openAnyPrTarget : undefined;
     const launcherPillRef = useRef<HTMLDivElement>(null);
     // Open any associated PR in the in-app PR tab when hosted GitHub is available;
     // otherwise fall back to opening on GitHub.
@@ -3382,19 +3416,20 @@ export const SessionChatInterface = memo(
       );
     });
     const openLinkedPr = useStableCallback((item: SessionPullRequestLinkListItem) => {
-      if (
-        item.kind === 'associated' &&
-        hasHostedGitHub &&
-        onOpenPrTab &&
-        item.view.repoFullName &&
-        item.view.number != null
-      ) {
-        onOpenPrTab({
-          prNumber: item.view.number,
-          repoFullName: item.view.repoFullName,
-          headCommitSha: getSessionPullRequestLegacyFields(item.view.pr).headCommitSha,
-        });
-        return;
+      if (hasHostedGitHub && onOpenPrTab) {
+        if (item.kind === 'associated' && item.view.repoFullName && item.view.number != null) {
+          onOpenPrTab({
+            prNumber: item.view.number,
+            repoFullName: item.view.repoFullName,
+            headCommitSha: getSessionPullRequestLegacyFields(item.view.pr).headCommitSha,
+          });
+          return;
+        }
+        const parsed = parseGitHubPrLinkTarget(item.url);
+        if (parsed) {
+          onOpenPrTab(parsed);
+          return;
+        }
       }
       void openExternalUrl(item.url);
     });
@@ -7855,7 +7890,7 @@ export const SessionChatInterface = memo(
     );
 
     return (
-      <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
+      <PrLinkProvider onOpenPrTab={markdownPrLinkHandler}>
         <SessionLinkProvider enabled={!!onNavigateSession}>
           {plaintextCopyConfirmation}
           {autoDeliveryDialogOpen ? (
@@ -8275,6 +8310,11 @@ export const SessionChatInterface = memo(
                               selectedMemberId={selectedProjectMemberRow?.id}
                               onSelectMember={setSelectedProjectMemberId}
                               onOpenPullRequest={(url) => {
+                                const parsed = parseGitHubPrLinkTarget(url);
+                                if (parsed && hasHostedGitHub && onOpenPrTab) {
+                                  openAnyPrTarget(parsed);
+                                  return;
+                                }
                                 void openExternalUrl(url);
                               }}
                             />

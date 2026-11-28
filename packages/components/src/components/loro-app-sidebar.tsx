@@ -380,6 +380,7 @@ import { WindowDragStrip } from '@/ui/window-drag-region';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
 import { openExternalUrl } from '@/lib/native-browser';
+import { parseGitHubPrLinkTarget } from '@/components/ai-gui/pr-link-context';
 import { getChangelogUrl, getSiteLocalizedUrl } from '@/lib/lody-urls';
 import { getCachedWorkspaceName } from '@/lib/local-storage-cache';
 import {
@@ -3678,14 +3679,16 @@ export function LoroAppSidebar({
     (request: SessionListPullRequestOpen) => {
       if (!workspaceSlug) return;
       closeMobileDrawer();
+      const parsedPr = parseGitHubPrLinkTarget(request.prUrl);
       const prNumber =
         typeof request.prNumber === 'number' && Number.isFinite(request.prNumber)
           ? request.prNumber
-          : null;
+          : (parsedPr?.prNumber ?? null);
+      const prRepo = parsedPr?.repoFullName;
       void router.navigate({
         to: '/$workspaceName/sessions/$sessionId',
         params: { workspaceName: workspaceSlug, sessionId: request.sessionId as SessionId },
-        search: prNumber ? { pr: prNumber } : {},
+        search: prNumber ? { pr: prNumber, ...(prRepo ? { prRepo } : {}) } : {},
       });
     },
     [closeMobileDrawer, router, workspaceSlug]

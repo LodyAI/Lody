@@ -62,7 +62,6 @@ import {
   getProjectRefBranch,
   getServerNow,
   statusViewTier,
-  getSessionPullRequestLegacyFields,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
@@ -218,6 +217,8 @@ import { SessionFileContentView, type SessionFileSaveViewState } from './session
 import { SessionFileAttachmentPane } from '../ai-gui/session-file-attachment';
 import { SessionFileQuickOpen } from './session-file-quick-open';
 import { PrTabContainer } from './pr-tab-container';
+import { matchesPrTabUrl, resolveActivePrTab } from './pr-tab-target';
+import { PrLinkProvider } from '@/components/ai-gui/pr-link-context';
 import { SessionBrowserPanel } from './session-browser-panel';
 import {
   SessionDevicePreviewPanel,
@@ -1181,6 +1182,7 @@ const SessionDetail = ({
   sessionId,
   urlTab,
   urlPrNumber,
+  urlPrRepo,
   urlBrowser,
   urlSimulator,
   onMobileBack,
@@ -1189,6 +1191,7 @@ const SessionDetail = ({
   sessionId: SessionId;
   urlTab?: string;
   urlPrNumber?: number;
+  urlPrRepo?: string;
   urlBrowser?: boolean;
   urlSimulator?: boolean;
   onMobileBack?: () => void;
@@ -1258,6 +1261,7 @@ const SessionDetail = ({
   const [restoredPrSidebar, setRestoredPrSidebar] = useState<{
     sessionId: SessionId;
     prNumber: number;
+    repoFullName?: string;
   } | null>(null);
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab | null>(
     () => initialTabState.sidePanel.tab
@@ -2341,67 +2345,29 @@ const SessionDetail = ({
     () => resolveSessionPullRequestViews(prOwnerSession),
     [prOwnerSession]
   );
-  const activePrTab = useMemo(() => {
-    const selected = selectedPrTab && selectedPrTab.sessionId === sessionId ? selectedPrTab : null;
-    if (selected) {
-      const match = associatedPrViews.find(
-        (view) =>
-          view.number === selected.prNumber &&
-          view.repoFullName?.toLowerCase() === selected.repoFullName.toLowerCase()
-      );
-      if (match && match.repoFullName && match.number != null) {
-        return {
-          repoFullName: match.repoFullName,
-          prNumber: match.number,
-          headCommitSha:
-            selected.headCommitSha ?? getSessionPullRequestLegacyFields(match.pr).headCommitSha,
-        };
-      }
-    }
-    if (urlPrNumber != null) {
-      if (latestPr && latestPrNumber === urlPrNumber && latestPrRepoFullName) {
-        return {
-          repoFullName: latestPrRepoFullName,
-          prNumber: latestPrNumber,
-          headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-        };
-      }
-      const byNumber = associatedPrViews.find(
-        (view) => view.number === urlPrNumber && view.repoFullName
-      );
-      if (byNumber && byNumber.repoFullName && byNumber.number != null) {
-        return {
-          repoFullName: byNumber.repoFullName,
-          prNumber: byNumber.number,
-          headCommitSha: getSessionPullRequestLegacyFields(byNumber.pr).headCommitSha,
-        };
-      }
-    }
-    if (latestPr && latestPrRepoFullName && latestPrNumber != null) {
-      return {
-        repoFullName: latestPrRepoFullName,
-        prNumber: latestPrNumber,
-        headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-      };
-    }
-    const fallback = associatedPrViews.find((view) => view.repoFullName && view.number != null);
-    if (fallback && fallback.repoFullName && fallback.number != null) {
-      return {
-        repoFullName: fallback.repoFullName,
-        prNumber: fallback.number,
-        headCommitSha: getSessionPullRequestLegacyFields(fallback.pr).headCommitSha,
-      };
-    }
-    return null;
-  }, [
-    associatedPrViews,
-    latestPr,
-    latestPrNumber,
-    latestPrRepoFullName,
-    selectedPrTab,
-    sessionId,
-    urlPrNumber,
-  ]);
+  const activePrTab = useMemo(
+    () =>
+      resolveActivePrTab({
+        selectedPrTab:
+          selectedPrTab && selectedPrTab.sessionId === sessionId ? selectedPrTab : null,
+        urlPrNumber,
+        urlPrRepo,
+        latestPr,
+        latestPrNumber,
+        latestPrRepoFullName,
+        associatedPrViews,
+      }),
+    [
+      associatedPrViews,
+      latestPr,
+      latestPrNumber,
+      latestPrRepoFullName,
+      selectedPrTab,
+      sessionId,
+      urlPrNumber,
+      urlPrRepo,
+    ]
+  );
 
   const writeSessionUrlTab = useCallback(
     (nextTab: string | undefined, { push = false }: { push?: boolean } = {}) => {
@@ -2491,7 +2457,11 @@ const SessionDetail = ({
   ]);
 
   const replaceSessionUrlPr = useCallback(
-    (nextPrNumber: number | undefined, { push = false }: { push?: boolean } = {}) => {
+    (
+      nextPrNumber: number | undefined,
+      nextPrRepo?: string,
+      { push = false }: { push?: boolean } = {}
+    ) => {
       if (!workspaceSlug) {
         return;
       }
@@ -2500,18 +2470,25 @@ const SessionDetail = ({
         to: '/$workspaceName/sessions/$sessionId',
         params: { workspaceName: workspaceSlug, sessionId },
         search: (prev) => {
-          if (prev.pr === nextPrNumber) {
+          const normalizedRepo = nextPrNumber === undefined ? undefined : nextPrRepo;
+          if (prev.pr === nextPrNumber && prev.prRepo === normalizedRepo) {
             return prev;
           }
           if (nextPrNumber === undefined) {
-            if (prev.pr === undefined) {
+            if (prev.pr === undefined && prev.prRepo === undefined) {
               return prev;
             }
             const next = { ...prev };
             delete next.pr;
+            delete next.prRepo;
             return next;
           }
-          return { ...prev, pr: nextPrNumber };
+          if (normalizedRepo) {
+            return { ...prev, pr: nextPrNumber, prRepo: normalizedRepo };
+          }
+          const next = { ...prev, pr: nextPrNumber };
+          delete next.prRepo;
+          return next;
         },
         replace: !push,
       });
@@ -3739,10 +3716,16 @@ const SessionDetail = ({
   if (!isMobile && urlPrNumber !== undefined) {
     if (
       activePrTab &&
-      urlPrNumber === activePrTab.prNumber &&
-      (restoredPrSidebar?.sessionId !== sessionId || restoredPrSidebar.prNumber !== urlPrNumber)
+      matchesPrTabUrl(activePrTab, urlPrNumber, urlPrRepo) &&
+      (restoredPrSidebar?.sessionId !== sessionId ||
+        restoredPrSidebar.prNumber !== urlPrNumber ||
+        restoredPrSidebar.repoFullName?.toLowerCase() !== activePrTab.repoFullName.toLowerCase())
     ) {
-      setRestoredPrSidebar({ sessionId, prNumber: urlPrNumber });
+      setRestoredPrSidebar({
+        sessionId,
+        prNumber: urlPrNumber,
+        repoFullName: activePrTab.repoFullName,
+      });
       setSidebarRestoreSeq((seq) => seq + 1);
       setIsSidebarOpen(true);
       activateSidebarTab('pr');
@@ -3765,7 +3748,7 @@ const SessionDetail = ({
   useEffect(() => {
     if (isMobile) return;
     if (urlPrNumber === undefined) return;
-    if (!activePrTab || urlPrNumber !== activePrTab.prNumber) return;
+    if (!activePrTab || !matchesPrTabUrl(activePrTab, urlPrNumber, urlPrRepo)) return;
     if (!isSidebarOpen || activeSidebarTab !== 'pr' || activeViewerTabId !== null) {
       replaceSessionUrlPr(undefined);
     }
@@ -3777,6 +3760,7 @@ const SessionDetail = ({
     isSidebarOpen,
     replaceSessionUrlPr,
     urlPrNumber,
+    urlPrRepo,
   ]);
 
   /* A child session's root URL redirects to its parent. Corrupted meta can
@@ -4186,7 +4170,7 @@ const SessionDetail = ({
         prNumber: args.prNumber,
         headCommitSha: args.headCommitSha,
       });
-      replaceSessionUrlPr(args.prNumber, { push: true });
+      replaceSessionUrlPr(args.prNumber, args.repoFullName, { push: true });
       if (!isMobile) {
         /* Expanding a collapsed sidebar restores the default/last panel size,
            and the empty state sits at whatever size it was left at — both are
@@ -4226,7 +4210,10 @@ const SessionDetail = ({
 
   const handleClosePrTab = useCallback(() => {
     replaceSessionUrlPr(undefined);
-  }, [replaceSessionUrlPr]);
+    if (!activePrTab?.isAssociated) {
+      setSelectedPrTab(null);
+    }
+  }, [activePrTab?.isAssociated, replaceSessionUrlPr]);
 
   const handleOpenBrowser = useCallback(
     (tabSessionId?: SessionId, navigateCandidate = isMobile) => {
@@ -4706,7 +4693,7 @@ const SessionDetail = ({
       activateSidebarTab(tabId);
       semanticRouterRef.current?.activate('side-panel');
       if (tabId === 'pr' && activePrTab) {
-        replaceSessionUrlPr(activePrTab.prNumber, { push: true });
+        replaceSessionUrlPr(activePrTab.prNumber, activePrTab.repoFullName, { push: true });
       }
       captureSessionDetailEvent('session/sidebar_tab_selected', {
         sidebar_tab: tabId,
@@ -4930,12 +4917,16 @@ const SessionDetail = ({
       }
       if (tabId === 'pr') {
         replaceSessionUrlPr(undefined);
+        if (!activePrTab?.isAssociated) {
+          setSelectedPrTab(null);
+        }
       }
       if (tabId === 'browser') {
         setBrowserCandidateNavigationRequest(null);
       }
     },
     [
+      activePrTab?.isAssociated,
       activeSidebarTab,
       activeViewerTabId,
       replaceSessionUrlPr,
@@ -6613,310 +6604,315 @@ const SessionDetail = ({
       // The slide / swipe-to-dismiss and the base layer beneath are owned by
       // `MobileWorkspaceStack` (this renders inside its Vaul right-drawer), so
       // here we only need the session's own flex column.
-      <div
-        {...stylex.props(
-          detailStyles.conversationPage,
-          detailStyles.conversationTopInset(mobileHeaderInset)
-        )}
-      >
-        <AdaptiveMobileSessionHeader
-          inset={mobileHeaderInset}
-          onBack={handleMobileSessionBack}
-          onTabs={() => setMobileTabSheetOpen(true)}
-          onMore={() => setMobileMenuSheetOpen(true)}
-          hasUnread={hasBackgroundUnread(mobileConversations)}
-          title={
-            <MobileProjectInfo
-              session={activeSession}
-              localProjectMeta={resolvedLocalProjectMeta}
-              isSyncing={activeSessionDocIsSyncing}
-            />
-          }
-        />
-        <MobileSessionTabSheet
-          open={mobileTabSheetOpen}
-          onOpenChange={setMobileTabSheetOpen}
-          conversations={mobileConversations}
-          archivedConversations={mobileArchivedConversations}
-          viewers={mobileViewers}
-          onSelectConversation={handleSessionTabSelect}
-          onNewConversation={isWorkspaceArchived ? undefined : handleNewTab}
-          onSelectViewer={handleMobileViewerSelect}
-          onRestoreConversation={handleMobileRestoreConversation}
-          onCloseConversation={(id) => {
-            void handleTabClose(id);
-          }}
-        />
-        <MobileLaterSheet
-          open={mobileLaterSheetOpen}
-          onOpenChange={setMobileLaterSheetOpen}
-          title={activeSession.title ?? undefined}
-          nowMs={getServerNow()}
-          onPick={(until) => mobileStatusActions.snooze(activeSession.id, until)}
-        />
-        <SessionShareMobileMenu
-          key={`${currentWorkspaceId}:${activeTabSessionId}`}
-          workspaceId={currentWorkspaceId}
-          session={activeDraftTab || hasActiveViewerTab ? null : activeTabSession}
-          open={mobileMenuSheetOpen}
-          onOpenChange={setMobileMenuSheetOpen}
-          infoRows={mobileMenuInfoRows}
-          actions={
-            exportAllowed
-              ? mobileMenuActions
-              : mobileMenuActions.filter(
-                  (action) => action.id !== 'copy-md' && action.id !== 'share-image'
-                )
-          }
-          owner={
-            isMultiMemberWorkspace && !activeSession.isArchived
-              ? {
-                  members: workspaceMembers,
-                  getDisabledReason: (userId) => getOwnerAccessReason(activeSession, userId),
-                  ownerUserId: activeSession.userId,
-                  onSelect: (userId) => {
-                    void handleTransferSessionOwner(activeSession.id, userId);
-                  },
-                }
-              : undefined
-          }
-        />
+      <PrLinkProvider onOpenPrTab={hasHostedGitHub ? handleOpenPrTab : undefined}>
         <div
-          id={mobileSkipTargetId}
-          role="main"
-          tabIndex={-1}
-          className={stylex.props(detailStyles.mobileContent).className}
+          {...stylex.props(
+            detailStyles.conversationPage,
+            detailStyles.conversationTopInset(mobileHeaderInset)
+          )}
         >
-          {/* Keep inactive tabs mounted for fast switching; only the active tab holds room sync. */}
-          {[activeSession, ...visibleChildSessions].map((tabSession) => {
-            const isActive = !hasActiveViewerTab && tabSession.id === activeTabSessionId;
-            const pendingForkSourceId = pendingForkSourceByTargetSessionId.get(tabSession.id);
-            const externalHistoryRefresh = externalHistoryRefreshBySessionId[tabSession.id];
-            const externalHistoryProviderLabel = externalHistoryRefresh
-              ? getExternalHistoryProviderLabel(externalHistoryRefresh.provider)
-              : undefined;
-            return (
-              <div
-                key={tabSession.id}
-                className={
-                  stylex.props(isActive ? detailStyles.rootFill : detailStyles.hiddenFill).className
-                }
-                aria-hidden={!isActive}
-              >
-                <SessionChatSurface
-                  registerChatRef={setChatTabRef}
-                  claimNavigationFocus={
-                    isActive && tabSession.id === sessionId ? claimNavigationFocus : undefined
+          <AdaptiveMobileSessionHeader
+            inset={mobileHeaderInset}
+            onBack={handleMobileSessionBack}
+            onTabs={() => setMobileTabSheetOpen(true)}
+            onMore={() => setMobileMenuSheetOpen(true)}
+            hasUnread={hasBackgroundUnread(mobileConversations)}
+            title={
+              <MobileProjectInfo
+                session={activeSession}
+                localProjectMeta={resolvedLocalProjectMeta}
+                isSyncing={activeSessionDocIsSyncing}
+              />
+            }
+          />
+          <MobileSessionTabSheet
+            open={mobileTabSheetOpen}
+            onOpenChange={setMobileTabSheetOpen}
+            conversations={mobileConversations}
+            archivedConversations={mobileArchivedConversations}
+            viewers={mobileViewers}
+            onSelectConversation={handleSessionTabSelect}
+            onNewConversation={isWorkspaceArchived ? undefined : handleNewTab}
+            onSelectViewer={handleMobileViewerSelect}
+            onRestoreConversation={handleMobileRestoreConversation}
+            onCloseConversation={(id) => {
+              void handleTabClose(id);
+            }}
+          />
+          <MobileLaterSheet
+            open={mobileLaterSheetOpen}
+            onOpenChange={setMobileLaterSheetOpen}
+            title={activeSession.title ?? undefined}
+            nowMs={getServerNow()}
+            onPick={(until) => mobileStatusActions.snooze(activeSession.id, until)}
+          />
+          <SessionShareMobileMenu
+            key={`${currentWorkspaceId}:${activeTabSessionId}`}
+            workspaceId={currentWorkspaceId}
+            session={activeDraftTab || hasActiveViewerTab ? null : activeTabSession}
+            open={mobileMenuSheetOpen}
+            onOpenChange={setMobileMenuSheetOpen}
+            infoRows={mobileMenuInfoRows}
+            actions={
+              exportAllowed
+                ? mobileMenuActions
+                : mobileMenuActions.filter(
+                    (action) => action.id !== 'copy-md' && action.id !== 'share-image'
+                  )
+            }
+            owner={
+              isMultiMemberWorkspace && !activeSession.isArchived
+                ? {
+                    members: workspaceMembers,
+                    getDisabledReason: (userId) => getOwnerAccessReason(activeSession, userId),
+                    ownerUserId: activeSession.userId,
+                    onSelect: (userId) => {
+                      void handleTransferSessionOwner(activeSession.id, userId);
+                    },
                   }
-                  session={tabSession}
-                  workspaceSession={activeSession}
-                  className={stylex.props(detailStyles.rootFill).className}
-                  hideHeader
-                  syncEnabled={isActive || pendingForkSourceId !== undefined}
-                  isVisible={isActive}
-                  isChildTab={tabSession.id !== sessionId}
-                  isExternalHistoryRefreshing={externalHistoryRefresh !== undefined}
-                  externalHistoryProviderLabel={externalHistoryProviderLabel}
-                  messageFileDiffEntriesByTurn={
-                    tabSession.id === activeSessionTabId ? messageFileDiffEntriesByTurn : undefined
-                  }
-                  onFileDiffClick={handleOpenFileDiffMobileForChat}
-                  onFilePathClick={handleOpenFile}
-                  onOpenHtmlFile={handleOpenHtmlFile}
-                  onNavigateToComment={handleNavigateToCommentMobile}
-                  onCommentReferencesChange={getCommentReferencesChangeHandler(tabSession.id)}
-                  onVisualAnnotationReferencesChange={getVisualAnnotationReferencesChangeHandler(
-                    tabSession.id
-                  )}
-                  onVisualAnnotationReferencesSubmitted={getVisualAnnotationReferencesSubmittedHandler(
-                    tabSession.id
-                  )}
-                  onOpenPrTab={handleOpenPrTab}
-                  onOpenAllChanges={handleOpenAllChanges}
-                  onOpenIosSimulator={() => handleOpenIosSimulator()}
-                  onOpenAndroidEmulator={() => handleOpenAndroidEmulator()}
-                  onOpenBrowser={
-                    previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
-                  }
-                  onOpenExistingBrowser={() => handleOpenBrowser(tabSession.id, false)}
-                  changesDiffStat={changesDiffStat}
-                  onForkLastAssistant={
-                    canForkSession(tabSession)
-                      ? (turnId, destination) =>
-                          handleForkDestination(tabSession, turnId, destination)
-                      : undefined
-                  }
-                  forkWorktreeAvailability={getForkWorktreeAvailability(tabSession)}
-                  forkingAssistantMessageId={pendingForks[tabSession.id]?.turnId}
-                  onNavigateSession={handleNavigateSession}
-                  onConversationPrepared={
-                    pendingForkSourceId
-                      ? () => handleForkedConversationPrepared(pendingForkSourceId, tabSession.id)
-                      : undefined
-                  }
-                  onConversationPrepareError={
-                    pendingForkSourceId
-                      ? () =>
-                          handleForkedConversationPrepareError(pendingForkSourceId, tabSession.id)
-                      : undefined
-                  }
-                />
-              </div>
-            );
-          })}
-          {draftTabs.map((draft) => {
-            const isActive = !hasActiveViewerTab && draft.id === activeTabSessionId;
-            return (
-              <div
-                key={draft.id}
-                className={
-                  stylex.props(isActive ? detailStyles.rootFill : detailStyles.hiddenFill).className
-                }
-                aria-hidden={!isActive}
-              >
-                <DraftSessionChatInterface
-                  ref={(el) => setChatTabRef(draft.id, el)}
-                  draft={draft}
-                  parentSession={activeSession}
-                  isRepoPublic={activeSessionLinkedRepo?.isPublic}
-                  isRepoLinked={activeSessionIsRepoLinked}
-                  commandsEnabled={isActive}
-                  onDraftChange={handleDraftChange}
-                  onSendDraft={handleSendDraft}
-                  onCommentReferencesChange={getCommentReferencesChangeHandler(draft.id)}
-                />
-              </div>
-            );
-          })}
-          {!hasActiveViewerTab ? pendingChildTabSurface : null}
-          {/* Viewer content — shown when a viewer tab is active (mobile). Solid
-              top padding (not scroll-under) so viewer toolbars clear the
-              floating frosted header. */}
-          {viewerTabs
-            .filter((tab) => tab.type !== 'file')
-            .map((tab) => {
-              const isActive = tab.id === effectiveActiveViewerTabId;
+                : undefined
+            }
+          />
+          <div
+            id={mobileSkipTargetId}
+            role="main"
+            tabIndex={-1}
+            className={stylex.props(detailStyles.mobileContent).className}
+          >
+            {/* Keep inactive tabs mounted for fast switching; only the active tab holds room sync. */}
+            {[activeSession, ...visibleChildSessions].map((tabSession) => {
+              const isActive = !hasActiveViewerTab && tabSession.id === activeTabSessionId;
+              const pendingForkSourceId = pendingForkSourceByTargetSessionId.get(tabSession.id);
+              const externalHistoryRefresh = externalHistoryRefreshBySessionId[tabSession.id];
+              const externalHistoryProviderLabel = externalHistoryRefresh
+                ? getExternalHistoryProviderLabel(externalHistoryRefresh.provider)
+                : undefined;
               return (
                 <div
-                  key={tab.id}
-                  {...stylex.props(
-                    isActive ? detailStyles.rootFill : detailStyles.hiddenFill,
-                    detailStyles.mobileViewerInset
-                  )}
+                  key={tabSession.id}
+                  className={
+                    stylex.props(isActive ? detailStyles.rootFill : detailStyles.hiddenFill)
+                      .className
+                  }
                   aria-hidden={!isActive}
                 >
-                  {renderViewerTabContent(
-                    tab,
-                    stylex.props(detailStyles.rootFill).className,
-                    isActive
-                  )}
+                  <SessionChatSurface
+                    registerChatRef={setChatTabRef}
+                    claimNavigationFocus={
+                      isActive && tabSession.id === sessionId ? claimNavigationFocus : undefined
+                    }
+                    session={tabSession}
+                    workspaceSession={activeSession}
+                    className={stylex.props(detailStyles.rootFill).className}
+                    hideHeader
+                    syncEnabled={isActive || pendingForkSourceId !== undefined}
+                    isVisible={isActive}
+                    isChildTab={tabSession.id !== sessionId}
+                    isExternalHistoryRefreshing={externalHistoryRefresh !== undefined}
+                    externalHistoryProviderLabel={externalHistoryProviderLabel}
+                    messageFileDiffEntriesByTurn={
+                      tabSession.id === activeSessionTabId
+                        ? messageFileDiffEntriesByTurn
+                        : undefined
+                    }
+                    onFileDiffClick={handleOpenFileDiffMobileForChat}
+                    onFilePathClick={handleOpenFile}
+                    onOpenHtmlFile={handleOpenHtmlFile}
+                    onNavigateToComment={handleNavigateToCommentMobile}
+                    onCommentReferencesChange={getCommentReferencesChangeHandler(tabSession.id)}
+                    onVisualAnnotationReferencesChange={getVisualAnnotationReferencesChangeHandler(
+                      tabSession.id
+                    )}
+                    onVisualAnnotationReferencesSubmitted={getVisualAnnotationReferencesSubmittedHandler(
+                      tabSession.id
+                    )}
+                    onOpenPrTab={handleOpenPrTab}
+                    onOpenAllChanges={handleOpenAllChanges}
+                    onOpenIosSimulator={() => handleOpenIosSimulator()}
+                    onOpenAndroidEmulator={() => handleOpenAndroidEmulator()}
+                    onOpenBrowser={
+                      previewAllowed ? () => handleOpenBrowser(tabSession.id, true) : undefined
+                    }
+                    onOpenExistingBrowser={() => handleOpenBrowser(tabSession.id, false)}
+                    changesDiffStat={changesDiffStat}
+                    onForkLastAssistant={
+                      canForkSession(tabSession)
+                        ? (turnId, destination) =>
+                            handleForkDestination(tabSession, turnId, destination)
+                        : undefined
+                    }
+                    forkWorktreeAvailability={getForkWorktreeAvailability(tabSession)}
+                    forkingAssistantMessageId={pendingForks[tabSession.id]?.turnId}
+                    onNavigateSession={handleNavigateSession}
+                    onConversationPrepared={
+                      pendingForkSourceId
+                        ? () => handleForkedConversationPrepared(pendingForkSourceId, tabSession.id)
+                        : undefined
+                    }
+                    onConversationPrepareError={
+                      pendingForkSourceId
+                        ? () =>
+                            handleForkedConversationPrepareError(pendingForkSourceId, tabSession.id)
+                        : undefined
+                    }
+                  />
                 </div>
               );
             })}
-        </div>
-
-        {/* Mobile diff sheet */}
-        <SessionMobileDiffDrawer
-          open={mobileDiffState !== null}
-          onOpenChange={(open) => !open && handleCloseMobileDiff()}
-          view={mobileDiffState?.view}
-          onBackToFiles={mobileDiffState?.mode === 'base' ? handleBackToMobileChanges : undefined}
-          changes={{
-            ready: changesReady,
-            synced: changesSynced,
-            unavailableMessage: changesUnavailableMessage,
-            changeEntries,
-            changeFilePaths,
-            onOpenChangesDiff: handleSelectMobileChange,
-          }}
-        >
-          {mobileDiffState && (
-            <SessionConversationDiffPanel
-              active={mobileDiffState.view === undefined || mobileDiffState.view === 'diff'}
-              sessionId={activeSession.id}
-              turnId={mobileDiffState.turnId}
-              filePaths={mobileDiffState.filePaths}
-              focusFilePath={mobileDiffState.focusFilePath}
-              focusComment={mobileDiffState.focusComment}
-              focusRequestSeq={mobileDiffState.focusRequestSeq}
-              mode={mobileDiffState.mode ?? 'conversation'}
-              allChangesScopeSupported={allChangesScopeSupported}
-              refreshToken={
-                (mobileDiffState.mode ?? 'conversation') === 'base'
-                  ? allChangesRefreshToken
-                  : undefined
-              }
-              fileDiffs={
-                (mobileDiffState.mode ?? 'conversation') === 'base'
-                  ? []
-                  : resolveTurnFileDiffs(mobileDiffState.turnId)
-              }
-              fileDiffsPending={!sessionDiffReady}
-              session={activeSession}
-              workspaceSession={workspaceOwnerSession}
-              onSendToChat={handleAddCommentReferenceToActiveChatInput}
-              commentReferenceKeys={activeCommentReferenceKeys}
-              fileProvider={
-                (mobileDiffState.mode ?? 'conversation') === 'base' ||
-                canOpenHistoricalDiffs ||
-                activeSessionFileProviderRequested
-                  ? activeSessionFileProvider
-                  : null
-              }
-              fileProviderPending={
-                (mobileDiffState.mode ?? 'conversation') === 'base' ||
-                canOpenHistoricalDiffs ||
-                activeSessionFileProviderRequested
-                  ? activeSessionFileProviderPending
-                  : false
-              }
-              onOpenFile={handleOpenFileFromDiff}
-              className={stylex.props(detailStyles.rootFill).className}
-            />
-          )}
-        </SessionMobileDiffDrawer>
-        {viewerTabs
-          .filter((tab): tab is Extract<ViewerTab, { type: 'file' }> => tab.type === 'file')
-          .map((tab) => {
-            const open = mobileFileViewerOpen && mobileFileViewerTabId === tab.id;
-            return (
-              <MobileFileViewerDrawer
-                key={tab.id}
-                open={open}
-                onOpenChange={(nextOpen) => {
-                  if (mobileFileViewerTabId === tab.id) {
-                    setMobileFileViewerOpen(nextOpen);
+            {draftTabs.map((draft) => {
+              const isActive = !hasActiveViewerTab && draft.id === activeTabSessionId;
+              return (
+                <div
+                  key={draft.id}
+                  className={
+                    stylex.props(isActive ? detailStyles.rootFill : detailStyles.hiddenFill)
+                      .className
                   }
-                }}
-                filePath={tab.filePath}
-                onCopyPath={() =>
-                  handleCopyText(
-                    tab.filePath,
-                    t('sessions.fileViewer.pathCopied', 'File path copied')
-                  )
-                }
-                onCopyMarkdown={
-                  isSessionMarkdownPath(tab.filePath)
-                    ? () => {
-                        setViewerTabSaveStates((prev) => {
-                          const previous = prev[tab.id] ?? EMPTY_VIEWER_TAB_SAVE_STATE;
-                          return {
-                            ...prev,
-                            [tab.id]: {
-                              ...previous,
-                              copyMarkdownRequestSeq: previous.copyMarkdownRequestSeq + 1,
-                            },
-                          };
-                        });
-                      }
+                  aria-hidden={!isActive}
+                >
+                  <DraftSessionChatInterface
+                    ref={(el) => setChatTabRef(draft.id, el)}
+                    draft={draft}
+                    parentSession={activeSession}
+                    isRepoPublic={activeSessionLinkedRepo?.isPublic}
+                    isRepoLinked={activeSessionIsRepoLinked}
+                    commandsEnabled={isActive}
+                    onDraftChange={handleDraftChange}
+                    onSendDraft={handleSendDraft}
+                    onCommentReferencesChange={getCommentReferencesChangeHandler(draft.id)}
+                  />
+                </div>
+              );
+            })}
+            {!hasActiveViewerTab ? pendingChildTabSurface : null}
+            {/* Viewer content — shown when a viewer tab is active (mobile). Solid
+              top padding (not scroll-under) so viewer toolbars clear the
+              floating frosted header. */}
+            {viewerTabs
+              .filter((tab) => tab.type !== 'file')
+              .map((tab) => {
+                const isActive = tab.id === effectiveActiveViewerTabId;
+                return (
+                  <div
+                    key={tab.id}
+                    {...stylex.props(
+                      isActive ? detailStyles.rootFill : detailStyles.hiddenFill,
+                      detailStyles.mobileViewerInset
+                    )}
+                    aria-hidden={!isActive}
+                  >
+                    {renderViewerTabContent(
+                      tab,
+                      stylex.props(detailStyles.rootFill).className,
+                      isActive
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+
+          {/* Mobile diff sheet */}
+          <SessionMobileDiffDrawer
+            open={mobileDiffState !== null}
+            onOpenChange={(open) => !open && handleCloseMobileDiff()}
+            view={mobileDiffState?.view}
+            onBackToFiles={mobileDiffState?.mode === 'base' ? handleBackToMobileChanges : undefined}
+            changes={{
+              ready: changesReady,
+              synced: changesSynced,
+              unavailableMessage: changesUnavailableMessage,
+              changeEntries,
+              changeFilePaths,
+              onOpenChangesDiff: handleSelectMobileChange,
+            }}
+          >
+            {mobileDiffState && (
+              <SessionConversationDiffPanel
+                active={mobileDiffState.view === undefined || mobileDiffState.view === 'diff'}
+                sessionId={activeSession.id}
+                turnId={mobileDiffState.turnId}
+                filePaths={mobileDiffState.filePaths}
+                focusFilePath={mobileDiffState.focusFilePath}
+                focusComment={mobileDiffState.focusComment}
+                focusRequestSeq={mobileDiffState.focusRequestSeq}
+                mode={mobileDiffState.mode ?? 'conversation'}
+                allChangesScopeSupported={allChangesScopeSupported}
+                refreshToken={
+                  (mobileDiffState.mode ?? 'conversation') === 'base'
+                    ? allChangesRefreshToken
                     : undefined
                 }
-              >
-                {renderViewerTabContent(tab, stylex.props(detailStyles.rootFill).className, open)}
-              </MobileFileViewerDrawer>
-            );
-          })}
-        {/* Mobile Files full-screen drawer — the counterpart of the desktop
+                fileDiffs={
+                  (mobileDiffState.mode ?? 'conversation') === 'base'
+                    ? []
+                    : resolveTurnFileDiffs(mobileDiffState.turnId)
+                }
+                fileDiffsPending={!sessionDiffReady}
+                session={activeSession}
+                workspaceSession={workspaceOwnerSession}
+                onSendToChat={handleAddCommentReferenceToActiveChatInput}
+                commentReferenceKeys={activeCommentReferenceKeys}
+                fileProvider={
+                  (mobileDiffState.mode ?? 'conversation') === 'base' ||
+                  canOpenHistoricalDiffs ||
+                  activeSessionFileProviderRequested
+                    ? activeSessionFileProvider
+                    : null
+                }
+                fileProviderPending={
+                  (mobileDiffState.mode ?? 'conversation') === 'base' ||
+                  canOpenHistoricalDiffs ||
+                  activeSessionFileProviderRequested
+                    ? activeSessionFileProviderPending
+                    : false
+                }
+                onOpenFile={handleOpenFileFromDiff}
+                className={stylex.props(detailStyles.rootFill).className}
+              />
+            )}
+          </SessionMobileDiffDrawer>
+          {viewerTabs
+            .filter((tab): tab is Extract<ViewerTab, { type: 'file' }> => tab.type === 'file')
+            .map((tab) => {
+              const open = mobileFileViewerOpen && mobileFileViewerTabId === tab.id;
+              return (
+                <MobileFileViewerDrawer
+                  key={tab.id}
+                  open={open}
+                  onOpenChange={(nextOpen) => {
+                    if (mobileFileViewerTabId === tab.id) {
+                      setMobileFileViewerOpen(nextOpen);
+                    }
+                  }}
+                  filePath={tab.filePath}
+                  onCopyPath={() =>
+                    handleCopyText(
+                      tab.filePath,
+                      t('sessions.fileViewer.pathCopied', 'File path copied')
+                    )
+                  }
+                  onCopyMarkdown={
+                    isSessionMarkdownPath(tab.filePath)
+                      ? () => {
+                          setViewerTabSaveStates((prev) => {
+                            const previous = prev[tab.id] ?? EMPTY_VIEWER_TAB_SAVE_STATE;
+                            return {
+                              ...prev,
+                              [tab.id]: {
+                                ...previous,
+                                copyMarkdownRequestSeq: previous.copyMarkdownRequestSeq + 1,
+                              },
+                            };
+                          });
+                        }
+                      : undefined
+                  }
+                >
+                  {renderViewerTabContent(tab, stylex.props(detailStyles.rootFill).className, open)}
+                </MobileFileViewerDrawer>
+              );
+            })}
+          {/* Mobile Files full-screen drawer — the counterpart of the desktop
            Files side panel, which the mobile branch never renders. Opened from
            the tab sheet's Files viewer entry.
 
@@ -6931,103 +6927,24 @@ const SessionDetail = ({
            delegate) rather than the browser's built-in preview, so a file
            reached from the tree lands in the same viewer tab — with save, LSP
            and tab persistence — as one tapped in the conversation. */}
-        <Drawer
-          direction="right"
-          repositionInputs={isNativeAppShell()}
-          open={mobileFilesBrowserOpen}
-          onOpenChange={setMobileFilesBrowserOpen}
-        >
-          <DrawerContent
-            nativeKeyboardInset
-            width="full"
-            xstyle={detailStyles.fullDrawer}
-            data-sidebar-swipe-open-disabled
+          <Drawer
+            direction="right"
+            repositionInputs={isNativeAppShell()}
+            open={mobileFilesBrowserOpen}
+            onOpenChange={setMobileFilesBrowserOpen}
           >
-            <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
-              {t('sessions.detailTabs.files', 'Files')}
-            </DrawerTitle>
-            <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
-              <div {...stylex.props(detailStyles.columnFill)}>
-                <header {...stylex.props(detailStyles.mobileDrawerHeader)}>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    icon
-                    width="calc(var(--spacing) * 11)"
-                    height="calc(var(--spacing) * 11)"
-                    xstyle={detailStyles.touchBackButton}
-                    /* Same order as the edge swipe: pop a directory level
-                       first, close the drawer only at the root. */
-                    onClick={() => {
-                      if (mobileFilesBrowserRef.current?.canGoBack()) {
-                        mobileFilesBrowserRef.current.goBack();
-                        return;
-                      }
-                      setMobileFilesBrowserOpen(false);
-                    }}
-                    aria-label={t('common.back', 'Back')}
-                  >
-                    <ArrowLeft {...stylex.props(detailStyles.icon16)} />
-                  </Button>
-                  <span {...stylex.props(detailStyles.mobileTitle)}>
-                    {t('sessions.detailTabs.files', 'Files')}
-                  </span>
-                </header>
-                <div {...stylex.props(detailStyles.relativeFill)}>
-                  <MobileProjectFileBrowser
-                    ref={mobileFilesBrowserRef}
-                    provider={activeSessionFileProvider}
-                    pending={activeSessionFileProviderPending}
-                    message={activeSessionFileProviderMessage}
-                    onOpenFile={(filePath) => {
-                      setMobileFilesBrowserOpen(false);
-                      handleOpenIndexedFile(filePath);
-                    }}
-                    /* No bottom tab bar over this drawer — only the safe area
-                       needs clearing. */
-                    bottomTabBarVisible={false}
-                  />
-                </div>
-              </div>
-            </VaulDrawerBody>
-          </DrawerContent>
-        </Drawer>
-        {/* Mobile PR full-screen drawer. Edge-only interactive back: Vaul drives
-           the drag but only from the left-edge zone (the body is wrapped in
-           `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
-           the drawer toward dismissal. The zone clears the fixed header so the
-           back button stays tappable. See mobile-workspace-stack.tsx. */}
-        {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
-           inset on iOS and the live viewport inset on other shells. Mobile web
-           uses browser resizing; see mobile-workspace-stack.tsx. */}
-        <Drawer
-          direction="right"
-          repositionInputs={isNativeAppShell()}
-          open={Boolean(urlPrNumber && activePrTab && urlPrNumber === activePrTab.prNumber)}
-          onOpenChange={(open) => {
-            if (!open) handleClosePrTab();
-          }}
-        >
-          <DrawerContent
-            nativeKeyboardInset
-            width="full"
-            xstyle={detailStyles.fullDrawer}
-            data-sidebar-swipe-open-disabled
-          >
-            <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
-              {t('sessions.detailTabs.pullRequest', 'Pull Request')}
-            </DrawerTitle>
-            <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
-              {activePrTab && urlPrNumber === activePrTab.prNumber && (
-                <PrTabContainer
-                  key={`${activePrTab.repoFullName}#${activePrTab.prNumber}`}
-                  sessionId={prSessionId}
-                  actionSessionId={activeSessionTabId}
-                  repoFullName={activePrTab.repoFullName}
-                  prNumber={activePrTab.prNumber}
-                  headCommitSha={activePrTab.headCommitSha}
-                  className={stylex.props(detailStyles.rootFill).className}
-                  leadingSlot={
+            <DrawerContent
+              nativeKeyboardInset
+              width="full"
+              xstyle={detailStyles.fullDrawer}
+              data-sidebar-swipe-open-disabled
+            >
+              <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
+                {t('sessions.detailTabs.files', 'Files')}
+              </DrawerTitle>
+              <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
+                <div {...stylex.props(detailStyles.columnFill)}>
+                  <header {...stylex.props(detailStyles.mobileDrawerHeader)}>
                     <Button
                       type="button"
                       variant="ghost"
@@ -7035,18 +6952,99 @@ const SessionDetail = ({
                       width="calc(var(--spacing) * 11)"
                       height="calc(var(--spacing) * 11)"
                       xstyle={detailStyles.touchBackButton}
-                      onClick={handleClosePrTab}
+                      /* Same order as the edge swipe: pop a directory level
+                       first, close the drawer only at the root. */
+                      onClick={() => {
+                        if (mobileFilesBrowserRef.current?.canGoBack()) {
+                          mobileFilesBrowserRef.current.goBack();
+                          return;
+                        }
+                        setMobileFilesBrowserOpen(false);
+                      }}
                       aria-label={t('common.back', 'Back')}
                     >
                       <ArrowLeft {...stylex.props(detailStyles.icon16)} />
                     </Button>
-                  }
-                />
-              )}
-            </VaulDrawerBody>
-          </DrawerContent>
-        </Drawer>
-        {/* Mobile Browser full-screen drawer — same stack as session ↔ PR:
+                    <span {...stylex.props(detailStyles.mobileTitle)}>
+                      {t('sessions.detailTabs.files', 'Files')}
+                    </span>
+                  </header>
+                  <div {...stylex.props(detailStyles.relativeFill)}>
+                    <MobileProjectFileBrowser
+                      ref={mobileFilesBrowserRef}
+                      provider={activeSessionFileProvider}
+                      pending={activeSessionFileProviderPending}
+                      message={activeSessionFileProviderMessage}
+                      onOpenFile={(filePath) => {
+                        setMobileFilesBrowserOpen(false);
+                        handleOpenIndexedFile(filePath);
+                      }}
+                      /* No bottom tab bar over this drawer — only the safe area
+                       needs clearing. */
+                      bottomTabBarVisible={false}
+                    />
+                  </div>
+                </div>
+              </VaulDrawerBody>
+            </DrawerContent>
+          </Drawer>
+          {/* Mobile PR full-screen drawer. Edge-only interactive back: Vaul drives
+           the drag but only from the left-edge zone (the body is wrapped in
+           `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
+           the drawer toward dismissal. The zone clears the fixed header so the
+           back button stays tappable. See mobile-workspace-stack.tsx. */}
+          {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
+           inset on iOS and the live viewport inset on other shells. Mobile web
+           uses browser resizing; see mobile-workspace-stack.tsx. */}
+          <Drawer
+            direction="right"
+            repositionInputs={isNativeAppShell()}
+            open={Boolean(
+              urlPrNumber && activePrTab && matchesPrTabUrl(activePrTab, urlPrNumber, urlPrRepo)
+            )}
+            onOpenChange={(open) => {
+              if (!open) handleClosePrTab();
+            }}
+          >
+            <DrawerContent
+              nativeKeyboardInset
+              width="full"
+              xstyle={detailStyles.fullDrawer}
+              data-sidebar-swipe-open-disabled
+            >
+              <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
+                {t('sessions.detailTabs.pullRequest', 'Pull Request')}
+              </DrawerTitle>
+              <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
+                {activePrTab && matchesPrTabUrl(activePrTab, urlPrNumber, urlPrRepo) && (
+                  <PrTabContainer
+                    key={`${activePrTab.repoFullName}#${activePrTab.prNumber}`}
+                    sessionId={activePrTab.isAssociated ? prSessionId : undefined}
+                    actionSessionId={activePrTab.isCurrentWorkPr ? activeSessionTabId : null}
+                    repoFullName={activePrTab.repoFullName}
+                    prNumber={activePrTab.prNumber}
+                    headCommitSha={activePrTab.headCommitSha}
+                    className={stylex.props(detailStyles.rootFill).className}
+                    leadingSlot={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        icon
+                        width="calc(var(--spacing) * 11)"
+                        height="calc(var(--spacing) * 11)"
+                        xstyle={detailStyles.touchBackButton}
+                        onClick={handleClosePrTab}
+                        aria-label={t('common.back', 'Back')}
+                      >
+                        <ArrowLeft {...stylex.props(detailStyles.icon16)} />
+                      </Button>
+                    }
+                  />
+                )}
+              </VaulDrawerBody>
+            </DrawerContent>
+          </Drawer>
+          {/* Mobile Browser full-screen drawer — same stack as session ↔ PR:
            right-sliding Vaul surface over the conversation, edge-swipe / back
            to reveal the layer beneath. Do NOT portal a sibling `fixed z-50`
            panel to `document.body`: the session itself is already a Vaul
@@ -7054,197 +7052,199 @@ const SessionDetail = ({
            conversation (invisible until the session drawer closes and flashes
            a few frames). Managed preview iframes survive remount via
            `managed-preview-frame-cache.ts`. */}
-        {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
+          {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
            inset on iOS and the live viewport inset on other shells. Mobile web
            uses browser resizing; see mobile-workspace-stack.tsx. */}
-        <Drawer
-          direction="right"
-          repositionInputs={isNativeAppShell()}
-          open={Boolean(previewAllowed && urlBrowser && activeBrowserSession)}
-          onOpenChange={(open) => {
-            if (!open) handleCloseBrowserTab();
-          }}
-        >
-          <DrawerContent
-            nativeKeyboardInset
-            width="full"
-            xstyle={detailStyles.fullDrawer}
-            data-sidebar-swipe-open-disabled
+          <Drawer
+            direction="right"
+            repositionInputs={isNativeAppShell()}
+            open={Boolean(previewAllowed && urlBrowser && activeBrowserSession)}
+            onOpenChange={(open) => {
+              if (!open) handleCloseBrowserTab();
+            }}
           >
-            <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
-              {t('sessions.browser.title', 'Browser')}
-            </DrawerTitle>
-            <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
-              {activeBrowserSession && (
-                <SessionBrowserPanel
-                  session={activeBrowserSession}
-                  active={Boolean(urlBrowser)}
-                  className={stylex.props(detailStyles.rootFill).className}
-                  candidateNavigationRequestId={
-                    browserCandidateNavigationRequest?.sessionId === activeBrowserSession.id
-                      ? browserCandidateNavigationRequest.id
-                      : 0
-                  }
-                  onCandidateNavigationRequestHandled={
-                    handleBrowserCandidateNavigationRequestHandled
-                  }
-                  visualAnnotationReferenceKeys={
-                    visualAnnotationReferenceKeysBySession[activeBrowserSession.id] ??
-                    EMPTY_VISUAL_ANNOTATION_REFERENCE_KEYS
-                  }
-                  onAddVisualAnnotationToChat={(reference) =>
-                    handleAddPreviewAnnotationToChat(activeBrowserSession.id, reference)
-                  }
-                  onToggleVisualAnnotationInChat={(reference) =>
-                    handleTogglePreviewAnnotationInChat(activeBrowserSession.id, reference)
-                  }
-                  leadingSlot={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      icon
-                      width="calc(var(--spacing) * 11)"
-                      height="calc(var(--spacing) * 11)"
-                      xstyle={detailStyles.touchBackButton}
-                      onClick={handleCloseBrowserTab}
-                      aria-label={t('common.back', 'Back')}
-                    >
-                      <ArrowLeft {...stylex.props(detailStyles.icon16)} />
-                    </Button>
-                  }
-                />
-              )}
-            </VaulDrawerBody>
-          </DrawerContent>
-        </Drawer>
-        {/* Mobile iOS Simulator drill: the same right-sliding layer as Browser,
+            <DrawerContent
+              nativeKeyboardInset
+              width="full"
+              xstyle={detailStyles.fullDrawer}
+              data-sidebar-swipe-open-disabled
+            >
+              <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
+                {t('sessions.browser.title', 'Browser')}
+              </DrawerTitle>
+              <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
+                {activeBrowserSession && (
+                  <SessionBrowserPanel
+                    session={activeBrowserSession}
+                    active={Boolean(urlBrowser)}
+                    className={stylex.props(detailStyles.rootFill).className}
+                    candidateNavigationRequestId={
+                      browserCandidateNavigationRequest?.sessionId === activeBrowserSession.id
+                        ? browserCandidateNavigationRequest.id
+                        : 0
+                    }
+                    onCandidateNavigationRequestHandled={
+                      handleBrowserCandidateNavigationRequestHandled
+                    }
+                    visualAnnotationReferenceKeys={
+                      visualAnnotationReferenceKeysBySession[activeBrowserSession.id] ??
+                      EMPTY_VISUAL_ANNOTATION_REFERENCE_KEYS
+                    }
+                    onAddVisualAnnotationToChat={(reference) =>
+                      handleAddPreviewAnnotationToChat(activeBrowserSession.id, reference)
+                    }
+                    onToggleVisualAnnotationInChat={(reference) =>
+                      handleTogglePreviewAnnotationInChat(activeBrowserSession.id, reference)
+                    }
+                    leadingSlot={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        icon
+                        width="calc(var(--spacing) * 11)"
+                        height="calc(var(--spacing) * 11)"
+                        xstyle={detailStyles.touchBackButton}
+                        onClick={handleCloseBrowserTab}
+                        aria-label={t('common.back', 'Back')}
+                      >
+                        <ArrowLeft {...stylex.props(detailStyles.icon16)} />
+                      </Button>
+                    }
+                  />
+                )}
+              </VaulDrawerBody>
+            </DrawerContent>
+          </Drawer>
+          {/* Mobile iOS Simulator drill: the same right-sliding layer as Browser,
            with its own `?simulator=1` state. */}
-        <Drawer
-          direction="right"
-          repositionInputs={isNativeAppShell()}
-          open={Boolean(urlSimulator && activeIosSimulatorSession)}
-          onOpenChange={(open) => {
-            if (!open) handleCloseIosSimulator();
-          }}
-        >
-          <DrawerContent
-            nativeKeyboardInset
-            width="full"
-            xstyle={detailStyles.fullDrawer}
-            data-sidebar-swipe-open-disabled
+          <Drawer
+            direction="right"
+            repositionInputs={isNativeAppShell()}
+            open={Boolean(urlSimulator && activeIosSimulatorSession)}
+            onOpenChange={(open) => {
+              if (!open) handleCloseIosSimulator();
+            }}
           >
-            <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
-              {t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
-            </DrawerTitle>
-            <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
-              {activeIosSimulatorSession && (
-                <SessionIosSimulatorPanel
-                  session={activeIosSimulatorSession}
-                  active={Boolean(urlSimulator)}
-                  controlsLayout="menu"
-                  onAttachScreenshot={(file) =>
-                    handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
-                  }
-                  leadingSlot={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      icon
-                      width="calc(var(--spacing) * 11)"
-                      height="calc(var(--spacing) * 11)"
-                      xstyle={detailStyles.touchBackButton}
-                      onClick={handleCloseIosSimulator}
-                      aria-label={t('common.back', 'Back')}
-                    >
-                      <ArrowLeft {...stylex.props(detailStyles.icon16)} />
-                    </Button>
-                  }
-                />
-              )}
-            </VaulDrawerBody>
-          </DrawerContent>
-        </Drawer>
-        {/* Android owns its mobile drawer independently of iOS and Browser. */}
-        <Drawer
-          direction="right"
-          repositionInputs={isNativeAppShell()}
-          open={Boolean(androidEmulatorOpen && activeAndroidEmulatorSession)}
-          onOpenChange={(open) => {
-            if (!open) setAndroidEmulatorOpen(false);
-          }}
-        >
-          <DrawerContent
-            nativeKeyboardInset
-            width="full"
-            xstyle={detailStyles.fullDrawer}
-            data-sidebar-swipe-open-disabled
+            <DrawerContent
+              nativeKeyboardInset
+              width="full"
+              xstyle={detailStyles.fullDrawer}
+              data-sidebar-swipe-open-disabled
+            >
+              <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
+                {t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
+              </DrawerTitle>
+              <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
+                {activeIosSimulatorSession && (
+                  <SessionIosSimulatorPanel
+                    session={activeIosSimulatorSession}
+                    active={Boolean(urlSimulator)}
+                    controlsLayout="menu"
+                    onAttachScreenshot={(file) =>
+                      handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
+                    }
+                    leadingSlot={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        icon
+                        width="calc(var(--spacing) * 11)"
+                        height="calc(var(--spacing) * 11)"
+                        xstyle={detailStyles.touchBackButton}
+                        onClick={handleCloseIosSimulator}
+                        aria-label={t('common.back', 'Back')}
+                      >
+                        <ArrowLeft {...stylex.props(detailStyles.icon16)} />
+                      </Button>
+                    }
+                  />
+                )}
+              </VaulDrawerBody>
+            </DrawerContent>
+          </Drawer>
+          {/* Android owns its mobile drawer independently of iOS and Browser. */}
+          <Drawer
+            direction="right"
+            repositionInputs={isNativeAppShell()}
+            open={Boolean(androidEmulatorOpen && activeAndroidEmulatorSession)}
+            onOpenChange={(open) => {
+              if (!open) setAndroidEmulatorOpen(false);
+            }}
           >
-            <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
-              {t('sessions.detailTabs.androidEmulator', 'Android Emulator')}
-            </DrawerTitle>
-            <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
-              {activeAndroidEmulatorSession && (
-                <SessionDevicePreviewPanel
-                  platform="android"
-                  session={activeAndroidEmulatorSession}
-                  active={Boolean(androidEmulatorOpen)}
-                  controlsLayout="menu"
-                  onAttachScreenshot={(file) =>
-                    handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
-                  }
-                  leadingSlot={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      icon
-                      width="calc(var(--spacing) * 11)"
-                      height="calc(var(--spacing) * 11)"
-                      xstyle={detailStyles.touchBackButton}
-                      onClick={() => setAndroidEmulatorOpen(false)}
-                      aria-label={t('common.back', 'Back')}
-                    >
-                      <ArrowLeft {...stylex.props(detailStyles.icon16)} />
-                    </Button>
-                  }
-                />
-              )}
-            </VaulDrawerBody>
-          </DrawerContent>
-        </Drawer>
-        {fileQuickOpenDialog}
-        {deleteConfirmDialog}
-        {dirtyForkDialog}
-        {worktreeForkObservers}
-        <SessionShareDialog
-          open={showSessionSharing && pendingSessionShare != null}
-          sessionTitle={
-            pendingSessionShare?.session.title?.trim() || t('sessions.untitled', 'Untitled session')
-          }
-          state={showSessionSharing ? (pendingSessionShare?.sharing ?? null) : null}
-          isSharing={isSharingSession}
-          onOpenChange={(open) => {
-            if (!open && !isSharingSession) setPendingSessionShare(null);
-          }}
-          onConfirm={() => {
-            void handleConfirmSessionShare();
-          }}
-        />
-        <RenameSessionDialog
-          target={renameDialogTarget}
-          onClose={() => setRenameDialogTarget(null)}
-        />
-        <ChatShareImageDialog
-          open={shareImageTarget != null}
-          onOpenChange={(open) => {
-            if (!open) setShareImageTarget(null);
-          }}
-          onCompleted={handleShareImageCompleted}
-          session={shareImageTarget?.session ?? null}
-          sourceRuntime={shareImageTarget?.runtime ?? null}
-          messages={shareImageTarget?.messages ?? []}
-          agentName={shareImageTarget?.agentName}
-        />
-      </div>
+            <DrawerContent
+              nativeKeyboardInset
+              width="full"
+              xstyle={detailStyles.fullDrawer}
+              data-sidebar-swipe-open-disabled
+            >
+              <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
+                {t('sessions.detailTabs.androidEmulator', 'Android Emulator')}
+              </DrawerTitle>
+              <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
+                {activeAndroidEmulatorSession && (
+                  <SessionDevicePreviewPanel
+                    platform="android"
+                    session={activeAndroidEmulatorSession}
+                    active={Boolean(androidEmulatorOpen)}
+                    controlsLayout="menu"
+                    onAttachScreenshot={(file) =>
+                      handleAttachSimulatorScreenshot(activeAndroidEmulatorSession.id, file)
+                    }
+                    leadingSlot={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        icon
+                        width="calc(var(--spacing) * 11)"
+                        height="calc(var(--spacing) * 11)"
+                        xstyle={detailStyles.touchBackButton}
+                        onClick={() => setAndroidEmulatorOpen(false)}
+                        aria-label={t('common.back', 'Back')}
+                      >
+                        <ArrowLeft {...stylex.props(detailStyles.icon16)} />
+                      </Button>
+                    }
+                  />
+                )}
+              </VaulDrawerBody>
+            </DrawerContent>
+          </Drawer>
+          {fileQuickOpenDialog}
+          {deleteConfirmDialog}
+          {dirtyForkDialog}
+          {worktreeForkObservers}
+          <SessionShareDialog
+            open={showSessionSharing && pendingSessionShare != null}
+            sessionTitle={
+              pendingSessionShare?.session.title?.trim() ||
+              t('sessions.untitled', 'Untitled session')
+            }
+            state={showSessionSharing ? (pendingSessionShare?.sharing ?? null) : null}
+            isSharing={isSharingSession}
+            onOpenChange={(open) => {
+              if (!open && !isSharingSession) setPendingSessionShare(null);
+            }}
+            onConfirm={() => {
+              void handleConfirmSessionShare();
+            }}
+          />
+          <RenameSessionDialog
+            target={renameDialogTarget}
+            onClose={() => setRenameDialogTarget(null)}
+          />
+          <ChatShareImageDialog
+            open={shareImageTarget != null}
+            onOpenChange={(open) => {
+              if (!open) setShareImageTarget(null);
+            }}
+            onCompleted={handleShareImageCompleted}
+            session={shareImageTarget?.session ?? null}
+            sourceRuntime={shareImageTarget?.runtime ?? null}
+            messages={shareImageTarget?.messages ?? []}
+            agentName={shareImageTarget?.agentName}
+          />
+        </div>
+      </PrLinkProvider>
     );
   }
 
@@ -7275,8 +7275,8 @@ const SessionDetail = ({
     ) : activeSidebarTab === 'pr' && activePrTab ? (
       <PrTabContainer
         key={`${activePrTab.repoFullName}#${activePrTab.prNumber}`}
-        sessionId={prSessionId}
-        actionSessionId={activeSessionTabId}
+        sessionId={activePrTab.isAssociated ? prSessionId : undefined}
+        actionSessionId={activePrTab.isCurrentWorkPr ? activeSessionTabId : null}
         repoFullName={activePrTab.repoFullName}
         prNumber={activePrTab.prNumber}
         headCommitSha={activePrTab.headCommitSha}
@@ -7733,64 +7733,66 @@ const SessionDetail = ({
   };
 
   return (
-    <div
-      ref={desktopActionRootRef}
-      className={stylex.props(detailStyles.rootFill).className}
-      onPointerDownCapture={(event) =>
-        handleDesktopTabRegionInteraction(event.target, event.currentTarget)
-      }
-      onFocusCapture={(event) =>
-        handleDesktopTabRegionInteraction(event.target, event.currentTarget)
-      }
-    >
-      <DesktopSessionDetailLayout
-        defaultSizes={defaultSizes}
-        topBar={tabBar}
-        chatSurfaces={desktopChatSurfaces}
-        terminalDock={<TerminalDockHost />}
-        secondaryPanel={desktopSecondaryPanel}
-        sidebarOpen={isSidebarVisible}
-        onSidebarCollapse={handleToggleSidebar}
-        deleteConfirmDialog={deleteConfirmDialog}
-        sidebarMinWidthRequest={sidebarWidthRequest}
-        sidebarRestoreSeq={sidebarRestoreSeq}
-      />
-      {/* These dialogs live at the desktop root too (the mobile branch renders its own
+    <PrLinkProvider onOpenPrTab={hasHostedGitHub ? handleOpenPrTab : undefined}>
+      <div
+        ref={desktopActionRootRef}
+        className={stylex.props(detailStyles.rootFill).className}
+        onPointerDownCapture={(event) =>
+          handleDesktopTabRegionInteraction(event.target, event.currentTarget)
+        }
+        onFocusCapture={(event) =>
+          handleDesktopTabRegionInteraction(event.target, event.currentTarget)
+        }
+      >
+        <DesktopSessionDetailLayout
+          defaultSizes={defaultSizes}
+          topBar={tabBar}
+          chatSurfaces={desktopChatSurfaces}
+          terminalDock={<TerminalDockHost />}
+          secondaryPanel={desktopSecondaryPanel}
+          sidebarOpen={isSidebarVisible}
+          onSidebarCollapse={handleToggleSidebar}
+          deleteConfirmDialog={deleteConfirmDialog}
+          sidebarMinWidthRequest={sidebarWidthRequest}
+          sidebarRestoreSeq={sidebarRestoreSeq}
+        />
+        {/* These dialogs live at the desktop root too (the mobile branch renders its own
           copies) so keyboard shortcuts such as `session.renameCurrent` have a mounted
           target on desktop. They portal out, so tree position
           doesn't matter. */}
-      {dirtyForkDialog}
-      {worktreeForkObservers}
-      <SessionShareDialog
-        open={showSessionSharing && pendingSessionShare != null}
-        sessionTitle={
-          pendingSessionShare?.session.title?.trim() || t('sessions.untitled', 'Untitled session')
-        }
-        state={showSessionSharing ? (pendingSessionShare?.sharing ?? null) : null}
-        isSharing={isSharingSession}
-        onOpenChange={(open) => {
-          if (!open && !isSharingSession) setPendingSessionShare(null);
-        }}
-        onConfirm={() => {
-          void handleConfirmSessionShare();
-        }}
-      />
-      <RenameSessionDialog
-        target={renameDialogTarget}
-        onClose={() => setRenameDialogTarget(null)}
-      />
-      <ChatShareImageDialog
-        open={shareImageTarget != null}
-        onOpenChange={(open) => {
-          if (!open) setShareImageTarget(null);
-        }}
-        onCompleted={handleShareImageCompleted}
-        session={shareImageTarget?.session ?? null}
-        sourceRuntime={shareImageTarget?.runtime ?? null}
-        messages={shareImageTarget?.messages ?? []}
-        agentName={shareImageTarget?.agentName}
-      />
-    </div>
+        {dirtyForkDialog}
+        {worktreeForkObservers}
+        <SessionShareDialog
+          open={showSessionSharing && pendingSessionShare != null}
+          sessionTitle={
+            pendingSessionShare?.session.title?.trim() || t('sessions.untitled', 'Untitled session')
+          }
+          state={showSessionSharing ? (pendingSessionShare?.sharing ?? null) : null}
+          isSharing={isSharingSession}
+          onOpenChange={(open) => {
+            if (!open && !isSharingSession) setPendingSessionShare(null);
+          }}
+          onConfirm={() => {
+            void handleConfirmSessionShare();
+          }}
+        />
+        <RenameSessionDialog
+          target={renameDialogTarget}
+          onClose={() => setRenameDialogTarget(null)}
+        />
+        <ChatShareImageDialog
+          open={shareImageTarget != null}
+          onOpenChange={(open) => {
+            if (!open) setShareImageTarget(null);
+          }}
+          onCompleted={handleShareImageCompleted}
+          session={shareImageTarget?.session ?? null}
+          sourceRuntime={shareImageTarget?.runtime ?? null}
+          messages={shareImageTarget?.messages ?? []}
+          agentName={shareImageTarget?.agentName}
+        />
+      </div>
+    </PrLinkProvider>
   );
 };
 

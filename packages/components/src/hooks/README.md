@@ -403,7 +403,9 @@ the payload no longer describes.
 ## Public PR reads
 
 `use-github-pr-identity.ts` keeps hosted repository identity separate from public
-read access. When a session association is unresolved, an anonymous GitHub metadata
+read access. When a session association is unresolved — or when viewing an
+unassociated PR whose workspace has no hosted token (`repo_not_linked`,
+`installation_not_found`, or `repo_not_authorized`) — an anonymous GitHub metadata
 request may establish a public repository ID for details, reviews and diffs. It
 never grants write access or mints a token. An existing numeric ID must still match;
 redirects, private repositories and failed probes retain the recoverable error.
