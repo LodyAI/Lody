@@ -19,6 +19,7 @@ import {
   getSessionRoomId,
   LODY_MAX_CHAIN_DEPTH,
   machineFlockKeys,
+  OperationCompletionContentSchema,
   type AgentConfigMeta,
   type MachineId,
   type SessionHistoryInput,
@@ -28,6 +29,8 @@ import {
 } from '@lody/shared';
 
 import { projectTurnAttention, type TurnResultAudience } from '@lody/shared/notifications';
+import { batchHistoryMembers } from './inbox/model';
+import { buildDirectChildCompletionOperationId } from './inbox/sqlite';
 import { LodyOperationCoordinator } from './operation-coordinator';
 import { LodyOperationStore } from './operation-store';
 
@@ -256,6 +259,9 @@ const makeHarness = async (options?: {
       if (batch && executionStore) {
         expect(executionStore.inbox.begin(batch, assistantTurnId)).toBe(true);
         expect(executionStore.inbox.fence(batch, assistantTurnId)).toBe(true);
+        for (const member of batchHistoryMembers(batch, executionStore.inbox.members(batch))) {
+          OperationCompletionContentSchema.parse(member);
+        }
       }
       histories.set(typedMessage.sessionId, [
         ...(histories.get(typedMessage.sessionId) ?? []),
@@ -2331,6 +2337,7 @@ it('wakes coordinator on child turn completion even while child is viewed or aft
   };
   expect(secondDispatch.inboxBatch?.chainDepth).toBe(1);
 
+  const expectedOpId = buildDirectChildCompletionOperationId(h.targetSessionId, 'human-turn-2');
   const inspectStore = new LodyOperationStore(h.storePath, () => TEST_NOW_MS, {
     maintenance: false,
   });
@@ -2338,13 +2345,14 @@ it('wakes coordinator on child turn completion even while child is viewed or aft
     .prepare(
       'SELECT operation_id, chain_depth, source_turn_id, completion_json FROM inbox_results WHERE session_id = ? AND operation_id = ?'
     )
-    .get(h.requesterSessionId, `direct-turn:${h.targetSessionId}:human-turn-2`) as {
+    .get(h.requesterSessionId, expectedOpId) as {
     operation_id: string;
     chain_depth: number;
     source_turn_id: string | null;
     completion_json: string;
   };
   inspectStore.close();
+  expect(directRow.operation_id).toMatch(/^[A-Za-z0-9._-]{1,64}$/);
   expect(directRow.chain_depth).toBe(0);
   expect(directRow.source_turn_id).toBe('coord-root-turn');
   expect(JSON.parse(directRow.completion_json)).toMatchObject({

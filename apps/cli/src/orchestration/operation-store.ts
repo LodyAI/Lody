@@ -9,7 +9,7 @@ import {
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { InboxSqlite } from './inbox/sqlite';
+import { buildDirectChildCompletionOperationId, InboxSqlite } from './inbox/sqlite';
 import type { InboxBatch, InboxScope } from './inbox/model';
 import { cancelManuallyStoppedTargets } from './inbox/rules';
 
@@ -1094,7 +1094,10 @@ export class LodyOperationStore {
           workspaceId: args.workspaceId,
           sessionId: args.coordinatorSessionId,
           userId: args.userId,
-          operationId: `direct-turn:${args.targetSessionId}:${args.settledTurnId}`,
+          operationId: buildDirectChildCompletionOperationId(
+            args.targetSessionId,
+            args.settledTurnId
+          ),
           ...(args.sourceTurnId ? { sourceTurnId: args.sourceTurnId } : {}),
           createdAt: args.createdAt ?? nowIso,
           completedAt: args.completedAt ?? nowIso,

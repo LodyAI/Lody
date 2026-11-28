@@ -1,7 +1,11 @@
 import { getLogger } from '@/utils/logger';
-import { LODY_MAX_CHAIN_DEPTH, type StoredLodyOperation } from '@lody/shared';
+import {
+  LODY_MAX_CHAIN_DEPTH,
+  LodyOperationIdSchema,
+  type StoredLodyOperation,
+} from '@lody/shared';
 import type Database from 'better-sqlite3';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { OrchestrationConnection } from '../platform/database';
 import {
@@ -54,6 +58,23 @@ const MemberRow = z.object({
 });
 
 /** Uses the Operation connection; completion is indexed in its existing transaction. */
+const normalizeDirectTurnOperationId = (raw: string): string => {
+  if (!raw.startsWith('direct-turn:')) return raw;
+  const rest = raw.slice('direct-turn:'.length);
+  const sep = rest.indexOf(':');
+  const seed = sep > 0 ? `${rest.slice(0, sep)}\0${rest.slice(sep + 1)}` : raw;
+  return `direct-turn-${createHash('sha256').update(seed).digest('hex').slice(0, 32)}`;
+};
+
+export const buildDirectChildCompletionOperationId = (
+  targetSessionId: string,
+  settledTurnId: string
+): string =>
+  `direct-turn-${createHash('sha256')
+    .update(`${targetSessionId}\0${settledTurnId}`)
+    .digest('hex')
+    .slice(0, 32)}`;
+
 export class InboxSqlite {
   constructor(
     private readonly db: Database.Database,
@@ -234,10 +255,11 @@ export class InboxSqlite {
     inputConfig?: InboxInput['config'];
   }): boolean {
     if (!args.completion) return false;
+    const operationId = LodyOperationIdSchema.parse(args.operationId);
     if (
       this.db
         .prepare('SELECT 1 FROM inbox_results WHERE session_id=? AND operation_id=?')
-        .get(args.sessionId, args.operationId)
+        .get(args.sessionId, operationId)
     )
       return false;
     const receipt = operationInboxCompletion(args.completion);
@@ -255,7 +277,7 @@ export class InboxSqlite {
         args.workspaceId,
         args.sessionId,
         args.userId,
-        args.operationId,
+        operationId,
         'session_chat',
         args.sourceTurnId ?? null,
         args.createdAt,
@@ -415,6 +437,25 @@ export class InboxSqlite {
           'INSERT INTO inbox_modes VALUES(?,?,2) ON CONFLICT(workspace_id) DO UPDATE SET owner=excluded.owner'
         )
         .run(workspaceId, owner);
+      const legacyDirectRows = this.db
+        .prepare(
+          "SELECT sequence, session_id, operation_id FROM inbox_results WHERE workspace_id=? AND operation_id LIKE 'direct-turn:%'"
+        )
+        .all(workspaceId) as Array<{ sequence: number; session_id: string; operation_id: string }>;
+      for (const row of legacyDirectRows) {
+        const normalized = normalizeDirectTurnOperationId(row.operation_id);
+        const duplicate = this.db
+          .prepare('SELECT 1 FROM inbox_results WHERE session_id=? AND operation_id=?')
+          .get(row.session_id, normalized);
+        if (duplicate) {
+          this.db.prepare('DELETE FROM inbox_members WHERE sequence=?').run(row.sequence);
+          this.db.prepare('DELETE FROM inbox_results WHERE sequence=?').run(row.sequence);
+        } else {
+          this.db
+            .prepare('UPDATE inbox_results SET operation_id=? WHERE sequence=?')
+            .run(normalized, row.sequence);
+        }
+      }
       const uncertain = this.db
         .prepare(
           "SELECT * FROM inbox_batches WHERE workspace_id=? AND owner<>? AND state IN ('submitting','submitted')"
@@ -973,6 +1014,11 @@ export class InboxSqlite {
   }
   private decodeMember(row: unknown): InboxMember {
     const r = MemberRow.parse(row);
+    const completion = JSON.parse(r.completion_json) as {
+      type?: unknown;
+      value?: { items?: Array<{ target?: { sessionId?: unknown } }> };
+    };
+    const normalizedOperationId = normalizeDirectTurnOperationId(r.operation_id);
     let originThreadId: string | undefined;
     if (r.frozen_config_json) {
       try {
@@ -981,10 +1027,9 @@ export class InboxSqlite {
           originThreadId = parsed.originThreadId.trim();
         }
       } catch {}
-    } else if (r.operation_id.startsWith('direct-turn:') && this.hasOperationsTable()) {
-      const rest = r.operation_id.slice('direct-turn:'.length);
-      const sep = rest.indexOf(':');
-      const targetSessionId = sep > 0 ? rest.slice(0, sep) : '';
+    } else if (normalizedOperationId.startsWith('direct-turn-') && this.hasOperationsTable()) {
+      const firstTargetId = completion.value?.items?.[0]?.target?.sessionId;
+      const targetSessionId = typeof firstTargetId === 'string' ? firstTargetId : '';
       if (targetSessionId) {
         try {
           const priorOp = this.db
@@ -1011,14 +1056,14 @@ export class InboxSqlite {
     }
     return {
       sequence: r.sequence,
-      operationId: r.operation_id,
+      operationId: normalizedOperationId,
       operationKind: r.operation_kind,
       ...(r.created_at ? { createdAt: r.created_at } : {}),
       ...(r.completed_at ? { completedAt: r.completed_at } : {}),
       ...(r.source_turn_id ? { sourceTurnId: r.source_turn_id } : {}),
       ...(originThreadId ? { originThreadId } : {}),
       chainDepth: r.chain_depth,
-      completion: JSON.parse(r.completion_json),
+      completion,
     };
   }
   /** Automatic continuations refused by the chain cap whose Session has not been told yet. */
