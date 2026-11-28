@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import vm from 'node:vm';
-import ts from 'typescript';
 import { createCapacitorAuthHygienePlugin } from './capacitor-auth-hygiene.ts';
 
 function createMemoryPreferences(initial = {}) {
@@ -37,6 +34,26 @@ function createMemoryLocalStorage(initial = {}) {
 
 const NOW = Date.parse('2026-11-26T00:00:00.000Z');
 
+void test('starts a session request using the registered Capacitor Preferences plugin', async (t) => {
+  const localStorage = createMemoryLocalStorage({
+    'CapacitorStorage.better-auth_cookie': JSON.stringify({
+      'better-auth.session_token': { value: 'expired', expires: '2026-11-25T00:00:00Z' },
+    }),
+  });
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage } });
+  t.after(() => {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else delete globalThis.window;
+  });
+  const plugin = createCapacitorAuthHygienePlugin({ isNative: () => true, now: () => NOW });
+
+  const request = await plugin.fetchPlugins[0].init('/get-session', { method: 'GET' });
+
+  assert.deepEqual(request, { url: '/get-session', options: { method: 'GET' } });
+  assert.equal(localStorage.getItem('CapacitorStorage.better-auth_cookie'), null);
+});
+
 void test('prunes locally expired native session tokens before capacitorClient reads Preferences', async () => {
   const preferences = createMemoryPreferences({
     'better-auth_cookie': JSON.stringify({
@@ -52,7 +69,7 @@ void test('prunes locally expired native session tokens before capacitorClient r
   });
   const plugin = createCapacitorAuthHygienePlugin({
     isNative: () => true,
-    getPreferences: async () => preferences,
+    preferences,
     getLocalStorage: () => createMemoryLocalStorage(),
     now: () => NOW,
   });
@@ -77,7 +94,7 @@ void test('retains active and no-expiry native tokens while pruning only expired
   });
   const plugin = createCapacitorAuthHygienePlugin({
     isNative: () => true,
-    getPreferences: async () => preferences,
+    preferences,
     getLocalStorage: () => createMemoryLocalStorage(),
     now: () => NOW,
   });
@@ -105,7 +122,7 @@ void test('clears server-rejected native Bearer token on /get-session null but p
   });
   const plugin = createCapacitorAuthHygienePlugin({
     isNative: () => true,
-    getPreferences: async () => preferences,
+    preferences,
     getLocalStorage: () => createMemoryLocalStorage(),
     now: () => NOW,
   });
@@ -166,7 +183,7 @@ void test('migrates a valid legacy localStorage session_token into Preferences o
   const preferences = createMemoryPreferences();
   const plugin = createCapacitorAuthHygienePlugin({
     isNative: () => true,
-    getPreferences: async () => preferences,
+    preferences,
     getLocalStorage: () => localStorage,
     now: () => NOW,
   });
@@ -205,7 +222,7 @@ void test('migrates a valid legacy localStorage session_token into Preferences o
   });
   const plugin2 = createCapacitorAuthHygienePlugin({
     isNative: () => true,
-    getPreferences: async () => preferences2,
+    preferences: preferences2,
     getLocalStorage: () => localStorage2,
     now: () => NOW,
   });
@@ -239,7 +256,7 @@ void test('non-native browser mode leaves localStorage and Preferences untouched
   });
   const plugin = createCapacitorAuthHygienePlugin({
     isNative: () => false,
-    getPreferences: async () => preferences,
+    preferences,
     getLocalStorage: () => localStorage,
     now: () => NOW,
   });
@@ -263,126 +280,4 @@ void test('non-native browser mode leaves localStorage and Preferences untouched
       .value,
     'expired-token.sig'
   );
-});
-
-void test('default Preferences loader wraps Capacitor plugin Proxy so Promise resolution never invokes Preferences.then()', async () => {
-  const source = ts.transpileModule(
-    readFileSync(new URL('./capacitor-auth-hygiene.ts', import.meta.url), 'utf8'),
-    { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }
-  ).outputText;
-
-  const map = new Map([
-    [
-      'better-auth_cookie',
-      JSON.stringify({
-        '__Secure-better-auth.session_token': {
-          value: 'expired-token.sig',
-          expires: '2026-11-25T23:59:59.000Z',
-        },
-      }),
-    ],
-  ]);
-  const accessedUnknownProps = [];
-  const unhandled = [];
-  const onUnhandled = (reason) => unhandled.push(reason);
-  process.on('unhandledRejection', onUnhandled);
-
-  try {
-    const impl = {
-      async get({ key }) {
-        return { value: map.has(key) ? map.get(key) : null };
-      },
-      async set({ key, value }) {
-        map.set(key, value);
-      },
-      async remove({ key }) {
-        map.delete(key);
-      },
-    };
-    const nativePreferencesProxy = new Proxy(
-      {},
-      {
-        get(_target, prop) {
-          if (prop === '$$typeof') return undefined;
-          if (prop === 'toJSON') return () => ({});
-          if (prop in impl) return (...args) => impl[prop](...args);
-          accessedUnknownProps.push(String(prop));
-          return () =>
-            Promise.reject(new Error(`"Preferences.${String(prop)}()" is not implemented on ios`));
-        },
-      }
-    );
-
-    const context = vm.createContext({
-      Date,
-      Headers,
-      JSON,
-      Number,
-      Object,
-      Promise,
-      URL,
-      window: { localStorage: createMemoryLocalStorage() },
-    });
-    const makeSynthetic = (exports) =>
-      new vm.SyntheticModule(
-        Object.keys(exports),
-        function () {
-          for (const [k, v] of Object.entries(exports)) this.setExport(k, v);
-        },
-        { context }
-      );
-
-    let importAttempts = 0;
-    const mod = new vm.SourceTextModule(source, {
-      context,
-      async importModuleDynamically(specifier) {
-        assert.equal(specifier, '@capacitor/preferences');
-        importAttempts += 1;
-        if (importAttempts === 1) {
-          throw new Error('transient dynamic import failure');
-        }
-        const prefsMod = makeSynthetic({ Preferences: nativePreferencesProxy });
-        await prefsMod.link(() => {});
-        await prefsMod.evaluate();
-        return prefsMod;
-      },
-    });
-    await mod.link((specifier) => {
-      assert.equal(specifier, 'better-auth-capacitor/client');
-      return makeSynthetic({ isNativePlatform: () => true });
-    });
-    await mod.evaluate();
-
-    const plugin = mod.namespace.createCapacitorAuthHygienePlugin({
-      now: () => NOW,
-    });
-
-    await plugin.fetchPlugins[0].init('https://backend.lody.ai/api/auth/get-session', {});
-    assert.equal(map.has('better-auth_cookie'), true);
-
-    await plugin.fetchPlugins[0].init('https://backend.lody.ai/api/auth/get-session', {});
-    assert.equal(map.has('better-auth_cookie'), false);
-
-    map.set(
-      'better-auth_cookie',
-      JSON.stringify({
-        '__Secure-better-auth.session_token': {
-          value: 'revoked-token.sig',
-          expires: null,
-        },
-      })
-    );
-    await plugin.fetchPlugins[0].hooks.onSuccess({
-      data: null,
-      request: {
-        url: 'https://backend.lody.ai/api/auth/get-session',
-        headers: { Authorization: 'Bearer revoked-token.sig' },
-      },
-    });
-    assert.equal(map.has('better-auth_cookie'), false);
-    assert.deepEqual(accessedUnknownProps, []);
-    assert.deepEqual(unhandled, []);
-  } finally {
-    process.off('unhandledRejection', onUnhandled);
-  }
 });

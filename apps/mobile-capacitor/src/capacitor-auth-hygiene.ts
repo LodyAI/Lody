@@ -1,3 +1,4 @@
+import { Preferences } from '@capacitor/preferences';
 import { isNativePlatform } from 'better-auth-capacitor/client';
 
 export type StoredCookieEntry = {
@@ -19,31 +20,13 @@ export type CapacitorAuthHygieneOptions = {
   storagePrefix?: string;
   cookiePrefix?: string;
   isNative?: () => boolean;
-  getPreferences?: () => Promise<CapacitorPreferencesLike>;
+  preferences?: CapacitorPreferencesLike;
   getLocalStorage?: () => LocalStorageLike | undefined;
   now?: () => number;
 };
 
 const SECURE_COOKIE_PREFIX = '__Secure-';
 const BEARER_PREFIX = 'bearer ';
-
-let cachedPreferences: Promise<CapacitorPreferencesLike> | null = null;
-
-function defaultGetPreferences(): Promise<CapacitorPreferencesLike> {
-  if (!cachedPreferences) {
-    cachedPreferences = import('@capacitor/preferences')
-      .then((mod) => ({
-        get: (options: { key: string }) => mod.Preferences.get(options),
-        set: (options: { key: string; value: string }) => mod.Preferences.set(options),
-        remove: (options: { key: string }) => mod.Preferences.remove(options),
-      }))
-      .catch((error: unknown) => {
-        cachedPreferences = null;
-        throw error;
-      });
-  }
-  return cachedPreferences;
-}
 
 function defaultGetLocalStorage(): LocalStorageLike | undefined {
   if (typeof window === 'undefined') return undefined;
@@ -173,7 +156,7 @@ export function createCapacitorAuthHygienePlugin(options: CapacitorAuthHygieneOp
   const cookieKey = normalizeCookieName(`${storagePrefix}_cookie`);
   const localCacheKey = normalizeCookieName(`${storagePrefix}_session_data`);
   const isNative = options.isNative ?? isNativePlatform;
-  const getPreferences = options.getPreferences ?? defaultGetPreferences;
+  const preferences = options.preferences ?? Preferences;
   const getLocalStorage = options.getLocalStorage ?? defaultGetLocalStorage;
   const now = options.now ?? Date.now;
 
@@ -213,7 +196,6 @@ export function createCapacitorAuthHygienePlugin(options: CapacitorAuthHygieneOp
         return;
       }
 
-      const preferences = await getPreferences();
       const nativeJar = parseCookieJar((await preferences.get({ key: cookieKey }))?.value) ?? {};
       const existingNative = readActiveSessionEntry(nativeJar, cookiePrefix, nowMs);
 
@@ -246,7 +228,6 @@ export function createCapacitorAuthHygienePlugin(options: CapacitorAuthHygieneOp
 
   async function pruneExpiredNativeTokens(): Promise<void> {
     try {
-      const preferences = await getPreferences();
       const nativeJar = parseCookieJar((await preferences.get({ key: cookieKey }))?.value);
       if (!nativeJar) return;
 
@@ -297,7 +278,6 @@ export function createCapacitorAuthHygienePlugin(options: CapacitorAuthHygieneOp
             if (!sentBearer) return;
 
             try {
-              const preferences = await getPreferences();
               const nativeJar = parseCookieJar((await preferences.get({ key: cookieKey }))?.value);
               const currentToken = readStoredSessionTokenValue(nativeJar, cookiePrefix);
               if (currentToken !== sentBearer) return;
