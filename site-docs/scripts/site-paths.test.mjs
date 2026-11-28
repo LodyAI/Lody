@@ -121,20 +121,291 @@ await test('site links preserve query, fragment, files and off-site/app destinat
   assert.equal(absolutePageUrl('/docs/package.json'), 'https://lody.ai/docs/package.json/');
 });
 
-await test('generated sitemap uses canonical directory URLs for every published page', async () => {
+await test('generated sitemap index and 8 locale sitemaps use canonical directory URLs with real lastmod', async () => {
   const { execFileSync } = await import('node:child_process');
-  const { readFileSync } = await import('node:fs');
+  const { detectPathLocale } = await import('./site-paths.mjs');
+  const { sitemapFilenameForLocale } = await import('./generate-sitemap.mjs');
+
   execFileSync(process.execPath, [path.join(packageRoot, 'scripts/generate-sitemap.mjs')]);
-  const xml = readFileSync(path.join(packageRoot, 'public/sitemap.xml'), 'utf8');
-  const urls = [...xml.matchAll(/<loc>(.*?)<\/loc>/gu)].map((match) => match[1]);
-  const paths = collectSitePaths(packageRoot).filter(isSitemapPath);
+  const indexXml = readFileSync(path.join(packageRoot, 'public/sitemap.xml'), 'utf8');
+  assert.match(indexXml, /<sitemapindex\b/u);
+  assert.doesNotMatch(indexXml, /<urlset\b/u);
+
+  const indexEntries = [
+    ...indexXml.matchAll(
+      /<sitemap><loc>(.*?)<\/loc>(?:<lastmod>(\d{4}-\d{2}-\d{2})<\/lastmod>)?<\/sitemap>/gu
+    ),
+  ].map((match) => ({ loc: match[1], lastmod: match[2] }));
+
   assert.deepEqual(
-    urls,
-    paths.map((p) => `https://lody.ai${p === '/' ? p : `${p}/`}`)
+    indexEntries.map((entry) => entry.loc),
+    SITE_LOCALES.map((locale) => `https://lody.ai/${sitemapFilenameForLocale(locale)}`)
   );
-  const dottedReleases = paths.filter((p) => /^\/(?:zh\/)?changelog\/.*\./u.test(p));
+
+  const allPaths = collectSitePaths(packageRoot).filter(isSitemapPath);
+  const seenUrls = new Set();
+
+  for (const [index, locale] of SITE_LOCALES.entries()) {
+    const filename = sitemapFilenameForLocale(locale);
+    const localeXml = readFileSync(path.join(packageRoot, 'public', filename), 'utf8');
+    assert.match(localeXml, /<urlset\b/u);
+
+    const urlEntries = [
+      ...localeXml.matchAll(
+        /<url><loc>(.*?)<\/loc>(?:<lastmod>(\d{4}-\d{2}-\d{2})<\/lastmod>)?<\/url>/gu
+      ),
+    ].map((match) => ({ loc: match[1], lastmod: match[2] }));
+
+    const expectedPaths = allPaths.filter((p) => detectPathLocale(p) === locale);
+    assert.deepEqual(
+      urlEntries.map((entry) => entry.loc),
+      expectedPaths.map((p) => `https://lody.ai${p === '/' ? p : `${p}/`}`)
+    );
+
+    let maxLocaleLastmod;
+    for (const entry of urlEntries) {
+      assert.equal(seenUrls.has(entry.loc), false, `Duplicate URL across sitemaps: ${entry.loc}`);
+      seenUrls.add(entry.loc);
+      const pathname = new URL(entry.loc).pathname;
+      const isDatedCollectionPost =
+        /^\/(?:(?:zh-hant|zh|ja|ko|es|fr|ru)\/)?(?:blog|changelog)\/.+\/$/u.test(pathname);
+      if (isDatedCollectionPost) {
+        assert.ok(entry.lastmod, `Dated MDX entry must retain frontmatter lastmod: ${entry.loc}`);
+      }
+      if (entry.lastmod && (!maxLocaleLastmod || entry.lastmod > maxLocaleLastmod)) {
+        maxLocaleLastmod = entry.lastmod;
+      }
+    }
+    assert.equal(indexEntries[index].lastmod, maxLocaleLastmod);
+  }
+
+  assert.equal(seenUrls.size, allPaths.length);
+
+  // Every published route must have 8-locale parity so hreflang alternates never 404.
+  const { stripLocalePrefix } = await import('./site-paths.mjs');
+  const basePathsByLocale = new Map(SITE_LOCALES.map((locale) => [locale, new Set()]));
+  for (const sitePath of allPaths) {
+    const { locale, basePath } = stripLocalePrefix(sitePath);
+    basePathsByLocale.get(locale).add(basePath);
+  }
+  const enBasePaths = [...basePathsByLocale.get('en')].sort();
+  for (const locale of SITE_LOCALES.slice(1)) {
+    assert.deepEqual(
+      [...basePathsByLocale.get(locale)].sort(),
+      enBasePaths,
+      `Locale "${locale}" sitemap routes must stay in 1:1 parity with English for valid hreflang`
+    );
+  }
+
+  const dottedReleases = allPaths.filter((p) => /^\/(?:zh\/)?changelog\/.*\./u.test(p));
   assert.ok(dottedReleases.length > 0);
-  for (const release of dottedReleases) assert.ok(urls.includes(`https://lody.ai${release}/`));
+  for (const release of dottedReleases) {
+    assert.ok(seenUrls.has(`https://lody.ai${release}/`));
+  }
+});
+
+await test('sitemap lastmod derives from content changes and omits fabricated dates on shallow clones', async () => {
+  const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import('node:fs');
+  const os = await import('node:os');
+  const { generateSitemaps } = await import('./generate-sitemap.mjs');
+
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'lody-sitemap-test-'));
+  try {
+    mkdirSync(path.join(tmpDir, 'content/docs/en'), { recursive: true });
+    mkdirSync(path.join(tmpDir, 'content/docs/ja'), { recursive: true });
+    mkdirSync(path.join(tmpDir, 'content/blog/en'), { recursive: true });
+    mkdirSync(path.join(tmpDir, 'content/pages/en'), { recursive: true });
+
+    writeFileSync(
+      path.join(tmpDir, 'content/docs/en/index.mdx'),
+      '---\ntitle: Intro\ndescription: Docs\n---\n# Intro\n'
+    );
+    writeFileSync(
+      path.join(tmpDir, 'content/docs/ja/index.mdx'),
+      '---\ntitle: はじめに\ndescription: Docs\n---\n# Intro\n'
+    );
+    writeFileSync(
+      path.join(tmpDir, 'content/blog/en/launch.mdx'),
+      '---\ntitle: Launch\ndate: 2026-09-04\ndescription: Launch post\n---\nBody\n'
+    );
+    writeFileSync(
+      path.join(tmpDir, 'content/pages/en/privacy.mdx'),
+      '---\ntitle: Privacy\ndescription: Privacy\n---\nBody\n'
+    );
+
+    const gitDates = new Map([
+      ['lib/landing-seo.ts', '2026-10-15'],
+      ['content/docs/en/index.mdx', '2026-09-20'],
+      ['content/docs/ja/index.mdx', '2026-11-02'],
+      ['content/blog/en/launch.mdx', '2026-09-01'],
+      ['content/pages/en/privacy.mdx', '2026-08-12'],
+    ]);
+
+    generateSitemaps(tmpDir, { gitLastmodByFile: gitDates });
+
+    const enXml = readFileSync(path.join(tmpDir, 'public/sitemap-en.xml'), 'utf8');
+    const jaXml = readFileSync(path.join(tmpDir, 'public/sitemap-ja.xml'), 'utf8');
+    const indexXml = readFileSync(path.join(tmpDir, 'public/sitemap.xml'), 'utf8');
+
+    assert.match(
+      enXml,
+      /<url><loc>https:\/\/lody\.ai\/<\/loc><lastmod>2026-10-15<\/lastmod><\/url>/u
+    );
+    assert.match(
+      enXml,
+      /<url><loc>https:\/\/lody\.ai\/docs\/<\/loc><lastmod>2026-09-20<\/lastmod><\/url>/u
+    );
+    assert.match(
+      enXml,
+      /<url><loc>https:\/\/lody\.ai\/blog\/launch\/<\/loc><lastmod>2026-09-04<\/lastmod><\/url>/u
+    );
+    assert.match(
+      enXml,
+      /<url><loc>https:\/\/lody\.ai\/blog\/<\/loc><lastmod>2026-09-04<\/lastmod><\/url>/u
+    );
+    assert.match(
+      enXml,
+      /<url><loc>https:\/\/lody\.ai\/privacy\/<\/loc><lastmod>2026-08-12<\/lastmod><\/url>/u
+    );
+    assert.match(
+      jaXml,
+      /<url><loc>https:\/\/lody\.ai\/ja\/docs\/<\/loc><lastmod>2026-11-02<\/lastmod><\/url>/u
+    );
+    assert.match(
+      indexXml,
+      /<sitemap><loc>https:\/\/lody\.ai\/sitemap-en\.xml<\/loc><lastmod>2026-10-15<\/lastmod><\/sitemap>/u
+    );
+    assert.match(
+      indexXml,
+      /<sitemap><loc>https:\/\/lody\.ai\/sitemap-ja\.xml<\/loc><lastmod>2026-11-02<\/lastmod><\/sitemap>/u
+    );
+
+    // Without git history (e.g. shallow depth=1 clone), frontmatter dates survive
+    // while undated pages omit <lastmod> instead of fabricating today's build date.
+    generateSitemaps(tmpDir, { gitLastmodByFile: new Map() });
+    const shallowEnXml = readFileSync(path.join(tmpDir, 'public/sitemap-en.xml'), 'utf8');
+    assert.match(
+      shallowEnXml,
+      /<url><loc>https:\/\/lody\.ai\/blog\/launch\/<\/loc><lastmod>2026-09-04<\/lastmod><\/url>/u
+    );
+    assert.match(shallowEnXml, /<url><loc>https:\/\/lody\.ai\/<\/loc><\/url>/u);
+    assert.match(shallowEnXml, /<url><loc>https:\/\/lody\.ai\/docs\/<\/loc><\/url>/u);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+await test('git shallow clones (depth=1 and depth=2) skip boundary commits instead of fabricating lastmod', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import('node:fs');
+  const os = await import('node:os');
+  const { pathToFileURL } = await import('node:url');
+  const { generateSitemaps } = await import('./generate-sitemap.mjs');
+
+  const tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'lody-sitemap-git-'));
+  const originRepo = path.join(tmpRoot, 'origin');
+  const depth1Repo = path.join(tmpRoot, 'depth1');
+  const depth2Repo = path.join(tmpRoot, 'depth2');
+
+  const git = (cwd, args, dateIso) =>
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Test',
+        GIT_AUTHOR_EMAIL: 'test@example.com',
+        GIT_COMMITTER_NAME: 'Test',
+        GIT_COMMITTER_EMAIL: 'test@example.com',
+        ...(dateIso ? { GIT_AUTHOR_DATE: dateIso, GIT_COMMITTER_DATE: dateIso } : {}),
+      },
+    });
+
+  try {
+    mkdirSync(path.join(originRepo, 'site-docs/content/docs/en'), { recursive: true });
+    mkdirSync(path.join(originRepo, 'site-docs/content/blog/en'), { recursive: true });
+    git(originRepo, ['init', '-b', 'main']);
+
+    // Commit 1 (2026-01-01): initial docs/index, docs/other, and dated blog post.
+    writeFileSync(
+      path.join(originRepo, 'site-docs/content/docs/en/index.mdx'),
+      '---\ntitle: Intro\ndescription: Docs\n---\n# Intro\n'
+    );
+    writeFileSync(
+      path.join(originRepo, 'site-docs/content/docs/en/other.mdx'),
+      '---\ntitle: Other\ndescription: Other\n---\n# Other\n'
+    );
+    writeFileSync(
+      path.join(originRepo, 'site-docs/content/blog/en/launch.mdx'),
+      '---\ntitle: Launch\ndate: 2026-01-01\ndescription: Launch\n---\nBody\n'
+    );
+    git(originRepo, ['add', '.']);
+    git(originRepo, ['commit', '-m', 'init'], '2026-01-01T12:00:00Z');
+
+    // Commit 2 (2026-01-02): touches only an unrelated README file.
+    writeFileSync(path.join(originRepo, 'README.md'), 'touch 2\n');
+    git(originRepo, ['add', '.']);
+    git(originRepo, ['commit', '-m', 'touch readme'], '2026-01-02T12:00:00Z');
+
+    // Commit 3 (2026-01-03): edits only docs/other.mdx.
+    writeFileSync(
+      path.join(originRepo, 'site-docs/content/docs/en/other.mdx'),
+      '---\ntitle: Other\ndescription: Updated\n---\n# Other v2\n'
+    );
+    git(originRepo, ['add', '.']);
+    git(originRepo, ['commit', '-m', 'update other'], '2026-01-03T12:00:00Z');
+
+    // Full history: distinct per-file dates.
+    generateSitemaps(path.join(originRepo, 'site-docs'));
+    const fullXml = readFileSync(path.join(originRepo, 'site-docs/public/sitemap-en.xml'), 'utf8');
+    assert.match(
+      fullXml,
+      /<url><loc>https:\/\/lody\.ai\/docs\/<\/loc><lastmod>2026-01-01<\/lastmod><\/url>/u
+    );
+    assert.match(
+      fullXml,
+      /<url><loc>https:\/\/lody\.ai\/docs\/other\/<\/loc><lastmod>2026-01-03<\/lastmod><\/url>/u
+    );
+
+    const originUrl = pathToFileURL(originRepo).href;
+
+    // Shallow --depth=2: Commit 2 (2026-01-02) is the boundary commit.
+    // Untouched docs/index.mdx must NOT be falsely stamped 2026-01-02;
+    // docs/other.mdx (edited in Commit 3 after the boundary) keeps 2026-01-03;
+    // blog/launch.mdx keeps its frontmatter date 2026-01-01.
+    git(tmpRoot, ['clone', '--depth=2', originUrl, depth2Repo]);
+    generateSitemaps(path.join(depth2Repo, 'site-docs'));
+    const depth2Xml = readFileSync(
+      path.join(depth2Repo, 'site-docs/public/sitemap-en.xml'),
+      'utf8'
+    );
+    assert.match(depth2Xml, /<url><loc>https:\/\/lody\.ai\/docs\/<\/loc><\/url>/u);
+    assert.match(
+      depth2Xml,
+      /<url><loc>https:\/\/lody\.ai\/docs\/other\/<\/loc><lastmod>2026-01-03<\/lastmod><\/url>/u
+    );
+    assert.match(
+      depth2Xml,
+      /<url><loc>https:\/\/lody\.ai\/blog\/launch\/<\/loc><lastmod>2026-01-01<\/lastmod><\/url>/u
+    );
+
+    // Shallow --depth=1: Commit 3 (HEAD) is itself a boundary commit.
+    // Undated pages omit <lastmod>; dated blog post keeps frontmatter 2026-01-01.
+    git(tmpRoot, ['clone', '--depth=1', originUrl, depth1Repo]);
+    generateSitemaps(path.join(depth1Repo, 'site-docs'));
+    const depth1Xml = readFileSync(
+      path.join(depth1Repo, 'site-docs/public/sitemap-en.xml'),
+      'utf8'
+    );
+    assert.match(depth1Xml, /<url><loc>https:\/\/lody\.ai\/docs\/<\/loc><\/url>/u);
+    assert.match(depth1Xml, /<url><loc>https:\/\/lody\.ai\/docs\/other\/<\/loc><\/url>/u);
+    assert.match(
+      depth1Xml,
+      /<url><loc>https:\/\/lody\.ai\/blog\/launch\/<\/loc><lastmod>2026-01-01<\/lastmod><\/url>/u
+    );
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
 });
 
 await test('robots.txt declares valid user-agent groups and canonical sitemap', () => {

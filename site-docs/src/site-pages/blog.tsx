@@ -17,57 +17,65 @@ const indexCopy: Record<
   }
 > = {
   en: {
-    title: 'Blog',
-    description: 'Product announcements, engineering notes, and stories from the Lody team.',
+    title: 'Blog — AI Coding Agent Workflows & Engineering',
+    description:
+      'Engineering guides, product updates, and team workflows for running Claude Code, Codex, and ACP AI coding agents in parallel with Lody.',
     feedTitle: 'Lody Blog',
     feedPath: '/rss.xml',
     path: '/blog',
   },
   zh: {
-    title: '博客',
-    description: '来自 Lody 团队的产品发布、工程实践与故事。',
+    title: '博客 — AI 编程 Agent 工程实践与团队协作',
+    description:
+      '来自 Lody 团队的 AI 编程 Agent 工程实践、Claude Code / Codex 并行协作指南与产品发布故事。',
     feedTitle: 'Lody 博客',
     feedPath: '/rss-zh.xml',
     path: '/zh/blog',
   },
   'zh-hant': {
-    title: '部落格',
-    description: '來自 Lody 團隊的產品發布、工程實踐與故事。',
+    title: '部落格 — AI 程式設計 Agent 工程實踐與團隊協作',
+    description:
+      '來自 Lody 團隊的 AI 程式設計 Agent 工程實踐、Claude Code / Codex 並行協作指南與產品發布故事。',
     feedTitle: 'Lody 部落格',
     feedPath: '/rss-zh-hant.xml',
     path: '/zh-hant/blog',
   },
   ja: {
-    title: 'ブログ',
-    description: 'Lody チームからの製品発表、エンジニアリングノート、ストーリー。',
+    title: 'ブログ — AI コーディングエージェント活用と開発ノート',
+    description:
+      'Lody チームによる Claude Code・Codex 並列開発ワークフロー、エンジニアリングノート、製品アップデートの記事一覧。',
     feedTitle: 'Lody ブログ',
     feedPath: '/rss-ja.xml',
     path: '/ja/blog',
   },
   ko: {
-    title: '블로그',
-    description: 'Lody 팀의 제품 소식, 엔지니어링 노트 및 이야기.',
+    title: '블로그 — AI 코딩 에이전트 워크플로와 엔지니어링',
+    description:
+      'Lody 팀의 Claude Code·Codex 병렬 개발 워크플로, 엔지니어링 노트, 제품 출시 소식을 확인하세요.',
     feedTitle: 'Lody 블로그',
     feedPath: '/rss-ko.xml',
     path: '/ko/blog',
   },
   es: {
-    title: 'Blog',
-    description: 'Anuncios de producto, notas de ingeniería e historias del equipo de Lody.',
+    title: 'Blog — Flujos de agentes de código IA e ingeniería',
+    description:
+      'Guías prácticas, notas de ingeniería y lanzamientos del equipo de Lody sobre Claude Code, Codex y agentes de código IA en paralelo.',
     feedTitle: 'Blog de Lody',
     feedPath: '/rss-es.xml',
     path: '/es/blog',
   },
   fr: {
-    title: 'Blog',
-    description: 'Annonces produit, notes d’ingénierie et récits de l’équipe Lody.',
+    title: 'Blog — Agents de code IA et ingénierie produit',
+    description:
+      'Guides pratiques, notes d’ingénierie et annonces produit de l’équipe Lody autour de Claude Code, Codex et des agents de code IA en parallèle.',
     feedTitle: 'Blog Lody',
     feedPath: '/rss-fr.xml',
     path: '/fr/blog',
   },
   ru: {
-    title: 'Блог',
-    description: 'Анонсы продуктов, инженерные заметки и истории команды Lody.',
+    title: 'Блог — Рабочие процессы ИИ-агентов и инженерия',
+    description:
+      'Практические руководства, инженерные заметки и анонсы команды Lody о параллельной работе с Claude Code, Codex и ACP ИИ-агентами.',
     feedTitle: 'Блог Lody',
     feedPath: '/rss-ru.xml',
     path: '/ru/blog',
