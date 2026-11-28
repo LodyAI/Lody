@@ -91,12 +91,17 @@ const styles = stylex.create({
     paddingBottom: space[2],
   },
   stack: {
+    boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     gap: space[2],
     width: '100%',
-    maxWidth: 640,
     minWidth: 0,
+    paddingInlineStart: 42,
+    paddingInlineEnd: {
+      default: 0,
+      '@media (min-width: 640px)': 71,
+    },
   },
   card: {
     boxSizing: 'border-box',

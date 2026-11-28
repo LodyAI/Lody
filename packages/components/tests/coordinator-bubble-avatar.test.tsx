@@ -15,7 +15,15 @@ import {
   CoordinatorBubbleAvatar,
   loadCoordinatorAvatarMoodData,
 } from '../src/components/project-mode/coordinator-bubble-avatar';
+import type { SessionHistory, SessionId } from '@lody/shared';
 import { CoordinatorProactiveCard } from '../src/components/project-mode/coordinator-action-bar';
+import { COORDINATOR_CARD_DISMISSED_ACTION_ID } from '../src/components/project-mode/coordinator-action-engine';
+import { CoordinatorConversationPreviewProvider } from '../src/components/project-mode/coordinator-conversation';
+import {
+  CoordinatorNeedsYouHeaderButton,
+  CoordinatorNeedsYouIslandBanner,
+  useCoordinatorNeedsYouController,
+} from '../src/components/project-mode/coordinator-needs-you-island';
 import {
   CoordinatorComposerReplyBanner,
   CoordinatorInlineQuoteChip,
@@ -174,7 +182,7 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
     expect(remounted?.querySelector('svg')).toBeNull();
   });
 
-  it('dismisses a proactive action card on click and omits already-dismissed cards on mount', async () => {
+  it('renders equal-hierarchy options without duplicating bubble prose and collapses into a skipped receipt when choosing Not now', async () => {
     await initI18n('zh_CN');
     let dismissedCount = 0;
     const sampleCard = {
@@ -205,6 +213,7 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
       root!.render(
         React.createElement(CoordinatorProactiveCard, {
           card: sampleCard,
+          hasBubbleBody: true,
           onExecuteAction: () => undefined,
           onDismiss: () => {
             dismissedCount += 1;
@@ -213,10 +222,14 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
       );
     });
 
-    const dismissBtn = container!.querySelector<HTMLButtonElement>(
+    expect(container!.textContent).not.toContain(sampleCard.title);
+    expect(container!.textContent).not.toContain(sampleCard.summary);
+    const optionBar = container!.querySelector('[data-coordinator-action-bar]');
+    const dismissBtn = optionBar?.querySelector<HTMLButtonElement>(
       '[data-coordinator-card-dismiss]'
     );
     expect(dismissBtn).not.toBeNull();
+    expect(dismissBtn?.textContent).toContain('暂不关注');
 
     await act(async () => {
       dismissBtn!.click();
@@ -225,6 +238,8 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
     expect(dismissedCount).toBe(1);
     const cardEl = container!.querySelector('[data-coordinator-proactive-card]');
     expect(cardEl?.hasAttribute('data-coordinator-card-dismissed')).toBe(true);
+    expect(cardEl?.hasAttribute('data-coordinator-card-collapsed')).toBe(true);
+    expect(cardEl?.textContent).toContain('已跳过');
 
     await act(async () => {
       root!.unmount();
@@ -234,13 +249,16 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
       root!.render(
         React.createElement(CoordinatorProactiveCard, {
           card: { ...sampleCard, isDismissed: true },
+          hasBubbleBody: true,
           onExecuteAction: () => undefined,
           onDismiss: () => undefined,
         })
       );
     });
 
-    expect(container!.querySelector('[data-coordinator-proactive-card]')).toBeNull();
+    const persistedCardEl = container!.querySelector('[data-coordinator-proactive-card]');
+    expect(persistedCardEl?.hasAttribute('data-coordinator-card-dismissed')).toBe(true);
+    expect(persistedCardEl?.hasAttribute('data-coordinator-card-collapsed')).toBe(true);
   });
 
   it('mounts the top-right observability trigger lazily and opens the animated topology observatory on click', async () => {
@@ -561,5 +579,227 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
       clearBtn?.click();
     });
     expect(cleared).toBe(true);
+  });
+
+  it('aggregates unresolved decisions in the Header Needs-You Dynamic Island, navigates prev/next, skips items, and submits custom replies quoting the original bubble', async () => {
+    await initI18n('zh_CN');
+    const jumpedTurns: string[] = [];
+    const dismissedBubbles: Array<{ turnId: string; bubbleId: string }> = [];
+    const submittedFeedback: Array<{
+      turnId: string;
+      bubbleId: string;
+      bubbleBody?: string;
+      feedback: string;
+    }> = [];
+
+    const initialHistory: SessionHistory[] = [
+      {
+        id: 'turn-q1',
+        role: 'assistant',
+        timestamp: '2026-11-28T10:00:00.000Z',
+        finished: true,
+        items: [
+          {
+            type: 'coordinator_message',
+            id: 'b-q1',
+            body: '三位交叉核对后的共识是：先让已经做好的八语内容在生产可访问，修掉现有死链和渲染问题。',
+            card: {
+              kind: 'decision',
+              title: '八语上线策略',
+              actions: [
+                {
+                  id: 'act-go',
+                  label: '按共识推进修复',
+                  tone: 'primary',
+                  intent: {
+                    kind: 'coordinator_prompt',
+                    prompt: '按共识推进修复',
+                    mode: 'send',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      } as unknown as SessionHistory,
+      {
+        id: 'turn-q2',
+        role: 'assistant',
+        timestamp: '2026-11-28T10:05:00.000Z',
+        finished: true,
+        items: [
+          {
+            type: 'coordinator_message',
+            id: 'b-q2',
+            body: 'iPhone Duo 模拟器检查已通过，是否现在合并 PR？',
+            card: {
+              kind: 'review_ready',
+              title: '合并 Duo PR',
+              actions: [
+                {
+                  id: 'act-merge-duo',
+                  label: '合并 PR',
+                  tone: 'primary',
+                  intent: {
+                    kind: 'coordinator_prompt',
+                    prompt: '合并 PR',
+                    mode: 'send',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      } as unknown as SessionHistory,
+    ];
+
+    function IslandTestHarness() {
+      const [history, setHistory] = React.useState<SessionHistory[]>(initialHistory);
+      const controller = useCoordinatorNeedsYouController({
+        enabled: true,
+        sessionId: 'coord-island-test' as SessionId,
+        history,
+      });
+      return React.createElement(
+        'div',
+        null,
+        React.createElement(CoordinatorNeedsYouHeaderButton, { controller }),
+        React.createElement(CoordinatorNeedsYouIslandBanner, {
+          controller,
+          onJumpToTurn: (turnId) => {
+            jumpedTurns.push(turnId);
+          },
+        }),
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            'data-test-apply-dismiss-q2': '',
+            onClick: () => {
+              setHistory((prev) =>
+                prev.map((turn) =>
+                  turn.id !== 'turn-q2'
+                    ? turn
+                    : ({
+                        ...turn,
+                        items: (turn.items as Array<Record<string, unknown>>).map((it) => ({
+                          ...it,
+                          actionResolutions: {
+                            [COORDINATOR_CARD_DISMISSED_ACTION_ID]: {
+                              status: 'dismissed',
+                              resolvedAt: 5000,
+                            },
+                          },
+                        })),
+                      } as unknown as SessionHistory)
+                )
+              );
+            },
+          },
+          'sync-dismiss'
+        )
+      );
+    }
+
+    await act(async () => {
+      root!.render(
+        React.createElement(
+          CoordinatorConversationPreviewProvider,
+          {
+            value: {
+              tasks: new Map(),
+              openTask: () => undefined,
+              onExecuteBubbleAction: () => undefined,
+              onDismissBubbleCard: (req) => {
+                dismissedBubbles.push(req);
+              },
+              onSubmitCardFeedback: (req) => {
+                submittedFeedback.push({
+                  turnId: req.turnId,
+                  bubbleId: req.bubbleId,
+                  bubbleBody: req.bubbleBody,
+                  feedback: req.feedback,
+                });
+                return true;
+              },
+            },
+          },
+          React.createElement(IslandTestHarness)
+        )
+      );
+    });
+
+    const headerBtn = container!.querySelector<HTMLButtonElement>(
+      '[data-coordinator-needs-you-btn]'
+    );
+    expect(headerBtn).not.toBeNull();
+    expect(headerBtn!.textContent).toContain('需要你的任务');
+    expect(headerBtn!.textContent).toContain('2');
+    expect(container!.querySelector('[data-coordinator-needs-you-island]')).toBeNull();
+
+    await act(async () => {
+      headerBtn!.click();
+    });
+
+    const island = container!.querySelector('[data-coordinator-needs-you-island]');
+    expect(island).not.toBeNull();
+    expect(island!.textContent).toContain('1 / 2');
+    expect(island!.querySelector('[data-coordinator-island-quote]')?.textContent).toContain(
+      '三位交叉核对后的共识是：先让已经做好的八语内容在生产可访问'
+    );
+
+    const jumpBtn = Array.from(island!.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('定位原文')
+    );
+    await act(async () => {
+      jumpBtn?.click();
+    });
+    expect(jumpedTurns).toEqual(['turn-q1']);
+
+    const nextBtn = island!.querySelector<HTMLButtonElement>('button[aria-label="下一个"]');
+    await act(async () => {
+      nextBtn!.click();
+    });
+    expect(island!.textContent).toContain('2 / 2');
+    expect(island!.querySelector('[data-coordinator-island-quote]')?.textContent).toContain(
+      'iPhone Duo 模拟器检查已通过'
+    );
+
+    const skipBtn = island!.querySelector<HTMLButtonElement>('[data-coordinator-card-dismiss]');
+    await act(async () => {
+      skipBtn!.click();
+      container!.querySelector<HTMLButtonElement>('[data-test-apply-dismiss-q2]')!.click();
+    });
+    expect(dismissedBubbles).toEqual([{ turnId: 'turn-q2', bubbleId: 'b-q2' }]);
+    expect(headerBtn!.textContent).toContain('1');
+    expect(island!.textContent).toContain('1 / 1');
+
+    const textarea = island!.querySelector<HTMLTextAreaElement>('textarea');
+    expect(textarea).not.toBeNull();
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value'
+      )?.set;
+      valueSetter?.call(textarea, 'main 分支已经有多语言了不是吗');
+      textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const sendBtn = island!.querySelector<HTMLButtonElement>('button[aria-label="发送回复"]');
+    expect(sendBtn?.disabled).toBe(false);
+    await act(async () => {
+      sendBtn!.click();
+    });
+
+    expect(submittedFeedback).toEqual([
+      {
+        turnId: 'turn-q1',
+        bubbleId: 'b-q1',
+        bubbleBody:
+          '三位交叉核对后的共识是：先让已经做好的八语内容在生产可访问，修掉现有死链和渲染问题。',
+        feedback: 'main 分支已经有多语言了不是吗',
+      },
+    ]);
   });
 });

@@ -10,6 +10,11 @@ import {
   buildCoordinatorThreadDirectoryIndex,
   type CoordinatorThreadDirectoryIndex,
 } from '@/components/project-mode/coordinator-thread-model';
+import {
+  CoordinatorNeedsYouHeaderButton,
+  CoordinatorNeedsYouIslandBanner,
+  useCoordinatorNeedsYouController,
+} from '@/components/project-mode/coordinator-needs-you-island';
 import { CoordinatorObservabilityHeaderButton } from '@/components/project-mode/coordinator-observability-panel';
 import { CoordinatorTriggersHeaderButton } from '@/components/project-mode/coordinator-triggers-panel';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
@@ -7816,6 +7821,15 @@ export const SessionChatInterface = memo(
       ) : null;
     const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
     const isCoordinatorHeader = Boolean(coordinatorConversation || isCoordinatorSession(session));
+    const coordinatorNeedsYouController = useCoordinatorNeedsYouController({
+      enabled: Boolean(coordinatorConversation),
+      sessionId: session.id,
+      history: sessionHistory,
+      hasPendingLocalUserMessage: pendingMessages.localUserMessages.length > 0,
+    });
+    const coordinatorNeedsYouNode = coordinatorConversation ? (
+      <CoordinatorNeedsYouHeaderButton controller={coordinatorNeedsYouController} />
+    ) : null;
     const coordinatorTriggersNode = isCoordinatorHeader ? (
       <CoordinatorTriggersHeaderButton
         coordinatorSessionId={session.id}
@@ -7834,6 +7848,7 @@ export const SessionChatInterface = memo(
     const toolbarNode = (
       <ErrorBoundary name="SessionChatHeader" variant="inline" resetKeys={[session.id]}>
         <div {...stylex.props(styles.toolbarHeader)}>
+          {coordinatorNeedsYouNode}
           {coordinatorTriggersNode}
           {coordinatorObservabilityNode}
           {headerLauncherActions}
@@ -7932,6 +7947,8 @@ export const SessionChatInterface = memo(
                           isMobile && styles.hiddenHeaderActions
                         )}
                       >
+                        {coordinatorNeedsYouNode}
+                        {coordinatorTriggersNode}
                         {coordinatorObservabilityNode}
                         {headerLauncherActions}
                         {headerGitHubActions}
@@ -7980,6 +7997,12 @@ export const SessionChatInterface = memo(
                         horizontalFold ? { maxHeight: horizontalFold.messageHeight } : undefined
                       }
                     >
+                      {coordinatorConversation ? (
+                        <CoordinatorNeedsYouIslandBanner
+                          controller={coordinatorNeedsYouController}
+                          onJumpToTurn={handleScrollToMessage}
+                        />
+                      ) : null}
                       {isSearchOpen ? (
                         <SessionSearchBar
                           query={searchQuery}

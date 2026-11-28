@@ -101,7 +101,6 @@ import {
   isSessionHistoryDelivered,
   type AcpConfigOptionValue,
   type MessageContent,
-  type OperationCompletionContent,
   type SessionHistoryParsed,
   type SessionId,
   type SessionInputBlock,
@@ -325,10 +324,7 @@ import {
 import { SessionLimitContinueAction } from '@/components/schedules/quota-continue-action';
 import { isClaudeSessionLimitMessage } from '@/components/schedules/quota-continue';
 import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
-import {
-  CoordinatorTaskChangeStrip,
-  useCoordinatorConversation,
-} from '@/components/project-mode/coordinator-conversation';
+import { useCoordinatorConversation } from '@/components/project-mode/coordinator-conversation';
 import { CoordinatorProactiveCard } from '@/components/project-mode/coordinator-action-bar';
 import { seedCoordinatorAvatarStreamSnapshot } from '@/components/project-mode/coordinator-avatar-mood';
 import { CoordinatorBubbleAvatar } from '@/components/project-mode/coordinator-bubble-avatar';
@@ -2423,6 +2419,25 @@ type AssistantTurnRowsCacheEntry = {
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
 
+const isHiddenCoordinatorSystemMessage = (message: SessionHistoryParsed): boolean => {
+  if (getCreatedSessionCards(message)) return true;
+  let sawOperationItem = false;
+  for (const entry of message.items) {
+    if (
+      entry.type === 'operation_progress' ||
+      entry.type === 'operation_completion' ||
+      entry.type === 'operation_completion_batch'
+    ) {
+      sawOperationItem = true;
+      continue;
+    }
+    if (shouldRenderSystemRowItem(entry) && hasVisibleOperationContent(entry)) {
+      return false;
+    }
+  }
+  return sawOperationItem;
+};
+
 // Exported for tests only (chat-virtual-rows-identity.test.ts).
 export const buildChatVirtualRows = ({
   items,
@@ -2468,8 +2483,8 @@ export const buildChatVirtualRows = ({
     const messageIndex = item.turnIndex;
     if (
       item.message.role === 'system' &&
-      item.message.items.length > 0 &&
-      !item.message.items.some(hasVisibleOperationContent)
+      ((item.message.items.length > 0 && !item.message.items.some(hasVisibleOperationContent)) ||
+        (coordinatorBubbles && isHiddenCoordinatorSystemMessage(item.message)))
     )
       continue;
     if (item.message.role !== 'assistant') {
@@ -4545,54 +4560,14 @@ const SystemMessageRowView = ({
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
-}) => {
-  const coordinator = useCoordinatorConversation();
-  const original = (
-    <SystemMessageRowContent
-      message={message}
-      sessionId={sessionId}
-      onNavigateSession={onNavigateSession}
-      capacityRetry={capacityRetry}
-    />
-  );
-  if (coordinator) {
-    const targets = collectOperationTaskTargets(message);
-    if (targets.size > 0) {
-      return (
-        <CoordinatorTaskChangeStrip
-          sessionIds={[...targets.keys()]}
-          fallbackTitles={targets}
-          details={original}
-        />
-      );
-    }
-  }
-  return original;
-};
-
-/** Child conversations a system row reports on, with the titles it carries. */
-function collectOperationTaskTargets(message: SessionHistoryParsed): Map<string, string> {
-  const targets = new Map<string, string>();
-  const add = (sessionId: string | undefined, label: string | undefined) => {
-    if (sessionId && !targets.has(sessionId)) targets.set(sessionId, label ?? '');
-  };
-  for (const card of getCreatedSessionCards(message) ?? []) add(card.sessionId, card.fallbackTitle);
-  const addCompletion = (completion: OperationCompletionContent) => {
-    for (const item of getOperationCompletionItems(completion)) {
-      add(item.target?.sessionId, item.label);
-    }
-  };
-  for (const item of message.items) {
-    if (item.type === 'operation_progress') {
-      for (const entry of item.items) add(entry.target.sessionId, entry.label);
-    } else if (item.type === 'operation_completion') {
-      addCompletion(item);
-    } else if (item.type === 'operation_completion_batch') {
-      for (const member of item.members ?? []) addCompletion(member);
-    }
-  }
-  return targets;
-}
+}) => (
+  <SystemMessageRowContent
+    message={message}
+    sessionId={sessionId}
+    onNavigateSession={onNavigateSession}
+    capacityRetry={capacityRetry}
+  />
+);
 
 const SystemMessageRowContent = ({
   message,
@@ -4605,12 +4580,22 @@ const SystemMessageRowContent = ({
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
 }) => {
-  const creationCards = getCreatedSessionCards(message);
+  const coordinator = useCoordinatorConversation();
+  const creationCards = coordinator ? null : getCreatedSessionCards(message);
   if (creationCards) {
     return <CreatedSessionList cards={creationCards} onNavigateSession={onNavigateSession} />;
   }
   const systemItems = message.items.flatMap((item, itemIndex) =>
-    shouldRenderSystemRowItem(item) && hasVisibleOperationContent(item) ? [{ item, itemIndex }] : []
+    shouldRenderSystemRowItem(item) &&
+    hasVisibleOperationContent(item) &&
+    !(
+      coordinator &&
+      (item.type === 'operation_progress' ||
+        item.type === 'operation_completion' ||
+        item.type === 'operation_completion_batch')
+    )
+      ? [{ item, itemIndex }]
+      : []
   );
 
   if (systemItems.length === 0) {
@@ -8698,6 +8683,7 @@ function CoordinatorReplyBubble({
   const hasBody = entry.body.trim().length > 0;
   const hasImages = (entry.images?.length ?? 0) > 0;
   const hasFiles = (entry.files?.length ?? 0) > 0;
+  const hasCardPayload = Boolean(entry.card) || (entry.actions?.length ?? 0) > 0;
   const anchorId = useMemo(
     () =>
       formatCoordinatorAnchorId({
@@ -8762,7 +8748,11 @@ function CoordinatorReplyBubble({
               ref={bubbleRef}
               onPointerEnter={handleInteractiveEnter}
               onPointerLeave={handleInteractiveLeave}
-              {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}
+              {...stylex.props(
+                conversationSurface.bubble,
+                coordinatorBubbleStyles.bubble,
+                hasCardPayload && coordinatorBubbleStyles.bubbleWithOptions
+              )}
             >
               <div {...stylex.props(coordinatorBubbleStyles.bubbleInnerStack)}>
                 {showInlineQuote && entry.replyTo ? (
@@ -8870,10 +8860,16 @@ function CoordinatorProactiveCardRow({
 
   if (!resolvedCard) return null;
 
+  const hasBubbleBody =
+    entry.body.trim().length > 0 ||
+    (entry.images?.length ?? 0) > 0 ||
+    (entry.files?.length ?? 0) > 0;
+
   return (
     <div {...stylex.props(coordinatorBubbleStyles.avatarAlignedSlot)}>
       <CoordinatorProactiveCard
         card={resolvedCard}
+        hasBubbleBody={hasBubbleBody}
         superseded={isSuperseded}
         onOpenTask={coordinator?.openTask}
         onOpenPr={coordinator?.openPr}
@@ -9101,7 +9097,7 @@ const coordinatorBubbleStyles = stylex.create({
     paddingBottom: 0,
   },
   cardGap: {
-    paddingTop: space[2],
+    paddingTop: 6,
     paddingBottom: 2,
   },
   supersededCardGap: {
@@ -9157,10 +9153,12 @@ const coordinatorBubbleStyles = stylex.create({
     width: '100%',
   },
   avatarAlignedSlot: {
+    boxSizing: 'border-box',
     width: '100%',
-    paddingInlineStart: {
+    paddingInlineStart: 42,
+    paddingInlineEnd: {
       default: 0,
-      '@media (min-width: 640px)': 42,
+      '@media (min-width: 640px)': 71,
     },
   },
   bubble: {
@@ -9168,8 +9166,18 @@ const coordinatorBubbleStyles = stylex.create({
     flexDirection: 'column',
     gap: 8,
   },
+  bubbleWithOptions: {
+    flex: '1 1 0%',
+  },
   sideActionsSlot: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    justifyContent: 'flex-end',
     flexShrink: 0,
+    minWidth: {
+      default: 0,
+      '@media (min-width: 640px)': 71,
+    },
     paddingInlineStart: space[2],
   },
   replyPillRow: {

@@ -70,6 +70,7 @@ export type CoordinatorCardFeedbackRequest = {
   readonly turnId: string;
   readonly bubbleId: string;
   readonly cardTitle: string;
+  readonly bubbleBody?: string;
   readonly bubbleReplyTo?: CoordinatorReplyRef;
   readonly activeThreadRootId?: string | null;
   readonly feedback: string;
@@ -697,7 +698,7 @@ export function useCoordinatorActionExecutor(options: {
         },
         existingThreadRootId: req.activeThreadRootId ?? req.bubbleReplyTo?.threadRootId,
         author: 'coordinator',
-        text: req.cardTitle,
+        text: req.bubbleBody?.trim() || req.cardTitle,
       });
       const sent = await onSendCoordinatorPrompt(trimmed, replyRef);
       if (sent) {

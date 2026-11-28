@@ -27,10 +27,12 @@ import {
   COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID,
   buildLatestCoordinatorBubbleByTaskId,
   buildSupersededCoordinatorCardKeys,
+  collectPendingCoordinatorDecisions,
   createCoordinatorActionCommandRegistry,
   formatCoordinatorBubbleKey,
   resolveCoordinatorBubbleActions,
   resolveCoordinatorProactiveCard,
+  streamItemsFromCoordinatorHistory,
 } from '../src/components/project-mode/coordinator-action-engine';
 import {
   claimCoordinatorBubbleAvatarPlayback,
@@ -337,6 +339,243 @@ describe('coordinator conversation bubbles and search', () => {
       getCoordinatorMessageSearchBlockId('coord-turn-1', 4),
       getCoordinatorMessageSearchBlockId('coord-turn-1', 6),
     ]);
+  });
+
+  it('hides child operation receipts and created_session system rows in coordinatorBubbles mode while preserving system_notice rows', () => {
+    const progressSys = wrap(
+      makeMessage(
+        'sys-progress',
+        'system',
+        [
+          {
+            type: 'operation_progress',
+            operationId: 'op-prog-1',
+            operationKind: 'session_create',
+            status: 'running',
+            items: [
+              { status: 'running', target: { sessionId: 'child-1' as SessionId }, label: 'Task 1' },
+            ],
+          } as unknown as MessageContent,
+        ],
+        true
+      )
+    );
+    const completionSys = wrap(
+      makeMessage(
+        'sys-batch-1',
+        'system',
+        [
+          {
+            type: 'operation_completion_batch',
+            batchId: 'batch-1',
+            memberCount: 1,
+            deliveryStatus: 'settled',
+            members: [
+              {
+                type: 'operation_completion',
+                deliveryId: 'd-1',
+                operationId: 'op-1',
+                operationKind: 'session_chat',
+                completion: {
+                  type: 'result',
+                  value: {
+                    items: [
+                      {
+                        status: 'succeeded',
+                        target: { sessionId: 'child-1' as SessionId, userTurnId: 'u-1' },
+                        output: { text: 'Done' },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          } as unknown as MessageContent,
+        ],
+        true
+      )
+    );
+    const createdSessionSys = wrap(
+      makeMessage(
+        'sys-created-1',
+        'system',
+        [
+          {
+            type: 'operation_completion',
+            deliveryId: 'd-create-1',
+            operationId: 'op-create-1',
+            operationKind: 'session_create',
+            completion: {
+              type: 'result',
+              value: {
+                items: [
+                  {
+                    status: 'succeeded',
+                    target: { sessionId: 'child-1' as SessionId },
+                    label: 'Task 1',
+                  },
+                ],
+              },
+            },
+          } as unknown as MessageContent,
+        ],
+        true
+      )
+    );
+    const scheduleProposalSys = wrap(
+      makeMessage(
+        'sys-schedule-proposal',
+        'system',
+        [
+          {
+            type: 'system_notice',
+            name: 'schedule_proposal',
+            meta: { title: 'Daily check' },
+          } as unknown as MessageContent,
+        ],
+        true
+      )
+    );
+    const bubbleTurn = wrap(
+      makeMessage(
+        'coord-turn-clean',
+        'assistant',
+        [{ type: 'coordinator_message', id: 'b-clean', body: '全部检查已完成。' }],
+        true
+      )
+    );
+
+    const rows = buildChatVirtualRows({
+      items: [progressSys, completionSys, createdSessionSys, scheduleProposalSys, bubbleTurn],
+      lastAssistantMessageId: 'coord-turn-clean',
+      expansionVersion: 0,
+      coordinatorBubbles: true,
+    });
+
+    expect(rows.map((row) => row.key)).toEqual([
+      'sys-schedule-proposal',
+      'assistant:coord-turn-clean:bubble:b-clean',
+    ]);
+  });
+
+  it('collects unresolved coordinator decisions including standalone non-child questions and drops resolved or superseded items', () => {
+    const standaloneQuestion: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-standalone',
+      body: '在派发子对话前，先确认兼容策略：保留 7 天双写还是直接切换？',
+      card: {
+        kind: 'decision',
+        title: '确认兼容策略',
+        actions: [
+          {
+            id: 'opt-7d',
+            label: '保留 7 天双写',
+            tone: 'primary',
+            intent: { kind: 'coordinator_prompt', prompt: '按 7 天双写推进', mode: 'send' },
+          },
+          {
+            id: 'opt-direct',
+            label: '直接切换',
+            intent: { kind: 'coordinator_prompt', prompt: '直接切换', mode: 'send' },
+          },
+        ],
+      },
+    };
+    const taskDecision: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-task',
+      body: 'PR #219 已通过本地与 CI 检查，要现在合并吗？',
+      card: {
+        kind: 'review_ready',
+        title: '合并 PR #219',
+        actions: [
+          {
+            id: 'opt-merge',
+            label: '合并 #219',
+            tone: 'primary',
+            intent: {
+              kind: 'client_command',
+              command: 'github.pr_merge',
+              params: { sessionId: 'child-pr-219' },
+            },
+          },
+        ],
+      },
+    };
+
+    const rawHistory: SessionHistory[] = [
+      makeMessage(
+        'turn-standalone',
+        'assistant',
+        [standaloneQuestion],
+        true
+      ) as unknown as SessionHistory,
+      makeMessage('turn-task', 'assistant', [taskDecision], true) as unknown as SessionHistory,
+    ];
+    const items = streamItemsFromCoordinatorHistory('coord-s1' as SessionId, rawHistory);
+    const superseded = buildSupersededCoordinatorCardKeys({
+      items,
+      tasksById: new Map(),
+      hasPendingLocalUserMessage: false,
+    });
+    const pending = collectPendingCoordinatorDecisions({
+      items,
+      supersededCardKeys: superseded,
+      tasksById: new Map(),
+      translate: (_k, fallback) => fallback,
+    });
+
+    expect(pending.map((item) => item.key)).toEqual([
+      formatCoordinatorBubbleKey('turn-standalone', 'b-standalone'),
+      formatCoordinatorBubbleKey('turn-task', 'b-task'),
+    ]);
+    expect(pending[0]?.bubbleBody).toContain('在派发子对话前，先确认兼容策略');
+    expect(pending[0]?.card.linkedTasks).toEqual([]);
+
+    const resolvedHistory: SessionHistory[] = [
+      makeMessage(
+        'turn-standalone',
+        'assistant',
+        [
+          {
+            ...standaloneQuestion,
+            actionResolutions: {
+              [COORDINATOR_CUSTOM_FEEDBACK_ACTION_ID]: {
+                status: 'executed',
+                resolvedAt: 2000,
+                summary: '先保留 3 天即可',
+              },
+            },
+          },
+        ],
+        true
+      ) as unknown as SessionHistory,
+      makeMessage(
+        'turn-task',
+        'assistant',
+        [
+          {
+            ...taskDecision,
+            actionResolutions: {
+              [COORDINATOR_CARD_DISMISSED_ACTION_ID]: {
+                status: 'dismissed',
+                resolvedAt: 2100,
+              },
+            },
+          },
+        ],
+        true
+      ) as unknown as SessionHistory,
+    ];
+    const afterItems = streamItemsFromCoordinatorHistory('coord-s1' as SessionId, resolvedHistory);
+    expect(
+      collectPendingCoordinatorDecisions({
+        items: afterItems,
+        supersededCardKeys: new Set(),
+        tasksById: new Map(),
+        translate: (_k, fallback) => fallback,
+      })
+    ).toEqual([]);
   });
 
   it('shows instant fallback status before the first coordinator output, switches to explicit status, and avoids end-of-turn or stale-daemon flashes', () => {

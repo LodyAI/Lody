@@ -4,6 +4,7 @@ import {
   computeCoordinatorActionDedupKey,
   extractActionLinkedSessionIds,
   extractLinkedSessionIdsFromText,
+  formatCoordinatorAnchorId,
   hasWorkspaceChanges,
   isCoordinatorCardStaleFromChildActivity,
   matchUserMessageToOpenCoordinatorCards,
@@ -19,9 +20,12 @@ import {
   type GitHubMergeMethod,
   type MessageContent,
   type OpenCoordinatorCardCandidate,
+  type SessionHistory,
+  type SessionHistoryParsed,
   type SessionId,
   type SessionPullRequestView,
 } from '@lody/shared';
+import { parseHistoryItemsForRender } from '@/components/ai-gui/build-chat-stream-items';
 import type { ChatStreamItem } from '@/components/ai-gui/view';
 import {
   hasMultiplePullRequestRepos,
@@ -988,4 +992,113 @@ export function buildSupersededCoordinatorCardKeys(args: {
   }
 
   return superseded;
+}
+
+export type PendingCoordinatorDecisionItem = {
+  readonly key: string;
+  readonly turnId: string;
+  readonly bubbleId: string;
+  readonly anchorId: string;
+  readonly bubbleBody: string;
+  readonly bubbleReplyTo?: CoordinatorReplyRef;
+  readonly createdAt?: number;
+  readonly card: ResolvedCoordinatorProactiveCard;
+};
+
+export function streamItemsFromCoordinatorHistory(
+  sessionId: SessionId,
+  history: readonly (SessionHistory | SessionHistoryParsed)[]
+): ChatStreamItem[] {
+  return history.map((raw, index) => {
+    const parsedItems = parseHistoryItemsForRender(raw.items);
+    const message: SessionHistoryParsed = {
+      ...(raw as SessionHistoryParsed),
+      items: parsedItems,
+      read: raw.read ?? false,
+    };
+    return {
+      type: 'message' as const,
+      sessionId,
+      message,
+      turnIndex: index,
+    };
+  });
+}
+
+/**
+ * Collects all unresolved coordinator conversation decisions across `items`,
+ * including standalone coordinator questions/proposals that have zero child
+ * conversations, while excluding already-chosen, dismissed, custom-replied,
+ * or causally superseded items.
+ */
+export function collectPendingCoordinatorDecisions(args: {
+  items: readonly ChatStreamItem[];
+  supersededCardKeys: ReadonlySet<string>;
+  tasksById: ReadonlyMap<string, ProjectBoardRow>;
+  supportedCommands?: ReadonlySet<string>;
+  activeThreadRootId?: string | null;
+  translate: CoordinatorTranslateFn;
+}): PendingCoordinatorDecisionItem[] {
+  const {
+    items,
+    supersededCardKeys,
+    tasksById,
+    supportedCommands,
+    activeThreadRootId = null,
+    translate,
+  } = args;
+  const out: PendingCoordinatorDecisionItem[] = [];
+
+  for (const streamItem of items) {
+    if (streamItem.type !== 'message' || streamItem.message.role !== 'assistant') continue;
+    const msg = streamItem.message;
+    for (const entry of msg.items) {
+      if (entry.type !== 'coordinator_message') continue;
+      if (activeThreadRootId) {
+        const anchor = formatCoordinatorAnchorId({
+          kind: 'coordinator_bubble',
+          turnId: msg.id,
+          bubbleId: entry.id,
+        });
+        if (anchor !== activeThreadRootId && entry.replyTo?.threadRootId !== activeThreadRootId) {
+          continue;
+        }
+      }
+      const key = formatCoordinatorBubbleKey(msg.id, entry.id);
+      if (supersededCardKeys.has(key)) continue;
+
+      const card = resolveCoordinatorProactiveCard({
+        entry,
+        tasksById,
+        supportedCommands,
+        translate,
+      });
+      if (!card) continue;
+      if (card.isDismissed || card.chosenAction || card.customFeedbackSummary) continue;
+      const actionable = card.actions.some(
+        (act) => act.liveState === 'ready' || act.liveState === 'running'
+      );
+      if (!actionable) continue;
+
+      const trimmedBody = entry.body.trim();
+      const fallbackBody = [card.title, card.summary].filter(Boolean).join('\n\n');
+
+      out.push({
+        key,
+        turnId: msg.id,
+        bubbleId: entry.id,
+        anchorId: formatCoordinatorAnchorId({
+          kind: 'coordinator_bubble',
+          turnId: msg.id,
+          bubbleId: entry.id,
+        }),
+        bubbleBody: trimmedBody || fallbackBody,
+        bubbleReplyTo: entry.replyTo,
+        createdAt: entry.createdAt,
+        card,
+      });
+    }
+  }
+
+  return out;
 }
