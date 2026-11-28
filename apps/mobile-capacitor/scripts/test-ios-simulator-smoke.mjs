@@ -7,7 +7,7 @@
  * boot + Better Auth session probe converge cleanly to /login with zero
  * uncaught errors or unhandled promise rejections.
  */
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -18,8 +18,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import {
   SMOKE_REVOKED_SESSION_TOKEN,
   buildPlaceholderBuildEnv,
@@ -36,6 +37,8 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const APP_DIR = resolve(SCRIPT_DIR, '..');
 const IOS_APP_DIR = join(APP_DIR, 'ios', 'App');
 const BUNDLE_ID = 'ai.lody.mobile';
+const SIMCTL_LIMIT = { timeout: 180_000, killSignal: 'SIGKILL' };
+const CLEANUP_OPTIONS = { ...SIMCTL_LIMIT, timeout: 30_000, stdio: 'ignore' };
 
 function runInherited(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -54,6 +57,18 @@ function runCapture(command, args, options = {}) {
     maxBuffer: 32 * 1024 * 1024,
     ...options,
   });
+}
+
+const execFileAsync = promisify(execFile);
+
+async function launchApp(udid) {
+  const { stdout, stderr } = await execFileAsync(
+    'xcrun',
+    ['simctl', 'launch', udid, BUNDLE_ID],
+    SIMCTL_LIMIT
+  );
+  process.stdout.write(stdout);
+  process.stderr.write(stderr);
 }
 
 function isFileCleanInGit(repoDir, relPath) {
@@ -194,67 +209,65 @@ async function main() {
     }
 
     console.log(`[ios-simulator-smoke] Booting simulator ${activeUdid}...`);
-    runInherited('xcrun', ['simctl', 'bootstatus', activeUdid, '-b']);
+    runInherited('xcrun', ['simctl', 'bootstatus', activeUdid, '-b'], {
+      ...SIMCTL_LIMIT,
+      timeout: 600_000,
+    });
 
-    spawnSync('xcrun', ['simctl', 'terminate', activeUdid, BUNDLE_ID], { stdio: 'ignore' });
-    spawnSync('xcrun', ['simctl', 'uninstall', activeUdid, BUNDLE_ID], { stdio: 'ignore' });
+    spawnSync('xcrun', ['simctl', 'terminate', activeUdid, BUNDLE_ID], CLEANUP_OPTIONS);
+    spawnSync('xcrun', ['simctl', 'uninstall', activeUdid, BUNDLE_ID], CLEANUP_OPTIONS);
 
-    console.log('[ios-simulator-smoke] Installing and launching scratch App.app...');
-    runInherited('xcrun', ['simctl', 'install', activeUdid, scratchAppPath]);
+    console.log('[ios-simulator-smoke] Installing scratch App.app...');
+    runInherited('xcrun', ['simctl', 'install', activeUdid, scratchAppPath], SIMCTL_LIMIT);
 
-    const resultPromise = stub.waitForResult();
-    runInherited('xcrun', ['simctl', 'launch', activeUdid, BUNDLE_ID]);
-
-    const result = await resultPromise;
+    console.log('[ios-simulator-smoke] Launching scratch App.app...');
+    await launchApp(activeUdid);
+    const result = await stub.waitForResult();
     console.log(
       `[ios-simulator-smoke] PASS fresh-cold-start (platform=${result.snapshot.platform}, route=${result.snapshot.pathname}, authRequests=${result.diagnostics.authRequests.length}, errors=0, unhandledRejections=0)`
     );
 
-    spawnSync('xcrun', ['simctl', 'terminate', activeUdid, BUNDLE_ID], { stdio: 'ignore' });
+    runInherited('xcrun', ['simctl', 'terminate', activeUdid, BUNDLE_ID], SIMCTL_LIMIT);
     const seed = buildRevokedSessionSeed();
-    const appDataContainer = runCapture('xcrun', [
-      'simctl',
-      'get_app_container',
-      activeUdid,
-      BUNDLE_ID,
-      'data',
-    ]).trim();
+    const appDataContainer = runCapture(
+      'xcrun',
+      ['simctl', 'get_app_container', activeUdid, BUNDLE_ID, 'data'],
+      SIMCTL_LIMIT
+    ).trim();
+    if (!isAbsolute(appDataContainer) || !existsSync(appDataContainer)) {
+      throw new Error('Simulator app data container is unavailable');
+    }
     const appPlistPath = join(appDataContainer, 'Library', 'Preferences', `${BUNDLE_ID}.plist`);
-    console.log(
-      '[ios-simulator-smoke] Seeding revoked session in native Preferences and relaunching...'
-    );
-    runInherited('xcrun', [
-      'simctl',
-      'spawn',
-      activeUdid,
-      'defaults',
-      'write',
-      appPlistPath,
-      `CapacitorStorage.${seed.cookieKey}`,
-      '-string',
-      seed.cookieValue,
-    ]);
-    runInherited('xcrun', [
-      'simctl',
-      'spawn',
-      activeUdid,
-      'defaults',
-      'write',
-      appPlistPath,
-      `CapacitorStorage.${seed.sessionDataKey}`,
-      '-string',
-      seed.sessionDataValue,
-    ]);
-
+    console.log('[ios-simulator-smoke] Seeding revoked session in native Preferences...');
+    mkdirSync(dirname(appPlistPath), { recursive: true });
+    const seededPlistPath = `${appPlistPath}.smoke-${process.pid}`;
+    try {
+      if (existsSync(appPlistPath)) cpSync(appPlistPath, seededPlistPath);
+      else runInherited('/usr/bin/plutil', ['-create', 'binary1', seededPlistPath]);
+      for (const [key, value] of [
+        [seed.cookieKey, seed.cookieValue],
+        [seed.sessionDataKey, seed.sessionDataValue],
+      ]) {
+        const keyPath = `CapacitorStorage.${key}`.replaceAll('.', '\\.');
+        runInherited('/usr/bin/plutil', ['-replace', keyPath, '-string', value, seededPlistPath]);
+      }
+      runInherited(
+        'xcrun',
+        ['simctl', 'spawn', activeUdid, 'defaults', 'import', appPlistPath, seededPlistPath],
+        SIMCTL_LIMIT
+      );
+    } finally {
+      rmSync(seededPlistPath, { force: true });
+    }
     stub.resetScenario({
       name: 'revoked-session-cleanup',
       expectedBearerToken: SMOKE_REVOKED_SESSION_TOKEN,
       expectClearedToken: SMOKE_REVOKED_SESSION_TOKEN,
       timeoutMs: options.timeoutMs,
     });
-    const revokedResultPromise = stub.waitForResult();
-    runInherited('xcrun', ['simctl', 'launch', activeUdid, BUNDLE_ID]);
-    const revokedResult = await revokedResultPromise;
+    console.log('[ios-simulator-smoke] Relaunching after seeding revoked session...');
+    await launchApp(activeUdid);
+    const revokedResult = await stub.waitForResult();
     console.log(
       `[ios-simulator-smoke] PASS revoked-session-cleanup (platform=${revokedResult.snapshot.platform}, route=${revokedResult.snapshot.pathname}, authRequests=${revokedResult.diagnostics.authRequests.length}, clearedRevokedToken=true, errors=0, unhandledRejections=0)`
     );
@@ -262,6 +275,13 @@ async function main() {
     const diagnostics = stub ? stub.getDiagnostics() : null;
     if (options.artifactDir) {
       mkdirSync(options.artifactDir, { recursive: true });
+      if (diagnostics) {
+        writeFileSync(
+          join(options.artifactDir, 'ios-simulator-smoke-diagnostics.json'),
+          JSON.stringify(diagnostics, null, 2),
+          'utf8'
+        );
+      }
       if (activeUdid) {
         spawnSync(
           'xcrun',
@@ -272,14 +292,7 @@ async function main() {
             'screenshot',
             join(options.artifactDir, 'ios-simulator-smoke-failure.png'),
           ],
-          { stdio: 'ignore' }
-        );
-      }
-      if (diagnostics) {
-        writeFileSync(
-          join(options.artifactDir, 'ios-simulator-smoke-diagnostics.json'),
-          JSON.stringify(diagnostics, null, 2),
-          'utf8'
+          CLEANUP_OPTIONS
         );
       }
     }
@@ -289,11 +302,11 @@ async function main() {
     throw error;
   } finally {
     if (activeUdid) {
-      spawnSync('xcrun', ['simctl', 'terminate', activeUdid, BUNDLE_ID], { stdio: 'ignore' });
+      spawnSync('xcrun', ['simctl', 'terminate', activeUdid, BUNDLE_ID], CLEANUP_OPTIONS);
     }
     if (createdSimulatorUdid) {
-      spawnSync('xcrun', ['simctl', 'shutdown', createdSimulatorUdid], { stdio: 'ignore' });
-      spawnSync('xcrun', ['simctl', 'delete', createdSimulatorUdid], { stdio: 'ignore' });
+      spawnSync('xcrun', ['simctl', 'shutdown', createdSimulatorUdid], CLEANUP_OPTIONS);
+      spawnSync('xcrun', ['simctl', 'delete', createdSimulatorUdid], CLEANUP_OPTIONS);
     }
     if (stub) {
       await stub.close().catch(() => {});

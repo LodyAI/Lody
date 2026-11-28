@@ -176,6 +176,7 @@ jobs:
         run: |
           set -euo pipefail
           corepack pnpm --filter @lody/mobile-capacitor run test:smoke:ios -- \
+            --timeout 120000 \
             --artifact-dir "${RUNNER_TEMP}/ios-simulator-smoke"
 
       - name: Upload iOS Simulator smoke diagnostics on failure
