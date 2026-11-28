@@ -34,6 +34,26 @@ function createMemoryLocalStorage(initial = {}) {
 
 const NOW = Date.parse('2026-11-26T00:00:00.000Z');
 
+void test('starts a session request using the registered Capacitor Preferences plugin', async (t) => {
+  const localStorage = createMemoryLocalStorage({
+    'CapacitorStorage.better-auth_cookie': JSON.stringify({
+      'better-auth.session_token': { value: 'expired', expires: '2026-11-25T00:00:00Z' },
+    }),
+  });
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage } });
+  t.after(() => {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else delete globalThis.window;
+  });
+  const plugin = createCapacitorAuthHygienePlugin({ isNative: () => true, now: () => NOW });
+
+  const request = await plugin.fetchPlugins[0].init('/get-session', { method: 'GET' });
+
+  assert.deepEqual(request, { url: '/get-session', options: { method: 'GET' } });
+  assert.equal(localStorage.getItem('CapacitorStorage.better-auth_cookie'), null);
+});
+
 void test('prunes locally expired native session tokens before capacitorClient reads Preferences', async () => {
   const preferences = createMemoryPreferences({
     'better-auth_cookie': JSON.stringify({
@@ -49,7 +69,7 @@ void test('prunes locally expired native session tokens before capacitorClient r
   });
   const plugin = createCapacitorAuthHygienePlugin({
     isNative: () => true,
-    getPreferences: async () => preferences,
+    preferences,
     getLocalStorage: () => createMemoryLocalStorage(),
     now: () => NOW,
   });
@@ -74,7 +94,7 @@ void test('retains active and no-expiry native tokens while pruning only expired
   });
   const plugin = createCapacitorAuthHygienePlugin({
     isNative: () => true,
-    getPreferences: async () => preferences,
+    preferences,
     getLocalStorage: () => createMemoryLocalStorage(),
     now: () => NOW,
   });
@@ -102,7 +122,7 @@ void test('clears server-rejected native Bearer token on /get-session null but p
   });
   const plugin = createCapacitorAuthHygienePlugin({
     isNative: () => true,
-    getPreferences: async () => preferences,
+    preferences,
     getLocalStorage: () => createMemoryLocalStorage(),
     now: () => NOW,
   });
@@ -163,7 +183,7 @@ void test('migrates a valid legacy localStorage session_token into Preferences o
   const preferences = createMemoryPreferences();
   const plugin = createCapacitorAuthHygienePlugin({
     isNative: () => true,
-    getPreferences: async () => preferences,
+    preferences,
     getLocalStorage: () => localStorage,
     now: () => NOW,
   });
@@ -202,7 +222,7 @@ void test('migrates a valid legacy localStorage session_token into Preferences o
   });
   const plugin2 = createCapacitorAuthHygienePlugin({
     isNative: () => true,
-    getPreferences: async () => preferences2,
+    preferences: preferences2,
     getLocalStorage: () => localStorage2,
     now: () => NOW,
   });
@@ -236,7 +256,7 @@ void test('non-native browser mode leaves localStorage and Preferences untouched
   });
   const plugin = createCapacitorAuthHygienePlugin({
     isNative: () => false,
-    getPreferences: async () => preferences,
+    preferences,
     getLocalStorage: () => localStorage,
     now: () => NOW,
   });
