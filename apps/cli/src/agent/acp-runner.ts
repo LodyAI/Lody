@@ -629,12 +629,82 @@ export async function prepareAcpProcessEnvironmentLegacy(
   );
 }
 
-async function startLocalAcpProtocol<T>(
+type LocalProcessStart = {
+  child: ChildProcess;
+  startupAbort: Promise<never>;
+  launcher: AcpLauncher;
+  startupTimeouts?: AcpStartupTimeoutOptions;
+};
+
+type LocalProcessOptions = {
+  prepareArgs?: (args: readonly string[]) => string[];
+  sensitiveOutput?: boolean;
+  retainCleanupFailure?: boolean;
+  safeOfflineBeforeInitialization?: () => boolean;
+};
+
+/** Run one operation and confirm process-tree cleanup before returning its result. */
+export async function withLocalAgentProcess<T>(
+  options: StartLocalAcpAgentOptions,
+  operation: Pick<LocalProcessOptions, 'prepareArgs' | 'sensitiveOutput'> & {
+    sessionLabel: string;
+  },
+  run: (child: ChildProcess, startupAbort: Promise<never>) => Promise<T>
+): Promise<T> {
+  const { agentProcess, result } = await startLocalAgentProcess(
+    options,
+    { ...operation, retainCleanupFailure: true },
+    async ({ child, startupAbort }) => ({ result: await run(child, startupAbort) })
+  );
+  try {
+    await terminateAcpProcessTree(agentProcess, {
+      logger: options.logger,
+      sessionLabel: operation.sessionLabel,
+      exitTimeoutMs: 3000,
+    });
+  } catch (cause) {
+    throw new AcpQuotaCleanupError(agentProcess, cause);
+  }
+  options.signal?.throwIfAborted();
+  return result;
+}
+
+function startLocalAcpProtocol<T>(
   options: LocalAcpProtocolOptions,
   startClient: (options: LocalAcpConnectionOptions) => Promise<T>,
   retainCleanupFailure = false,
   sensitiveOutput = false,
   safeOfflineBeforeInitialization?: () => boolean
+) {
+  return startLocalAgentProcess(
+    options,
+    { retainCleanupFailure, sensitiveOutput, safeOfflineBeforeInitialization },
+    ({ child, startupAbort, launcher, startupTimeouts }) => {
+      if (!child.stdout) throw new Error('Agent process stdout is not available');
+      if (!child.stdin) throw new Error('Agent process stdin is not available');
+      options.logger.debug('[acp-startup] creating ACP client');
+      return startClient({
+        stream: ndJsonStream(
+          createStdinWritableStream(child.stdin),
+          createStdoutReadableStream(child.stdout)
+        ),
+        launcher,
+        startupTimeouts,
+        startupAbort,
+      });
+    }
+  );
+}
+
+async function startLocalAgentProcess<T>(
+  options: LocalAcpProtocolOptions,
+  {
+    prepareArgs,
+    retainCleanupFailure,
+    sensitiveOutput,
+    safeOfflineBeforeInitialization,
+  }: LocalProcessOptions,
+  start: (context: LocalProcessStart) => Promise<T>
 ) {
   options.signal?.throwIfAborted();
   // Async resolve so registry agents distributed as a platform binary are
@@ -658,6 +728,7 @@ async function startLocalAcpProtocol<T>(
     signal: options.signal,
   });
   options.signal?.throwIfAborted();
+  if (prepareArgs) launch.args = prepareArgs(launch.args);
   const launcher: AcpLauncher = resolveAcpLauncher(launch.command);
   const spawnAnalyticsProps = {
     cliType: options.cliType,
@@ -859,19 +930,6 @@ async function startLocalAcpProtocol<T>(
       }
     );
 
-    // Create streams with proper buffering and backpressure handling.
-    // See utils/stream.ts for details on race condition and backpressure fixes.
-    if (!agentProcess.stdout) {
-      throw new Error('Agent process stdout is not available');
-    }
-    if (!agentProcess.stdin) {
-      throw new Error('Agent process stdin is not available');
-    }
-
-    const output = createStdoutReadableStream(agentProcess.stdout);
-    const input = createStdinWritableStream(agentProcess.stdin);
-    const stream = ndJsonStream(input, output);
-
     let rejectSignalAbort: ((error: DOMException) => void) | undefined;
     const signalAbort = options.signal
       ? new Promise<never>((_resolve, reject) => {
@@ -884,15 +942,10 @@ async function startLocalAcpProtocol<T>(
     options.signal?.addEventListener('abort', handleSignalAbort, { once: true });
     try {
       options.signal?.throwIfAborted();
-      options.logger.debug('[acp-startup] creating ACP client');
-      const started = await startClient({
-        stream,
-        launcher,
-        startupTimeouts,
-        startupAbort: signalAbort
-          ? Promise.race([startupMonitor.abortPromise, signalAbort])
-          : startupMonitor.abortPromise,
-      });
+      const startupAbort = signalAbort
+        ? Promise.race([startupMonitor.abortPromise, signalAbort])
+        : startupMonitor.abortPromise;
+      const started = await start({ child: agentProcess, startupAbort, launcher, startupTimeouts });
       options.signal?.throwIfAborted();
       return {
         agentProcess,
@@ -901,6 +954,9 @@ async function startLocalAcpProtocol<T>(
       };
     } catch (error) {
       const startupError = startupMonitor.resolveError(error);
+      // An operation may fail before observing startupAbort. Our teardown is not a startup exit.
+      startupMonitor.dispose();
+      options.signal?.removeEventListener('abort', handleSignalAbort);
       // The process died/failed to spawn before startup completed (the startup
       // monitor surfaces async ENOENT/EACCES/early-exit here). Protocol-level
       // failures are captured inside AgentClient.startSession, so only

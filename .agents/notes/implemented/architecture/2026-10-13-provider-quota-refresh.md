@@ -8,11 +8,11 @@ PR: https://github.com/LodyAI/Lody/pull/1535
 
 ## Abstract
 
-Composer and Agent settings previously displayed quota without asking for a current reading. Lody now projects Core's existing `rateLimits` capability into its Provider cache and requests an independent quota read when eligible UI becomes visible. A daemon-owned, short-lived ACP process queries independently; Core queries need no session, while legacy registry Antigravity uses an isolated `/usage` session and builtin Antigravity uses agy's zero-turn JSON command. Failed or ambiguous empty responses preserve cached quota; authoritative snapshot replacement and freshness timestamps remain deferred.
+Composer and Agent settings previously displayed quota without asking for a current reading. Lody now projects Core's existing `rateLimits` capability into its Provider cache and requests an independent quota read when eligible UI becomes visible. A daemon-owned, short-lived ACP process queries independently; Core queries need no session, while Antigravity uses its official usage commands and registry Copilot uses the SDK account RPC. Failed or ambiguous empty responses preserve cached quota; authoritative snapshot replacement and freshness timestamps remain deferred.
 
 ## Contract and ownership
 
-Core already defines `_lody/rate_limits/get` and `{version: 1, query?: true}`. The shared Core query contract remains unchanged. Display requires a runtime declaration or an official Antigravity compatibility reader; refresh additionally requires `query: true` and Machine protocol `providerRateLimitsRefresh: 1`. Push-only providers can display existing quota. Builtin credential/account overrides, brand routes, and Codex API-key profiles remain ineligible; custom ACP providers own their declared account semantics.
+Core already defines `_lody/rate_limits/get` and `{version: 1, query?: true}`. The shared Core query contract remains unchanged. Display requires a runtime declaration or an official Antigravity/Copilot compatibility reader; refresh additionally requires `query: true` and Machine protocol `providerRateLimitsRefresh: 1`. Push-only providers can display existing quota. Builtin credential/account overrides, brand routes, and Codex API-key profiles remain ineligible; custom ACP providers own their declared account semantics.
 
 The UI hook refreshes on visible composer/provider activation, foreground return, and popover opening. The workspace runtime coalesces requests and uses its existing local-control or Machine RPC route, then reconciles existing Flock handles. There is no polling, new subscription, guessed percentage, or loading overlay.
 
@@ -44,6 +44,41 @@ reaches the existing refresh owner. No ACP session or model turn is created. The
 upper Provider cache and ACP workflows retain their existing Promise boundaries.
 The new builtin is independently identified; the deprecated registry Provider
 keeps its launcher and sessions rather than being silently rewritten.
+
+## Official Copilot compatibility
+
+The registry entry `github-copilot-cli` uses its resolved official launcher and
+account environment in SDK mode. Lody replaces the ACP flag with
+`--headless --stdio` and preserves the package prefix and other arguments. The
+existing startup owner admits and owns this separate process. Success, failure,
+timeout and cancellation all await tree termination. Unconfirmed cleanup reaches
+the existing Provider quarantine without affecting other configurations or chat.
+The SDK transport is an external Promise boundary. Migrating the launcher, startup
+gate and cleanup owner to native Effect remains outside this reader's scope.
+
+The reader uses Content-Length JSON-RPC, checks SDK protocol version 3 with `ping`,
+and calls `account.getQuota` without creating a session. The reader handles only
+these two sequential exchanges with bounded byte buffering, avoiding a general
+JSON-RPC dependency for this account-only read. Official CLI versions
+1.0.107 and the registry pin 1.0.112 support this query with an existing local login.
+The 1.0.107 ACP endpoint has neither the account RPC nor a Core quota declaration.
+The ACP `/usage` command reports session consumption, so it cannot supply an account
+allowance. Lody owns the compatibility capability for the official registry
+identity. Custom commands with the same display name receive no such declaration.
+
+Only a finite `premium_interactions.remainingPercentage` in [0, 100] becomes a
+Core window, with used percentage equal to 100 minus remaining percentage. Zero
+remains exhausted. `hasQuota` does not replace the numeric reading. Unlimited or
+missing entitlements and invalid values fail without replacing cached quota.
+The generic limit ID matches `github-copilot-cli`, so model selection retains this
+account-wide reading. Token-based billing makes request counts ambiguous, and the
+observed reset date was near query time. Counts, overage, window duration and reset
+time remain omitted rather than implying monthly requests or a reset forecast.
+
+[GitHub's usage guide](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing)
+distinguishes account quota from session usage. Local read-only validation against
+the pinned CLI establishes the v3 query used here, independently of newer SDK
+handshakes. Tests use synthetic peers and account data.
 
 ## Persistence and ordering
 

@@ -67,6 +67,44 @@ describe('SessionUsagePopover', () => {
     expect(container.querySelector('button')).toBeNull();
   });
 
+  it('renders account-wide Copilot quota beside a selected model without inventing a reset', async () => {
+    const agentType = 'github-copilot-cli';
+    const agentConfigId = 'copilot-provider' as AgentConfigId;
+    await renderUsage({
+      agentType,
+      agentConfigId,
+      modelId: 'claude-sonnet-4.6',
+      showRateLimitWithoutContext: true,
+      rateLimits: {
+        [getRateLimitEntryKey(agentType, agentType, agentConfigId)]: {
+          limitId: agentType,
+          scope: { providerId: 'github-copilot' },
+          windows: [
+            {
+              label: 'Copilot subscription',
+              usedPercent: 65.5,
+              windowDurationSeconds: null,
+              resetsAtEpochSeconds: null,
+            },
+          ],
+        },
+      },
+    });
+    expect(container.textContent).toContain('66%');
+    await act(async () => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(document.body.querySelector('[aria-label="Usage"]')?.textContent).toContain(
+      'Copilot subscription'
+    );
+    expect(document.body.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe(
+      '65.5'
+    );
+    expect(document.body.querySelector('[aria-label="Usage"]')?.textContent).not.toMatch(
+      /Weekly|Monthly|Resets/
+    );
+  });
+
   it.each(['antigravity', 'antigravity-acp'])(
     'shows both model groups and both quota windows alongside context for %s',
     async (agentType) => {

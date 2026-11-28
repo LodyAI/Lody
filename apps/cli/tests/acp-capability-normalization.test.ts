@@ -206,3 +206,20 @@ it('keeps native Antigravity declarations authoritative and does not enable cust
   ])
     expect(normalizeAcpSessionCapabilities({}, { agent: other }).rateLimits).toBeUndefined();
 });
+
+it('projects the official Copilot compatibility reader in probe and live-session normalization', () => {
+  const agent = { cliType: 'registry', agentType: 'github-copilot-cli' };
+  expect(normalizeAcpSessionCapabilities({}, { agent }).rateLimits).toEqual({
+    version: 1,
+    query: true,
+  });
+  expect(
+    normalizeAcpSessionCapabilities({}, { agent, rateLimits: { version: 1 } }).rateLimits
+  ).toEqual({ version: 1 });
+  expect(
+    normalizeAcpSessionCapabilities({}, { agent: { ...agent, cliType: 'custom' } }).rateLimits
+  ).toBeUndefined();
+  expect(
+    normalizeAcpSessionCapabilities({}, { agent: { ...agent, agentType: 'Copilot' } }).rateLimits
+  ).toBeUndefined();
+});

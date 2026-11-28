@@ -10,6 +10,7 @@ import {
 import type { SessionConfigOption, SessionConfigSelectGroup } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
 import { filterAcpConfigOptions } from '@/agent/acp-config-option-filter';
+import { getCopilotQuotaCapability } from './copilot-quota';
 import { getAntigravityQuotaCapability } from './antigravity-quota';
 
 export type AcpCapabilitiesResult = {
@@ -248,7 +249,8 @@ export function normalizeAcpSessionCapabilities(
     sessionTitle: lifecycleCapabilities.sessionTitle === true,
     rateLimits:
       lifecycleCapabilities.rateLimits ??
-      getAntigravityQuotaCapability(lifecycleCapabilities.agent),
+      getAntigravityQuotaCapability(lifecycleCapabilities.agent) ??
+      getCopilotQuotaCapability(lifecycleCapabilities.agent),
     ...(lifecycleCapabilities.goalActions?.length
       ? { goalActions: lifecycleCapabilities.goalActions }
       : {}),
