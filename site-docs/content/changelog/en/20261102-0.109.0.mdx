@@ -1,0 +1,35 @@
+---
+title: '20261102-0.109.0'
+version: 0.109.0
+date: 2026-11-02
+description: Multi-repository projects, scheduled messages, inline quotes, image markup, and Android previews, plus improvements to sign-in, history imports, and conversation reliability.
+draft: true
+---
+
+Version 0.109.0
+
+### ✨ New
+
+- Combine multiple repositories and local folders in one Project. A guided setup helps you choose the machine and project members; you can create or edit projects directly from the conversation's project picker.
+- Schedule a complete message, including attachments, from the composer. View scheduled messages in the queue and edit them without leaving the conversation.
+- The Schedules page now separates tasks from one-time messages, with clearer status, filters, run history, and actions to clear finished messages.
+- Quote selected conversation text directly in the composer. Combine several excerpts with your questions, and preview or remove each quote before sending. Requires a machine with message quote support.
+- Mark up images in a full-window editor with text, pen, rectangles, and arrows. Attach notes to text or rectangle marks, then send the annotated image and notes to the Agent.
+- Preview and control Android emulators from a conversation on machines with a configured Android SDK and AVD. Adjust preview quality, rotate the device, paste text, and take screenshots.
+- Drag iOS and Android preview tabs together to view both devices side by side, resize the split, or drag a tab out to separate them.
+- Sign in to supported HTTP MCP servers from MCP settings. Each account authorizes on its own machine, and new sign-in credentials are stored in the local OS credential vault rather than the shared workspace configuration.
+- ACP Agent settings now show the sign-in methods advertised by the Agent before you start authentication.
+- Import Magpie providers on a headless server with `lody agent-config import-magpie` in a cloud workspace.
+- When a turn includes both subagents and background commands, the task panel separates them into Subagents and Tasks tabs.
+
+### 🐛 Fixes and Improvements
+
+- Fixed slow desktop startup authentication checks incorrectly signing you out and requiring another browser login.
+- Ordinary conversations remain available when the Inbox database cannot start. Temporary Inbox failures retry automatically, while affected operations report their unavailable state.
+- Fixed queued messages getting stuck when synchronized updates arrive out of order.
+- Running background tasks remain visible after the Agent's main reply finishes.
+- Kimi's proposed plan is now visible before you approve it.
+- Fixed conversations reverting to Plan mode while older message content was still loading, after the Agent had already reported leaving Plan mode.
+- Improved DeepSeek history imports: preserve stored titles and activity times, read images from both current and legacy stores, and show a placeholder for missing or corrupt images so the remaining history can still load.
+- Improved iOS conversation scrolling so loading older messages is less likely to interrupt scroll momentum.
+- Updated managed Claude Code to 2.1.316.
