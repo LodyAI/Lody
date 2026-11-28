@@ -23,6 +23,10 @@ export const operationRepositoryLayer = (store: LodyOperationStore) => {
     claimItemMaterialization: (s, id, n, t) =>
       io(() => store.claimItemMaterialization(s, id, n, t)),
     markItemInputDurable: (s, id, n, t) => io(() => store.markItemInputDurable(s, id, n, t)),
+    readCoordinatorChildWatermarks: (s) => io(() => store.readCoordinatorChildWatermarks(s)),
+    inspectCoordinatorTarget: (c, t, u) => io(() => store.inspectCoordinatorTarget(c, t, u)),
+    recordCoordinatorDirectChildCompletion: (args) =>
+      io(() => store.recordCoordinatorDirectChildCompletion(args)),
   });
 };
 

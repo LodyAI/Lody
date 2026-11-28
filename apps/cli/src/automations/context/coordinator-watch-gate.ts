@@ -262,7 +262,7 @@ export async function readCoordinatorWorkItemsSnapshot(args: {
 
 export type CoordinatorWakeGateDecision =
   | { kind: 'pass'; result: AutomationResult }
-  | { kind: 'suppress'; reason: 'user_viewing' | 'debounce'; retryDelayMs: number };
+  | { kind: 'suppress'; reason: 'debounce'; retryDelayMs: number };
 
 function extractTargetHints(payload: unknown): { workItemId?: string; sessionId?: string } {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return {};
@@ -277,7 +277,7 @@ function extractTargetHints(payload: unknown): { workItemId?: string; sessionId?
   };
 }
 
-/** Suppresses wakes while the owner views the child session and debounces bursts. */
+/** Coalesces rapid bursts on observed work items before waking the coordinator. */
 export function evaluateCoordinatorWakeGate(args: {
   result: AutomationResult;
   observedSnapshots: readonly ObservedCoordinatorWorkItem[];
@@ -302,14 +302,6 @@ export function evaluateCoordinatorWakeGate(args: {
       : observedSnapshots;
 
   const targets = relevant.length > 0 ? relevant : observedSnapshots;
-
-  if (targets.some((item) => item.userViewingAnyMember)) {
-    return {
-      kind: 'suppress',
-      reason: 'user_viewing',
-      retryDelayMs: debounceMs,
-    };
-  }
 
   let shortestRemainingDebounce = 0;
   for (const item of targets) {

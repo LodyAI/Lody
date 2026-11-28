@@ -32,7 +32,7 @@ flowchart TB
     UI["Pure View Projection UI = f(Store)\nTask Groups / Multi-PR Chips / Causal Card Invalidation"]
 
     subgraph Reconciler["Coordinator Reconciler"]
-      WakeGate["Stateless Wake Gate\nSandboxed Watch Predicates + Focus and Debounce Suppression"]
+      WakeGate["Stateless Wake Gate\nChild Turn Completion + Sandboxed Watch Predicates + Burst Debounce"]
       Coord["Coordinator Conversation (Holds Read Cursor)\nReads Store.diff(cursor..head) on Every Turn"]
     end
   end
@@ -68,10 +68,10 @@ Endpoints do not couple to one another directly:
   2. `working` applies when any member is actively running (or a standalone card is `working`).
   3. `accepted` applies to child-backed WorkItems only when all members are archived/accepted OR `acceptedAt >= latestMessageAt`; any newer child activity invalidates acceptance and returns the item to `review`. Standalone items enter `accepted` on `stage: "done"` or `acceptedAt`.
   4. `review` is the default ready-for-review state.
-  A `WorkItem` unions all associated pull requests across members and repositories (`pullRequests[]`, rendered as a compact overlapping avatar-style PR stack), holds optional `summary`, `progressNote`, `pendingAction`, and `externalRefs[]`, and archives all member conversations together on Accept.
+     A `WorkItem` unions all associated pull requests across members and repositories (`pullRequests[]`, rendered as a compact overlapping avatar-style PR stack), holds optional `summary`, `progressNote`, `pendingAction`, and `externalRefs[]`, and archives all member conversations together on Accept.
 - **Collaboration mode (`delegated` | `direct`)**:
   - `delegated`: the coordinator briefs workers, collects completion receipts, and presents next-step or review cards.
-  - `direct`: for open-ended design, visual iteration, or multi-round back-and-forth, the coordinator seeds the child conversation with context, recommends direct collaboration in the side panel, and steps back until an explicit handoff or watched milestone occurs.
+  - `direct`: for open-ended design, visual iteration, or multi-round back-and-forth, the coordinator seeds the child conversation with context and recommends direct collaboration in the side panel so the user can iterate without relay latency, while still summarizing each settled child turn completion back into the coordinator timeline.
 
 ### 2. Physical Storage Ownership
 
@@ -91,13 +91,13 @@ When the coordinator emits a proactive `card`, the daemon records `snapshotTurnB
 - **UI projection**: an unchosen card whose linked session now reports a different `SessionMeta.latestUserMsgId` has been overtaken by direct child activity and automatically collapses as superseded.
 - **CLI implicit reply matching**: when a user later types a plain message in the coordinator composer, `resolveCoordinatorPromptReplyHeader` skips open cards whose `snapshotTurnBySession` no longer matches current `SessionMeta.latestUserMsgId`, preventing stale `<related_card_context>` injection.
 
-### 4. Domain-Agnostic Wake Gate and Bounded Lazy Digest
+### 4. Domain-Agnostic Wake Gate and Unified Child Completion Reporting
 
 The routing kernel contains no hardcoded domain status enums (such as GitHub PR states):
 
-- **Lazy digest (`diff(cursor..head)`)**: ordinary direct turns between the user and a child conversation do not wake the coordinator. When the coordinator next runs a turn, the host filters changed child sessions in memory via `SessionMeta` against the local `cursor`, performs bounded transient tail reads (`<= 4` concurrent rooms, top-K recent work items) to build a compact `<project_facts_delta>`, and advances each child's `cursor` only when its facts were confirmed no-op or actually delivered within the turn budget (deferred, failed, or truncated updates retain their prior cursor for the next turn).
-- **Programmable watch predicates (`CodeMode`)**: domain-specific milestones (such as opening a pull request, exporting target asset files, failing CI checks, or receiving external issue triggers) are expressed as sandboxed `lody_automation` predicates over pluggable read adapters (`ctx.read` / `ctx.exec` / `ctx.fetch`) that return either `false` or a wake summary.
-- **Physical attention gate**: intrinsic completion of coordinator-owned `Operation`s, unattended child execution blocks/failures, and matched watch predicates pass through one physical gate—suppressing wakeups while the user is actively focused on that child conversation and coalescing bursts within a short debounce window (cancelling the pending wakeup if the user directly intervenes in the child conversation during the window).
+- **Unified child turn completion receipts**: every settled non-cancelled turn completion across coordinator-managed child conversations—whether dispatched by the coordinator (`lody_session_create` / `lody_session_chat`), triggered via a `session_dispatch` card button, or sent directly by the user inside the child conversation in `delegated` or `direct` mode—delivers an `OperationInbox` completion receipt (`chainDepth: 0` for human-initiated turns, deduplicated against coordinator-owned `operations` via local `coordinator_child_watermarks`) and wakes the coordinator regardless of whether the child tab is currently open (`session-viewing` never suppresses completion or watch wakes). While a follow-up turn is already in flight on that child conversation, reconciliation waits for the active turn to settle rather than waking mid-exchange.
+- **Bounded `<project_facts_delta>` (`diff(cursor..head)`)**: when the coordinator runs any turn (human input or automatic completion continuation), the host filters changed child sessions in memory via `SessionMeta` against the local `cursor`, performs bounded transient tail reads (`<= 4` concurrent rooms, top-K recent work items) to build a compact `<project_facts_delta>` (recent direct user/child exchanges, PR status updates, and acceptance), and advances each child's `cursor` only when its facts were confirmed no-op or actually delivered within the turn budget (deferred, failed, or truncated updates retain their prior cursor for the next turn).
+- **Programmable watch predicates (`CodeMode`)**: external milestones outside turn completion (such as CI check transitions or external issue triggers) are expressed as sandboxed `lody_automation` predicates over pluggable read adapters (`ctx.read` / `ctx.exec` / `ctx.fetch`) that return either `false` or a wake summary, coalescing rapid bursts within a short debounce window.
 
 ## Performance and Security Bounds
 

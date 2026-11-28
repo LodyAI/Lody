@@ -4,6 +4,7 @@ import {
   AgentRoleSnapshotSchema,
   buildAgentMessageAuthor,
   MemoryBindingSchema,
+  type SessionTurnInputConfig,
 } from '@lody/shared';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
@@ -957,9 +958,152 @@ export class LodyOperationStore {
         )
         .run(requesterSessionId, requesterSessionId);
       this.db
+        .prepare(
+          'DELETE FROM coordinator_child_watermarks WHERE coordinator_session_id = ? OR target_session_id = ?'
+        )
+        .run(requesterSessionId, requesterSessionId);
+      this.db
         .prepare('DELETE FROM coordinator_turn_deltas WHERE coordinator_session_id = ?')
         .run(requesterSessionId);
     }).immediate();
+  }
+
+  readCoordinatorChildWatermarks(coordinatorSessionId: SessionId): Map<string, string> {
+    const rows = this.db
+      .prepare(
+        `SELECT target_session_id, settled_turn_id
+         FROM coordinator_child_watermarks
+         WHERE coordinator_session_id = ?`
+      )
+      .all(coordinatorSessionId) as Array<{
+      target_session_id: string;
+      settled_turn_id: string;
+    }>;
+    const out = new Map<string, string>();
+    for (const row of rows) {
+      out.set(row.target_session_id, row.settled_turn_id);
+    }
+    return out;
+  }
+
+  inspectCoordinatorTarget(
+    coordinatorSessionId: SessionId,
+    targetSessionId: SessionId,
+    settledTurnId: string
+  ): {
+    active: boolean;
+    covered: boolean;
+    sourceTurnId?: string;
+    inputConfig?: SessionTurnInputConfig;
+  } {
+    const rows = this.db
+      .prepare(
+        `SELECT state, items_json, frozen_config_json
+         FROM operations
+         WHERE requester_session_id = ? AND items_json LIKE ?
+         ORDER BY created_at DESC`
+      )
+      .all(coordinatorSessionId, `%"sessionId":${JSON.stringify(targetSessionId)}%`) as Array<{
+      state: 'active' | 'finished';
+      items_json: string;
+      frozen_config_json: string;
+    }>;
+    let active = false;
+    let covered = false;
+    let sourceTurnId: string | undefined;
+    let inputConfig: SessionTurnInputConfig | undefined;
+    const expectedAssistantId = `assistant:${settledTurnId}`;
+    for (const row of rows) {
+      let items: Array<Record<string, unknown>> = [];
+      try {
+        const parsed = JSON.parse(row.items_json);
+        if (Array.isArray(parsed)) items = parsed as Array<Record<string, unknown>>;
+      } catch {
+        items = [];
+      }
+      const matchingItems = items.filter((item) => {
+        const target = item.target;
+        return (
+          target !== null &&
+          typeof target === 'object' &&
+          (target as { sessionId?: unknown }).sessionId === targetSessionId
+        );
+      });
+      if (matchingItems.length === 0) continue;
+      if (row.state === 'active') active = true;
+      for (const item of matchingItems) {
+        const target = item.target as { userTurnId?: unknown };
+        if (target.userTurnId === settledTurnId || item.assistantTurnId === expectedAssistantId) {
+          covered = true;
+        }
+      }
+      if (!sourceTurnId || !inputConfig) {
+        try {
+          const frozen = JSON.parse(row.frozen_config_json) as {
+            sourceTurnId?: unknown;
+            inputConfig?: SessionTurnInputConfig;
+          };
+          if (!sourceTurnId && typeof frozen.sourceTurnId === 'string' && frozen.sourceTurnId) {
+            sourceTurnId = frozen.sourceTurnId;
+          }
+          if (!inputConfig && frozen.inputConfig && typeof frozen.inputConfig === 'object') {
+            inputConfig = frozen.inputConfig;
+          }
+        } catch {}
+      }
+    }
+    return {
+      active,
+      covered,
+      ...(sourceTurnId ? { sourceTurnId } : {}),
+      ...(inputConfig ? { inputConfig } : {}),
+    };
+  }
+
+  recordCoordinatorDirectChildCompletion(args: {
+    workspaceId: WorkspaceId;
+    coordinatorSessionId: SessionId;
+    userId: string;
+    targetSessionId: SessionId;
+    settledTurnId: string;
+    sourceTurnId?: string;
+    inputConfig?: SessionTurnInputConfig;
+    completion?: LodyOperationCompletion;
+    createdAt?: string;
+    completedAt?: string;
+  }): boolean {
+    const nowMs = this.now();
+    const nowIso = new Date(nowMs).toISOString();
+    let inserted = false;
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO coordinator_child_watermarks (
+             coordinator_session_id,
+             target_session_id,
+             settled_turn_id,
+             updated_at
+           ) VALUES (?, ?, ?, ?)
+           ON CONFLICT(coordinator_session_id, target_session_id) DO UPDATE SET
+             settled_turn_id = excluded.settled_turn_id,
+             updated_at = excluded.updated_at`
+        )
+        .run(args.coordinatorSessionId, args.targetSessionId, args.settledTurnId, nowMs);
+      if (args.completion && args.settledTurnId) {
+        inserted = this.inbox.indexDirectCompletion({
+          workspaceId: args.workspaceId,
+          sessionId: args.coordinatorSessionId,
+          userId: args.userId,
+          operationId: `direct-turn:${args.targetSessionId}:${args.settledTurnId}`,
+          ...(args.sourceTurnId ? { sourceTurnId: args.sourceTurnId } : {}),
+          createdAt: args.createdAt ?? nowIso,
+          completedAt: args.completedAt ?? nowIso,
+          completion: args.completion,
+          ...(args.inputConfig ? { inputConfig: args.inputConfig } : {}),
+        });
+      }
+    }).immediate();
+    return inserted;
   }
 
   readCoordinatorTurnDelta(
@@ -1536,6 +1680,13 @@ export class LodyOperationStore {
         delta_text TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS coordinator_child_watermarks (
+        coordinator_session_id TEXT NOT NULL,
+        target_session_id TEXT NOT NULL,
+        settled_turn_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (coordinator_session_id, target_session_id)
+      );
     `);
       if (hasInbox) {
         // Passive upgrade copies with no batch are legacy backlog, not new work.
@@ -1577,6 +1728,7 @@ export class LodyOperationStore {
       'table:operation_inputs',
       'table:coordinator_read_cursors',
       'table:coordinator_turn_deltas',
+      'table:coordinator_child_watermarks',
     ]);
     const existingObjects = this.db
       .prepare(

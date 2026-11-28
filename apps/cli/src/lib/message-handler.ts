@@ -4742,6 +4742,13 @@ export class MessageHandler {
         await this.withDaemonCommandScope(() =>
           this.materializeOperationTarget(operation, item, index)
         ),
+      listSessionMetas: async () =>
+        (await listAliveSessionMetas(this.workspaceDocument)).map((row) => row.meta),
+      readCoordinatorWorkItems: async (coordinatorSessionId) => {
+        const doc = await this.workspaceDocument.getOrCreateSessionDoc(coordinatorSessionId);
+        const state = await doc.getDocState();
+        return state?.workItems;
+      },
     });
 
     this.setupSessionEventHandlers();

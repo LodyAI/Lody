@@ -32,7 +32,7 @@ flowchart TB
     UI["纯函数视图投影 UI = f(Store)\n任务组聚合 / 多 PR 徽章 / 过期卡片因果失效"]
 
     subgraph Reconciler["协调者调和闭环 (Reconciler)"]
-      WakeGate["无状态唤醒门控 Wake Gate\nCodeMode 沙箱守望谓词 + 焦点在场抑制与防抖合并"]
+      WakeGate["无状态唤醒门控 Wake Gate\n子对话回合完结回执 + CodeMode 沙箱守望谓词 + 突发防抖合并"]
       Coord["协调者会话 (持有本地已读游标 cursor)\n每次开轮统一读取 Store.diff(cursor..head)"]
     end
   end
@@ -68,10 +68,10 @@ flowchart TB
   2. `working`：任一成员正在运行（或独立卡处于 `working`）。
   3. `accepted`：含成员的任务组仅在全部成员已归档/验收或 `acceptedAt >= latestMessageAt` 时处于 `accepted`；验收后产生的新活动会自动使验收失效并回到 `review`。独立任务卡以 `stage: "done"` 或 `acceptedAt` 判定完成。
   4. `review`：其余默认待审阅状态。
-  任务卡汇总跨仓库 PR 去重并集（以多人头像式半重叠 PR 堆叠展示），承载可选 `summary`、`progressNote`、`pendingAction` 与 `externalRefs[]`，整组验收会一并归档组内全部成员对话。
+     任务卡汇总跨仓库 PR 去重并集（以多人头像式半重叠 PR 堆叠展示），承载可选 `summary`、`progressNote`、`pendingAction` 与 `externalRefs[]`，整组验收会一并归档组内全部成员对话。
 - **协作模式（`delegated` | `direct`）**：
   - `delegated`（托管模式）：协调者负责派发简报、回收回执并生成下一步预测卡片。
-  - `direct`（直连共创模式）：面对高歧义方案共创、复杂交互打磨或多轮高频微调时，协调者先为子对话注入背景，主动建议用户在右侧面板与子对话直接沟通，自身退居后台守望，避免中间传话损耗。
+  - `direct`（直连共创模式）：面对高歧义方案共创、复杂交互打磨或多轮高频微调时，协调者先为子对话注入背景并建议用户在右侧面板与子对话直接沟通，省去中间传话损耗；当子对话完成当前回合后，仍自动唤醒协调者将进展沉淀总结回主对话流。
 
 ### 2. 物理存储归属
 
@@ -91,13 +91,13 @@ flowchart TB
 - **前端即时折叠**：对于尚未被用户点击选择的开放卡片，一旦任一关联子会话当前的 `SessionMeta.latestUserMsgId` 与快照值不一致（说明用户已在右侧直接向子会话发送了新指令推进任务），卡片立即自动折叠隐藏。
 - **CLI 隐式上下文防误绑**：用户后续在协调者输入框直接发送普通文本时，`resolveCoordinatorPromptReplyHeader` 会校验 `snapshotTurnBySession`；已被子会话新轮次超越的旧卡不再注入 `<related_card_context>`。
 
-### 4. 业务无关的唤醒门控与有界增量读取
+### 4. 业务无关的唤醒门控与全量子对话完成汇总
 
 路由内核不包含任何硬编码的业务状态枚举（例如不把 GitHub PR 状态写死在内核中）：
 
-- **按需懒摘要（`diff(cursor..head)`）**：用户在子会话内的日常多轮直连交流不唤醒协调者。当协调者下一次开启回合时，宿主机先在纯内存中对比 `SessionMeta` 与本地 `cursor` 筛出变动的子会话，仅对最近活跃的 Top-K 会话做有界并发（`<= 4`）的尾部瞬时读取生成紧凑增量摘要；**仅对已确认无变更或已实际写入本轮 `deltaText` 的子会话推进 `cursor`**，因单轮配额、尾读失败或字符预算截断而未送达的更新保留旧游标留待下一轮补读。
-- **可编程守望探针（`CodeMode`）**：“什么算有进展”由运行在 `lody_automation` 沙箱中的轻量 JS 谓词按任务目标决定（可读取 `ctx.read` / `ctx.exec` / `ctx.fetch` 暴露的 PR、文件、测试结果或外部插件资源），命中时返回通用唤醒信号，未命中返回 `false`。
-- **物理注意力闸门**：协调者自派 `Operation` 结束、子会话无人值守卡死/报错、以及守望探针命中统一经过物理注意力过滤——若用户此刻正聚焦在该子会话面板上则抑制唤醒，并在短防抖窗口内合并同批唤醒；若窗口期内用户已亲手在子会话发消息接管，则自动抵消挂起的唤醒。
+- **全量子对话回合完成回执**：受管子会话每当完成一轮非手动取消的执行——无论是协调者自派（`lody_session_create` / `lody_session_chat`）、用户点击预测卡片 `session_dispatch` 触发，还是用户在右侧面板直连子对话（含 `delegated` 与 `direct` 模式）发话完成——都会通过本机 `coordinator_child_watermarks` 与既有 `operations` 去重对齐后写入 `OperationInbox` 完成回执（人工触发回合记 `chainDepth: 0`）并自动唤醒协调者汇报进展；右侧面板是否正打开该子会话（`session-viewing`）不再抑制完成回执或守望唤醒。若该子会话紧接着已有下一轮输入正在运行，调和器会等待活跃回合落地后再一并汇报，避免多轮连续输入中途打断。
+- **有界 `<project_facts_delta>` 增量读取（`diff(cursor..head)`）**：当协调者开启任意回合（用户输入或自动完成续跑）时，宿主机先在纯内存中对比 `SessionMeta` 与本地 `cursor` 筛出变动的子会话，仅对最近活跃的 Top-K 会话做有界并发（`<= 4`）的尾部瞬时读取生成紧凑增量摘要（含近期直连问答摘要、PR 状态更新与验收变更）；**仅对已确认无变更或已实际写入本轮 `deltaText` 的子会话推进 `cursor`**，因单轮配额、尾读失败或字符预算截断而未送达的更新保留旧游标留待下一轮补读。
+- **可编程守望探针（`CodeMode`）**：回合完成之外的外部里程碑（如 CI 状态流转或外部触发器）由运行在 `lody_automation` 沙箱中的轻量 JS 谓词按任务目标决定（可读取 `ctx.read` / `ctx.exec` / `ctx.fetch`），命中时在短防抖窗口内合并突发事件后唤醒协调者。
 
 ## 性能与安全边界
 

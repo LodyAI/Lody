@@ -53,6 +53,8 @@ export class CoordinatorPorts extends Context.Service<
       item: Extract<LodyOperationItemResult, { status: 'active' }>,
       index: number
     ): Effect.Effect<void, unknown>;
+    listSessionMetas?: Effect.Effect<readonly SessionMeta[], unknown>;
+    readCoordinatorWorkItems?(id: SessionId): Effect.Effect<unknown, unknown>;
     warn(message: string, cause?: unknown): Effect.Effect<void>;
   }
 >()('lody/orchestration/CoordinatorPorts') {}

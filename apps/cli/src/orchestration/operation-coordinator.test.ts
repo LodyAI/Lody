@@ -2215,3 +2215,176 @@ it('closes Inbox and SQLite even when an execution drain has a release failure',
   expect(internal.store).toBeNull();
   await expect(inbox.wake()).rejects.toBeDefined();
 });
+
+it('wakes coordinator on child turn completion even while child is viewed or after human intervention', async () => {
+  let resolveSecondContinuation: (() => void) | undefined;
+  const secondContinuationDone = new Promise<void>((resolve) => {
+    resolveSecondContinuation = resolve;
+  });
+  let continuationCount = 0;
+  const h = await makeHarness({
+    afterTurnComplete: () => {
+      continuationCount += 1;
+      if (continuationCount === 2) resolveSecondContinuation?.();
+    },
+  });
+
+  h.metas.set(h.requesterSessionId, {
+    ...h.metas.get(h.requesterSessionId)!,
+    coordinator: { version: 1 },
+    latestUserMsgId: 'coord-root-turn',
+    lastHandledUserMsgId: 'coord-root-turn',
+  });
+  h.metas.set(h.targetSessionId, {
+    ...h.metas.get(h.targetSessionId)!,
+    title: 'Fix button alignment',
+    openedBySessionId: h.requesterSessionId,
+    processingUserMsgId: 'turn-1',
+  });
+
+  (
+    h.coordinatorOptions.workspaceDocument as unknown as {
+      getPresenceStates: () => Record<string, unknown>;
+    }
+  ).getPresenceStates = () => ({
+    viewer1: {
+      kind: 'session-viewing',
+      userId: 'user-1',
+      instanceId: 'inst-1',
+      sessionId: h.targetSessionId,
+      since: TEST_NOW_MS - 1_000,
+      updatedAt: TEST_NOW_MS,
+    },
+  });
+  h.coordinatorOptions.listSessionMetas = async () => [...h.metas.values()];
+  h.coordinatorOptions.readCoordinatorWorkItems = async () => ({});
+
+  h.coordinator.start();
+  await h.coordinator.idle();
+
+  h.histories.set(h.targetSessionId, [
+    {
+      id: 'turn-1',
+      role: 'user',
+      timestamp: '2026-07-20T00:00:00.000Z',
+      items: [{ type: 'text', text: 'work' }],
+      fileDiff: [],
+      status: 'handled',
+    },
+    {
+      id: 'assistant:turn-1',
+      role: 'assistant',
+      userTurnId: 'turn-1',
+      timestamp: '2026-07-20T00:00:02.000Z',
+      items: [{ type: 'text', text: 'Initial delegated implementation done.' }],
+      fileDiff: [],
+      finished: true,
+    },
+  ]);
+  h.metas.set(h.targetSessionId, {
+    ...h.metas.get(h.targetSessionId)!,
+    processingUserMsgId: undefined,
+    lastHandledUserMsgId: 'turn-1',
+  });
+
+  await h.coordinator.wake('target-finished-1');
+  await h.coordinator.idle();
+  await vi.waitFor(() => {
+    expect(h.continueSession).toHaveBeenCalledTimes(1);
+  });
+
+  h.histories.set(h.targetSessionId, [
+    ...(h.histories.get(h.targetSessionId) ?? []),
+    {
+      id: 'human-turn-2',
+      role: 'user',
+      userId: 'user-1',
+      timestamp: '2026-07-20T00:01:00.000Z',
+      items: [{ type: 'text', text: 'Also update the hover state and open a PR.' }],
+      fileDiff: [],
+      status: 'handled',
+    },
+    {
+      id: 'assistant:human-turn-2',
+      role: 'assistant',
+      userTurnId: 'human-turn-2',
+      timestamp: '2026-07-20T00:01:05.000Z',
+      items: [{ type: 'text', text: 'Updated hover state and opened PR #42.' }],
+      fileDiff: [],
+      finished: true,
+    },
+  ]);
+  h.metas.set(h.targetSessionId, {
+    ...h.metas.get(h.targetSessionId)!,
+    latestUserMsgId: 'human-turn-2',
+    lastHandledUserMsgId: 'human-turn-2',
+    processingUserMsgId: undefined,
+  });
+
+  await h.coordinator.wake('direct-human-turn-finished');
+  await h.coordinator.idle();
+  await secondContinuationDone;
+
+  expect(h.continueSession).toHaveBeenCalledTimes(2);
+  const secondDispatch = h.continueSession.mock.calls[1]?.[1] as {
+    inboxBatch?: { batchId: string; chainDepth: number };
+  };
+  expect(secondDispatch.inboxBatch?.chainDepth).toBe(1);
+
+  const inspectStore = new LodyOperationStore(h.storePath, () => TEST_NOW_MS, {
+    maintenance: false,
+  });
+  const directRow = (inspectStore as unknown as { db: Database.Database }).db
+    .prepare(
+      'SELECT operation_id, chain_depth, source_turn_id, completion_json FROM inbox_results WHERE session_id = ? AND operation_id = ?'
+    )
+    .get(h.requesterSessionId, `direct-turn:${h.targetSessionId}:human-turn-2`) as {
+    operation_id: string;
+    chain_depth: number;
+    source_turn_id: string | null;
+    completion_json: string;
+  };
+  inspectStore.close();
+  expect(directRow.chain_depth).toBe(0);
+  expect(directRow.source_turn_id).toBe('coord-root-turn');
+  expect(JSON.parse(directRow.completion_json)).toMatchObject({
+    type: 'result',
+    value: {
+      items: [
+        {
+          status: 'succeeded',
+          label: 'Fix button alignment',
+          target: { sessionId: h.targetSessionId, userTurnId: 'human-turn-2' },
+          assistantTurnId: 'assistant:human-turn-2',
+          output: { text: 'Updated hover state and opened PR #42.' },
+        },
+      ],
+    },
+  });
+
+  h.histories.set(h.targetSessionId, [
+    ...(h.histories.get(h.targetSessionId) ?? []),
+    {
+      id: 'human-turn-3-cancelled',
+      role: 'user',
+      userId: 'user-1',
+      timestamp: '2026-07-20T00:02:00.000Z',
+      items: [{ type: 'text', text: 'Never mind' }],
+      fileDiff: [],
+      status: 'canceled',
+      cancellationReason: 'user_stop',
+    },
+  ]);
+  h.metas.set(h.targetSessionId, {
+    ...h.metas.get(h.targetSessionId)!,
+    latestUserMsgId: 'human-turn-3-cancelled',
+    lastHandledUserMsgId: 'human-turn-3-cancelled',
+    processingUserMsgId: undefined,
+  });
+
+  await h.coordinator.wake('direct-human-turn-cancelled');
+  await h.coordinator.idle();
+  expect(h.continueSession).toHaveBeenCalledTimes(2);
+
+  await h.coordinator.stop();
+});

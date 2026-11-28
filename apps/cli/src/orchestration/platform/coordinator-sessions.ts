@@ -104,6 +104,20 @@ export const coordinatorSessionsLayer = (
         if (!active() || signal.aborted) return Promise.resolve();
         return options.materializeTarget(operation, item, index, signal);
       }),
+    ...(options.listSessionMetas
+      ? { listSessionMetas: io(() => options.listSessionMetas!()) }
+      : {}),
+    readCoordinatorWorkItems: (id) =>
+      io(async () => {
+        if (options.readCoordinatorWorkItems) {
+          return await options.readCoordinatorWorkItems(id);
+        }
+        const doc = await options.workspaceDocument.getOrCreateSessionDoc(id);
+        const state = await (doc as { getDocState?: () => Promise<{ workItems?: unknown }> })
+          .getDocState?.()
+          .catch(() => undefined);
+        return state?.workItems;
+      }),
     warn: (message, cause) =>
       Effect.sync(() =>
         options.logger.warn(`${message}${cause === undefined ? '' : `: ${String(cause)}`}`)

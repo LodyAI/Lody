@@ -3202,28 +3202,22 @@ describe('Engine scheduling', () => {
       payload: { workItemId: childImplId },
     };
 
-    const suppressedByFocus = evaluateCoordinatorWakeGate({
+    const debouncedWhileViewing = evaluateCoordinatorWakeGate({
       result: matchCandidate,
       observedSnapshots: observedWhileViewing,
     });
-    expect(suppressedByFocus).toEqual({
+    expect(debouncedWhileViewing).toEqual({
       kind: 'suppress',
-      reason: 'user_viewing',
-      retryDelayMs: COORDINATOR_WAKE_DEBOUNCE_MS,
+      reason: 'debounce',
+      retryDelayMs: 2_500,
     });
 
-    const parkedAfterFocus = ledger.finishWait(
-      coordWait,
-      false,
-      10_000,
-      COORDINATOR_WAKE_DEBOUNCE_MS
-    );
-    expect(parkedAfterFocus).toMatchObject({
+    const parkedAfterDebounce = ledger.finishWait(coordWait, false, 10_000, 2_500);
+    expect(parkedAfterDebounce).toMatchObject({
       state: 'waiting',
-      nextCheckAt: 10_000 + COORDINATOR_WAKE_DEBOUNCE_MS,
+      nextCheckAt: 12_500,
     });
 
-    viewingChild = false;
     ledger.updateWait(coordWait.id, 'waiting', { state: 'checking' }, 10_500);
     const observedDuringBurst: import('./context/coordinator-watch-gate').ObservedCoordinatorWorkItem[] =
       [];
@@ -3250,7 +3244,7 @@ describe('Engine scheduling', () => {
 
     childLastMessageAt = 8_500;
     ledger.updateWait(coordWait.id, 'waiting', { state: 'checking' }, 13_000);
-    const observedAfterQuiet: import('./context/coordinator-watch-gate').ObservedCoordinatorWorkItem[] =
+    const observedAfterQuietWhileStillViewing: import('./context/coordinator-watch-gate').ObservedCoordinatorWorkItem[] =
       [];
     await readAutomationContext({
       ledger,
@@ -3259,11 +3253,12 @@ describe('Engine scheduling', () => {
       wait: coordWait,
       input: { resource: 'coordinator.workItems', parameters: { workItemId: childImplId } },
       now: 13_000,
-      onCoordinatorWorkItemsObserved: (items) => observedAfterQuiet.push(...items),
+      onCoordinatorWorkItemsObserved: (items) => observedAfterQuietWhileStillViewing.push(...items),
     });
+    expect(observedAfterQuietWhileStillViewing[0]?.userViewingAnyMember).toBe(true);
     const passedGate = evaluateCoordinatorWakeGate({
       result: matchCandidate,
-      observedSnapshots: observedAfterQuiet,
+      observedSnapshots: observedAfterQuietWhileStillViewing,
     });
     expect(passedGate).toEqual({ kind: 'pass', result: matchCandidate });
     const matched = ledger.finishWait(coordWait, matchCandidate, 13_000);

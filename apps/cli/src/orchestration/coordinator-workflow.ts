@@ -1,5 +1,11 @@
 import {
+  hasPendingUserTurnActivation,
+  isCoordinatorSession,
+  isSessionOwnedByCoordinatorWorkItems,
   makeLodyError,
+  normalizeCoordinatorWorkItemsMap,
+  readMessageAuthor,
+  resolveEffectiveWorkItemId,
   type LodyOperationCompletion,
   type LodyOperationItemResult,
   type MachineId,
@@ -140,7 +146,239 @@ export class CoordinatorWorkflow {
       } else {
         yield* this.activity.cancel('progress');
       }
+      yield* this.reconcileDirectChildCompletions().pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterrupts(cause)
+            ? Effect.failCause(cause)
+            : this.ports.warn(
+                `[orchestration] Direct child completion scan failed: ${String(Cause.squash(cause))}`,
+                cause
+              )
+        )
+      );
       yield* this.ports.wakeInbox;
+    }.bind(this)
+  );
+  reconcileDirectChildCompletions = Effect.fnUntraced(
+    function* (this: CoordinatorWorkflow): Effect.fn.Return<void, unknown> {
+      if (!this.started || !this.ports.listSessionMetas) return;
+      const allMetas = yield* this.ports.listSessionMetas;
+      const coordinators = allMetas.filter(
+        (meta) =>
+          isCoordinatorSession(meta) &&
+          !meta.isArchived &&
+          !meta.collaborationStopped &&
+          meta.machineId === this.options.machineId &&
+          Boolean(meta.userId)
+      );
+      if (coordinators.length === 0) return;
+
+      for (const coordinator of coordinators) {
+        if (!this.started) return;
+        const rawWorkItems = this.ports.readCoordinatorWorkItems
+          ? yield* this.ports
+              .readCoordinatorWorkItems(coordinator.id)
+              .pipe(Effect.orElseSucceed(() => undefined))
+          : undefined;
+        const workItems = normalizeCoordinatorWorkItemsMap(rawWorkItems);
+        const children = allMetas.filter(
+          (meta) =>
+            meta.userId === coordinator.userId &&
+            !meta.isArchived &&
+            isSessionOwnedByCoordinatorWorkItems(meta, coordinator.id, workItems)
+        );
+        if (children.length === 0) continue;
+        const watermarks = yield* this.operations.readCoordinatorChildWatermarks(coordinator.id);
+        for (const child of children) {
+          if (!this.started) return;
+          yield* this.reconcileSingleDirectChild(coordinator, child, workItems, watermarks).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterrupts(cause)
+                ? Effect.failCause(cause)
+                : this.ports.warn(
+                    `[orchestration] Direct child completion check failed (${child.id}): ${String(Cause.squash(cause))}`,
+                    cause
+                  )
+            )
+          );
+        }
+      }
+    }.bind(this)
+  );
+  private reconcileSingleDirectChild = Effect.fnUntraced(
+    function* (
+      this: CoordinatorWorkflow,
+      coordinator: SessionMeta,
+      child: SessionMeta,
+      workItems: ReturnType<typeof normalizeCoordinatorWorkItemsMap>,
+      watermarks: ReadonlyMap<string, string>
+    ): Effect.fn.Return<void, unknown> {
+      const prior = watermarks.get(child.id);
+      const inFlight = Boolean(child.processingUserMsgId) || hasPendingUserTurnActivation(child);
+      if (prior === undefined) {
+        yield* this.operations.recordCoordinatorDirectChildCompletion({
+          workspaceId: this.options.workspaceId,
+          coordinatorSessionId: coordinator.id,
+          userId: coordinator.userId!,
+          targetSessionId: child.id,
+          settledTurnId: child.lastHandledUserMsgId ?? '',
+        });
+        return;
+      }
+      if (inFlight || !child.lastHandledUserMsgId || child.lastHandledUserMsgId === prior) {
+        return;
+      }
+      const settledTurnId = child.lastHandledUserMsgId;
+      const opStatus = yield* this.operations.inspectCoordinatorTarget(
+        coordinator.id,
+        child.id,
+        settledTurnId
+      );
+      if (opStatus.active) return;
+      if (opStatus.covered) {
+        yield* this.operations.recordCoordinatorDirectChildCompletion({
+          workspaceId: this.options.workspaceId,
+          coordinatorSessionId: coordinator.id,
+          userId: coordinator.userId!,
+          targetSessionId: child.id,
+          settledTurnId,
+        });
+        return;
+      }
+      if (child.machineId && child.machineId !== this.options.machineId) {
+        yield* this.ports
+          .confirmReadable(
+            child.id,
+            `coordinator.direct-child:${child.id}:${settledTurnId}`,
+            child.machineId
+          )
+          .pipe(
+            Effect.timeoutOrElse({
+              duration: TARGET_CATCH_UP_TIMEOUT_MS,
+              orElse: () => Effect.void,
+            })
+          );
+      }
+      const backend = yield* this.ports.session(child.id);
+      yield* this.subscribeTarget(child.id, backend);
+      const targetOutput = yield* backend.readTurnOutput(settledTurnId);
+      const userTurn = targetOutput.find(
+        (entry) => entry.id === settledTurnId && entry.role === 'user'
+      );
+      if (!userTurn) return;
+      const author = readMessageAuthor(userTurn.author);
+      const localCancel = yield* this.operations.inputCancellationReason(
+        this.options.workspaceId,
+        child.id,
+        settledTurnId
+      );
+      if (
+        (author?.kind === 'agent' && author.sessionId === coordinator.id) ||
+        userTurn.status === 'canceled' ||
+        localCancel === 'user_stop'
+      ) {
+        yield* this.operations.recordCoordinatorDirectChildCompletion({
+          workspaceId: this.options.workspaceId,
+          coordinatorSessionId: coordinator.id,
+          userId: coordinator.userId!,
+          targetSessionId: child.id,
+          settledTurnId,
+        });
+        return;
+      }
+      const workItemTitle = workItems[resolveEffectiveWorkItemId(child)]?.title?.trim();
+      const label = workItemTitle || child.title?.trim() || undefined;
+      const sourceTurnId =
+        opStatus.sourceTurnId ?? coordinator.lastHandledUserMsgId ?? coordinator.latestUserMsgId;
+      const nowIso = new Date(this.now()).toISOString();
+      const createdAt = userTurn.timestamp || nowIso;
+
+      if (userTurn.status === 'failed') {
+        const failedAssistant = targetOutput.find(
+          (entry) => entry.role === 'assistant' && entry.userTurnId === settledTurnId
+        );
+        const itemResult: LodyOperationItemResult = {
+          status: 'failed',
+          ...(label ? { label } : {}),
+          target: { sessionId: child.id, userTurnId: settledTurnId },
+          error: targetFailureError(targetOutput, failedAssistant?.id, this.now()),
+        };
+        yield* this.operations.recordCoordinatorDirectChildCompletion({
+          workspaceId: this.options.workspaceId,
+          coordinatorSessionId: coordinator.id,
+          userId: coordinator.userId!,
+          targetSessionId: child.id,
+          settledTurnId,
+          ...(sourceTurnId ? { sourceTurnId } : {}),
+          ...(opStatus.inputConfig ? { inputConfig: opStatus.inputConfig } : {}),
+          createdAt,
+          completedAt: nowIso,
+          completion: { type: 'result', value: { items: [itemResult] } },
+        });
+        return;
+      }
+
+      const assistant = targetOutput.find(
+        (entry) =>
+          entry.role === 'assistant' &&
+          entry.userTurnId === settledTurnId &&
+          isTerminalAssistantEntry(entry)
+      );
+      if (!assistant) return;
+      const handoff = yield* this.followSteerHandoff(backend, child, assistant);
+      if (handoff._tag === 'Running') return;
+      if (handoff._tag === 'Cancelled') {
+        yield* this.operations.recordCoordinatorDirectChildCompletion({
+          workspaceId: this.options.workspaceId,
+          coordinatorSessionId: coordinator.id,
+          userId: coordinator.userId!,
+          targetSessionId: child.id,
+          settledTurnId,
+        });
+        return;
+      }
+      if (handoff._tag === 'Failed') {
+        const itemResult: LodyOperationItemResult = {
+          status: 'failed',
+          ...(label ? { label } : {}),
+          target: { sessionId: child.id, userTurnId: settledTurnId },
+          error: targetFailureError(targetOutput, assistant.id, this.now()),
+        };
+        yield* this.operations.recordCoordinatorDirectChildCompletion({
+          workspaceId: this.options.workspaceId,
+          coordinatorSessionId: coordinator.id,
+          userId: coordinator.userId!,
+          targetSessionId: child.id,
+          settledTurnId,
+          ...(sourceTurnId ? { sourceTurnId } : {}),
+          ...(opStatus.inputConfig ? { inputConfig: opStatus.inputConfig } : {}),
+          createdAt,
+          completedAt: nowIso,
+          completion: { type: 'result', value: { items: [itemResult] } },
+        });
+        return;
+      }
+
+      const output = assistantOutputPreview(handoff.assistant);
+      const itemResult: LodyOperationItemResult = {
+        status: 'succeeded',
+        ...(label ? { label } : {}),
+        target: { sessionId: child.id, userTurnId: settledTurnId },
+        assistantTurnId: handoff.assistant.id,
+        ...(output ? { output } : {}),
+      };
+      yield* this.operations.recordCoordinatorDirectChildCompletion({
+        workspaceId: this.options.workspaceId,
+        coordinatorSessionId: coordinator.id,
+        userId: coordinator.userId!,
+        targetSessionId: child.id,
+        settledTurnId,
+        ...(sourceTurnId ? { sourceTurnId } : {}),
+        ...(opStatus.inputConfig ? { inputConfig: opStatus.inputConfig } : {}),
+        createdAt,
+        completedAt: nowIso,
+        completion: { type: 'result', value: { items: [itemResult] } },
+      });
     }.bind(this)
   );
   projectInboxReceipts = Effect.fnUntraced(

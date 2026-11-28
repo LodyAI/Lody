@@ -3,6 +3,7 @@ import type {
   LodyOperationItemResult,
   MachineId,
   SessionId,
+  SessionTurnInputConfig,
   StoredLodyOperation,
   WorkspaceId,
 } from '@lody/shared';
@@ -13,6 +14,12 @@ export type AcceptOperationInput = Omit<
   'fingerprint' | 'state' | 'completion' | 'finishedAt'
 >;
 export type AcceptOperationOptions = { materializationClaimToken?: string };
+export type CoordinatorTargetInspection = {
+  active: boolean;
+  covered: boolean;
+  sourceTurnId?: string;
+  inputConfig?: SessionTurnInputConfig;
+};
 export class OperationRepository extends Context.Service<
   OperationRepository,
   {
@@ -60,5 +67,25 @@ export class OperationRepository extends Context.Service<
       index: number,
       token?: string
     ): Effect.Effect<StoredLodyOperation, unknown>;
+    readCoordinatorChildWatermarks(
+      coordinatorSessionId: SessionId
+    ): Effect.Effect<Map<string, string>, unknown>;
+    inspectCoordinatorTarget(
+      coordinatorSessionId: SessionId,
+      targetSessionId: SessionId,
+      settledTurnId: string
+    ): Effect.Effect<CoordinatorTargetInspection, unknown>;
+    recordCoordinatorDirectChildCompletion(args: {
+      workspaceId: WorkspaceId;
+      coordinatorSessionId: SessionId;
+      userId: string;
+      targetSessionId: SessionId;
+      settledTurnId: string;
+      sourceTurnId?: string;
+      inputConfig?: SessionTurnInputConfig;
+      completion?: LodyOperationCompletion;
+      createdAt?: string;
+      completedAt?: string;
+    }): Effect.Effect<boolean, unknown>;
   }
 >()('lody/orchestration/Operations') {}

@@ -221,6 +221,58 @@ export class InboxSqlite {
       `completion:${value}`
     );
   }
+  /** Persist a direct child turn completion receipt for a coordinator conversation. */
+  indexDirectCompletion(args: {
+    workspaceId: string;
+    sessionId: string;
+    userId: string;
+    operationId: string;
+    sourceTurnId?: string;
+    createdAt: string;
+    completedAt: string;
+    completion: StoredLodyOperation['completion'];
+    inputConfig?: InboxInput['config'];
+  }): boolean {
+    if (!args.completion) return false;
+    if (
+      this.db
+        .prepare('SELECT 1 FROM inbox_results WHERE session_id=? AND operation_id=?')
+        .get(args.sessionId, args.operationId)
+    )
+      return false;
+    const receipt = operationInboxCompletion(args.completion);
+    if (!receipt) return false;
+    const { value } = this.db
+      .prepare(
+        "UPDATE orchestration_meta SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT) WHERE key='inbox_sequence' RETURNING CAST(value AS INTEGER) AS value"
+      )
+      .get() as { value: number };
+    this.db
+      .prepare(`INSERT INTO inbox_results(sequence,workspace_id,session_id,user_id,operation_id,operation_kind,source_turn_id,created_at,completed_at,chain_depth,completion_json,automatic_eligible,consumed,consumed_at)
+      VALUES(?,?,?,?,?,?,?,?,?,0,?,1,0,NULL)`)
+      .run(
+        value,
+        args.workspaceId,
+        args.sessionId,
+        args.userId,
+        args.operationId,
+        'session_chat',
+        args.sourceTurnId ?? null,
+        args.createdAt,
+        args.completedAt,
+        JSON.stringify(receipt)
+      );
+    this.requestAutomatic(
+      {
+        workspaceId: args.workspaceId,
+        sessionId: args.sessionId,
+        userId: args.userId,
+      },
+      args.inputConfig ?? {},
+      `completion:${value}`
+    );
+    return true;
+  }
   private requestAutomatic(
     scope: InboxScope,
     config: InboxInput['config'],
@@ -929,6 +981,33 @@ export class InboxSqlite {
           originThreadId = parsed.originThreadId.trim();
         }
       } catch {}
+    } else if (r.operation_id.startsWith('direct-turn:') && this.hasOperationsTable()) {
+      const rest = r.operation_id.slice('direct-turn:'.length);
+      const sep = rest.indexOf(':');
+      const targetSessionId = sep > 0 ? rest.slice(0, sep) : '';
+      if (targetSessionId) {
+        try {
+          const priorOp = this.db
+            .prepare(
+              `SELECT o.frozen_config_json FROM operations o
+               JOIN inbox_results ir ON ir.sequence = ?
+               WHERE o.requester_session_id = ir.session_id AND o.items_json LIKE ?
+               ORDER BY o.created_at DESC LIMIT 1`
+            )
+            .get(r.sequence, `%"sessionId":${JSON.stringify(targetSessionId)}%`) as
+            | { frozen_config_json: string }
+            | undefined;
+          if (priorOp?.frozen_config_json) {
+            const parsed = JSON.parse(priorOp.frozen_config_json) as { originThreadId?: unknown };
+            if (
+              typeof parsed.originThreadId === 'string' &&
+              parsed.originThreadId.trim().length > 0
+            ) {
+              originThreadId = parsed.originThreadId.trim();
+            }
+          }
+        } catch {}
+      }
     }
     return {
       sequence: r.sequence,
