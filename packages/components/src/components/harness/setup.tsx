@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Minus, X } from 'lucide-react';
 
 import { useWorkspaceMcpCatalog } from '@/hooks/use-workspace-mcp-catalog';
 
@@ -68,12 +68,10 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
   const [measure, bodyHeight] = useHeight();
   const foot = useFootShape();
 
+  const connected = Object.keys(state.credentials).length > 0;
+  const answered = state.status === 'ready';
   const canContinue =
-    current.id === 'providers'
-      ? Object.keys(state.credentials).length > 0
-      : current.id === 'review'
-        ? checked
-        : true;
+    current.id === 'providers' ? connected || !answered : current.id === 'review' ? checked : true;
 
   const go = (next: number) => {
     setDir(next > step ? 1 : -1);
@@ -207,9 +205,11 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
               </Button>
             ) : (
               <span {...stylex.props(s.footHint)}>
-                {Object.keys(state.credentials).length
+                {connected
                   ? `${Object.keys(state.credentials).length} connected`
-                  : 'Connect one to continue'}
+                  : answered
+                    ? 'Connect one to continue'
+                    : 'This app cannot read this machine’s connections'}
               </span>
             )}
             <Button variant="primary" onClick={advance} disabled={!canContinue}>
@@ -311,23 +311,32 @@ function footClipPath({ w, h, r }: { w: number; h: number; r: number }) {
 }
 
 /**
- * What the review step can actually confirm from data the page already has:
- * nothing here is simulated, so a failed check stays failed.
+ * What the review step can confirm from data the page has. A check the harness
+ * could not read is `unknown`, never a failure: the machine may be set up
+ * behind a store this app cannot reach.
  */
-function useSetupChecks() {
+type SetupCheck = { label: string; ok: boolean; unknown?: boolean };
+
+function useSetupChecks(): SetupCheck[] {
   const state = useHarness();
   const { device } = useActiveDevice();
   const target = useSorbetTarget();
   const capabilities = useDeviceCapabilities();
   const { synced } = useWorkspaceMcpCatalog();
+  const answered = state.status === 'ready';
   return [
     { label: 'Device online', ok: device?.status === 'online' },
     { label: 'Lody Agent set up on this device', ok: !!target },
-    {
-      label: 'A provider is connected',
-      ok: Object.keys(state.credentials).length > 0,
-    },
-    { label: 'Models available', ok: capabilities.models.length > 0 },
+    answered
+      ? { label: 'A provider is connected', ok: Object.keys(state.credentials).length > 0 }
+      : {
+          label: 'Provider connections readable from this app',
+          ok: false,
+          unknown: true,
+        },
+    answered
+      ? { label: 'Models available', ok: capabilities.models.length > 0 }
+      : { label: 'Models readable from this app', ok: false, unknown: true },
     { label: 'Workspace MCP servers read', ok: synced },
   ];
 }
@@ -363,17 +372,23 @@ function Review({
     ...PROVIDERS.filter((p) => state.credentials[p.id]).map((p) => p.name),
     ...state.customs.filter((c) => state.credentials[c.id]).map((c) => c.name),
   ];
+  const providersValue = providers.length
+    ? providers.join(', ')
+    : state.status === 'ready'
+      ? 'None connected'
+      : 'Not readable from this app';
   const modelName = (id: string | undefined) =>
     capabilities.models.find((m) => m.id === id)?.name ?? id ?? 'Agent default';
   const effort = capabilities.effortOption?.options.find(
     (option) => option.value === defaults.values.effort
   )?.name;
   const attached = servers.filter((server) => server.enabledByDefault === true).length;
-  const failed = checks.filter((check) => !check.ok).length;
+  const failed = checks.filter((check) => !check.ok && !check.unknown).length;
+  const unknown = checks.filter((check) => check.unknown === true).length;
   const done = at >= checks.length;
 
   const rows = [
-    { step: 0, label: 'Providers', value: providers.join(', ') || 'None connected' },
+    { step: 0, label: 'Providers', value: providersValue },
     {
       step: 1,
       label: 'Models',
@@ -410,7 +425,7 @@ function Review({
         ))}
       </dl>
 
-      <div {...stylex.props(panel.checks, done && !failed && panel.checksDone)}>
+      <div {...stylex.props(panel.checks, done && !failed && !unknown && panel.checksDone)}>
         <div {...stylex.props(panel.checksHead)}>
           {!done ? (
             <>
@@ -420,6 +435,8 @@ function Review({
             <>
               {failed} to fix on {deviceName ?? 'your device'}
             </>
+          ) : unknown ? (
+            <>Checked what this app can see on {deviceName ?? 'your device'}</>
           ) : (
             <>
               <span {...stylex.props(panel.checksOk)}>
@@ -436,11 +453,14 @@ function Review({
           {checks.map((check, index) => {
             const shown = index < at;
             const ok = shown && check.ok;
+            const unknown = shown && !check.ok && check.unknown === true;
             return (
               <li key={check.label} {...stylex.props(panel.checkRow, ok && panel.checkRowDone)}>
                 <span {...stylex.props(panel.checkIcon, ok && panel.checkIconDone)}>
                   {ok ? (
                     <DrawnCheck size={10} />
+                  ) : unknown ? (
+                    <Minus size={10} />
                   ) : shown ? (
                     <X size={10} />
                   ) : index === at ? (
