@@ -139,9 +139,10 @@ jobs:
 
   mobile-ios-smoke:
     name: Mobile iOS Simulator startup smoke
-    runs-on: macos-15
-    timeout-minutes: 30
+    runs-on: xcode-27
+    timeout-minutes: 45
     env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       NODE_VERSION: '22.23.4'
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
     steps:
@@ -236,7 +237,16 @@ jobs:
           fi
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
-          echo "no" | avdmanager create avd --force -n lody-smoke -k "system-images;android-35;google_apis;x86_64"
+          emulator="$ANDROID_HOME/emulator/emulator"
+          "$emulator" -accel-check
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/lody-android-avds"
+          mkdir -p "$ANDROID_AVD_HOME"
+          avdmanager create avd --force --name lody-smoke --device pixel_6 \
+            --path "$ANDROID_AVD_HOME/lody-smoke.avd" \
+            --package "system-images;android-35;google_apis;x86_64"
+          test -f "$ANDROID_AVD_HOME/lody-smoke.ini"
+          "$emulator" -list-avds | grep -Fx lody-smoke
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
 
       - name: Run Android Emulator startup smoke test
         shell: bash
@@ -456,10 +466,11 @@ jobs:
 
   selfhost-mobile-ios-smoke:
     name: Self-host Mobile iOS authenticated startup smoke
-    runs-on: macos-15
+    runs-on: xcode-27
     environment: ${{ inputs.target-environment }}
     timeout-minutes: 45
     env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       NODE_VERSION: '22.23.4'
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
     steps:
