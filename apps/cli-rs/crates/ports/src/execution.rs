@@ -2,7 +2,7 @@
 
 use crate::error::{PortError, PortErrorKind, PortResult};
 use crate::identity::{LocalProjectId, SessionId, WorkspaceId};
-use crate::storage::{AutomationEvidenceEntry, AutomationMatchResult};
+use crate::storage::{AutomationEvidenceEntry, AutomationMatchResult, AutomationReadObservation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -667,7 +667,11 @@ pub struct AutomationProgramEvaluation {
 }
 
 pub trait AutomationHostOps: Send + Sync {
-    fn read_resource(&self, resource: &str, query: &Value) -> PortResult<Value>;
+    fn read_resource(
+        &self,
+        resource: &str,
+        parameters: &Value,
+    ) -> PortResult<AutomationReadObservation>;
     fn session_workdir(&self) -> Option<PathBuf>;
     fn command_env(&self) -> BTreeMap<String, String>;
     fn override_fetch(&self, _request: &Value) -> Option<PortResult<Value>> {

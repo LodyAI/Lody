@@ -114,44 +114,42 @@ CREATE TABLE IF NOT EXISTS wait_reads (
 ";
 
 const SCHEMA_INDEXES_SQL: &str = "
+CREATE INDEX IF NOT EXISTS turn_observations_due ON turn_observations(retry_at);
+CREATE INDEX IF NOT EXISTS events_session ON events(session_id, observed_at);
+CREATE INDEX IF NOT EXISTS events_work ON events(work_id);
+DROP INDEX IF EXISTS receipts_due;
+CREATE INDEX IF NOT EXISTS receipts_due_active ON receipts(retry_at)
+  WHERE state IN ('accepted','waiting','resolved','submitting','queued','running','blocked','unknown','cancelling');
+CREATE INDEX IF NOT EXISTS receipts_updated ON receipts(updated_at);
+DROP INDEX IF EXISTS receipts_delivery;
+DROP INDEX IF EXISTS deliveries_state;
+CREATE INDEX IF NOT EXISTS receipts_rule ON receipts(rule_id);
+CREATE INDEX IF NOT EXISTS receipts_invocation ON receipts(rule_id, action_kind, correlation_key);
+CREATE INDEX IF NOT EXISTS receipts_session ON receipts(session_id);
+CREATE INDEX IF NOT EXISTS receipts_event ON receipts(event_source, event_id);
+CREATE INDEX IF NOT EXISTS receipts_capacity ON receipts(event_type, policy, state);
+CREATE INDEX IF NOT EXISTS receipts_owner ON receipts(owner_user_id);
+CREATE INDEX IF NOT EXISTS waits_due_at ON waits(state, due_at);
+CREATE INDEX IF NOT EXISTS waits_owner ON waits(owner_user_id, session_id);
+CREATE INDEX IF NOT EXISTS waits_session ON waits(session_id);
+CREATE INDEX IF NOT EXISTS waits_run ON waits(state, run_pending);
+CREATE INDEX IF NOT EXISTS wait_reads_resource ON wait_reads(resource, wait_id);
+CREATE INDEX IF NOT EXISTS work_session ON work(session_id, state);
+CREATE INDEX IF NOT EXISTS work_owner ON work(owner_user_id);
+CREATE INDEX IF NOT EXISTS work_binding ON work(binding_id);
+CREATE INDEX IF NOT EXISTS receipts_work ON receipts(work_id);
+CREATE INDEX IF NOT EXISTS deliveries_event ON deliveries(event_source, event_id);
+CREATE INDEX IF NOT EXISTS deliveries_work ON deliveries(event_work_id, rule_id);
+CREATE INDEX IF NOT EXISTS deliveries_owner ON deliveries(owner_user_id);
+CREATE INDEX IF NOT EXISTS turn_observations_owner ON turn_observations(user_id, observed_at);
 CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_id, sequence DESC);
-CREATE INDEX IF NOT EXISTS idx_events_type_seq ON events(type, sequence DESC);
-CREATE INDEX IF NOT EXISTS idx_events_project_seq ON events(project_id, sequence DESC);
-CREATE INDEX IF NOT EXISTS idx_events_work ON events(work_id) WHERE work_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_deliveries_state ON deliveries(state);
 CREATE INDEX IF NOT EXISTS idx_deliveries_session_updated ON deliveries(scope_session_id, updated_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_deliveries_owner_updated ON deliveries(owner_user_id, updated_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_deliveries_event ON deliveries(event_source, event_id);
-CREATE INDEX IF NOT EXISTS idx_deliveries_work ON deliveries(event_work_id) WHERE event_work_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_receipts_state ON receipts(state, updated_at);
 CREATE INDEX IF NOT EXISTS idx_receipts_due ON receipts(retry_at, updated_at, id)
   WHERE state IN ('accepted','waiting','resolved','submitting','queued','running','blocked','unknown','cancelling');
-CREATE INDEX IF NOT EXISTS idx_receipts_rule_active ON receipts(rule_id)
-  WHERE state IN ('accepted','waiting','resolved','submitting','queued','running','blocked','unknown','cancelling');
-CREATE INDEX IF NOT EXISTS idx_receipts_rule_corr ON receipts(rule_id, correlation_key);
 CREATE INDEX IF NOT EXISTS idx_receipts_session_updated ON receipts(session_id, updated_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_receipts_scope_updated ON receipts(scope_session_id, updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_receipts_owner_updated ON receipts(owner_user_id, updated_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_receipts_work ON receipts(work_id) WHERE work_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_receipts_event ON receipts(event_source, event_id);
-CREATE INDEX IF NOT EXISTS idx_receipts_compact_live ON receipts(session_id)
-  WHERE action_kind = 'session.compact'
-    AND state IN ('accepted','waiting','resolved','submitting','queued','running','blocked','unknown','cancelling');
-CREATE INDEX IF NOT EXISTS idx_work_session_state ON work(session_id, state);
-CREATE INDEX IF NOT EXISTS idx_work_owner_updated ON work(owner_user_id, updated_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_work_session_updated ON work(session_id, updated_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_work_invocation ON work(invocation_id) WHERE invocation_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_waits_due ON waits(state, next_check_at);
-CREATE INDEX IF NOT EXISTS idx_waits_due_at ON waits(due_at) WHERE due_at IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_waits_run_pending ON waits(id)
-  WHERE state IN ('waiting', 'checking') AND run_pending = 1;
 CREATE INDEX IF NOT EXISTS idx_waits_session_created ON waits(session_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_waits_owner_created ON waits(owner_user_id, created_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_waits_invocation ON waits(invocation_id) WHERE invocation_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_wait_reads_resource ON wait_reads(resource, wait_id);
-CREATE INDEX IF NOT EXISTS idx_turn_observations_retry ON turn_observations(retry_at);
-CREATE INDEX IF NOT EXISTS idx_turn_observations_session ON turn_observations(session_id, observed_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_turn_observations_user ON turn_observations(user_id, observed_at DESC, id DESC);
 ";
 
 pub fn automation_identity_json(parts: &[Value]) -> String {
@@ -298,6 +296,10 @@ fn migrate_if_needed(conn: &mut Connection) -> PortResult<()> {
         ensure_column(&tx, "turn_observations", "user_id", "TEXT")?;
         ensure_column(&tx, "turn_observations", "session_id", "TEXT")?;
         ensure_column(&tx, "turn_observations", "observed_at", "INTEGER")?;
+
+        tx.execute_batch("DROP INDEX IF EXISTS waits_due;")
+            .map_err(map_sql_err)?;
+        backfill_legacy_query_columns(&tx)?;
     }
     tx.execute_batch(SCHEMA_INDEXES_SQL).map_err(map_sql_err)?;
     tx.execute_batch(&format!(
@@ -308,26 +310,292 @@ fn migrate_if_needed(conn: &mut Connection) -> PortResult<()> {
     Ok(())
 }
 
-fn wait_due_at(wait: &AutomationWaitRecord) -> Option<i64> {
-    if wait.state != AutomationWaitState::Waiting {
-        return None;
+fn backfill_legacy_query_columns(tx: &Transaction<'_>) -> PortResult<()> {
+    let mut after = 0i64;
+    loop {
+        let batch: Vec<(i64, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT rowid, payload FROM events WHERE rowid > ?1 ORDER BY rowid ASC LIMIT 512")
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![after], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map_err(map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(map_sql_err)?
+        };
+        if batch.is_empty() {
+            break;
+        }
+        for (rowid, payload) in &batch {
+            after = *rowid;
+            if let Ok(ev) = serde_json::from_str::<Value>(payload) {
+                tx.execute(
+                    "UPDATE events SET type = ?1, source = ?2, subject = ?3, session_id = ?4, project_id = ?5, work_id = ?6, observed_at = ?7 WHERE sequence = ?8",
+                    params![
+                        ev.get("type").and_then(Value::as_str),
+                        ev.get("source").and_then(Value::as_str),
+                        ev.get("subject").and_then(Value::as_str),
+                        ev.pointer("/scope/sessionId").and_then(Value::as_str),
+                        ev.pointer("/scope/projectId").and_then(Value::as_str),
+                        ev.pointer("/data/workId").and_then(Value::as_str),
+                        ev.get("observedAt").and_then(Value::as_i64),
+                        rowid,
+                    ],
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
+        if batch.len() < 512 {
+            break;
+        }
     }
+
+    after = 0;
+    loop {
+        let batch: Vec<(i64, String, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT rowid, id, payload FROM receipts WHERE rowid > ?1 ORDER BY rowid ASC LIMIT 512")
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![after], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(map_sql_err)?
+        };
+        if batch.is_empty() {
+            break;
+        }
+        for (rowid, id, payload) in &batch {
+            after = *rowid;
+            if let Ok(rcpt) = serde_json::from_str::<Value>(payload) {
+                let sid = rcpt.get("sessionId").and_then(Value::as_str);
+                let scope_sid = rcpt
+                    .pointer("/rule/scope/sessionId")
+                    .and_then(Value::as_str)
+                    .or(sid);
+                let corr = rcpt
+                    .pointer("/event/correlationId")
+                    .and_then(Value::as_str)
+                    .or_else(|| {
+                        rcpt.pointer("/intent/correlationKey")
+                            .and_then(Value::as_str)
+                    })
+                    .or_else(|| rcpt.get("deliveryId").and_then(Value::as_str));
+                let policy = if rcpt.pointer("/rule/handler/kind").and_then(Value::as_str)
+                    == Some("policy")
+                {
+                    rcpt.pointer("/rule/handler/policy").and_then(Value::as_str)
+                } else {
+                    None
+                };
+                tx.execute(
+                    "UPDATE receipts SET session_id = ?1, scope_session_id = ?2, owner_user_id = ?3, rule_id = ?4, action_kind = ?5, event_type = ?6, event_source = ?7, event_id = ?8, correlation_key = ?9, policy = ?10, work_id = ?11, retry_at = ?12 WHERE id = ?13",
+                    params![
+                        sid,
+                        scope_sid,
+                        rcpt.pointer("/rule/ownerUserId").and_then(Value::as_str),
+                        rcpt.pointer("/rule/id").and_then(Value::as_str),
+                        rcpt.pointer("/intent/action/kind").and_then(Value::as_str),
+                        rcpt.pointer("/event/type").and_then(Value::as_str),
+                        rcpt.pointer("/event/source").and_then(Value::as_str),
+                        rcpt.pointer("/event/id").and_then(Value::as_str),
+                        corr,
+                        policy,
+                        rcpt.pointer("/event/data/workId").and_then(Value::as_str),
+                        rcpt.get("retryAt").and_then(Value::as_i64).unwrap_or(0),
+                        id,
+                    ],
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
+        if batch.len() < 512 {
+            break;
+        }
+    }
+
+    after = 0;
+    loop {
+        let batch: Vec<(i64, String, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT rowid, id, payload FROM waits WHERE rowid > ?1 ORDER BY rowid ASC LIMIT 512")
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![after], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(map_sql_err)?
+        };
+        if batch.is_empty() {
+            break;
+        }
+        for (rowid, id, payload) in &batch {
+            after = *rowid;
+            if let Ok(w) = serde_json::from_str::<Value>(payload) {
+                let next_check = w.get("nextCheckAt").and_then(Value::as_i64).unwrap_or(0);
+                let due_at = w
+                    .get("expiresAt")
+                    .and_then(Value::as_i64)
+                    .map_or(next_check, |exp| next_check.min(exp));
+                let run_pending = i64::from(w.get("run").is_some_and(|r| {
+                    r.get("startedAt").is_some()
+                        && !r.get("startedAt").unwrap().is_null()
+                        && r.get("exit").is_none_or(Value::is_null)
+                }));
+                tx.execute(
+                    "UPDATE waits SET session_id = ?1, owner_user_id = ?2, invocation_id = ?3, created_at = ?4, due_at = ?5, run_pending = ?6 WHERE id = ?7",
+                    params![
+                        w.get("sessionId").and_then(Value::as_str),
+                        w.get("ownerUserId").and_then(Value::as_str),
+                        w.get("invocationId").and_then(Value::as_str),
+                        w.get("createdAt").and_then(Value::as_i64),
+                        due_at,
+                        run_pending,
+                        id,
+                    ],
+                )
+                .map_err(map_sql_err)?;
+                if let Some(reads) = w.get("reads").and_then(Value::as_array) {
+                    for res in reads.iter().filter_map(Value::as_str) {
+                        tx.execute(
+                            "INSERT OR IGNORE INTO wait_reads (wait_id, resource) VALUES (?1, ?2)",
+                            params![id, res],
+                        )
+                        .map_err(map_sql_err)?;
+                    }
+                }
+            }
+        }
+        if batch.len() < 512 {
+            break;
+        }
+    }
+
+    after = 0;
+    loop {
+        let batch: Vec<(i64, String, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT rowid, id, payload FROM work WHERE rowid > ?1 ORDER BY rowid ASC LIMIT 512")
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![after], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(map_sql_err)?
+        };
+        if batch.is_empty() {
+            break;
+        }
+        for (rowid, id, payload) in &batch {
+            after = *rowid;
+            if let Ok(wk) = serde_json::from_str::<Value>(payload) {
+                tx.execute(
+                    "UPDATE work SET session_id = ?1, owner_user_id = ?2, state = ?3, turn_id = ?4, invocation_id = ?5, updated_at = ?6, binding_id = ?7, fingerprint = ?8, model_id = ?9 WHERE id = ?10",
+                    params![
+                        wk.get("sessionId").and_then(Value::as_str),
+                        wk.get("ownerUserId").and_then(Value::as_str),
+                        wk.get("state").and_then(Value::as_str),
+                        wk.get("turnId").and_then(Value::as_str),
+                        wk.get("invocationId").and_then(Value::as_str),
+                        wk.get("updatedAt").and_then(Value::as_i64),
+                        wk.get("bindingId").and_then(Value::as_str),
+                        wk.get("fingerprint").and_then(Value::as_str),
+                        wk.get("modelId").and_then(Value::as_str),
+                        id,
+                    ],
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
+        if batch.len() < 512 {
+            break;
+        }
+    }
+
+    after = 0;
+    loop {
+        let batch: Vec<(i64, String, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT rowid, id, payload FROM deliveries WHERE rowid > ?1 ORDER BY rowid ASC LIMIT 512")
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![after], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(map_sql_err)?
+        };
+        if batch.is_empty() {
+            break;
+        }
+        for (rowid, id, payload) in &batch {
+            after = *rowid;
+            if let Ok(del) = serde_json::from_str::<Value>(payload) {
+                tx.execute(
+                    "UPDATE deliveries SET rule_id = ?1, owner_user_id = ?2, scope_session_id = ?3, event_source = ?4, event_id = ?5, event_work_id = ?6, updated_at = ?7 WHERE id = ?8",
+                    params![
+                        del.pointer("/rule/id").and_then(Value::as_str),
+                        del.pointer("/rule/ownerUserId").and_then(Value::as_str),
+                        del.pointer("/rule/scope/sessionId").and_then(Value::as_str),
+                        del.pointer("/event/source").and_then(Value::as_str),
+                        del.pointer("/event/id").and_then(Value::as_str),
+                        del.pointer("/event/data/workId").and_then(Value::as_str),
+                        del.get("updatedAt").and_then(Value::as_i64),
+                        id,
+                    ],
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
+        if batch.len() < 512 {
+            break;
+        }
+    }
+
+    after = 0;
+    loop {
+        let batch: Vec<(i64, String, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT rowid, id, payload FROM turn_observations WHERE rowid > ?1 ORDER BY rowid ASC LIMIT 512")
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![after], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(map_sql_err)?
+        };
+        if batch.is_empty() {
+            break;
+        }
+        for (rowid, id, payload) in &batch {
+            after = *rowid;
+            if let Ok(obs) = serde_json::from_str::<Value>(payload) {
+                tx.execute(
+                    "UPDATE turn_observations SET user_id = ?1, session_id = ?2, observed_at = ?3 WHERE id = ?4",
+                    params![
+                        obs.get("userId").and_then(Value::as_str),
+                        obs.get("sessionId").and_then(Value::as_str),
+                        obs.get("observedAt").and_then(Value::as_i64),
+                        id,
+                    ],
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
+        if batch.len() < 512 {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+fn wait_due_at(wait: &AutomationWaitRecord) -> i64 {
     match wait.expires_at {
-        Some(exp) => Some(wait.next_check_at.min(exp)),
-        None => Some(wait.next_check_at),
+        Some(exp) => wait.next_check_at.min(exp),
+        None => wait.next_check_at,
     }
 }
 
 fn wait_run_pending(wait: &AutomationWaitRecord) -> i64 {
-    let active = matches!(
-        wait.state,
-        AutomationWaitState::Waiting | AutomationWaitState::Checking
-    );
     let started_without_exit = wait
         .run
         .as_ref()
         .is_some_and(|r| r.started_at.is_some() && r.exit.is_none());
-    i64::from(active && started_without_exit)
+    i64::from(started_without_exit)
 }
 
 fn write_wait_tx(tx: &Transaction<'_>, wait: &AutomationWaitRecord) -> PortResult<()> {
@@ -356,9 +624,7 @@ fn write_wait_tx(tx: &Transaction<'_>, wait: &AutomationWaitRecord) -> PortResul
         params![&wait.id],
     )
     .map_err(map_sql_err)?;
-    if wait.state == AutomationWaitState::Waiting
-        && let Some(reads) = &wait.reads
-    {
+    if let Some(reads) = &wait.reads {
         for resource in reads {
             tx.execute(
                 "INSERT OR IGNORE INTO wait_reads (wait_id, resource) VALUES (?1, ?2)",
@@ -544,6 +810,59 @@ impl AutomationStorePort for SqliteAutomationStore {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sql_err)?;
+        let normalized_interval = input.interval_ms.max(1_000);
+        let existing_payloads: Vec<String> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT payload FROM waits
+                     WHERE owner_user_id = ?1 AND session_id = ?2
+                     ORDER BY created_at DESC, id ASC",
+                )
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![&owner_user_id.0, &session_id.0], |r| r.get(0))
+                .map_err(map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(map_sql_err)?
+        };
+        for raw in existing_payloads {
+            let candidate: AutomationWaitRecord = serde_json::from_str(&raw)
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+            if !matches!(
+                candidate.state,
+                AutomationWaitState::Waiting
+                    | AutomationWaitState::Checking
+                    | AutomationWaitState::Matched
+            ) {
+                continue;
+            }
+            let receipt_terminal = if let Some(inv_id) = &candidate.invocation_id {
+                let rcpt_state: Option<String> = tx
+                    .query_row(
+                        "SELECT state FROM receipts WHERE id = ?1",
+                        params![inv_id],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(map_sql_err)?;
+                matches!(
+                    rcpt_state.as_deref(),
+                    Some(
+                        "completed" | "cancelled" | "dropped" | "failed" | "settled" | "superseded"
+                    )
+                )
+            } else {
+                false
+            };
+            if !receipt_terminal
+                && candidate.program.as_deref() == Some(input.program.as_str())
+                && candidate.interval_ms == normalized_interval
+                && candidate.expires_at == input.expires_at
+                && candidate.reason == input.reason
+            {
+                return Ok(candidate);
+            }
+        }
+
         let id = Self::allocate_wait_id(&tx, scope, session_id, now_ms)?;
         let wait = AutomationWaitRecord {
             id,
@@ -554,7 +873,7 @@ impl AutomationStorePort for SqliteAutomationStore {
             program: Some(input.program.clone()),
             run: None,
             reason: input.reason.clone(),
-            interval_ms: input.interval_ms.max(1_000),
+            interval_ms: normalized_interval,
             expires_at: input.expires_at,
             created_at: now_ms,
             updated_at: now_ms,
@@ -588,8 +907,46 @@ impl AutomationStorePort for SqliteAutomationStore {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sql_err)?;
+        let existing_payloads: Vec<String> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT payload FROM waits
+                     WHERE owner_user_id = ?1 AND session_id = ?2
+                     ORDER BY created_at DESC, id ASC",
+                )
+                .map_err(map_sql_err)?;
+            let rows = stmt
+                .query_map(params![&owner_user_id.0, &session_id.0], |r| r.get(0))
+                .map_err(map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(map_sql_err)?
+        };
+        for raw in existing_payloads {
+            let candidate: AutomationWaitRecord = serde_json::from_str(&raw)
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+            if matches!(
+                candidate.state,
+                AutomationWaitState::Waiting | AutomationWaitState::Checking
+            ) && let Some(existing_run) = &candidate.run
+                && existing_run.exit.is_none()
+                && existing_run.command == input.command
+                && existing_run.args == input.args
+                && existing_run.cwd == input.cwd
+                && existing_run.env == input.env
+            {
+                return Ok(candidate);
+            }
+        }
+
         let id = Self::allocate_wait_id(&tx, scope, session_id, now_ms)?;
         let log_path = logs_dir.join(format!("{id}.log"));
+        let default_reason = {
+            let mut joined = input.command.clone();
+            for arg in &input.args {
+                joined.push(' ');
+                joined.push_str(arg);
+            }
+            joined.chars().take(2_000).collect::<String>()
+        };
         let wait = AutomationWaitRecord {
             id,
             session_id: session_id.clone(),
@@ -607,7 +964,7 @@ impl AutomationStorePort for SqliteAutomationStore {
                 pid: None,
                 exit: None,
             }),
-            reason: input.reason.clone(),
+            reason: Some(input.reason.clone().unwrap_or(default_reason)),
             interval_ms: 60_000,
             expires_at: None,
             created_at: now_ms,
@@ -726,7 +1083,7 @@ impl AutomationStorePort for SqliteAutomationStore {
         let mut stmt = conn
             .prepare(
                 "SELECT payload FROM waits
-                 WHERE state = 'waiting' AND due_at IS NOT NULL AND due_at <= ?1
+                 WHERE state IN ('waiting', 'checking') AND due_at IS NOT NULL AND due_at <= ?1
                  ORDER BY due_at ASC, id ASC
                  LIMIT ?2",
             )
@@ -761,11 +1118,15 @@ impl AutomationStorePort for SqliteAutomationStore {
         let Some(mut wait) = read_wait_tx(&tx, wait_id)? else {
             return Ok(None);
         };
-        if wait.state != AutomationWaitState::Waiting {
+        if !matches!(
+            wait.state,
+            AutomationWaitState::Waiting | AutomationWaitState::Checking
+        ) {
             return Ok(None);
         }
         wait.state = AutomationWaitState::Checking;
         wait.checks = wait.checks.saturating_add(1);
+        wait.evidence = Some(Vec::new());
         wait.updated_at = now_ms;
         write_wait_tx(&tx, &wait)?;
         tx.commit().map_err(map_sql_err)?;
@@ -786,7 +1147,7 @@ impl AutomationStorePort for SqliteAutomationStore {
         let Some(mut wait) = read_wait_tx(&tx, wait_id)? else {
             return Ok(false);
         };
-        if wait.state == AutomationWaitState::Cancelled {
+        if wait.state != AutomationWaitState::Checking {
             return Ok(false);
         }
         let Some(run) = wait.run.as_mut() else {
@@ -840,17 +1201,18 @@ impl AutomationStorePort for SqliteAutomationStore {
         let Some(mut wait) = read_wait_tx(&tx, wait_id)? else {
             return Ok(None);
         };
-        if wait.state == AutomationWaitState::Cancelled {
-            return Ok(Some(wait));
+        if !matches!(
+            wait.state,
+            AutomationWaitState::Waiting | AutomationWaitState::Checking
+        ) {
+            return Ok(None);
         }
         let Some(run) = wait.run.as_mut() else {
             return Ok(None);
         };
         if run.exit.is_none() {
             run.exit = Some(exit.clone());
-            if wait.state == AutomationWaitState::Waiting {
-                wait.next_check_at = now_ms;
-            }
+            wait.next_check_at = wait.next_check_at.min(now_ms);
             wait.updated_at = now_ms;
             write_wait_tx(&tx, &wait)?;
         }
@@ -1590,9 +1952,20 @@ impl AutomationStorePort for SqliteAutomationStore {
     fn next_due_at(&self, scope: &AutomationWorkspaceScope) -> PortResult<Option<i64>> {
         let conn_arc = self.connection_for(scope)?;
         let conn = conn_arc.lock().expect("automation db lock");
+        let accepted_delivery: Option<i32> = conn
+            .query_row(
+                "SELECT 1 FROM deliveries WHERE state = 'accepted' LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        if accepted_delivery.is_some() {
+            return Ok(Some(0));
+        }
         let wait_due: Option<i64> = conn
             .query_row(
-                "SELECT MIN(due_at) FROM waits WHERE state = 'waiting' AND due_at IS NOT NULL",
+                "SELECT MIN(due_at) FROM waits WHERE state IN ('waiting', 'checking') AND due_at IS NOT NULL",
                 [],
                 |r| r.get(0),
             )
@@ -1600,17 +1973,132 @@ impl AutomationStorePort for SqliteAutomationStore {
         let rcpt_due: Option<i64> = conn
             .query_row(
                 "SELECT MIN(retry_at) FROM receipts
-                 WHERE state IN ('accepted','waiting','resolved','submitting','queued','running','unknown','cancelling')",
+                 WHERE state IN ('accepted','waiting','resolved','submitting','queued','running','blocked','unknown','cancelling')
+                   AND state != 'blocked'",
                 [],
                 |r| r.get(0),
             )
             .map_err(map_sql_err)?;
-        Ok(match (wait_due, rcpt_due) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
-            (None, None) => None,
+        let obs_due: Option<i64> = conn
+            .query_row("SELECT MIN(retry_at) FROM turn_observations", [], |r| {
+                r.get(0)
+            })
+            .map_err(map_sql_err)?;
+        Ok([wait_due, rcpt_due, obs_due].into_iter().flatten().min())
+    }
+
+    fn read_source_checkpoint(
+        &self,
+        scope: &AutomationWorkspaceScope,
+        source_id: &str,
+    ) -> PortResult<Option<Value>> {
+        let conn_arc = self.connection_for(scope)?;
+        let conn = conn_arc.lock().expect("automation db lock");
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT payload FROM sources WHERE id = ?1",
+                params![source_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        raw.map(|s| {
+            serde_json::from_str::<Value>(&s)
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))
         })
+        .transpose()
+    }
+
+    fn write_source_checkpoint(
+        &self,
+        scope: &AutomationWorkspaceScope,
+        source_id: &str,
+        checkpoint: &Value,
+    ) -> PortResult<()> {
+        let payload = serde_json::to_string(checkpoint)
+            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+        let conn_arc = self.connection_for(scope)?;
+        let conn = conn_arc.lock().expect("automation db lock");
+        conn.execute(
+            "INSERT OR REPLACE INTO sources (id, payload) VALUES (?1, ?2)",
+            params![source_id, payload],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    fn read_capacity_snapshot(
+        &self,
+        scope: &AutomationWorkspaceScope,
+        binding_id: &str,
+    ) -> PortResult<Option<Value>> {
+        let conn_arc = self.connection_for(scope)?;
+        let conn = conn_arc.lock().expect("automation db lock");
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT payload FROM capacity WHERE id = ?1",
+                params![binding_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        raw.map(|s| {
+            serde_json::from_str::<Value>(&s)
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))
+        })
+        .transpose()
+    }
+
+    fn write_capacity_snapshot(
+        &self,
+        scope: &AutomationWorkspaceScope,
+        binding_id: &str,
+        snapshot: &Value,
+    ) -> PortResult<()> {
+        let payload = serde_json::to_string(snapshot)
+            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+        let conn_arc = self.connection_for(scope)?;
+        let conn = conn_arc.lock().expect("automation db lock");
+        conn.execute(
+            "INSERT OR REPLACE INTO capacity (id, payload) VALUES (?1, ?2)",
+            params![binding_id, payload],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    fn read_session_events(
+        &self,
+        scope: &AutomationWorkspaceScope,
+        session_id: &SessionId,
+        since_ms: i64,
+        limit: usize,
+    ) -> PortResult<Vec<Value>> {
+        let conn_arc = self.connection_for(scope)?;
+        let conn = conn_arc.lock().expect("automation db lock");
+        let bounded = limit.clamp(1, 100) as i64;
+        let mut stmt = conn
+            .prepare(
+                "SELECT payload FROM events
+                 WHERE session_id = ?1 AND observed_at >= ?2
+                 ORDER BY sequence ASC
+                 LIMIT ?3",
+            )
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map(params![&session_id.0, since_ms.max(0), bounded], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(map_sql_err)?;
+        let mut out = Vec::new();
+        for row in rows {
+            let raw = row.map_err(map_sql_err)?;
+            out.push(
+                serde_json::from_str(&raw)
+                    .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?,
+            );
+        }
+        Ok(out)
     }
 
     fn erase_workspace_store(&self, scope: &AutomationWorkspaceScope) -> PortResult<()> {

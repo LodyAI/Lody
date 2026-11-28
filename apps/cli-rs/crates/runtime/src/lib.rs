@@ -204,7 +204,7 @@ impl DaemonRuntime {
         ))
     }
 
-    fn resolve_workspace_mode(
+    pub(crate) fn resolve_workspace_mode(
         &self,
         workspace_id: &WorkspaceId,
     ) -> PortResult<WorkspaceSecurityMode> {
@@ -218,6 +218,75 @@ impl DaemonRuntime {
                 Ok(WorkspaceSecurityMode::Plaintext)
             }
             Err(err) => Err(err),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_host_admitted_turn(
+        &self,
+        workspace_id: &WorkspaceId,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        category: InboxCategory,
+        verified_requester: UserId,
+        prompt_text: String,
+        adapter_id: String,
+    ) -> PortResult<AdmittedTurnInput> {
+        let mode = self.resolve_workspace_mode(workspace_id)?;
+        match mode {
+            WorkspaceSecurityMode::Unknown => Err(PortError::new(
+                PortErrorKind::Unavailable,
+                "WORKSPACE_SECURITY_MODE_UNKNOWN",
+            )),
+            WorkspaceSecurityMode::Plaintext => Ok(AdmittedTurnInput {
+                workspace_id: workspace_id.clone(),
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                category,
+                verified_requester,
+                prompt_text,
+                adapter_id,
+                custom_acp: None,
+                signed_intent_verified: true,
+                signature_hex: None,
+            }),
+            WorkspaceSecurityMode::Encrypted { .. } => {
+                let signed = self
+                    .deps
+                    .engine
+                    .sign_machine_turn_intent(&lody_ports::MachineSignTurnRequest {
+                        workspace_id: workspace_id.clone(),
+                        session_id: session_id.clone(),
+                        target_machine_id: self.deps.machine_id.clone(),
+                        turn_id: turn_id.clone(),
+                        prompt_text: prompt_text.clone(),
+                        adapter_id: adapter_id.clone(),
+                    })
+                    .map_err(|_| {
+                        PortError::new(
+                            PortErrorKind::Unavailable,
+                            "E2EE_MACHINE_SIGNING_UNAVAILABLE",
+                        )
+                    })?;
+                if signed.signature_hex.trim().is_empty() {
+                    return Err(PortError::new(
+                        PortErrorKind::Unavailable,
+                        "E2EE_MACHINE_SIGNING_UNAVAILABLE",
+                    ));
+                }
+                Ok(AdmittedTurnInput {
+                    workspace_id: workspace_id.clone(),
+                    session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
+                    category,
+                    verified_requester,
+                    prompt_text,
+                    adapter_id,
+                    custom_acp: None,
+                    signed_intent_verified: true,
+                    signature_hex: Some(signed.signature_hex),
+                })
+            }
         }
     }
 
@@ -253,23 +322,31 @@ impl DaemonRuntime {
             return;
         }
         let wake_notify = Arc::clone(&mount.supervisor_wake);
-        let shutdown_notify = Arc::clone(&mount.supervisor_shutdown);
+        let mut shutdown_rx = mount.supervisor_shutdown_rx.clone();
         let managed_runs = Arc::clone(&mount.managed_runs);
+        let active_checks = Arc::clone(&mount.active_automation_checks);
         let rt_clone = self.clone();
         let ws_clone = workspace_id.clone();
 
         let task = tokio::spawn(async move {
             let mut startup_reconciled = false;
             loop {
+                if *shutdown_rx.borrow_and_update() {
+                    break;
+                }
                 let now_ms = current_epoch_ms_i64();
                 let sched_next = tick_workspace_schedules(&rt_clone, &ws_clone, now_ms)
                     .await
                     .ok()
                     .flatten();
+                if *shutdown_rx.borrow_and_update() {
+                    break;
+                }
                 let auto_next = tick_workspace_automations(
                     &rt_clone,
                     &ws_clone,
                     &managed_runs,
+                    &active_checks,
                     &wake_notify,
                     &mut startup_reconciled,
                     now_ms,
@@ -277,6 +354,9 @@ impl DaemonRuntime {
                 .await
                 .ok()
                 .flatten();
+                if *shutdown_rx.borrow_and_update() {
+                    break;
+                }
                 let combined = match (sched_next, auto_next) {
                     (Some(a), Some(b)) => Some(a.min(b)),
                     (Some(a), None) => Some(a),
@@ -289,7 +369,11 @@ impl DaemonRuntime {
 
                 tokio::select! {
                     biased;
-                    _ = shutdown_notify.notified() => break,
+                    changed = shutdown_rx.changed() => {
+                        if changed.is_err() || *shutdown_rx.borrow_and_update() {
+                            break;
+                        }
+                    }
                     _ = wake_notify.notified() => {}
                     _ = tokio::time::sleep(sleep_dur) => {}
                 }
@@ -315,10 +399,15 @@ impl DaemonRuntime {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn managed_runs_for_workspace(
         &self,
         workspace_id: &WorkspaceId,
-    ) -> Option<(Arc<ManagedRunRegistry>, Arc<Notify>)> {
+    ) -> Option<(
+        Arc<ManagedRunRegistry>,
+        Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+        Arc<Notify>,
+    )> {
         if let Ok(mode) = self.resolve_workspace_mode(workspace_id) {
             let mut guard = self.workspaces.write().expect("workspaces lock");
             let _ = guard.get_or_insert_mount(workspace_id, mode);
@@ -327,7 +416,13 @@ impl DaemonRuntime {
             .read()
             .expect("workspaces lock")
             .get_mount(workspace_id)
-            .map(|m| (Arc::clone(&m.managed_runs), Arc::clone(&m.supervisor_wake)))
+            .map(|m| {
+                (
+                    Arc::clone(&m.managed_runs),
+                    Arc::clone(&m.active_automation_checks),
+                    Arc::clone(&m.supervisor_wake),
+                )
+            })
     }
 
     fn erase_local_workspace_stores(&self, workspace_id: &WorkspaceId) -> PortResult<()> {
@@ -382,7 +477,7 @@ impl DaemonRuntime {
             } => {
                 let drained = sessions.len();
                 supervisor.managed_runs.stop_all();
-                supervisor.shutdown_notify.notify_waiters();
+                let _ = supervisor.shutdown_tx.send(true);
                 if let Some(task) = supervisor.task {
                     let _ = task.await;
                 }
@@ -639,6 +734,7 @@ impl DaemonRuntime {
             adapter_id,
             custom_acp: custom_acp.clone(),
             signed_intent_verified,
+            signature_hex: None,
         })?;
 
         match self
@@ -1392,7 +1488,7 @@ impl DaemonRuntime {
                         .automation_store
                         .cancel_item(&scope, &wait.id, now_ms)?;
                     if wait.run.is_some()
-                        && let Some((runs, _)) = self.managed_runs_for_workspace(&workspace_id)
+                        && let Some((runs, _, _)) = self.managed_runs_for_workspace(&workspace_id)
                     {
                         runs.stop(&wait.id);
                     }
@@ -1430,21 +1526,23 @@ impl DaemonRuntime {
                 let effective_now = now_ms.unwrap_or_else(current_epoch_ms_i64);
                 let sched_next =
                     tick_workspace_schedules(self, &workspace_id, effective_now).await?;
-                let auto_next =
-                    if let Some((runs, wake)) = self.managed_runs_for_workspace(&workspace_id) {
-                        let mut reconciled = false;
-                        tick_workspace_automations(
-                            self,
-                            &workspace_id,
-                            &runs,
-                            &wake,
-                            &mut reconciled,
-                            effective_now,
-                        )
-                        .await?
-                    } else {
-                        None
-                    };
+                let auto_next = if let Some((runs, active_checks, wake)) =
+                    self.managed_runs_for_workspace(&workspace_id)
+                {
+                    let mut reconciled = false;
+                    tick_workspace_automations(
+                        self,
+                        &workspace_id,
+                        &runs,
+                        &active_checks,
+                        &wake,
+                        &mut reconciled,
+                        effective_now,
+                    )
+                    .await?
+                } else {
+                    None
+                };
                 let next_wake_ms = match (sched_next, auto_next) {
                     (Some(a), Some(b)) => Some(a.min(b)),
                     (Some(a), None) => Some(a),
@@ -1787,7 +1885,7 @@ impl DaemonRuntime {
             .drain_all();
         for sup in supervisors {
             sup.managed_runs.stop_all();
-            sup.shutdown_notify.notify_waiters();
+            let _ = sup.shutdown_tx.send(true);
             if let Some(task) = sup.task {
                 let _ = task.await;
             }

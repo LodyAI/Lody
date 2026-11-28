@@ -28,7 +28,6 @@ pub const SANDBOX_MAX_FETCH_BODY_BYTES: usize = 64 * 1024;
 pub const SANDBOX_MAX_RESULT_BYTES: usize = 64 * 1024;
 pub const SANDBOX_MAX_RESUME_TEXT_BYTES: usize = 32 * 1024;
 pub const SANDBOX_MAX_EVIDENCE_ITEMS: usize = 32;
-pub const SANDBOX_MAX_EVIDENCE_ENTRY_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct QuickJsAutomationSandbox {
@@ -298,6 +297,29 @@ fn execute_bounded_fetch(request: &Value, timeout: Duration) -> PortResult<Value
     }))
 }
 
+#[cfg(unix)]
+fn terminate_process_group_sync(pgid: u32) {
+    if pgid == 0 {
+        return;
+    }
+    let neg = format!("-{pgid}");
+    let _ = Command::new("/bin/kill")
+        .args(["-TERM", &neg])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = Command::new("/bin/kill")
+        .args(["-KILL", &neg])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(unix))]
+fn terminate_process_group_sync(_pgid: u32) {}
+
 fn execute_bounded_command(
     request: &Value,
     session_workdir: Option<&Path>,
@@ -364,66 +386,84 @@ fn execute_bounded_command(
     };
     let resolved_cwd = resolve_contained_cwd(root, rel_cwd)?;
 
-    let mut child = Command::new(cmd_name)
-        .args(&args)
+    let mut cmd = Command::new(cmd_name);
+    cmd.args(&args)
         .current_dir(resolved_cwd)
         .env_clear()
         .envs(command_env)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            PortError::new(
-                PortErrorKind::InvalidInput,
-                format!("AUTOMATION_EXEC_FAILED:{e}"),
-            )
-        })?;
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        PortError::new(
+            PortErrorKind::InvalidInput,
+            format!("AUTOMATION_EXEC_FAILED:{e}"),
+        )
+    })?;
+    let pgid = child.id();
 
     let mut stdout_pipe = child.stdout.take();
     let mut stderr_pipe = child.stderr.take();
 
-    let out_thread = std::thread::spawn(move || -> Result<Vec<u8>, &'static str> {
-        let mut buf = Vec::new();
-        if let Some(mut r) = stdout_pipe.take() {
-            let mut chunk = [0u8; 4096];
-            loop {
-                let n = r.read(&mut chunk).map_err(|_| "AUTOMATION_EXEC_IO_ERROR")?;
-                if n == 0 {
-                    break;
+    let (out_tx, out_rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let res = (|| -> Result<Vec<u8>, &'static str> {
+            let mut buf = Vec::new();
+            if let Some(mut r) = stdout_pipe.take() {
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let n = r.read(&mut chunk).map_err(|_| "AUTOMATION_EXEC_IO_ERROR")?;
+                    if n == 0 {
+                        break;
+                    }
+                    if buf.len() + n > SANDBOX_MAX_TOOL_IO_BYTES {
+                        return Err("AUTOMATION_EXEC_OUTPUT_TOO_LARGE");
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
                 }
-                if buf.len() + n > SANDBOX_MAX_TOOL_IO_BYTES {
-                    return Err("AUTOMATION_EXEC_OUTPUT_TOO_LARGE");
-                }
-                buf.extend_from_slice(&chunk[..n]);
             }
-        }
-        Ok(buf)
+            Ok(buf)
+        })();
+        let _ = out_tx.send(res);
     });
 
-    let err_thread = std::thread::spawn(move || -> Result<Vec<u8>, &'static str> {
-        let mut buf = Vec::new();
-        if let Some(mut r) = stderr_pipe.take() {
-            let mut chunk = [0u8; 4096];
-            loop {
-                let n = r.read(&mut chunk).map_err(|_| "AUTOMATION_EXEC_IO_ERROR")?;
-                if n == 0 {
-                    break;
+    let (err_tx, err_rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let res = (|| -> Result<Vec<u8>, &'static str> {
+            let mut buf = Vec::new();
+            if let Some(mut r) = stderr_pipe.take() {
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let n = r.read(&mut chunk).map_err(|_| "AUTOMATION_EXEC_IO_ERROR")?;
+                    if n == 0 {
+                        break;
+                    }
+                    if buf.len() + n > SANDBOX_MAX_TOOL_IO_BYTES {
+                        return Err("AUTOMATION_EXEC_OUTPUT_TOO_LARGE");
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
                 }
-                if buf.len() + n > SANDBOX_MAX_TOOL_IO_BYTES {
-                    return Err("AUTOMATION_EXEC_OUTPUT_TOO_LARGE");
-                }
-                buf.extend_from_slice(&chunk[..n]);
             }
-        }
-        Ok(buf)
+            Ok(buf)
+        })();
+        let _ = err_tx.send(res);
     });
 
     let status = loop {
         match child.try_wait() {
-            Ok(Some(st)) => break st,
+            Ok(Some(st)) => {
+                terminate_process_group_sync(pgid);
+                break st;
+            }
             Ok(None) => {
                 if Instant::now() >= deadline {
+                    terminate_process_group_sync(pgid);
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(PortError::new(
@@ -434,19 +474,24 @@ fn execute_bounded_command(
                 std::thread::sleep(Duration::from_millis(5));
             }
             Err(e) => {
+                terminate_process_group_sync(pgid);
                 let _ = child.kill();
                 return Err(PortError::new(PortErrorKind::Internal, e.to_string()));
             }
         }
     };
 
-    let stdout_bytes = out_thread
-        .join()
-        .map_err(|_| PortError::new(PortErrorKind::Internal, "stdout thread panicked"))?
+    let drain_wait = deadline
+        .saturating_duration_since(Instant::now())
+        .min(Duration::from_secs(1))
+        .max(Duration::from_millis(50));
+    let stdout_bytes = out_rx
+        .recv_timeout(drain_wait)
+        .unwrap_or(Ok(Vec::new()))
         .map_err(|code| PortError::new(PortErrorKind::InvalidInput, code))?;
-    let stderr_bytes = err_thread
-        .join()
-        .map_err(|_| PortError::new(PortErrorKind::Internal, "stderr thread panicked"))?
+    let stderr_bytes = err_rx
+        .recv_timeout(drain_wait)
+        .unwrap_or(Ok(Vec::new()))
         .map_err(|code| PortError::new(PortErrorKind::InvalidInput, code))?;
 
     if stdout_bytes.len() + stderr_bytes.len() > SANDBOX_MAX_TOOL_IO_BYTES {
@@ -579,7 +624,6 @@ impl AutomationSandboxPort for QuickJsAutomationSandbox {
 
         let telemetry = Arc::new(Mutex::new(EvalTelemetry::default()));
         let telemetry_for_host = Arc::clone(&telemetry);
-        let now_ms = context.now_ms;
 
         let raw_outcome: PortResult<String> = std::thread::scope(|s| {
             s.spawn(|| {
@@ -627,33 +671,29 @@ impl AutomationSandboxPort for QuickJsAutomationSandbox {
                                                 telemetry_for_host.lock().expect("telemetry lock");
                                             guard.reads.insert(resource.to_string());
                                         }
-                                        let val = host_ops.read_resource(resource, &a2)?;
-                                        let serialized =
-                                            serde_json::to_string(&val).map_err(|e| {
-                                                PortError::new(
-                                                    PortErrorKind::Internal,
-                                                    e.to_string(),
-                                                )
-                                            })?;
-                                        let recorded_val = if serialized.len()
-                                            <= SANDBOX_MAX_EVIDENCE_ENTRY_BYTES
-                                        {
-                                            val.clone()
-                                        } else {
-                                            Value::String("[omitted: exceeds 16 KiB]".to_string())
-                                        };
-                                        {
+                                        let obs = host_ops.read_resource(resource, &a2)?;
+                                        if !obs.evidence.is_empty() {
                                             let mut guard =
                                                 telemetry_for_host.lock().expect("telemetry lock");
-                                            if guard.evidence.len() < SANDBOX_MAX_EVIDENCE_ITEMS {
-                                                guard.evidence.push(AutomationEvidenceEntry {
-                                                    resource: resource.to_string(),
-                                                    observed_at: now_ms,
-                                                    value: recorded_val,
+                                            for item in obs.evidence {
+                                                if guard.evidence.len() >= SANDBOX_MAX_EVIDENCE_ITEMS
+                                                {
+                                                    break;
+                                                }
+                                                let exists = guard.evidence.iter().any(|e| {
+                                                    e.source_id == item.source_id
+                                                        && e.revision == item.revision
+                                                        && e.pr_url == item.pr_url
                                                 });
+                                                if !exists {
+                                                    guard.evidence.push(item);
+                                                }
                                             }
                                         }
-                                        val
+                                        json!({
+                                            "value": obs.value,
+                                            "observedAt": obs.observed_at
+                                        })
                                     }
                                     "fetch" => {
                                         let req_val = json!({
@@ -747,17 +787,37 @@ impl AutomationSandboxPort for QuickJsAutomationSandbox {
                             throw new Error(parsed.error || "Host call failed");
                           });
 
+                          const wrapFetchResult = (res) => {
+                            const bodyStr = typeof res.body === "string" ? res.body : "";
+                            return Object.freeze({
+                              ok: Boolean(res.ok),
+                              status: res.status ?? 0,
+                              headers: res.headers ?? {},
+                              url: res.url ?? "",
+                              body: bodyStr,
+                              text: async () => bodyStr,
+                              json: async () => JSON.parse(bodyStr),
+                            });
+                          };
+
+                          const normalizeExecArgs = (first, args, options) => {
+                            if (typeof first === "object" && first !== null && !Array.isArray(first)) {
+                              return first;
+                            }
+                            return {
+                              command: first,
+                              ...(args === undefined ? {} : { args }),
+                              ...(options && options.cwd !== undefined ? { cwd: options.cwd } : {})
+                            };
+                          };
+
                           const ctx = Object.freeze({
                             sessionId: meta.sessionId,
                             workspaceId: meta.workspaceId,
                             now: meta.now,
                             read: (resource, query) => invoke("read", resource, query ?? {}),
-                            fetch: (url, options) => invoke("fetch", url, options ?? {}),
-                            exec: (command, args, options) => invoke("exec", {
-                              command,
-                              ...(args === undefined ? {} : { args }),
-                              ...(options && options.cwd !== undefined ? { cwd: options.cwd } : {})
-                            }, null),
+                            fetch: (url, options) => invoke("fetch", url, options ?? {}).then(wrapFetchResult),
+                            exec: (first, args, options) => invoke("exec", normalizeExecArgs(first, args, options), null),
                           });
 
                           return Promise.resolve()

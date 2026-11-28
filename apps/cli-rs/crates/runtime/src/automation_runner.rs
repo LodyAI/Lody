@@ -8,32 +8,37 @@ use lody_app::{
 use lody_kernel::{
     ContinuationGateDecision, ManagedRunExitOutcome, ManagedRunSummaryInput, TargetSessionGate,
     WaitCheckInput, WaitTransitionDecision, decide_continuation_gate, decide_wait_transition,
-    format_managed_run_summary,
+    evaluate_capacity_observation, format_managed_run_summary, parse_github_pr_url,
+    pull_request_checkpoint_id, workflow_checkpoint_id,
 };
 use lody_ports::{
-    AdmittedTurnInput, AutomationHostOps, AutomationMatchResult, AutomationProgramContext,
-    AutomationReceiptPatch, AutomationReceiptState, AutomationRunExit, AutomationRunOutcome,
-    AutomationWaitCompletion, AutomationWaitRecord, AutomationWorkspaceScope, InboxCategory,
-    SessionRunStatus,
+    AutomationEvidenceEntry, AutomationHostOps, AutomationMatchResult, AutomationProgramContext,
+    AutomationReadObservation, AutomationReceiptPatch, AutomationReceiptState, AutomationRunExit,
+    AutomationRunOutcome, AutomationWaitCompletion, AutomationWaitRecord, AutomationWorkspaceScope,
+    InboxCategory, SessionMetaSnapshot, SessionRunStatus, WorkspaceSecurityMode,
 };
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 
 pub const MANAGED_RUN_LOG_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 pub const MANAGED_RUN_TAIL_BYTES: usize = 4 * 1024;
 const MANAGED_RUN_LOG_RETENTION_MS: i64 = 7 * 24 * 60 * 60_000;
+const POST_EXIT_PIPE_DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
+const WORKFLOW_OBSERVATION_FRESHNESS_MS: i64 = 120_000;
+const SIGNING_RETRY_DELAY_MS: i64 = 15_000;
 
 #[derive(Default)]
 pub struct ManagedRunRegistry {
-    active: Mutex<HashMap<String, Arc<Notify>>>,
+    active: Mutex<HashMap<String, watch::Sender<bool>>>,
 }
 
 pub struct ManagedRunLaunchSpec {
@@ -46,6 +51,32 @@ pub struct ManagedRunLaunchSpec {
     pub log_path: PathBuf,
 }
 
+#[cfg(unix)]
+async fn terminate_process_group(pgid: Option<u32>) {
+    let Some(pid) = pgid.filter(|p| *p > 0) else {
+        return;
+    };
+    let neg = format!("-{pid}");
+    let _ = Command::new("/bin/kill")
+        .args(["-TERM", &neg])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let _ = Command::new("/bin/kill")
+        .args(["-KILL", &neg])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await;
+}
+
+#[cfg(not(unix))]
+async fn terminate_process_group(_pgid: Option<u32>) {}
+
 impl ManagedRunRegistry {
     pub fn is_live(&self, wait_id: &str) -> bool {
         self.active
@@ -55,26 +86,26 @@ impl ManagedRunRegistry {
     }
 
     pub fn stop(&self, wait_id: &str) {
-        if let Some(cancel) = self
+        if let Some(cancel_tx) = self
             .active
             .lock()
             .expect("managed runs lock")
             .remove(wait_id)
         {
-            cancel.notify_waiters();
+            let _ = cancel_tx.send(true);
         }
     }
 
     pub fn stop_all(&self) {
-        let handles: Vec<Arc<Notify>> = self
+        let handles: Vec<watch::Sender<bool>> = self
             .active
             .lock()
             .expect("managed runs lock")
             .drain()
-            .map(|(_, n)| n)
+            .map(|(_, tx)| tx)
             .collect();
-        for cancel in handles {
-            cancel.notify_waiters();
+        for cancel_tx in handles {
+            let _ = cancel_tx.send(true);
         }
     }
 
@@ -84,13 +115,13 @@ impl ManagedRunRegistry {
         wake_notify: Arc<Notify>,
         spec: ManagedRunLaunchSpec,
     ) {
-        let cancel_notify = Arc::new(Notify::new());
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
         {
             let mut guard = self.active.lock().expect("managed runs lock");
             if guard.contains_key(&spec.wait_id) {
                 return;
             }
-            guard.insert(spec.wait_id.clone(), Arc::clone(&cancel_notify));
+            guard.insert(spec.wait_id.clone(), cancel_tx);
         }
 
         let registry = Arc::clone(self);
@@ -109,6 +140,15 @@ impl ManagedRunRegistry {
                 .open(&spec.log_path)
                 .ok();
 
+            if *cancel_rx.borrow_and_update() {
+                registry
+                    .active
+                    .lock()
+                    .expect("managed runs lock")
+                    .remove(&wait_id);
+                return;
+            }
+
             let mut cmd = Command::new(&spec.command);
             cmd.args(&spec.args)
                 .current_dir(&spec.cwd)
@@ -118,6 +158,10 @@ impl ManagedRunRegistry {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
+            #[cfg(unix)]
+            {
+                cmd.process_group(0);
+            }
 
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
@@ -146,7 +190,8 @@ impl ManagedRunRegistry {
                 }
             };
 
-            if let Some(pid) = child.id() {
+            let child_pid = child.id();
+            if let Some(pid) = child_pid {
                 let _ = deps.automation_store.record_run_pid(
                     &scope,
                     &wait_id,
@@ -161,7 +206,7 @@ impl ManagedRunRegistry {
 
             let out_buf = Arc::clone(&shared_buf);
             let log_clone_a = spec.log_path.clone();
-            let stdout_task = tokio::spawn(async move {
+            let mut stdout_task = tokio::spawn(async move {
                 if let Some(mut r) = stdout.take() {
                     let mut chunk = [0u8; 4096];
                     while let Ok(n) = r.read(&mut chunk).await {
@@ -175,7 +220,7 @@ impl ManagedRunRegistry {
 
             let err_buf = Arc::clone(&shared_buf);
             let log_clone_b = spec.log_path.clone();
-            let stderr_task = tokio::spawn(async move {
+            let mut stderr_task = tokio::spawn(async move {
                 if let Some(mut r) = stderr.take() {
                     let mut chunk = [0u8; 4096];
                     while let Ok(n) = r.read(&mut chunk).await {
@@ -187,15 +232,36 @@ impl ManagedRunRegistry {
                 }
             });
 
-            let wait_outcome = tokio::select! {
-                _ = cancel_notify.notified() => None,
-                status_res = child.wait() => Some(status_res),
+            let wait_outcome = if *cancel_rx.borrow_and_update() {
+                None
+            } else {
+                tokio::select! {
+                    biased;
+                    changed = cancel_rx.changed() => {
+                        if changed.is_ok() && *cancel_rx.borrow_and_update() {
+                            None
+                        } else {
+                            Some(child.wait().await)
+                        }
+                    }
+                    status_res = child.wait() => Some(status_res),
+                }
             };
 
             match wait_outcome {
                 Some(status_res) => {
-                    let _ = stdout_task.await;
-                    let _ = stderr_task.await;
+                    if tokio::time::timeout(POST_EXIT_PIPE_DRAIN_TIMEOUT, &mut stdout_task)
+                        .await
+                        .is_err()
+                    {
+                        stdout_task.abort();
+                    }
+                    if tokio::time::timeout(POST_EXIT_PIPE_DRAIN_TIMEOUT, &mut stderr_task)
+                        .await
+                        .is_err()
+                    {
+                        stderr_task.abort();
+                    }
                     let _ = log_file.as_mut().map(Write::flush);
                     registry
                         .active
@@ -233,6 +299,7 @@ impl ManagedRunRegistry {
                     wake_notify.notify_one();
                 }
                 None => {
+                    terminate_process_group(child_pid).await;
                     let _ = child.kill().await;
                     let _ = child.wait().await;
                     stdout_task.abort();
@@ -328,28 +395,482 @@ pub fn resolve_contained_workdir(root: &Path, relative_cwd: Option<&str>) -> Por
     Ok(candidate)
 }
 
+struct ActiveCheckGuard {
+    set: Arc<Mutex<HashSet<String>>>,
+    wait_id: String,
+}
+
+impl Drop for ActiveCheckGuard {
+    fn drop(&mut self) {
+        self.set
+            .lock()
+            .expect("active checks lock")
+            .remove(&self.wait_id);
+    }
+}
+
 struct RuntimeAutomationHostOps {
     deps: Arc<DaemonDependencies>,
-    workspace_id: WorkspaceId,
+    scope: AutomationWorkspaceScope,
     session_id: SessionId,
+    now_ms: i64,
     workdir: Option<PathBuf>,
     command_env: BTreeMap<String, String>,
-    session_status_json: Value,
+    session_meta: Option<SessionMetaSnapshot>,
+    session_read_json: Value,
+    session_group_json: Value,
+}
+
+fn ensure_empty_read_params(resource: &str, query: &Value) -> PortResult<()> {
+    match query {
+        Value::Null => Ok(()),
+        Value::Object(map) if map.is_empty() => Ok(()),
+        _ => Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            format!("AUTOMATION_INVALID_READ_PARAMETERS:{resource}"),
+        )),
+    }
+}
+
+fn parse_events_read_params(query: &Value) -> PortResult<(Option<i64>, usize)> {
+    match query {
+        Value::Null => Ok((None, 50)),
+        Value::Object(map) => {
+            let mut since = None;
+            let mut limit = 50usize;
+            for (k, v) in map {
+                match k.as_str() {
+                    "since" => {
+                        if !v.is_null() {
+                            let ts = v.as_i64().filter(|n| *n >= 0).ok_or_else(|| {
+                                PortError::new(
+                                    PortErrorKind::InvalidInput,
+                                    "AUTOMATION_INVALID_READ_PARAMETERS:events",
+                                )
+                            })?;
+                            since = Some(ts);
+                        }
+                    }
+                    "limit" => {
+                        if !v.is_null() {
+                            let raw =
+                                v.as_u64()
+                                    .filter(|n| (1..=100).contains(n))
+                                    .ok_or_else(|| {
+                                        PortError::new(
+                                            PortErrorKind::InvalidInput,
+                                            "AUTOMATION_INVALID_READ_PARAMETERS:events",
+                                        )
+                                    })?;
+                            limit = raw as usize;
+                        }
+                    }
+                    _ => {
+                        return Err(PortError::new(
+                            PortErrorKind::InvalidInput,
+                            "AUTOMATION_INVALID_READ_PARAMETERS:events",
+                        ));
+                    }
+                }
+            }
+            Ok((since, limit))
+        }
+        _ => Err(PortError::new(
+            PortErrorKind::InvalidInput,
+            "AUTOMATION_INVALID_READ_PARAMETERS:events",
+        )),
+    }
+}
+
+struct UnwrappedCheckpoint<'a> {
+    data: &'a serde_json::Map<String, Value>,
+    observed_at: Option<i64>,
+    revision: Option<&'a str>,
+}
+
+fn unwrap_source_checkpoint(cp: &Value) -> Option<UnwrappedCheckpoint<'_>> {
+    let outer = cp.as_object()?;
+    let data = outer
+        .get("data")
+        .and_then(Value::as_object)
+        .unwrap_or(outer);
+    let observed_at = outer
+        .get("observedAt")
+        .and_then(Value::as_i64)
+        .or_else(|| data.get("updatedAt").and_then(Value::as_i64));
+    let revision = outer
+        .get("revision")
+        .and_then(Value::as_str)
+        .or_else(|| data.get("revision").and_then(Value::as_str));
+    Some(UnwrappedCheckpoint {
+        data,
+        observed_at,
+        revision,
+    })
+}
+
+impl RuntimeAutomationHostOps {
+    fn read_pull_requests(&self) -> PortResult<AutomationReadObservation> {
+        let links = self
+            .session_meta
+            .as_ref()
+            .map(|m| m.linked_pull_requests.as_slice())
+            .unwrap_or(&[]);
+        let mut out = Vec::with_capacity(links.len());
+        let mut oldest_observed_at: Option<i64> = None;
+
+        for link in links {
+            let parsed = parse_github_pr_url(&link.url);
+            let cp_id = pull_request_checkpoint_id(&self.session_id.0, &link.url);
+            let cp = self
+                .deps
+                .automation_store
+                .read_source_checkpoint(&self.scope, &cp_id)?;
+            let unwrapped = cp.as_ref().and_then(unwrap_source_checkpoint);
+            let cp_obj = unwrapped.as_ref().map(|u| u.data);
+            let observed_ts = unwrapped.as_ref().and_then(|u| u.observed_at);
+            let updated_at = cp_obj
+                .and_then(|o| o.get("updatedAt"))
+                .and_then(Value::as_i64)
+                .or(observed_ts);
+            if let Some(ts) = observed_ts.or(updated_at) {
+                oldest_observed_at = Some(oldest_observed_at.map_or(ts, |cur| cur.min(ts)));
+            }
+            let repository = cp_obj
+                .and_then(|o| o.get("repository"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+                .or_else(|| parsed.as_ref().map(|(r, _)| r.clone()));
+            let pr_number = cp_obj
+                .and_then(|o| o.get("prNumber"))
+                .and_then(Value::as_u64)
+                .or_else(|| parsed.as_ref().map(|(_, n)| *n));
+            let state = cp_obj
+                .and_then(|o| o.get("state"))
+                .and_then(Value::as_str)
+                .unwrap_or(link.status.as_str());
+            let merged = cp_obj
+                .and_then(|o| o.get("merged"))
+                .and_then(Value::as_bool)
+                .unwrap_or(link.status == "merged");
+            let head_sha = cp_obj
+                .and_then(|o| o.get("headSha"))
+                .and_then(Value::as_str);
+
+            out.push(json!({
+                "url": link.url,
+                "linkStatus": link.status,
+                "repository": repository,
+                "prNumber": pr_number,
+                "state": state,
+                "merged": merged,
+                "headSha": head_sha,
+                "updatedAt": updated_at,
+            }));
+        }
+
+        Ok(AutomationReadObservation {
+            value: Value::Array(out),
+            observed_at: oldest_observed_at.unwrap_or(self.now_ms),
+            evidence: Vec::new(),
+        })
+    }
+
+    fn read_workflow_runs(&self) -> PortResult<AutomationReadObservation> {
+        let links = self
+            .session_meta
+            .as_ref()
+            .map(|m| m.linked_pull_requests.as_slice())
+            .unwrap_or(&[]);
+        let open_links: Vec<_> = links.iter().filter(|l| l.status == "open").collect();
+        if open_links.is_empty() {
+            return Ok(AutomationReadObservation {
+                value: json!({
+                    "status": "unknown",
+                    "reason": "no_linked_pull_request",
+                }),
+                observed_at: self.now_ms,
+                evidence: Vec::new(),
+            });
+        }
+
+        let mut pull_requests = Vec::new();
+        let mut evidence = Vec::new();
+        let mut oldest_observed_at = self.now_ms;
+
+        for link in open_links {
+            let Some((parsed_repo, parsed_num)) = parse_github_pr_url(&link.url) else {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "current_ci_evidence_unavailable",
+                    }),
+                    observed_at: self.now_ms,
+                    evidence: Vec::new(),
+                });
+            };
+            let pr_cp_id = pull_request_checkpoint_id(&self.session_id.0, &link.url);
+            let Some(pr_cp) = self
+                .deps
+                .automation_store
+                .read_source_checkpoint(&self.scope, &pr_cp_id)?
+            else {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "current_ci_evidence_unavailable",
+                    }),
+                    observed_at: self.now_ms,
+                    evidence: Vec::new(),
+                });
+            };
+            let Some(UnwrappedCheckpoint {
+                data: pr_obj,
+                observed_at: Some(pr_updated_at),
+                ..
+            }) = unwrap_source_checkpoint(&pr_cp)
+            else {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "current_ci_evidence_unavailable",
+                    }),
+                    observed_at: self.now_ms,
+                    evidence: Vec::new(),
+                });
+            };
+            if self.now_ms.saturating_sub(pr_updated_at) > WORKFLOW_OBSERVATION_FRESHNESS_MS {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "current_ci_evidence_unavailable",
+                    }),
+                    observed_at: pr_updated_at,
+                    evidence: Vec::new(),
+                });
+            }
+            let pr_state = pr_obj
+                .get("state")
+                .and_then(Value::as_str)
+                .unwrap_or("open");
+            let pr_merged = pr_obj
+                .get("merged")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if pr_merged || pr_state != "open" {
+                continue;
+            }
+            let Some(head_sha) = pr_obj
+                .get("headSha")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            else {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "current_ci_evidence_unavailable",
+                    }),
+                    observed_at: pr_updated_at,
+                    evidence: Vec::new(),
+                });
+            };
+            let repository = pr_obj
+                .get("repository")
+                .and_then(Value::as_str)
+                .unwrap_or(parsed_repo.as_str());
+            let pr_number = pr_obj
+                .get("prNumber")
+                .and_then(Value::as_u64)
+                .unwrap_or(parsed_num);
+
+            let wf_source_id = workflow_checkpoint_id(&self.session_id.0, repository, head_sha);
+            let Some(wf_cp) = self
+                .deps
+                .automation_store
+                .read_source_checkpoint(&self.scope, &wf_source_id)?
+            else {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "current_ci_evidence_unavailable",
+                    }),
+                    observed_at: pr_updated_at,
+                    evidence: Vec::new(),
+                });
+            };
+            let Some(UnwrappedCheckpoint {
+                data: wf_obj,
+                observed_at: Some(wf_updated_at),
+                revision: wf_rev,
+            }) = unwrap_source_checkpoint(&wf_cp)
+            else {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "current_ci_evidence_unavailable",
+                    }),
+                    observed_at: pr_updated_at,
+                    evidence: Vec::new(),
+                });
+            };
+            if self.now_ms.saturating_sub(wf_updated_at) > WORKFLOW_OBSERVATION_FRESHNESS_MS {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "current_ci_evidence_unavailable",
+                    }),
+                    observed_at: wf_updated_at,
+                    evidence: Vec::new(),
+                });
+            }
+            if wf_obj.get("headSha").and_then(Value::as_str) != Some(head_sha) {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "current_ci_evidence_unavailable",
+                    }),
+                    observed_at: wf_updated_at,
+                    evidence: Vec::new(),
+                });
+            }
+            if wf_obj.get("gap").is_some_and(|g| !g.is_null()) {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "workflow_coverage_incomplete",
+                    }),
+                    observed_at: wf_updated_at,
+                    evidence: Vec::new(),
+                });
+            }
+            let Some(runs) = wf_obj.get("runs").and_then(Value::as_array) else {
+                return Ok(AutomationReadObservation {
+                    value: json!({
+                        "status": "unknown",
+                        "reason": "current_ci_evidence_unavailable",
+                    }),
+                    observed_at: wf_updated_at,
+                    evidence: Vec::new(),
+                });
+            };
+            let revision = wf_rev
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| format!("{head_sha}:{wf_updated_at}"));
+
+            oldest_observed_at = oldest_observed_at.min(pr_updated_at).min(wf_updated_at);
+            evidence.push(AutomationEvidenceEntry {
+                source_id: wf_source_id,
+                revision,
+                session_id: self.session_id.0.clone(),
+                pr_url: link.url.clone(),
+                repository: repository.to_string(),
+                head_sha: head_sha.to_string(),
+            });
+            pull_requests.push(json!({
+                "url": link.url,
+                "repository": repository,
+                "prNumber": pr_number,
+                "headSha": head_sha,
+                "runs": runs,
+            }));
+        }
+
+        if pull_requests.is_empty() {
+            return Ok(AutomationReadObservation {
+                value: json!({
+                    "status": "unknown",
+                    "reason": "no_linked_pull_request",
+                }),
+                observed_at: self.now_ms,
+                evidence: Vec::new(),
+            });
+        }
+
+        Ok(AutomationReadObservation {
+            value: json!({
+                "status": "observed",
+                "pullRequests": pull_requests,
+            }),
+            observed_at: oldest_observed_at,
+            evidence,
+        })
+    }
 }
 
 impl AutomationHostOps for RuntimeAutomationHostOps {
-    fn read_resource(&self, resource: &str, _query: &Value) -> PortResult<Value> {
+    fn read_resource(
+        &self,
+        resource: &str,
+        query: &Value,
+    ) -> PortResult<AutomationReadObservation> {
         match resource {
-            "session" => Ok(self.session_status_json.clone()),
-            "session.group" => Ok(json!({
-                "rootSessionId": self.session_id.0,
-                "settled": self.session_status_json.get("executionState").and_then(Value::as_str) == Some("idle"),
-                "sessions": [self.session_status_json]
-            })),
-            "events" => Ok(json!([])),
-            "provider.capacity" => Ok(json!({ "available": true })),
-            "github.pullRequests" => Ok(json!([])),
-            "github.workflowRuns" => Ok(json!([])),
+            "session" => {
+                ensure_empty_read_params(resource, query)?;
+                Ok(AutomationReadObservation {
+                    value: self.session_read_json.clone(),
+                    observed_at: self.now_ms,
+                    evidence: Vec::new(),
+                })
+            }
+            "session.group" => {
+                ensure_empty_read_params(resource, query)?;
+                Ok(AutomationReadObservation {
+                    value: self.session_group_json.clone(),
+                    observed_at: self.now_ms,
+                    evidence: Vec::new(),
+                })
+            }
+            "events" => {
+                let (since, limit) = parse_events_read_params(query)?;
+                let items = self.deps.automation_store.read_session_events(
+                    &self.scope,
+                    &self.session_id,
+                    since.unwrap_or(0),
+                    limit,
+                )?;
+                Ok(AutomationReadObservation {
+                    value: Value::Array(items),
+                    observed_at: self.now_ms,
+                    evidence: Vec::new(),
+                })
+            }
+            "provider.capacity" => {
+                ensure_empty_read_params(resource, query)?;
+                let binding_id = self
+                    .session_meta
+                    .as_ref()
+                    .and_then(|m| m.agent_config_id.as_deref());
+                let binding_fp = self
+                    .session_meta
+                    .as_ref()
+                    .and_then(|m| m.agent_config_fingerprint.as_deref());
+                let snap = match binding_id {
+                    Some(bid) if !bid.is_empty() => self
+                        .deps
+                        .automation_store
+                        .read_capacity_snapshot(&self.scope, bid)?,
+                    _ => None,
+                };
+                let (val, observed_at) = evaluate_capacity_observation(
+                    snap.as_ref(),
+                    binding_id,
+                    binding_fp,
+                    self.now_ms,
+                );
+                Ok(AutomationReadObservation {
+                    value: val,
+                    observed_at,
+                    evidence: Vec::new(),
+                })
+            }
+            "github.pullRequests" => {
+                ensure_empty_read_params(resource, query)?;
+                self.read_pull_requests()
+            }
+            "github.workflowRuns" => {
+                ensure_empty_read_params(resource, query)?;
+                self.read_workflow_runs()
+            }
             other => Err(PortError::new(
                 PortErrorKind::InvalidInput,
                 format!("AUTOMATION_UNKNOWN_READ_RESOURCE:{other}"),
@@ -362,7 +883,6 @@ impl AutomationHostOps for RuntimeAutomationHostOps {
     }
 
     fn command_env(&self) -> BTreeMap<String, String> {
-        let _ = (&self.deps, &self.workspace_id);
         self.command_env.clone()
     }
 }
@@ -403,10 +923,92 @@ pub fn build_sanitized_automation_env(
     env
 }
 
+async fn build_session_read_views(
+    runtime: &DaemonRuntime,
+    workspace_id: &WorkspaceId,
+    session_id: &SessionId,
+    now_ms: i64,
+) -> (Option<SessionMetaSnapshot>, Value, Value) {
+    let meta_opt = runtime
+        .deps
+        .engine
+        .read_session_meta(workspace_id, session_id)
+        .ok()
+        .flatten();
+    let status_json = runtime
+        .build_automation_session_snapshot(workspace_id, session_id, now_ms)
+        .await;
+    let exec_state = status_json
+        .get("executionState")
+        .and_then(Value::as_str)
+        .unwrap_or("idle");
+    let phase_str = status_json
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or("idle");
+
+    let live_paused = match runtime.session_handle(workspace_id, session_id) {
+        Some(handle) => handle.inspect_inbox_paused().await.unwrap_or(false),
+        None => false,
+    };
+    let archived = meta_opt
+        .as_ref()
+        .is_some_and(|m| m.deleted || m.status == SessionRunStatus::Archived);
+    let stopped = live_paused || meta_opt.as_ref().is_some_and(|m| m.queue_paused);
+    let latest_input = meta_opt
+        .as_ref()
+        .and_then(|m| m.latest_user_msg_id.as_ref())
+        .map(|t| Value::String(t.0.clone()))
+        .unwrap_or(Value::Null);
+    let last_handled = meta_opt
+        .as_ref()
+        .and_then(|m| m.last_handled_user_msg_id.as_ref())
+        .map(|t| Value::String(t.0.clone()))
+        .unwrap_or(Value::Null);
+
+    let session_read = json!({
+        "id": session_id.0,
+        "latestInputId": latest_input,
+        "lastHandledInputId": last_handled,
+        "archived": archived,
+        "stopped": stopped,
+        "executionState": exec_state,
+        "phase": phase_str,
+    });
+
+    let root_id = meta_opt
+        .as_ref()
+        .map(|m| m.root_session_id.0.clone())
+        .unwrap_or_else(|| session_id.0.clone());
+    let queued_pending = meta_opt
+        .as_ref()
+        .is_some_and(|m| !m.queue_paused && m.queued_count > 0);
+    let settled = exec_state == "idle" && !queued_pending;
+    let mut group_obj = serde_json::Map::new();
+    group_obj.insert("rootSessionId".to_string(), Value::String(root_id));
+    group_obj.insert("settled".to_string(), Value::Bool(settled));
+    if !settled {
+        let reason = if exec_state != "idle" {
+            "turn_running"
+        } else {
+            "queued_input_pending"
+        };
+        group_obj.insert("reason".to_string(), Value::String(reason.to_string()));
+    }
+    group_obj.insert(
+        "sessions".to_string(),
+        Value::Array(vec![session_read.clone()]),
+    );
+
+    (meta_opt, session_read, Value::Object(group_obj))
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn tick_workspace_automations(
     runtime: &DaemonRuntime,
     workspace_id: &WorkspaceId,
     managed_runs: &Arc<ManagedRunRegistry>,
+    active_checks: &Arc<Mutex<HashSet<String>>>,
     wake_notify: &Arc<Notify>,
     startup_reconciled: &mut bool,
     now_ms: i64,
@@ -437,6 +1039,17 @@ pub async fn tick_workspace_automations(
     };
 
     for candidate in due {
+        {
+            let mut guard = active_checks.lock().expect("active checks lock");
+            if !guard.insert(candidate.id.clone()) {
+                continue;
+            }
+        }
+        let _active_guard = ActiveCheckGuard {
+            set: Arc::clone(active_checks),
+            wait_id: candidate.id.clone(),
+        };
+
         let Some(claimed) =
             runtime
                 .deps
@@ -478,17 +1091,19 @@ pub async fn tick_workspace_automations(
         let workdir = runtime
             .resolve_automation_session_workdir(workspace_id, &claimed.session_id)
             .await;
-        let session_status_json = runtime
-            .build_automation_session_snapshot(workspace_id, &claimed.session_id, now_ms)
-            .await;
+        let (session_meta, session_read_json, session_group_json) =
+            build_session_read_views(runtime, workspace_id, &claimed.session_id, now_ms).await;
         let command_env = build_sanitized_automation_env(&runtime.deps, &claimed.session_id, None);
         let host_ops: Arc<dyn AutomationHostOps> = Arc::new(RuntimeAutomationHostOps {
             deps: Arc::clone(&runtime.deps),
-            workspace_id: workspace_id.clone(),
+            scope: scope.clone(),
             session_id: claimed.session_id.clone(),
+            now_ms,
             workdir,
             command_env,
-            session_status_json,
+            session_meta,
+            session_read_json,
+            session_group_json,
         });
         let eval_ctx = AutomationProgramContext {
             session_id: claimed.session_id.clone(),
@@ -847,11 +1462,26 @@ async fn dispatch_actionable_receipts(
             continue;
         };
 
-        let owner_uid_str = receipt
+        let Some(owner_uid_str) = receipt
             .rule
             .get("ownerUserId")
             .and_then(Value::as_str)
-            .unwrap_or("local-host");
+            .filter(|s| !s.trim().is_empty())
+        else {
+            runtime.deps.automation_store.update_receipt(
+                scope,
+                &receipt.id,
+                &AutomationReceiptPatch {
+                    state: AutomationReceiptState::Blocked,
+                    reason: Some("permission_denied".to_string()),
+                    turn_id: receipt.turn_id.clone(),
+                    attempts: receipt.attempts.saturating_add(1),
+                    retry_at: None,
+                    now_ms,
+                },
+            )?;
+            continue;
+        };
         let owner_uid = lody_app::UserId(owner_uid_str.to_string());
         let gate =
             inspect_target_session_gate(runtime, &scope.workspace_id, &target_sid, &owner_uid)
@@ -929,17 +1559,34 @@ async fn dispatch_actionable_receipts(
                     .turn_id
                     .clone()
                     .unwrap_or_else(|| TurnId(format!("auto_{}", receipt.id)));
-                let _ = runtime.deps.inbox.admit_turn(&AdmittedTurnInput {
-                    workspace_id: scope.workspace_id.clone(),
-                    session_id: target_sid.clone(),
-                    turn_id: turn_id.clone(),
-                    category: InboxCategory::Automation,
-                    verified_requester: owner_uid.clone(),
-                    prompt_text: resume_text.clone(),
-                    adapter_id: "default".to_string(),
-                    custom_acp: None,
-                    signed_intent_verified: true,
-                })?;
+                let admitted = match runtime.prepare_host_admitted_turn(
+                    &scope.workspace_id,
+                    &target_sid,
+                    &turn_id,
+                    InboxCategory::Automation,
+                    owner_uid.clone(),
+                    resume_text.clone(),
+                    "default".to_string(),
+                ) {
+                    Ok(input) => input,
+                    Err(_) => {
+                        runtime.deps.automation_store.update_receipt(
+                            scope,
+                            &receipt.id,
+                            &AutomationReceiptPatch {
+                                state: AutomationReceiptState::Waiting,
+                                reason: Some("signing_unavailable".to_string()),
+                                turn_id: Some(turn_id),
+                                attempts: receipt.attempts.saturating_add(1),
+                                retry_at: Some(now_ms.saturating_add(SIGNING_RETRY_DELAY_MS)),
+                                now_ms,
+                            },
+                        )?;
+                        continue;
+                    }
+                };
+
+                let _ = runtime.deps.inbox.admit_turn(&admitted)?;
 
                 if let Ok(false) = runtime.deps.history.is_user_turn_durable(
                     &scope.workspace_id,
@@ -996,6 +1643,10 @@ async fn inspect_target_session_gate(
     session_id: &SessionId,
     owner_user_id: &lody_app::UserId,
 ) -> TargetSessionGate {
+    let Ok(mode) = runtime.resolve_workspace_mode(workspace_id) else {
+        return TargetSessionGate::TemporarilyUnavailable;
+    };
+
     match runtime
         .deps
         .engine
@@ -1005,10 +1656,10 @@ async fn inspect_target_session_gate(
             if meta.deleted || meta.status == SessionRunStatus::Archived {
                 return TargetSessionGate::ArchivedOrDeleted;
             }
-            if meta.owner_machine_id != runtime.deps.machine_id {
-                return TargetSessionGate::PermissionDenied;
-            }
-            if &meta.owner_user_id != owner_user_id {
+            if &meta.workspace_id != workspace_id
+                || meta.owner_machine_id != runtime.deps.machine_id
+                || &meta.owner_user_id != owner_user_id
+            {
                 return TargetSessionGate::PermissionDenied;
             }
             if meta.queue_paused {
@@ -1019,9 +1670,33 @@ async fn inspect_target_session_gate(
             if runtime.deps.engine.is_connected() {
                 return TargetSessionGate::ArchivedOrDeleted;
             }
+            if !matches!(mode, WorkspaceSecurityMode::Plaintext) || workspace_id.0 != "local" {
+                return TargetSessionGate::TemporarilyUnavailable;
+            }
+            let Some(handle) = runtime.session_handle(workspace_id, session_id) else {
+                return TargetSessionGate::TemporarilyUnavailable;
+            };
+            match handle.inspect_driving_user().await {
+                Ok(Some(ref uid)) if uid == owner_user_id => {}
+                Ok(Some(_)) => return TargetSessionGate::PermissionDenied,
+                _ => return TargetSessionGate::TemporarilyUnavailable,
+            }
         }
         Err(err)
-            if err.kind == PortErrorKind::Unavailable && !runtime.deps.engine.is_connected() => {}
+            if err.kind == PortErrorKind::Unavailable
+                && !runtime.deps.engine.is_connected()
+                && matches!(mode, WorkspaceSecurityMode::Plaintext)
+                && workspace_id.0 == "local" =>
+        {
+            let Some(handle) = runtime.session_handle(workspace_id, session_id) else {
+                return TargetSessionGate::TemporarilyUnavailable;
+            };
+            match handle.inspect_driving_user().await {
+                Ok(Some(ref uid)) if uid == owner_user_id => {}
+                Ok(Some(_)) => return TargetSessionGate::PermissionDenied,
+                _ => return TargetSessionGate::TemporarilyUnavailable,
+            }
+        }
         Err(_) => return TargetSessionGate::TemporarilyUnavailable,
     }
 

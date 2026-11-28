@@ -32,6 +32,7 @@ fn duplicate_admission_pause_gate_and_ended_claim_reconciliation_persist_across_
             adapter_id: "codex".to_string(),
             custom_acp: None,
             signed_intent_verified: true,
+            signature_hex: None,
         };
         assert_eq!(store.admit_turn(&auto).unwrap(), AdmissionVerdict::Admitted);
         assert_eq!(
@@ -49,6 +50,7 @@ fn duplicate_admission_pause_gate_and_ended_claim_reconciliation_persist_across_
             adapter_id: "codex".to_string(),
             custom_acp: None,
             signed_intent_verified: true,
+            signature_hex: None,
         };
         assert_eq!(
             store.admit_turn(&ended_orphan).unwrap(),
@@ -81,6 +83,7 @@ fn duplicate_admission_pause_gate_and_ended_claim_reconciliation_persist_across_
             adapter_id: "claude".to_string(),
             custom_acp: None,
             signed_intent_verified: true,
+            signature_hex: None,
         };
         assert_eq!(
             store.admit_turn(&human).unwrap(),
@@ -351,6 +354,41 @@ fn schedule_ledger_matches_node_schema_rejects_future_versions_and_tracks_once_m
             .has_consumed_complete_message(&ws, "sched_once")
             .unwrap()
     );
+
+    {
+        let conn = Connection::open(&shared_db).unwrap();
+        conn.execute(
+            "INSERT INTO schedule_runs (run_key, workspace_id, schedule_id, state, planned_at, payload)
+             VALUES (?1, ?2, ?3, 'claimed', 2000, ?4)",
+            rusqlite::params![
+                "sched_node:act_1:2000",
+                &ws.0,
+                "sched_node",
+                r#"{"runKey":"sched_node:act_1:2000","state":"claimed","sessionId":"s_1","userTurnId":"t_1"}"#
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO schedule_runs (run_key, workspace_id, schedule_id, state, planned_at, payload)
+             VALUES (?1, ?2, ?3, 'session_prepared', 3000, ?4)",
+            rusqlite::params![
+                "sched_node:act_1:3000",
+                &ws.0,
+                "sched_node",
+                r#"{"runKey":"sched_node:act_1:3000","state":"session_prepared","sessionId":"s_2","userTurnId":"t_2"}"#
+            ],
+        )
+        .unwrap();
+    }
+    let cross_engine_unfinished = ledger.unfinished_runs(&ws).unwrap();
+    assert!(
+        cross_engine_unfinished
+            .iter()
+            .any(|r| r.run_key == "sched_node:act_1:2000" && r.state == ScheduleRunState::Claimed)
+    );
+    assert!(cross_engine_unfinished.iter().any(|r| {
+        r.run_key == "sched_node:act_1:3000" && r.state == ScheduleRunState::SessionPrepared
+    }));
 }
 
 #[test]
@@ -466,12 +504,12 @@ fn automation_and_pr_poller_stores_match_node_v4_layout_recover_orphan_runs_and_
             3_000,
         )
         .unwrap();
+    let _ = store.claim_wait(&scope, &run_wait.id, 3_050).unwrap();
     assert!(store.claim_run_start(&scope, &run_wait.id, 3_100).unwrap());
     assert!(!store.claim_run_start(&scope, &run_wait.id, 3_200).unwrap());
     store
         .record_run_pid(&scope, &run_wait.id, 7777, 3_150)
         .unwrap();
-    let _ = store.claim_wait(&scope, &run_wait.id, 3_150).unwrap();
 
     let reopened = SqliteAutomationStore::new(layout.clone());
     assert_eq!(reopened.orphan_started_runs(&scope, 9_000).unwrap(), 1);
@@ -516,5 +554,151 @@ fn automation_and_pr_poller_stores_match_node_v4_layout_recover_orphan_runs_and_
     assert_eq!(
         poller.read_target_last_success("ws_alpha:pr:42").unwrap(),
         None
+    );
+
+    let v2_scope = AutomationWorkspaceScope {
+        machine_id: MachineId("mach_1".to_string()),
+        workspace_id: WorkspaceId("ws_v2_legacy".to_string()),
+    };
+    let v2_path = layout.automation_db_for_workspace("mach_1", "ws_v2_legacy");
+    fs::create_dir_all(v2_path.parent().unwrap()).unwrap();
+    {
+        let conn = Connection::open(&v2_path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT NOT NULL UNIQUE, payload TEXT NOT NULL);
+            CREATE TABLE deliveries (id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL);
+            CREATE TABLE receipts (id TEXT PRIMARY KEY, delivery_id TEXT NOT NULL, state TEXT NOT NULL, updated_at INTEGER NOT NULL, payload TEXT NOT NULL);
+            CREATE TABLE work (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE TABLE waits (id TEXT PRIMARY KEY, state TEXT NOT NULL, next_check_at INTEGER NOT NULL, payload TEXT NOT NULL);
+            PRAGMA user_version = 2;
+            "#,
+        )
+        .unwrap();
+        let legacy_wait = serde_json::json!({
+            "id": "w_legacy_due",
+            "sessionId": sid.0,
+            "workspaceId": "ws_v2_legacy",
+            "ownerUserId": uid.0,
+            "ownerMachineId": "mach_1",
+            "program": "async () => false",
+            "intervalMs": 5000,
+            "createdAt": 1000,
+            "updatedAt": 1000,
+            "nextCheckAt": 1500,
+            "checks": 0,
+            "consecutiveErrors": 0,
+            "state": "waiting",
+            "reads": ["github.pullRequests"]
+        });
+        conn.execute(
+            "INSERT INTO waits (id, state, next_check_at, payload) VALUES ('w_legacy_due', 'waiting', 1500, ?1)",
+            rusqlite::params![legacy_wait.to_string()],
+        )
+        .unwrap();
+        let legacy_receipt = serde_json::json!({
+            "id": "rcpt_legacy_1",
+            "deliveryId": "del_legacy_1",
+            "state": "accepted",
+            "rule": { "id": "r_1", "ownerUserId": uid.0 },
+            "event": { "id": "ev_1", "type": "wait.matched", "source": "wait" },
+            "intent": { "action": { "kind": "session.continue" } },
+            "sessionId": sid.0,
+            "attempts": 0,
+            "retryAt": 1500,
+            "createdAt": 1500,
+            "updatedAt": 1500
+        });
+        conn.execute(
+            "INSERT INTO receipts (id, delivery_id, state, updated_at, payload) VALUES ('rcpt_legacy_1', 'del_legacy_1', 'accepted', 1500, ?1)",
+            rusqlite::params![legacy_receipt.to_string()],
+        )
+        .unwrap();
+    }
+    let upgraded_store = SqliteAutomationStore::new(layout.clone());
+    let migrated_due = upgraded_store.due_waits(&v2_scope, 2_000, 10).unwrap();
+    assert_eq!(migrated_due.len(), 1);
+    assert_eq!(migrated_due[0].id, "w_legacy_due");
+    assert_eq!(
+        upgraded_store
+            .actionable_receipts(&v2_scope, 2_000, 10)
+            .unwrap()
+            .len(),
+        1
+    );
+    let v2_conn = Connection::open(&v2_path).unwrap();
+    let migrated_ver: i32 = v2_conn
+        .query_row("PRAGMA user_version;", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(migrated_ver, AUTOMATION_SCHEMA_VERSION);
+
+    let mid_check_wait = upgraded_store
+        .register_wait(
+            &v2_scope,
+            &sid,
+            &uid,
+            &AutomationRegistrationInput {
+                program: "async () => ({ resumeText: 'ok' })".to_string(),
+                reason: Some("mid-check crash test".to_string()),
+                interval_ms: 5_000,
+                expires_at: None,
+            },
+            3_000,
+        )
+        .unwrap();
+    let claimed_once = upgraded_store
+        .claim_wait(&v2_scope, &mid_check_wait.id, 3_000)
+        .unwrap()
+        .unwrap();
+    assert_eq!(claimed_once.state, AutomationWaitState::Checking);
+    assert_eq!(claimed_once.checks, 1);
+
+    let restarted_store = SqliteAutomationStore::new(layout.clone());
+    let due_after_crash = restarted_store.due_waits(&v2_scope, 3_500, 10).unwrap();
+    assert!(due_after_crash.iter().any(|w| w.id == mid_check_wait.id));
+    let reclaimed = restarted_store
+        .claim_wait(&v2_scope, &mid_check_wait.id, 3_500)
+        .unwrap()
+        .expect("interrupted checking wait must be reclaimable after restart");
+    assert_eq!(reclaimed.state, AutomationWaitState::Checking);
+    assert_eq!(reclaimed.checks, 2);
+
+    let dup_run_input = AutomationRunInput {
+        command: "pnpm".to_string(),
+        args: vec![
+            "test".to_string(),
+            "--filter".to_string(),
+            "cli".to_string(),
+        ],
+        cwd: Some("apps/cli".to_string()),
+        env: Some(std::collections::BTreeMap::from([(
+            "CI".to_string(),
+            "1".to_string(),
+        )])),
+        reason: Some("idempotent retry".to_string()),
+    };
+    let run_first = restarted_store
+        .register_run(&v2_scope, &sid, &uid, &dup_run_input, 4_000)
+        .unwrap();
+    let run_retry = restarted_store
+        .register_run(&v2_scope, &sid, &uid, &dup_run_input, 4_050)
+        .unwrap();
+    assert_eq!(
+        run_first.id, run_retry.id,
+        "retrying lody_automation run must reuse unfinished run"
+    );
+    let _ = restarted_store
+        .claim_wait(&v2_scope, &run_first.id, 4_100)
+        .unwrap()
+        .unwrap();
+    assert!(
+        restarted_store
+            .claim_run_start(&v2_scope, &run_first.id, 4_100)
+            .unwrap()
+    );
+    assert!(
+        !restarted_store
+            .claim_run_start(&v2_scope, &run_retry.id, 4_150)
+            .unwrap()
     );
 }

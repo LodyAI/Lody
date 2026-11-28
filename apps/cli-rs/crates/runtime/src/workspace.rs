@@ -4,14 +4,14 @@ use lody_app::AttachedWorkspaceView;
 use lody_ports::{
     PortError, PortErrorKind, PortResult, SessionId, WorkspaceId, WorkspaceSecurityMode,
 };
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::Notify;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle;
 
 pub struct DrainedSupervisor {
     pub managed_runs: Arc<ManagedRunRegistry>,
-    pub shutdown_notify: Arc<Notify>,
+    pub shutdown_tx: watch::Sender<bool>,
     pub task: Option<JoinHandle<()>>,
 }
 
@@ -32,21 +32,26 @@ pub struct WorkspaceMount {
     pub detach_notify: Option<Arc<Notify>>,
     pub sessions: HashMap<SessionId, SessionHandle>,
     pub supervisor_wake: Arc<Notify>,
-    pub supervisor_shutdown: Arc<Notify>,
+    pub supervisor_shutdown_tx: watch::Sender<bool>,
+    pub supervisor_shutdown_rx: watch::Receiver<bool>,
     pub managed_runs: Arc<ManagedRunRegistry>,
+    pub active_automation_checks: Arc<Mutex<HashSet<String>>>,
     pub supervisor_task: Option<JoinHandle<()>>,
 }
 
 impl WorkspaceMount {
     pub fn new(workspace_id: WorkspaceId, security_mode: WorkspaceSecurityMode) -> Self {
+        let (supervisor_shutdown_tx, supervisor_shutdown_rx) = watch::channel(false);
         Self {
             workspace_id,
             security_mode,
             detach_notify: None,
             sessions: HashMap::new(),
             supervisor_wake: Arc::new(Notify::new()),
-            supervisor_shutdown: Arc::new(Notify::new()),
+            supervisor_shutdown_tx,
+            supervisor_shutdown_rx,
             managed_runs: Arc::new(ManagedRunRegistry::default()),
+            active_automation_checks: Arc::new(Mutex::new(HashSet::new())),
             supervisor_task: None,
         }
     }
@@ -113,7 +118,7 @@ impl FleetWorkspaceTable {
         }
         let supervisor = DrainedSupervisor {
             managed_runs: Arc::clone(&mount.managed_runs),
-            shutdown_notify: Arc::clone(&mount.supervisor_shutdown),
+            shutdown_tx: mount.supervisor_shutdown_tx.clone(),
             task: mount.supervisor_task.take(),
         };
         DetachDisposition::Started {
@@ -135,7 +140,7 @@ impl FleetWorkspaceTable {
             all_sessions.extend(mount.sessions.drain().map(|(_, h)| h));
             all_supervisors.push(DrainedSupervisor {
                 managed_runs: mount.managed_runs,
-                shutdown_notify: mount.supervisor_shutdown,
+                shutdown_tx: mount.supervisor_shutdown_tx,
                 task: mount.supervisor_task.take(),
             });
         }

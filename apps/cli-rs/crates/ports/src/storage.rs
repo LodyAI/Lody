@@ -51,6 +51,8 @@ pub struct AdmittedTurnInput {
     pub adapter_id: String,
     pub custom_acp: Option<CustomCommandSpec>,
     pub signed_intent_verified: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,7 +203,8 @@ pub trait DiffStorePort: Send + Sync {
 #[serde(rename_all = "snake_case")]
 pub enum ScheduleRunState {
     Pending,
-    Prepared,
+    Claimed,
+    SessionPrepared,
     Dispatched,
     RetryWait,
     Finished,
@@ -213,7 +216,8 @@ impl ScheduleRunState {
     pub fn as_wire_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
-            Self::Prepared => "prepared",
+            Self::Claimed => "claimed",
+            Self::SessionPrepared => "session_prepared",
             Self::Dispatched => "dispatched",
             Self::RetryWait => "retry_wait",
             Self::Finished => "finished",
@@ -225,7 +229,8 @@ impl ScheduleRunState {
     pub fn from_wire_str(raw: &str) -> Option<Self> {
         match raw {
             "pending" => Some(Self::Pending),
-            "prepared" => Some(Self::Prepared),
+            "claimed" => Some(Self::Claimed),
+            "session_prepared" => Some(Self::SessionPrepared),
             "dispatched" => Some(Self::Dispatched),
             "retry_wait" => Some(Self::RetryWait),
             "finished" => Some(Self::Finished),
@@ -455,9 +460,21 @@ pub struct AutomationMatchResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationEvidenceEntry {
-    pub resource: String,
-    pub observed_at: i64,
+    pub source_id: String,
+    pub revision: String,
+    pub session_id: String,
+    pub pr_url: String,
+    pub repository: String,
+    pub head_sha: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationReadObservation {
     pub value: Value,
+    pub observed_at: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<AutomationEvidenceEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -752,6 +769,45 @@ pub trait AutomationStorePort: Send + Sync {
         before: Option<&AutomationActivityCursor>,
     ) -> PortResult<AutomationActivityPage>;
     fn next_due_at(&self, scope: &AutomationWorkspaceScope) -> PortResult<Option<i64>>;
+    fn read_source_checkpoint(
+        &self,
+        _scope: &AutomationWorkspaceScope,
+        _source_id: &str,
+    ) -> PortResult<Option<Value>> {
+        Ok(None)
+    }
+    fn write_source_checkpoint(
+        &self,
+        _scope: &AutomationWorkspaceScope,
+        _source_id: &str,
+        _checkpoint: &Value,
+    ) -> PortResult<()> {
+        Ok(())
+    }
+    fn read_capacity_snapshot(
+        &self,
+        _scope: &AutomationWorkspaceScope,
+        _binding_id: &str,
+    ) -> PortResult<Option<Value>> {
+        Ok(None)
+    }
+    fn write_capacity_snapshot(
+        &self,
+        _scope: &AutomationWorkspaceScope,
+        _binding_id: &str,
+        _snapshot: &Value,
+    ) -> PortResult<()> {
+        Ok(())
+    }
+    fn read_session_events(
+        &self,
+        _scope: &AutomationWorkspaceScope,
+        _session_id: &SessionId,
+        _since_ms: i64,
+        _limit: usize,
+    ) -> PortResult<Vec<Value>> {
+        Ok(Vec::new())
+    }
     fn erase_workspace_store(&self, scope: &AutomationWorkspaceScope) -> PortResult<()>;
 }
 

@@ -106,6 +106,121 @@ pub fn automation_identity(parts: &[&str]) -> String {
     sha256_hex_bytes(json.as_bytes())
 }
 
+pub fn pull_request_checkpoint_id(session_id: &str, url: &str) -> String {
+    automation_identity(&["github.pr", session_id, url])
+}
+
+pub fn workflow_checkpoint_id(session_id: &str, repository: &str, head_sha: &str) -> String {
+    let lower = repository.to_ascii_lowercase();
+    automation_identity(&["github.workflow", session_id, &lower, head_sha])
+}
+
+pub fn parse_github_pr_url(url: &str) -> Option<(String, u64)> {
+    let trimmed = url.trim().split(['?', '#']).next()?;
+    let rest = trimmed
+        .strip_prefix("https://github.com/")
+        .or_else(|| trimmed.strip_prefix("http://github.com/"))?;
+    let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+    if parts.len() < 4 || parts[2] != "pull" {
+        return None;
+    }
+    let pr_number = parts[3].parse::<u64>().ok()?;
+    Some((format!("{}/{}", parts[0], parts[1]), pr_number))
+}
+
+pub fn evaluate_capacity_observation(
+    snapshot: Option<&Value>,
+    binding_id: Option<&str>,
+    binding_fingerprint: Option<&str>,
+    now_ms: i64,
+) -> (Value, i64) {
+    let Some(binding_id) = binding_id.filter(|s| !s.is_empty()) else {
+        return (
+            serde_json::json!({ "status": "unknown", "reason": "capacity_unobserved" }),
+            now_ms,
+        );
+    };
+    let Some(snap) = snapshot.and_then(Value::as_object) else {
+        return (
+            serde_json::json!({ "status": "unknown", "reason": "capacity_unobserved" }),
+            now_ms,
+        );
+    };
+    let observed_at = snap
+        .get("observedAt")
+        .and_then(Value::as_i64)
+        .unwrap_or(now_ms);
+    let snap_binding = snap.get("bindingId").and_then(Value::as_str).unwrap_or("");
+    let snap_fp = snap.get("fingerprint").and_then(Value::as_str);
+    let valid_until = snap.get("validUntil").and_then(Value::as_i64).unwrap_or(0);
+    let auth = snap
+        .get("authentication")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let billing = snap
+        .get("billing")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let windows_val = snap
+        .get("windows")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let windows = windows_val.as_array().cloned().unwrap_or_default();
+
+    let (status, reason) = if snap_binding != binding_id
+        || binding_fingerprint.is_some_and(|fp| snap_fp != Some(fp))
+    {
+        ("unknown", "capacity_binding_unobserved")
+    } else if auth == "invalid" || billing == "invalid" {
+        ("no", "capacity_account_unavailable")
+    } else if observed_at > now_ms || valid_until <= now_ms {
+        ("unknown", "capacity_observation_stale")
+    } else if windows.iter().any(|w| {
+        let w_obs = w
+            .get("observedAt")
+            .and_then(Value::as_i64)
+            .unwrap_or(observed_at);
+        let w_valid = w
+            .get("validUntil")
+            .and_then(Value::as_i64)
+            .unwrap_or(valid_until);
+        w_obs > now_ms || w_valid <= now_ms
+    }) {
+        ("unknown", "capacity_window_stale")
+    } else if windows.iter().any(|w| {
+        w.get("usedPercent")
+            .and_then(Value::as_f64)
+            .is_some_and(|pct| pct >= 100.0)
+    }) {
+        ("no", "capacity_exhausted")
+    } else if windows.is_empty()
+        || snap.get("source").and_then(Value::as_str) == Some("exhaustion")
+        || auth != "valid"
+        || billing != "valid"
+        || windows.iter().any(|w| {
+            w.get("usedPercent")
+                .and_then(Value::as_f64)
+                .is_none_or(|pct| !pct.is_finite() || pct < 0.0)
+        })
+    {
+        ("unknown", "capacity_evidence_incomplete")
+    } else {
+        ("yes", "capacity_available")
+    };
+
+    (
+        serde_json::json!({
+            "status": status,
+            "reason": reason,
+            "windows": windows_val,
+            "authentication": auth,
+            "billing": billing,
+            "validUntil": valid_until,
+        }),
+        observed_at.max(0),
+    )
+}
+
 pub fn compute_automation_error_backoff_ms(interval_ms: i64, consecutive_errors: u32) -> i64 {
     let shift = consecutive_errors.min(20);
     let exp = AUTOMATION_BASE_ERROR_BACKOFF_MS.saturating_mul(1i64 << shift);

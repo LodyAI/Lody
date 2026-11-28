@@ -17,9 +17,10 @@ pub use backend::{
 };
 pub use data_plane::{
     EnginePort, EpochKeyMaterial, HistoryBlock, HistoryPort, HistoryTurnRecord,
-    MAX_SCHEDULE_PROMPT_BYTES, QueuedDraftItem, ScheduleDestination, ScheduleEditPatch,
-    ScheduleMisfirePolicy, ScheduleOverlapPolicy, ScheduleProposalInput, ScheduleProposalOutcome,
-    ScheduleRecord, ScheduleRepoPort, ScheduleRetryPolicy, SessionMetaSnapshot, SessionRunStatus,
+    MAX_SCHEDULE_PROMPT_BYTES, MachineSignTurnRequest, MachineSignedTurnIntent, QueuedDraftItem,
+    ScheduleDestination, ScheduleEditPatch, ScheduleMisfirePolicy, ScheduleOverlapPolicy,
+    ScheduleProposalInput, ScheduleProposalOutcome, ScheduleRecord, ScheduleRepoPort,
+    ScheduleRetryPolicy, SessionMetaSnapshot, SessionPullRequestLink, SessionRunStatus,
     TurnTerminalOutcome, UnavailableScheduleRepo, validate_schedule_identifier,
     validate_schedule_prompt, validate_schedule_rule, validate_schedule_title,
 };
@@ -47,14 +48,15 @@ pub use identity::{
 };
 pub use storage::{
     AdmissionVerdict, AdmittedTurnInput, AutomationActivityCursor, AutomationActivityPage,
-    AutomationEvidenceEntry, AutomationManagedRun, AutomationMatchResult, AutomationReceiptPatch,
-    AutomationReceiptRecord, AutomationReceiptState, AutomationRegistrationInput,
-    AutomationRunExit, AutomationRunInput, AutomationRunOutcome, AutomationStorePort,
-    AutomationWaitCompletion, AutomationWaitRecord, AutomationWaitState, AutomationWorkspaceScope,
-    DelegatedResultRecord, DiffCaptureScope, DiffFileEntry, DiffStorePort, InboxCategory,
-    InboxStorePort, LocalProjectRecord, PrPollerRepoCooldown, PrPollerScopeBucket,
-    PrPollerStorePort, ProjectStorePort, ScheduleCursorRecord, ScheduleLedgerPort,
-    ScheduleLedgerRunRecord, ScheduleRunState, StorageLeaseMode, StorageLeasePort, SubmissionStage,
-    TurnDiffCompression, TurnDiffEventInput, TurnDiffSummary, UnavailableAutomationStore,
-    UnavailablePrPollerStore, UnavailableScheduleLedger,
+    AutomationEvidenceEntry, AutomationManagedRun, AutomationMatchResult,
+    AutomationReadObservation, AutomationReceiptPatch, AutomationReceiptRecord,
+    AutomationReceiptState, AutomationRegistrationInput, AutomationRunExit, AutomationRunInput,
+    AutomationRunOutcome, AutomationStorePort, AutomationWaitCompletion, AutomationWaitRecord,
+    AutomationWaitState, AutomationWorkspaceScope, DelegatedResultRecord, DiffCaptureScope,
+    DiffFileEntry, DiffStorePort, InboxCategory, InboxStorePort, LocalProjectRecord,
+    PrPollerRepoCooldown, PrPollerScopeBucket, PrPollerStorePort, ProjectStorePort,
+    ScheduleCursorRecord, ScheduleLedgerPort, ScheduleLedgerRunRecord, ScheduleRunState,
+    StorageLeaseMode, StorageLeasePort, SubmissionStage, TurnDiffCompression, TurnDiffEventInput,
+    TurnDiffSummary, UnavailableAutomationStore, UnavailablePrPollerStore,
+    UnavailableScheduleLedger,
 };

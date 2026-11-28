@@ -1,6 +1,7 @@
 use lody_ports::{
-    AutomationHostOps, AutomationMatchResult, AutomationProgramContext, AutomationSandboxPort,
-    PortError, PortErrorKind, PortResult, SessionId, WorkspaceId,
+    AutomationEvidenceEntry, AutomationHostOps, AutomationMatchResult, AutomationProgramContext,
+    AutomationReadObservation, AutomationSandboxPort, PortError, PortErrorKind, PortResult,
+    SessionId, WorkspaceId,
 };
 use lody_sandbox::{QuickJsAutomationSandbox, resolve_contained_cwd};
 use serde_json::{Value, json};
@@ -16,12 +17,33 @@ struct TestHostOps {
 }
 
 impl AutomationHostOps for TestHostOps {
-    fn read_resource(&self, resource: &str, _query: &Value) -> PortResult<Value> {
-        self.reads.get(resource).cloned().ok_or_else(|| {
+    fn read_resource(
+        &self,
+        resource: &str,
+        _query: &Value,
+    ) -> PortResult<AutomationReadObservation> {
+        let val = self.reads.get(resource).cloned().ok_or_else(|| {
             PortError::new(
                 PortErrorKind::InvalidInput,
                 format!("AUTOMATION_UNKNOWN_READ_RESOURCE:{resource}"),
             )
+        })?;
+        let evidence = if resource == "github.pullRequests" {
+            vec![AutomationEvidenceEntry {
+                source_id: "src_pr_42".to_string(),
+                revision: "rev_1".to_string(),
+                session_id: "00000000-0000-4000-8000-000000000001".to_string(),
+                pr_url: "https://github.com/lodyai/lody/pull/42".to_string(),
+                repository: "lodyai/lody".to_string(),
+                head_sha: "deadbeef".to_string(),
+            }]
+        } else {
+            Vec::new()
+        };
+        Ok(AutomationReadObservation {
+            value: val,
+            observed_at: 1_700_000_000_000,
+            evidence,
         })
     }
 
@@ -106,7 +128,7 @@ fn sandbox_validates_function_shape_evaluates_async_reads_and_enforces_call_time
 
     let not_ready = sandbox
         .evaluate_program(
-            "async ({ ctx }) => { const prs = await ctx.read('github.pullRequests'); return prs.length === 99 ? { resumeText: 'go' } : false; }",
+            "async ({ ctx }) => { const { value: prs } = await ctx.read('github.pullRequests'); return prs.length === 99 ? { resumeText: 'go' } : false; }",
             &ctx,
             std::sync::Arc::clone(&ops),
         )
@@ -119,12 +141,13 @@ fn sandbox_validates_function_shape_evaluates_async_reads_and_enforces_call_time
         .evaluate_program(
             r#"
             async ({ ctx }) => {
-              const [prs, http, cmd] = await Promise.all([
+              const [{ value: prs, observedAt }, http, cmd] = await Promise.all([
                 ctx.read("github.pullRequests"),
                 ctx.fetch("https://example.com/status"),
-                ctx.exec("/bin/cat", ["marker.txt"], { cwd: "nested" }),
+                ctx.exec({ command: "/bin/cat", args: ["marker.txt"], cwd: "nested" }),
               ]);
-              if (prs[0].checks === "success" && http.ok && cmd.stdout.trim() === "ready-now") {
+              const bodyText = await http.text();
+              if (prs[0].checks === "success" && observedAt > 0 && http.ok && bodyText === "pong" && cmd.stdout.trim() === "ready-now") {
                 return {
                   resumeText: "  PR #42 green and marker ready  ",
                   payload: { pr: prs[0].number, marker: cmd.stdout.trim() }

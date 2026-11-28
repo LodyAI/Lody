@@ -912,6 +912,7 @@ impl SessionActor {
                     adapter_id: invocation.adapter_id.clone(),
                     custom_acp: self.opts.custom_acp.clone(),
                     signed_intent_verified: invocation.signed_intent_verified,
+                    signature_hex: None,
                 });
                 let rec = HistoryTurnRecord {
                     turn_id: TurnId(invocation.turn_id.clone()),
@@ -977,6 +978,7 @@ impl SessionActor {
                     adapter_id: invocation.adapter_id.clone(),
                     custom_acp: self.opts.custom_acp.clone(),
                     signed_intent_verified: invocation.signed_intent_verified,
+                    signature_hex: None,
                 });
                 let rec = HistoryTurnRecord {
                     turn_id: TurnId(invocation.turn_id.clone()),

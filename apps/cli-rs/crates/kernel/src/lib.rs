@@ -14,8 +14,9 @@ pub use automation::{
     AUTOMATION_RECONCILE_CAP_MS, ContinuationGateDecision, ManagedRunExitOutcome,
     ManagedRunFormattedResult, ManagedRunSummaryInput, TargetSessionGate, WaitCheckInput,
     WaitTransitionDecision, automation_identity, compute_automation_error_backoff_ms,
-    decide_continuation_gate, decide_wait_transition, format_managed_run_summary,
-    next_supervisor_wake_deadline_ms,
+    decide_continuation_gate, decide_wait_transition, evaluate_capacity_observation,
+    format_managed_run_summary, next_supervisor_wake_deadline_ms, parse_github_pr_url,
+    pull_request_checkpoint_id, workflow_checkpoint_id,
 };
 pub use inbox::{InboxAdmitOutcome, InboxEntry, InboxState};
 pub use pr_poller::{

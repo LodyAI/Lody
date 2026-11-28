@@ -87,6 +87,13 @@ pub enum TurnTerminalOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionPullRequestLink {
+    pub url: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionMetaSnapshot {
     pub workspace_id: WorkspaceId,
     pub session_id: SessionId,
@@ -100,6 +107,32 @@ pub struct SessionMetaSnapshot {
     pub status: SessionRunStatus,
     pub queue_paused: bool,
     pub queued_count: usize,
+    #[serde(default)]
+    pub agent_config_id: Option<String>,
+    #[serde(default)]
+    pub agent_config_fingerprint: Option<String>,
+    #[serde(default)]
+    pub latest_user_msg_id: Option<TurnId>,
+    #[serde(default)]
+    pub last_handled_user_msg_id: Option<TurnId>,
+    #[serde(default)]
+    pub linked_pull_requests: Vec<SessionPullRequestLink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineSignTurnRequest {
+    pub workspace_id: WorkspaceId,
+    pub session_id: SessionId,
+    pub target_machine_id: MachineId,
+    pub turn_id: TurnId,
+    pub prompt_text: String,
+    pub adapter_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineSignedTurnIntent {
+    pub signature_hex: String,
+    pub signer_device_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,6 +204,22 @@ pub trait EnginePort: Send + Sync {
         workspace_id: &WorkspaceId,
         keys: &[EpochKeyMaterial],
     ) -> PortResult<()>;
+    fn sign_machine_turn_intent(
+        &self,
+        _request: &MachineSignTurnRequest,
+    ) -> PortResult<MachineSignedTurnIntent> {
+        Err(PortError::capability_unavailable("e2eeMachineInputSigning"))
+    }
+    fn verify_schedule_authorization(
+        &self,
+        _workspace_id: &WorkspaceId,
+        _schedule_id: &str,
+        _definition_fingerprint: &str,
+    ) -> PortResult<bool> {
+        Err(PortError::capability_unavailable(
+            "e2eeScheduleAuthorization",
+        ))
+    }
 }
 
 pub trait HistoryPort: Send + Sync {

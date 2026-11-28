@@ -102,6 +102,8 @@ struct StoredBatchConfig {
     adapter_id: String,
     custom_acp: Option<CustomCommandSpec>,
     signed_intent_verified: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signature_hex: Option<String>,
 }
 
 pub struct SqliteStore {
@@ -237,6 +239,7 @@ impl InboxStorePort for SqliteStore {
             adapter_id: input.adapter_id.clone(),
             custom_acp: input.custom_acp.clone(),
             signed_intent_verified: input.signed_intent_verified,
+            signature_hex: input.signature_hex.clone(),
         };
         let cfg_json = serde_json::to_string(&cfg)
             .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
@@ -386,6 +389,7 @@ impl InboxStorePort for SqliteStore {
             adapter_id: cfg.adapter_id,
             custom_acp: cfg.custom_acp,
             signed_intent_verified: cfg.signed_intent_verified,
+            signature_hex: cfg.signature_hex,
         }))
     }
 

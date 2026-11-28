@@ -9,11 +9,14 @@ use lody_kernel::{
     schedule_run_key,
 };
 use lody_ports::{
-    AdmittedTurnInput, InboxCategory, ScheduleCursorRecord, ScheduleDestination,
-    ScheduleLedgerRunRecord, ScheduleMisfirePolicy, ScheduleOverlapPolicy, ScheduleRecord,
-    ScheduleRunState, StorageLeaseMode,
+    InboxCategory, ScheduleCursorRecord, ScheduleDestination, ScheduleLedgerRunRecord,
+    ScheduleMisfirePolicy, ScheduleOverlapPolicy, ScheduleRecord, ScheduleRunState,
+    StorageLeaseMode, WorkspaceSecurityMode,
 };
 use serde_json::{Value, json};
+
+const DISPATCHED_RECONCILE_INTERVAL_MS: i64 = 5_000;
+const AUTH_RETRY_DELAY_MS: i64 = 15_000;
 
 fn map_misfire(policy: ScheduleMisfirePolicy) -> KernelMisfirePolicy {
     match policy {
@@ -64,6 +67,152 @@ fn is_capacity_deferred(run: &ScheduleLedgerRunRecord, payload: &Value) -> bool 
         && payload.get("errorCode").and_then(Value::as_str) == Some("CAPACITY_EXHAUSTED")
 }
 
+fn resolve_run_target_ids(
+    runtime: &DaemonRuntime,
+    workspace_id: &WorkspaceId,
+    run: &ScheduleLedgerRunRecord,
+    payload: &Value,
+) -> Option<(SessionId, TurnId)> {
+    if let (Some(sid), Some(tid)) = (
+        payload
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty()),
+        payload
+            .get("userTurnId")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty()),
+    ) {
+        return Some((SessionId(sid.to_string()), TurnId(tid.to_string())));
+    }
+    let sched = runtime
+        .deps
+        .schedule_repo
+        .get_schedule(workspace_id, &run.schedule_id)
+        .ok()
+        .flatten()?;
+    let dest = sched
+        .session_id
+        .as_ref()
+        .map(|sid| KernelScheduleDestination::ExistingSession {
+            session_id: sid.0.clone(),
+        })
+        .unwrap_or_else(|| map_destination(&sched.destination));
+    let ids = schedule_run_ids(&run.run_key, &sched.schedule_id, &dest);
+    Some((SessionId(ids.session_id), TurnId(ids.user_turn_id)))
+}
+
+fn is_scheduled_turn_settled(
+    runtime: &DaemonRuntime,
+    workspace_id: &WorkspaceId,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+) -> PortResult<bool> {
+    if runtime
+        .deps
+        .inbox
+        .is_input_ended(workspace_id, session_id, turn_id)?
+    {
+        return Ok(true);
+    }
+    if let Ok(turns) = runtime
+        .deps
+        .history
+        .read_session_turns(workspace_id, session_id)
+        && turns
+            .iter()
+            .any(|t| &t.turn_id == turn_id && t.outcome.is_some())
+    {
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn reconcile_dispatched_and_in_flight_runs(
+    runtime: &DaemonRuntime,
+    workspace_id: &WorkspaceId,
+    now_ms: i64,
+    record_wake: &mut impl FnMut(Option<i64>),
+) -> PortResult<bool> {
+    let initial = match runtime.deps.schedule_ledger.unfinished_runs(workspace_id) {
+        Ok(rows) => rows,
+        Err(err) if err.kind == PortErrorKind::Unavailable => return Ok(false),
+        Err(err) => return Err(err),
+    };
+
+    for run in &initial {
+        let mut payload: Value =
+            serde_json::from_str(&run.payload_json).unwrap_or_else(|_| json!({}));
+        match run.state {
+            ScheduleRunState::Claimed | ScheduleRunState::SessionPrepared => {
+                if let Some((sid, tid)) =
+                    resolve_run_target_ids(runtime, workspace_id, run, &payload)
+                {
+                    let settled = is_scheduled_turn_settled(runtime, workspace_id, &sid, &tid)?;
+                    let durable = runtime
+                        .deps
+                        .history
+                        .is_user_turn_durable(workspace_id, &sid, &tid)
+                        .unwrap_or(false);
+                    if settled || durable {
+                        mark_run_state(
+                            runtime,
+                            &run.run_key,
+                            &[ScheduleRunState::Claimed, ScheduleRunState::SessionPrepared],
+                            ScheduleRunState::Dispatched,
+                            &mut payload,
+                            None,
+                            now_ms,
+                        )?;
+                        if settled {
+                            mark_run_state(
+                                runtime,
+                                &run.run_key,
+                                &[ScheduleRunState::Dispatched],
+                                ScheduleRunState::Finished,
+                                &mut payload,
+                                None,
+                                now_ms,
+                            )?;
+                        } else {
+                            record_wake(Some(
+                                now_ms.saturating_add(DISPATCHED_RECONCILE_INTERVAL_MS),
+                            ));
+                        }
+                    }
+                }
+            }
+            ScheduleRunState::Dispatched => {
+                if let Some((sid, tid)) =
+                    resolve_run_target_ids(runtime, workspace_id, run, &payload)
+                {
+                    if is_scheduled_turn_settled(runtime, workspace_id, &sid, &tid)? {
+                        mark_run_state(
+                            runtime,
+                            &run.run_key,
+                            &[ScheduleRunState::Dispatched],
+                            ScheduleRunState::Finished,
+                            &mut payload,
+                            None,
+                            now_ms,
+                        )?;
+                    } else {
+                        record_wake(Some(
+                            now_ms.saturating_add(DISPATCHED_RECONCILE_INTERVAL_MS),
+                        ));
+                    }
+                } else {
+                    record_wake(Some(
+                        now_ms.saturating_add(DISPATCHED_RECONCILE_INTERVAL_MS),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(true)
+}
+
 pub async fn tick_workspace_schedules(
     runtime: &DaemonRuntime,
     workspace_id: &WorkspaceId,
@@ -73,22 +222,6 @@ pub async fn tick_workspace_schedules(
         return Ok(None);
     }
 
-    let schedules = match runtime
-        .deps
-        .schedule_repo
-        .list_schedules(workspace_id, None, 1_000, 0)
-    {
-        Ok(list) => list,
-        Err(err) if err.kind == PortErrorKind::Unavailable => return Ok(None),
-        Err(err) => return Err(err),
-    };
-
-    let unfinished = match runtime.deps.schedule_ledger.unfinished_runs(workspace_id) {
-        Ok(rows) => rows,
-        Err(err) if err.kind == PortErrorKind::Unavailable => return Ok(None),
-        Err(err) => return Err(err),
-    };
-
     let mut earliest_wake: Option<i64> = None;
     let mut record_wake = |candidate: Option<i64>| {
         if let Some(ts) = candidate {
@@ -97,6 +230,26 @@ pub async fn tick_workspace_schedules(
                 None => ts,
             });
         }
+    };
+
+    if !reconcile_dispatched_and_in_flight_runs(runtime, workspace_id, now_ms, &mut record_wake)? {
+        return Ok(None);
+    }
+
+    let schedules = match runtime
+        .deps
+        .schedule_repo
+        .list_schedules(workspace_id, None, 1_000, 0)
+    {
+        Ok(list) => list,
+        Err(err) if err.kind == PortErrorKind::Unavailable => return Ok(earliest_wake),
+        Err(err) => return Err(err),
+    };
+
+    let unfinished = match runtime.deps.schedule_ledger.unfinished_runs(workspace_id) {
+        Ok(rows) => rows,
+        Err(err) if err.kind == PortErrorKind::Unavailable => return Ok(earliest_wake),
+        Err(err) => return Err(err),
     };
 
     for schedule in &schedules {
@@ -244,23 +397,31 @@ pub async fn tick_workspace_schedules(
         }
     }
 
+    let pre_dispatch_states = [
+        ScheduleRunState::Pending,
+        ScheduleRunState::RetryWait,
+        ScheduleRunState::Claimed,
+        ScheduleRunState::SessionPrepared,
+    ];
     let active_runs = runtime.deps.schedule_ledger.unfinished_runs(workspace_id)?;
     for run in &active_runs {
+        if !pre_dispatch_states.contains(&run.state) {
+            continue;
+        }
         let mut payload: Value =
             serde_json::from_str(&run.payload_json).unwrap_or_else(|_| json!({}));
-        if !matches!(
+        if matches!(
             run.state,
             ScheduleRunState::Pending | ScheduleRunState::RetryWait
         ) {
-            continue;
-        }
-        let next_attempt_at = payload
-            .get("nextAttemptAt")
-            .and_then(Value::as_i64)
-            .unwrap_or(run.planned_at);
-        if next_attempt_at > now_ms {
-            record_wake(Some(next_attempt_at));
-            continue;
+            let next_attempt_at = payload
+                .get("nextAttemptAt")
+                .and_then(Value::as_i64)
+                .unwrap_or(run.planned_at);
+            if next_attempt_at > now_ms {
+                record_wake(Some(next_attempt_at));
+                continue;
+            }
         }
 
         let live_schedule = runtime
@@ -284,7 +445,7 @@ pub async fn tick_workspace_schedules(
             mark_run_state(
                 runtime,
                 &run.run_key,
-                &[ScheduleRunState::Pending, ScheduleRunState::RetryWait],
+                &pre_dispatch_states,
                 ScheduleRunState::Skipped,
                 &mut payload,
                 Some("DEFINITION_CHANGED_OR_DISABLED"),
@@ -297,7 +458,7 @@ pub async fn tick_workspace_schedules(
             mark_run_state(
                 runtime,
                 &run.run_key,
-                &[ScheduleRunState::Pending, ScheduleRunState::RetryWait],
+                &pre_dispatch_states,
                 ScheduleRunState::Skipped,
                 &mut payload,
                 Some("DISPATCH_EXPIRED"),
@@ -315,7 +476,7 @@ pub async fn tick_workspace_schedules(
             mark_run_state(
                 runtime,
                 &run.run_key,
-                &[ScheduleRunState::Pending, ScheduleRunState::RetryWait],
+                &pre_dispatch_states,
                 ScheduleRunState::Skipped,
                 &mut payload,
                 Some("MESSAGE_ALREADY_CONSUMED"),
@@ -324,14 +485,127 @@ pub async fn tick_workspace_schedules(
             continue;
         }
 
-        let attempts = payload
-            .get("attempts")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            .saturating_add(1) as u32;
+        let ws_mode = match runtime.resolve_workspace_mode(workspace_id) {
+            Ok(WorkspaceSecurityMode::Unknown) | Err(_) => {
+                let retry_at = now_ms.saturating_add(AUTH_RETRY_DELAY_MS);
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert("nextAttemptAt".to_string(), json!(retry_at));
+                }
+                record_wake(Some(retry_at));
+                mark_run_state(
+                    runtime,
+                    &run.run_key,
+                    &pre_dispatch_states,
+                    ScheduleRunState::RetryWait,
+                    &mut payload,
+                    Some("AUTH_UNAVAILABLE"),
+                    now_ms,
+                )?;
+                continue;
+            }
+            Ok(mode) => mode,
+        };
+        if matches!(ws_mode, WorkspaceSecurityMode::Encrypted { .. }) {
+            match runtime.deps.engine.verify_schedule_authorization(
+                workspace_id,
+                &schedule.schedule_id,
+                &schedule.definition_fingerprint,
+            ) {
+                Ok(true) => {}
+                Ok(false) => {
+                    mark_run_state(
+                        runtime,
+                        &run.run_key,
+                        &pre_dispatch_states,
+                        ScheduleRunState::Skipped,
+                        &mut payload,
+                        Some("AUTHORIZATION_INVALID"),
+                        now_ms,
+                    )?;
+                    continue;
+                }
+                Err(_) => {
+                    let retry_at = now_ms.saturating_add(AUTH_RETRY_DELAY_MS);
+                    if let Some(obj) = payload.as_object_mut() {
+                        obj.insert("nextAttemptAt".to_string(), json!(retry_at));
+                    }
+                    record_wake(Some(retry_at));
+                    mark_run_state(
+                        runtime,
+                        &run.run_key,
+                        &pre_dispatch_states,
+                        ScheduleRunState::RetryWait,
+                        &mut payload,
+                        Some("AUTH_UNAVAILABLE"),
+                        now_ms,
+                    )?;
+                    continue;
+                }
+            }
+        }
+
+        let dest = schedule
+            .session_id
+            .as_ref()
+            .map(|sid| KernelScheduleDestination::ExistingSession {
+                session_id: sid.0.clone(),
+            })
+            .unwrap_or_else(|| map_destination(&schedule.destination));
+        let ids = schedule_run_ids(&run.run_key, &schedule.schedule_id, &dest);
+        let target_session_id = SessionId(ids.session_id);
+        let turn_id = TurnId(ids.user_turn_id);
+
+        let prior_attempts = payload.get("attempts").and_then(Value::as_u64).unwrap_or(0) as u32;
+        let attempts = if matches!(
+            run.state,
+            ScheduleRunState::Pending | ScheduleRunState::RetryWait
+        ) {
+            prior_attempts.saturating_add(1)
+        } else {
+            prior_attempts.max(1)
+        };
+
         if let Some(obj) = payload.as_object_mut() {
             obj.insert("attempts".to_string(), json!(attempts));
-            obj.insert("state".to_string(), Value::String("prepared".to_string()));
+            obj.insert(
+                "sessionId".to_string(),
+                Value::String(target_session_id.0.clone()),
+            );
+            obj.insert("userTurnId".to_string(), Value::String(turn_id.0.clone()));
+        }
+
+        if run.state != ScheduleRunState::SessionPrepared {
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(
+                    "state".to_string(),
+                    Value::String(ScheduleRunState::Claimed.as_wire_str().to_string()),
+                );
+                obj.insert("updatedAt".to_string(), json!(now_ms));
+            }
+            if runtime
+                .deps
+                .schedule_ledger
+                .transition_run(
+                    &run.run_key,
+                    &[
+                        ScheduleRunState::Pending,
+                        ScheduleRunState::RetryWait,
+                        ScheduleRunState::Claimed,
+                    ],
+                    ScheduleRunState::Claimed,
+                    &payload.to_string(),
+                )
+                .is_err()
+            {
+                continue;
+            }
+        }
+
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert(
+                "state".to_string(),
+                Value::String(ScheduleRunState::SessionPrepared.as_wire_str().to_string()),
+            );
             obj.insert("updatedAt".to_string(), json!(now_ms));
         }
         if runtime
@@ -339,8 +613,8 @@ pub async fn tick_workspace_schedules(
             .schedule_ledger
             .transition_run(
                 &run.run_key,
-                &[ScheduleRunState::Pending, ScheduleRunState::RetryWait],
-                ScheduleRunState::Prepared,
+                &[ScheduleRunState::Claimed, ScheduleRunState::SessionPrepared],
+                ScheduleRunState::SessionPrepared,
                 &payload.to_string(),
             )
             .is_err()
@@ -356,7 +630,7 @@ pub async fn tick_workspace_schedules(
             mark_run_state(
                 runtime,
                 &run.run_key,
-                &[ScheduleRunState::Prepared],
+                &[ScheduleRunState::SessionPrepared],
                 ScheduleRunState::Skipped,
                 &mut payload,
                 Some("DEFINITION_CHANGED_AFTER_PREPARE"),
@@ -364,17 +638,6 @@ pub async fn tick_workspace_schedules(
             )?;
             continue;
         }
-
-        let dest = schedule
-            .session_id
-            .as_ref()
-            .map(|sid| KernelScheduleDestination::ExistingSession {
-                session_id: sid.0.clone(),
-            })
-            .unwrap_or_else(|| map_destination(&schedule.destination));
-        let ids = schedule_run_ids(&run.run_key, &schedule.schedule_id, &dest);
-        let target_session_id = SessionId(ids.session_id);
-        let turn_id = TurnId(ids.user_turn_id);
 
         let dispatch_res = dispatch_scheduled_turn(
             runtime,
@@ -390,23 +653,34 @@ pub async fn tick_workspace_schedules(
                 mark_run_state(
                     runtime,
                     &run.run_key,
-                    &[ScheduleRunState::Prepared],
+                    &[ScheduleRunState::SessionPrepared],
                     ScheduleRunState::Dispatched,
                     &mut payload,
                     None,
                     now_ms,
                 )?;
-                mark_run_state(
-                    runtime,
-                    &run.run_key,
-                    &[ScheduleRunState::Dispatched],
-                    ScheduleRunState::Finished,
-                    &mut payload,
-                    None,
-                    now_ms,
-                )?;
+                record_wake(Some(
+                    now_ms.saturating_add(DISPATCHED_RECONCILE_INTERVAL_MS),
+                ));
             }
             Err(err) => {
+                if err.message.contains("E2EE_MACHINE_SIGNING_UNAVAILABLE") {
+                    let retry_at = now_ms.saturating_add(AUTH_RETRY_DELAY_MS);
+                    if let Some(obj) = payload.as_object_mut() {
+                        obj.insert("nextAttemptAt".to_string(), json!(retry_at));
+                    }
+                    record_wake(Some(retry_at));
+                    mark_run_state(
+                        runtime,
+                        &run.run_key,
+                        &[ScheduleRunState::SessionPrepared],
+                        ScheduleRunState::RetryWait,
+                        &mut payload,
+                        Some("E2EE_MACHINE_SIGNING_UNAVAILABLE"),
+                        now_ms,
+                    )?;
+                    continue;
+                }
                 let is_cap = err.message.contains("CAPACITY_EXHAUSTED");
                 let other_cap = active_runs.iter().any(|other| {
                     other.run_key != run.run_key
@@ -430,7 +704,7 @@ pub async fn tick_workspace_schedules(
                         mark_run_state(
                             runtime,
                             &run.run_key,
-                            &[ScheduleRunState::Prepared],
+                            &[ScheduleRunState::SessionPrepared],
                             ScheduleRunState::Skipped,
                             &mut payload,
                             Some("DISPATCH_EXPIRED"),
@@ -441,7 +715,7 @@ pub async fn tick_workspace_schedules(
                         mark_run_state(
                             runtime,
                             &run.run_key,
-                            &[ScheduleRunState::Prepared],
+                            &[ScheduleRunState::SessionPrepared],
                             ScheduleRunState::Skipped,
                             &mut payload,
                             Some("CAPACITY_DEFERRED"),
@@ -456,7 +730,7 @@ pub async fn tick_workspace_schedules(
                         mark_run_state(
                             runtime,
                             &run.run_key,
-                            &[ScheduleRunState::Prepared],
+                            &[ScheduleRunState::SessionPrepared],
                             ScheduleRunState::RetryWait,
                             &mut payload,
                             Some("CAPACITY_EXHAUSTED"),
@@ -471,7 +745,7 @@ pub async fn tick_workspace_schedules(
                         mark_run_state(
                             runtime,
                             &run.run_key,
-                            &[ScheduleRunState::Prepared],
+                            &[ScheduleRunState::SessionPrepared],
                             ScheduleRunState::RetryWait,
                             &mut payload,
                             Some(&err.message),
@@ -482,7 +756,7 @@ pub async fn tick_workspace_schedules(
                         mark_run_state(
                             runtime,
                             &run.run_key,
-                            &[ScheduleRunState::Prepared],
+                            &[ScheduleRunState::SessionPrepared],
                             ScheduleRunState::Failed,
                             &mut payload,
                             Some(&err.message),
@@ -537,17 +811,16 @@ async fn dispatch_scheduled_turn(
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> PortResult<()> {
-    let _ = runtime.deps.inbox.admit_turn(&AdmittedTurnInput {
-        workspace_id: workspace_id.clone(),
-        session_id: session_id.clone(),
-        turn_id: turn_id.clone(),
-        category: InboxCategory::Schedule,
-        verified_requester: schedule.author_user_id.clone(),
-        prompt_text: schedule.prompt_text.clone(),
-        adapter_id: schedule.adapter_id.clone(),
-        custom_acp: None,
-        signed_intent_verified: true,
-    })?;
+    let admitted = runtime.prepare_host_admitted_turn(
+        workspace_id,
+        session_id,
+        turn_id,
+        InboxCategory::Schedule,
+        schedule.author_user_id.clone(),
+        schedule.prompt_text.clone(),
+        schedule.adapter_id.clone(),
+    )?;
+    let _ = runtime.deps.inbox.admit_turn(&admitted)?;
 
     if let Ok(false) = runtime
         .deps
