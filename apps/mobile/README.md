@@ -93,7 +93,9 @@ git submodule update --init --recursive apps/mobile/ios
 Mobile has independent dependency locks and toolchains. The root `pnpm install`,
 `pnpm check`, and desktop build do not install or validate the native clients.
 Send-time reference catalog readiness across newly created sessions and incremental
-stream catch-up is documented in the [mention catch-up readiness decision](../../.agents/notes/implemented/bug-fix/2026-11-26-mobile-mention-catchup-readiness.md).
+stream catch-up is documented in the [mention catch-up readiness decision](../../.agents/notes/implemented/bug-fix/2026-11-26-mobile-mention-catchup-readiness.md),
+and composer Agent Role display caching and readiness recovery are documented in the
+[Role selector recovery decision](../../.agents/notes/implemented/bug-fix/2026-11-28-mobile-role-selector-recovery.md).
 
 ### Backend configuration
 
