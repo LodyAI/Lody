@@ -168,7 +168,8 @@ receives key material.
 | New epoch committed and installed in core | the same | install that epoch, then move the seal epoch to it |
 | Ledger advances or a new device is admitted | the same | admit the new public keys |
 | This device loses write permission (Guest, role change, exhausted 15-minute epoch budget) | the same | hold sealing and snapshot upload for its writer; admission and older epochs stay |
-| This device's member is removed or the device is revoked | the same | clear the keyring, remove the remote, drop the namespace |
+| This device's member is removed | the same | clear the keyring, remove the remote, drop the namespace |
+| This device is revoked | the same | hold and remove its writer; if no other identity of this installation is still current, also clear the keyring, remove the remote, drop the namespace |
 | The host restarts, reconnects or hands off to a new build | the same, on reconnect | full reinstall (the keyring never persists) |
 
 A revoked or removed member's public key stays admitted, so their historical
@@ -192,8 +193,30 @@ memory. The owner accepts this because the data process is trusted and managed
 by Lody. Its one mitigation is that the host process disables core dumps and
 attaches no crash reporter.
 
-**Removal and cleanup.** On credential-confirmed member removal or revocation
-of this device, Lody:
+**Device revocation (owner decision A, 2026-11-22).** The daemon's machine
+identity and desktop main's personal device share one namespace on an
+installation. When this device is revoked, its own writer is always retired.
+Then there are two cases:
+
+- **Another identity is still current.** Nothing else happens. That is a
+  personal device, or a machine identity still in shared use. Dropping the shared
+  namespace would destroy that identity's data and its rows not yet uploaded.
+- **No identity is current any more.** Revocation does the full cleanup below,
+  like member removal. Decrypted content must not stay on a lost or stolen
+  computer.
+
+Whether another identity is still current is decided from the revoked process's
+own `VerifiedLedger`: an admitted device of an active member. It is never decided
+from local caches or renderer data. Both the daemon's and main's identities
+count. Each process records its identity beside the namespace, as a candidate
+only, and decides only for its own revocation, so neither process needs the
+other's keys or ledger. The decision is serialized machine-wide and forgets the
+revoked identity in the same step. When both identities are revoked, the later
+decision therefore always finds none left and cleans up. An identity whose
+status cannot be judged counts as current.
+
+**Removal and cleanup.** On credential-confirmed member removal, or on
+revocation of this installation's last current identity, Lody:
 
 1. writes a durable *pending wipe* marker beside the workspace's identity
    records;
@@ -346,6 +369,10 @@ None.
   - Owner decisions 1–4 given in the coordinating session on 2026-11-20 and
     recorded on [#2955](https://github.com/LodyAI/Lody/pull/2955).
   - The owner approved this revision (`f4bd8d1c0`) on 2026-11-20 ([record](https://github.com/LodyAI/Lody/pull/2955#issuecomment-7028570219)).
+  - On 2026-11-22, the owner chose option A for local data after device
+    revocation, in the coordinating session: retire only the revoked writer
+    while another local identity is current, and clean up fully once none is.
+    It replaces the earlier rule that every revocation drops the namespace.
 - **Inspected.**
   - The native stack: draft PRs #2902–#2942 (top `native-desktop-acceptance-fixes`
     @ `840f6d05`) and its design doc `.agents/docs/native-workspace-meta.md`.
