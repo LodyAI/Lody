@@ -21,7 +21,7 @@ export const sidebarShortcutOverlayActiveAtom = atom<boolean>(false);
 
 /**
  * Optional platform override used by Storybook previews to toggle between
- * macOS (`⌘ 1`) and Windows (`Control 1`) pills without mutating OS globals.
+ * macOS (`⌘ 1`) and Windows (`Ctrl 1`) pills without mutating OS globals.
  */
 export const sidebarShortcutPlatformOverrideAtom = atom<SidebarShortcutPlatform | null>(null);
 

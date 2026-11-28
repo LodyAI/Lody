@@ -86,7 +86,7 @@ export type SidebarShortcutPillProps = {
 };
 
 /**
- * Unified shortcut pill (`⌘ 1` on macOS, `Control 1` on Windows/Linux) shown on
+ * Unified shortcut pill (`⌘ 1` on macOS, `Ctrl 1` on Windows/Linux) shown on
  * the right edge of the first 9 visible sidebar session rows while the primary
  * modifier key is held.
  */
@@ -111,7 +111,7 @@ export function SidebarShortcutPill({
       {platform === 'mac' ? (
         <Command {...stylex.props(styles.icon)} strokeWidth={2} aria-hidden="true" />
       ) : (
-        <span>Control</span>
+        <span>Ctrl</span>
       )}
       <span>{index}</span>
     </kbd>

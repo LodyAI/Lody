@@ -365,7 +365,7 @@ describe('sidebar visible session 1-9 shortcuts and pills', () => {
     expect(store.get(sidebarShortcutOverlayActiveAtom)).toBe(false);
   });
 
-  it('renders macOS icon pills and Windows Control pills only on the first 9 rows', () => {
+  it('renders macOS icon pills and Windows Ctrl pills only on the first 9 rows', () => {
     renderWith(
       createElement(
         'div',
@@ -397,7 +397,7 @@ describe('sidebar visible session 1-9 shortcuts and pills', () => {
     const winPill1 = container.querySelector('[data-sidebar-shortcut-pill="1"]');
     expect(winPill1?.getAttribute('data-sidebar-shortcut-platform')).toBe('windows');
     expect(winPill1?.querySelector('svg')).toBeNull();
-    expect(winPill1?.textContent).toBe('Control1');
+    expect(winPill1?.textContent).toBe('Ctrl1');
   });
 
   it('grows the ⇧ glyph inside a macOS binding pill to match ⌘ ink', () => {

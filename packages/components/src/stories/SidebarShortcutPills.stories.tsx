@@ -396,7 +396,7 @@ export const PillGallery: Story = {
             {(['mac', 'windows'] as const).map((platform) => (
               <div key={platform} {...stylex.props(storyStyles.pillCard)}>
                 <div {...stylex.props(storyStyles.sidebarCaption)}>
-                  {platform === 'mac' ? 'macOS · Command icon' : 'Windows / Linux · Control label'}
+                  {platform === 'mac' ? 'macOS · Command icon' : 'Windows / Linux · Ctrl label'}
                 </div>
                 <div {...stylex.props(storyStyles.inlineControls)}>
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((index) => (
@@ -452,7 +452,7 @@ export const PillGallery: Story = {
               platform="mac"
             />
             <GallerySidebarColumn heading="macOS · Holding Command (⌘)" active platform="mac" />
-            <GallerySidebarColumn heading="Windows · Holding Control" active platform="windows" />
+            <GallerySidebarColumn heading="Windows · Holding Ctrl" active platform="windows" />
           </div>
         </div>
       </div>
@@ -1022,7 +1022,7 @@ function PlaygroundInner({
       if (!targetId) return;
       onSelectSession(targetId);
       const targetTitle = sessionById.get(targetId)?.title ?? targetId;
-      const label = platform === 'mac' ? `⌘${slot}` : `Control+${slot}`;
+      const label = platform === 'mac' ? `⌘${slot}` : `Ctrl+${slot}`;
       onLastTriggerNote(`${label} (${source}) → ${targetTitle}`);
     },
     [onLastTriggerNote, onSelectSession, platform, sessionById, slotSessionIds]
@@ -1213,7 +1213,7 @@ function PlaygroundInner({
               {(
                 [
                   { id: 'mac', label: 'macOS (⌘)' },
-                  { id: 'windows', label: 'Windows (Control)' },
+                  { id: 'windows', label: 'Windows (Ctrl)' },
                 ] as const
               ).map((item) => (
                 <Button
@@ -1238,7 +1238,7 @@ function PlaygroundInner({
                 ? 'Release Pill Preview'
                 : platform === 'mac'
                   ? 'Pin ⌘ Pills'
-                  : 'Pin Control Pills'}
+                  : 'Pin Ctrl Pills'}
             </Button>
           </div>
         </div>
@@ -1247,7 +1247,7 @@ function PlaygroundInner({
           <p>
             Hold{' '}
             <strong {...stylex.props(storyStyles.foreground)}>
-              {platform === 'mac' ? 'Command (⌘)' : 'Control'}
+              {platform === 'mac' ? 'Command (⌘)' : 'Ctrl'}
             </strong>{' '}
             for 150ms to reveal the shortcut pills on the first 9 visible rows across expanded
             sections. Overlay status:{' '}
@@ -1260,7 +1260,7 @@ function PlaygroundInner({
             Collapse/expand any section (Pinned, Maintenance, Mac Studio, projects, GitHub repos,
             Focus, Later, Settled, Chats) or click <em>Show more</em> to see slots 1–9 adapt live.
             Note: web browsers reserve <code>⌘1–⌘9</code> for browser tabs, so use{' '}
-            <code>Control+1–9</code> in Windows mode or click any slot below to test switching.
+            <code>Ctrl+1–9</code> in Windows mode or click any slot below to test switching.
           </p>
         </div>
 
