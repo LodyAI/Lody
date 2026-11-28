@@ -1,0 +1,17 @@
+[package]
+name = "lody-sandbox"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+lody-ports.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
+rquickjs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

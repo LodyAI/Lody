@@ -1,0 +1,13 @@
+[package]
+name = "lody-app"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+lody-kernel.workspace = true
+lody-ports.workspace = true
+serde.workspace = true
+serde_json.workspace = true

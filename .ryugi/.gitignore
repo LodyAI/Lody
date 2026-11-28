@@ -2,3 +2,7 @@ config.json
 artifacts/*
 !artifacts/document/
 artifacts/document/*/.artifact-id
+!artifacts/whiteboard/
+artifacts/whiteboard/*/.artifact-id
+!artifacts/html/
+artifacts/html/*/.artifact-id

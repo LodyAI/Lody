@@ -1,0 +1,320 @@
+{
+  "version": 1,
+  "threads": [
+    {
+      "id": "mSqQG0pvDL",
+      "anchor": {
+        "blockId": "NZAFsc1n",
+        "quote": "",
+        "ask": "repo-engine-link-mode",
+        "choice": "shared-engine-host",
+        "answer": null
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:13:32.658Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "NY3RxUnyD8",
+          "author": "agent",
+          "text": "Answered repo-engine-link-mode",
+          "at": "2026-11-21T12:13:32.658Z"
+        }
+      ]
+    },
+    {
+      "id": "WS8NzbTeVL",
+      "anchor": {
+        "blockId": "Sg8SXC-2",
+        "quote": "",
+        "ask": "daemon-supervision",
+        "choice": "thin-self-exec",
+        "answer": null
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:13:32.774Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "HMOZecB1cG",
+          "author": "agent",
+          "text": "Answered daemon-supervision",
+          "at": "2026-11-21T12:13:32.774Z"
+        }
+      ]
+    },
+    {
+      "id": "uULYbXqx5p",
+      "anchor": {
+        "blockId": "sES7tMUa",
+        "quote": "",
+        "ask": "local-ipc-protocol",
+        "choice": "mux-with-v7-compat",
+        "answer": null
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:13:32.894Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "T-l1_fq5gV",
+          "author": "agent",
+          "text": "Answered local-ipc-protocol",
+          "at": "2026-11-21T12:13:32.894Z"
+        }
+      ]
+    },
+    {
+      "id": "QtDJghwlGf",
+      "anchor": {
+        "blockId": "sES7tMUa",
+        "quote": "",
+        "ask": "sqlite-consolidation",
+        "choice": "keep-separate-dbs",
+        "answer": null
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:13:33.008Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "_nZIHX7IsR",
+          "author": "agent",
+          "text": "Answered sqlite-consolidation",
+          "at": "2026-11-21T12:13:33.008Z"
+        }
+      ]
+    },
+    {
+      "id": "CQZhnpW8qo",
+      "anchor": {
+        "blockId": "H_uxFxld",
+        "quote": "",
+        "ask": "selfhost-discovery-mode",
+        "choice": "well-known-discovery",
+        "answer": null
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:13:33.126Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "1NrkniEUJ8",
+          "author": "agent",
+          "text": "Answered selfhost-discovery-mode",
+          "at": "2026-11-21T12:13:33.126Z"
+        }
+      ]
+    },
+    {
+      "id": "KxowXxXM4p",
+      "anchor": {
+        "blockId": "tMDlFAuL",
+        "quote": "",
+        "ask": "acp-adapter-strategy",
+        "choice": "externalize-then-port",
+        "answer": null
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:13:33.243Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "EPK_2_7IrT",
+          "author": "agent",
+          "text": "Answered acp-adapter-strategy",
+          "at": "2026-11-21T12:13:33.243Z"
+        }
+      ]
+    },
+    {
+      "id": "vNn8WkrgPY",
+      "anchor": {
+        "blockId": "tMDlFAuL",
+        "quote": "",
+        "ask": "js-codemode-engine",
+        "choice": "rquickjs",
+        "answer": null
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:13:33.358Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "S8tgzax6hf",
+          "author": "agent",
+          "text": "Answered js-codemode-engine",
+          "at": "2026-11-21T12:13:33.358Z"
+        }
+      ]
+    },
+    {
+      "id": "O07HQB0ajG",
+      "anchor": {
+        "blockId": "*",
+        "quote": "",
+        "submit": true,
+        "asks": [
+          "daemon-supervision",
+          "repo-engine-link-mode",
+          "selfhost-discovery-mode",
+          "local-ipc-protocol",
+          "sqlite-consolidation",
+          "acp-adapter-strategy",
+          "js-codemode-engine"
+        ]
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:13:33.478Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "MFSkAdqjok",
+          "author": "agent",
+          "text": "Submitted the answers",
+          "at": "2026-11-21T12:13:33.478Z"
+        }
+      ]
+    },
+    {
+      "id": "oZM8dIV10D",
+      "anchor": {
+        "blockId": "NZAFsc1n",
+        "quote": "",
+        "ask": "repo-engine-link-mode",
+        "note": true
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:14:29.017Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "B08SPCSXw1",
+          "author": "agent",
+          "text": "已定案：桌面与纯服务器统一连接独立的 loro-repo-engine 宿主进程，复用按 build 序号平滑接管机制，写入第七章决策总表。",
+          "at": "2026-11-21T12:14:29.017Z"
+        }
+      ]
+    },
+    {
+      "id": "Mms32MypCp",
+      "anchor": {
+        "blockId": "Sg8SXC-2",
+        "quote": "",
+        "ask": "daemon-supervision",
+        "note": true
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:14:29.168Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "h9icgnpBw1",
+          "author": "agent",
+          "text": "已定案：采用单一 lody 二进制内置极薄 daemon-runner 子模式持有 Host Lease 并执行远程升级排水切换。",
+          "at": "2026-11-21T12:14:29.168Z"
+        }
+      ]
+    },
+    {
+      "id": "-a8yCrxLOB",
+      "anchor": {
+        "blockId": "sES7tMUa",
+        "quote": "",
+        "ask": "local-ipc-protocol",
+        "note": true
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:14:29.398Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "Q0hqq0Slc7",
+          "author": "agent",
+          "text": "已定案两阶段方案：灰度期采用 lody-mux.sock + legacy_ipc_compat 薄兼容层支持 Electron 零改动回滚；旧 Node CLI 退役后将 Electron 切至新通道并删除兼容模块。",
+          "at": "2026-11-21T12:14:29.398Z"
+        }
+      ]
+    },
+    {
+      "id": "jVrjomSL6a",
+      "anchor": {
+        "blockId": "sES7tMUa",
+        "quote": "",
+        "ask": "sqlite-consolidation",
+        "note": true
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:14:29.516Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "3Ypc-SXc5G",
+          "author": "agent",
+          "text": "已定案：保留各本地控制库原文件名与表结构以支持灰度双向无缝回滚及 E2EE 单工作区物理擦除，仅在 lodyd 单进程内收口为常驻连接池。",
+          "at": "2026-11-21T12:14:29.516Z"
+        }
+      ]
+    },
+    {
+      "id": "O6xn_UQOkW",
+      "anchor": {
+        "blockId": "H_uxFxld",
+        "quote": "",
+        "ask": "selfhost-discovery-mode",
+        "note": true
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:14:29.635Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "2Dz3bI5_iK",
+          "author": "agent",
+          "text": "已定案：主推 lody login --server 单入口拉取 /.well-known/lody-configuration 自动发现，同时兼容 profile.toml 覆盖。",
+          "at": "2026-11-21T12:14:29.635Z"
+        }
+      ]
+    },
+    {
+      "id": "cBBw9eQS7f",
+      "anchor": {
+        "blockId": "tMDlFAuL",
+        "quote": "",
+        "ask": "acp-adapter-strategy",
+        "note": true
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:14:29.755Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "x9UMur6rOh",
+          "author": "agent",
+          "text": "已定案：先将 5 个内置 TS ACP Adapter 剥离为独立受管制品走标准 stdio，后续按需将高频 Adapter 迁为原生 Rust。",
+          "at": "2026-11-21T12:14:29.755Z"
+        }
+      ]
+    },
+    {
+      "id": "0rqpFgyWTC",
+      "anchor": {
+        "blockId": "tMDlFAuL",
+        "quote": "",
+        "ask": "js-codemode-engine",
+        "note": true
+      },
+      "status": "open",
+      "statusAt": "2026-11-21T12:14:29.870Z",
+      "statusBy": "agent",
+      "messages": [
+        {
+          "id": "Nw7egP9utH",
+          "author": "agent",
+          "text": "已定案：在 lodyd 内嵌 rquickjs 沙箱执行 Automations 条件脚本，严格限制堆内存与超时预算。",
+          "at": "2026-11-21T12:14:29.870Z"
+        }
+      ]
+    }
+  ]
+}

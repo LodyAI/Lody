@@ -1,0 +1,8 @@
+disallowed-methods = [
+  { path = "std::env::var", reason = "Read environment variables exclusively through lody_env" },
+  { path = "std::env::var_os", reason = "Read environment variables exclusively through lody_env" },
+  { path = "std::env::vars", reason = "Read environment variables exclusively through lody_env" },
+  { path = "std::env::vars_os", reason = "Read environment variables exclusively through lody_env" },
+  { path = "std::env::set_var", reason = "Mutating process environment is forbidden; pass env maps via Command::env" },
+  { path = "std::env::remove_var", reason = "Mutating process environment is forbidden; pass env maps via Command::env" },
+]

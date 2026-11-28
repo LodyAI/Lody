@@ -1,0 +1,556 @@
+<doc>
+  <h1 id="ckwgnBjX"><code>apps/cli-rs</code> 核心接口、领域抽象与私有化自部署契约全景</h1>
+  <p id="EGMqjVeP">本文档完整呈现已在 <code>apps/cli-rs/</code> 落地并通过真实进程黑盒验证的 <b>14 个 Cargo Workspace 成员、21 个核心端口/应用层 Trait、纯函数状态机、单进程单 Fleet 多 Workspace 动态挂载/卸载隔离架构，以及面向企业私有化自部署（Self-Hosted）的一等公民抽象设计</b>。所有模块均遵循 <code>specs/rust-cli-daemon-architecture.zh.md</code> 的核心准则。</p>
+  <alert id="hOrBkDSs" type="tip">
+    <p>配套画板与交互台：<ref whiteboard="cli-rs-progress-map">打开架构落地进度白板（已完成 vs 待完成全景图）</ref> · <ref html="ports-inspector">打开交互式 Trait 图鉴与自部署装配模拟器</ref> · 背景记录见 <ref document="rust-cli-architecture">早期架构梳理文档</ref>。</p>
+  </alert>
+  <h2 id="xbat9i3d">零、 实时架构落地进度总览（已完成 vs 待完成）</h2>
+  <p id="e4xwkQTf">下图按颜色直观区分当前 <code>apps/cli-rs</code> 各层模块的真实工程状态：<b>绿色实线为已完成并通过真实进程测试</b>，<b>蓝色实线为主干已跑通（外围子能力待补）</b>，<b>橙色虚线为契约已锁定、待接入真实外部实现</b>（点击画布可直接进入白板缩放与批注）：</p>
+  <p id="ubFTVdy6"><ref whiteboard="cli-rs-progress-map" to="KiPf6d0yY1pg9r8QubFv5" frame="f-crate-status" embed="true" /></p>
+  <table id="rtZ9BhJt">
+    <tr>
+      <th>
+        <p>模块 / Crate</p>
+      </th>
+      <th>
+        <p>当前状态</p>
+      </th>
+      <th>
+        <p>已完成能力（均已通过测试闭环）</p>
+      </th>
+      <th>
+        <p>待完成子项（Next）</p>
+      </th>
+    </tr>
+    <tr>
+      <td>
+        <p><code>bins/lody</code> &amp; <code>lody-env</code></p>
+      </td>
+      <td>
+        <p><b>已完成</b></p>
+      </td>
+      <td>
+        <p>唯一组合根（<code>local</code> 编译期物理剥离后端 / <code>connected</code> 按 Profile 目录隔离）；<code>lody-env</code> + <code>clippy.toml</code> 编译期收口全工作区环境变量。</p>
+      </td>
+      <td>
+        <p><code>daemon-runner</code> 远程受管升级原子切换。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-ports</code> &amp; <code>lody-app</code></p>
+      </td>
+      <td>
+        <p><b>已完成</b></p>
+      </td>
+      <td>
+        <p>21 项核心 Trait（数据、单写存储、执行、6 大厂商无关自部署后端）、<code>VerifiedPrincipal</code>、安全模式防降级棘轮、<code>enforce_command_policy</code> 集中门禁。</p>
+      </td>
+      <td>
+        <p>从单一定义自动生成 TypeScript 协议类型与跨语言字节向量。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-kernel</code></p>
+      </td>
+      <td>
+        <p><b>已完成</b></p>
+      </td>
+      <td>
+        <p>零 I/O、零时钟、零克隆原地转移函数 <code>step</code>：统一收件箱去重/暂停/中断后残留 Claim 结算/人类抢占自动化、代际隔离、陈旧 ACP 恢复在场重发、有界 30s 迟到流式租约与原生 <code>sessionActivity</code> 仲裁、结构化无输出失败分类、权限挂起、Steer 三态、Goal 上限与单层子会话深度门禁。</p>
+      </td>
+      <td>
+        <p>与旧版 TS 会话历史轨迹做批量回放对拍。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-runtime</code></p>
+      </td>
+      <td>
+        <p><b>已完成</b></p>
+      </td>
+      <td>
+        <p>单进程单 Fleet 内嵌 <code>FleetWorkspaceTable</code>（多 Workspace 动态挂载、防降级拦截、无锁排空卸载与单工作区擦除）、双通道控制优先 <code>SessionActor</code>、基于显式通知与最早到期截止时间的 Schedule 定时触发与 Automation 持续评估监督器、受管后台长命令（重启后 <code>orphan_started_runs</code> 中断上报绝不重跑）、1s 迟到流式在场收敛与 GC 保护、跨会话子任务委派与回执自动唤醒。</p>
+      </td>
+      <td>
+        <p>接入真实 Loro/Flock 事件源后联动 PR/Workflow 事件流。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-entry</code></p>
+      </td>
+      <td>
+        <p><b>主干已通</b></p>
+      </td>
+      <td>
+        <p>纯投影层（零直接磁盘身份读写）：<code>clap</code> CLI（含 <code>lody machine restore-id</code> 与无存储锁争用的 <code>lody mcp-stdio</code> 桥接）+ <code>axum</code> 本地 Unix Socket（<code>probe</code> &amp; <code>control</code>，完整覆盖桌面端 <code>/project-control</code>、<code>worktree/*</code>、<code>/mcp-control</code> 与 <code>/automation-control</code>）+ 进程内 Streamable HTTP MCP Server（<code>/mcp</code> 投影 <code>VerifiedPrincipal::AgentSession</code> 强校验会话归属，支持 <code>lody_schedule</code>、<code>lody_automation</code>、<code>lody_catalog</code>，禁用 HTTP 时自动回退挂载 <code>mcp-stdio</code>）+ <code>terminal.sock</code> PTY 服务。</p>
+      </td>
+      <td>
+        <p>新 <code>lody-mux.sock</code> 多路复用协议与远端 Machine RPC 网关。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-sqlite</code> / <code>sandbox</code> / <code>acp</code> / <code>worktree</code></p>
+      </td>
+      <td>
+        <p><b>已完成</b></p>
+      </td>
+      <td>
+        <p><code>FileStorageLease</code> 让位锁、5 级优先级 <code>LocalMachineIdentityStore</code>、<code>operations.sqlite3</code>、<code>schedules.sqlite</code> 执行游标账本、兼容 Node v4 的 <code>automations/&lt;hash&gt;.sqlite</code> 分库与损坏自愈 <code>pr-poller-state.sqlite3</code>；独立 <code>lody-sandbox</code> 基于 <code>rquickjs</code> 沙箱求值（16MiB 内存上限、中断截止、最多 32 次受限 <code>ctx.read/fetch/exec</code>）；<code>ACP over stdio</code>（含 <code>_lody/session/activity_update</code> v1、<code>steering</code> 三态回执握手、隔离 <code>_lody/session/archive</code>）+ <code>portable-pty</code> + 代理感知制品安装；Git Worktree + 桌面端目录/文件/分支/技能扫描 + <code>LTD1</code> v2 FastCDC <code>TurnDiffStore</code>。</p>
+      </td>
+      <td>
+        <p>持续跟进上游 ACP 扩展契约演进。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-engine</code> &amp; <code>lody-backend</code></p>
+      </td>
+      <td>
+        <p><b>待实现（仅契约）</b></p>
+      </td>
+      <td>
+        <p>端口契约、组合根条件编译装配与自部署配置隔离模型已就位。</p>
+      </td>
+      <td>
+        <p>对接独立 <code>loro-repo-engine</code> 宿主进程与真实 Roost 存储；实现 <code>/.well-known</code> 自动发现、OIDC/自定义 CA、三模协商上传、多代码托管 SCM、E2EE 账本装钥与原生 <code>lody-iroh</code>。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>lody-conformance</code> &amp; <code>scripted-acp</code></p>
+      </td>
+      <td>
+        <p><b>已完成 · 全绿</b></p>
+      </td>
+      <td>
+        <p>编译出的 Rust <code>lody</code> 二进制已实跑通过全部 6 大进程边界业务闭环 + 共享 <code>LODY_DATA_DIR</code> 重启热接力测试。</p>
+      </td>
+      <td>
+        <p>随新模块推进补充 MCP 子会话真委派与本地 Loopback 自部署 Mock 场景。</p>
+      </td>
+    </tr>
+  </table>
+  <p id="b5HG-Oi5">后续待完成模块的推荐推进顺序如下：</p>
+  <p id="aw3gTnge"><ref whiteboard="cli-rs-progress-map" to="KiPf6d0yY1pg9r8QubFv5" frame="f-next-roadmap" embed="true" /></p>
+  <hr id="1XdNEYiv" />
+  <h2 id="ICAsfopc">一、 Workspace 单向依赖拓扑与编译期物理隔离</h2>
+  <p id="v4GBtS6Y">整个 <code>apps/cli-rs</code> 去掉了冗余前缀，划分为 1 个二进制组合根（<code>bins/lody</code>）、10 个核心架构 Crate 与 2 个外部进程黑盒对照测试 Crate。依赖方向由各自 <code>Cargo.toml</code> 在编译期硬性锁死，<b>任何反向依赖或叶子实现之间的横向互调都会直接编译失败</b>：</p>
+  <mermaid id="hI1hb2wR">flowchart TB
+  subgraph BIN[&quot;组合根 (Composition Root)&quot;]
+    LODY[&quot;bins/lody (package: lody)&lt;br/&gt;default = 纯本地装配 | feature = connected&quot;]
+  end
+
+  subgraph ENTRY[&quot;协议入口投影 (Entry)&quot;]
+    ENT[&quot;lody-entry&lt;br/&gt;薄 CLI / mcp-stdio / lody-mux + legacy IPC / 远端 RPC&quot;]
+  end
+
+  subgraph ORCH[&quot;应用接口与运行时编排&quot;]
+    RT[&quot;lody-runtime&lt;br/&gt;双通道 SessionActor · 监管树 · 资源租约&quot;]
+    APP[&quot;lody-app&lt;br/&gt;唯一 AppCommand / AppQuery + enforce_command_policy&quot;]
+  end
+
+  subgraph CORE[&quot;零依赖核心契约与纯内核&quot;]
+    KERNEL[&quot;lody-kernel&lt;br/&gt;纯函数 step(State, Event) -&gt; (State, Actions)&lt;br/&gt;零 I/O · 零时钟 · 零 async · 零内部依赖&quot;]
+    PORTS[&quot;lody-ports&lt;br/&gt;20 个纯 Trait 与值类型&lt;br/&gt;零 I/O · 零内部依赖&quot;]
+  end
+
+  subgraph IMPL[&quot;叶子适配器实现 (彼此互不依赖，仅依赖 lody-ports)&quot;]
+    SQL[&quot;lody-sqlite&lt;br/&gt;operations / schedules / automations&quot;]
+    ACP[&quot;lody-acp&lt;br/&gt;ACP stdio + 受管制品安装器&quot;]
+    WT[&quot;lody-worktree&lt;br/&gt;Git Worktree + TurnDiffStore&quot;]
+    ENG[&quot;lody-engine&lt;br/&gt;loro-repo-engine 客户端 + Roost&quot;]
+    BACK[&quot;lody-backend (仅 connected 特性编译)&lt;br/&gt;自部署 Profile / OIDC / 上传 / SCM / E2EE&quot;]
+  end
+
+  LODY --&gt; ENT
+  LODY --&gt; RT
+  LODY --&gt; SQL &amp; ACP &amp; WT &amp; ENG
+  LODY -. &quot;仅 --features connected&quot; .-&gt; BACK
+  ENT --&gt; APP
+  RT --&gt; APP &amp; KERNEL &amp; PORTS
+  APP --&gt; KERNEL &amp; PORTS
+  SQL &amp; ACP &amp; WT &amp; ENG &amp; BACK --&gt; PORTS</mermaid>
+  <table id="9-Zmg5Wa">
+    <tr>
+      <th>
+        <p>编译模式</p>
+      </th>
+      <th>
+        <p>构建命令</p>
+      </th>
+      <th>
+        <p>链接与运行时装配行为</p>
+      </th>
+    </tr>
+    <tr>
+      <td>
+        <p><b>默认开源本地构建（<code>local</code>）</b></p>
+      </td>
+      <td>
+        <p><code>cargo build -p lody</code></p>
+      </td>
+      <td>
+        <p><b>编译期物理不链接 <code>lody-backend</code></b>（<code>cargo tree -p lody</code> 不含任何联网控制面代码），从二进制层面保证默认桌面/CLI 构建绝无可能发出认证云请求；仅保留公共受管运行时制品下载通道。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><b>联网/自部署通用构建（<code>connected</code>）</b></p>
+      </td>
+      <td>
+        <p><code>cargo build -p lody --features connected</code></p>
+      </td>
+      <td>
+        <p>链接厂商无关的 <code>lody-backend</code>。<b>未配置 <code>backend-profile.json</code> 时组合根仍返回 <code>backend: None</code>，按纯本地组合运行</b>；用户显式执行 <code>lody login --server &lt;origin&gt;</code> 后，同一份二进制统一服务官方云与任意企业私有化实例。</p>
+      </td>
+    </tr>
+  </table>
+  <hr id="2xWGoshA" />
+  <h2 id="6h3BVL7p">二、 身份、工作区安全模式与统一错误模型（<code>lody-ports::identity</code> &amp; <code>error</code>）</h2>
+  <p id="wmHz5lS7">在任何业务命令进入执行层之前，身份与安全模式通过强类型枚举固定，消除散落在各处的布尔标志位与字符串拼接判断：</p>
+  <codeblock id="Xp8JJgt9" lang="rust">pub enum WorkspaceSecurityMode {
+    Unknown,
+    Plaintext,
+    Encrypted { genesis_hash: String },
+}
+
+pub enum VerifiedPrincipal {
+    LocalHost {
+        caller_pid: Option&lt;u32&gt;,
+        account_id: Option&lt;UserId&gt;,
+    },
+    AgentSession {
+        workspace_id: WorkspaceId,
+        session_id: SessionId,
+        machine_id: MachineId,
+        account_id: Option&lt;UserId&gt;,
+    },
+    ConnectedMember {
+        profile_id: ProfileId,
+        user_id: UserId,
+    },
+    EncryptedMember {
+        profile_id: ProfileId,
+        account_id: UserId,
+        execution_user_id: UserId,
+        device_pubkey_hex: String,
+    },
+}</codeblock>
+  <ul id="TRkGVR9a">
+    <li><b>安全模式单向棘轮（防降级与防未知外发）</b>：<code>WorkspaceSecurityMode::Unknown.allows_plaintext_network_egress()</code> 恒为 <code>false</code>，在工作区完成认证分类前严禁任何明文正文出站；已持有的 <code>Encrypted { genesis_hash }</code> 拒绝向 <code>Plaintext</code> / <code>Unknown</code> 降级或篡改创世哈希（<code>validate_transition</code> 单测已覆盖）。</li>
+    <li><b>双层验签分工</b>：第 1 层在 <code>lody-entry</code> 校验传输通道信封产出 <code>VerifiedPrincipal</code>；第 2 层在加密工作区文档同步输入进入 <code>InboxStorePort</code> 前按账本策略逐条验签（未签名的 <code>resume</code> 不视为合法激活目标，执行身份取自验签结果而非展示用 <code>userId</code>）。</li>
+    <li><b>传输无关错误分类（<code>PortErrorKind</code>）</b>：统一收敛为 <code>InvalidInput</code>、<code>Unauthorized</code>、<code>Forbidden</code>、<code>NotFound</code>、<code>Conflict</code>、<code>CapabilityUnavailable</code>、<code>EntitlementReadOnly</code>、<code>Timeout</code>、<code>Unavailable</code>、<code>Internal</code> 十类，所有入口层按各自协议映射状态码。</li>
+  </ul>
+  <hr id="ty9ZcySk" />
+  <h2 id="_EX7BAnb">三、 向上唯一应用接口（<code>lody-app</code>）与纯函数状态机（<code>lody-kernel</code>）</h2>
+  <h3 id="isLBODjz">1. 唯一应用服务接口 <code>ApplicationService</code></h3>
+  <p id="Mmsgn79W">过去“创建会话 / 发消息 / 取消回合”在 CLI 子命令、内置 MCP 工具、本地 IPC 和远端 Machine RPC 里各写了一遍；现在 <code>lody-entry</code> 只依赖 <code>lody-app</code>，所有入口统一投影到同一套契约：</p>
+  <codeblock id="XhbCfPNb" lang="rust">pub trait ApplicationService: Send + Sync {
+    fn execute(&amp;self, caller: &amp;VerifiedPrincipal, cmd: AppCommand) -&gt; PortResult&lt;AppResponse&gt;;
+    fn query(&amp;self, caller: &amp;VerifiedPrincipal, query: AppQuery) -&gt; PortResult&lt;AppResponse&gt;;
+}
+
+pub fn enforce_command_policy(
+    caller: &amp;VerifiedPrincipal,
+    cmd: &amp;AppCommand,
+    entitlement: Option&lt;&amp;EntitlementStatus&gt;,
+) -&gt; PortResult&lt;()&gt;;</codeblock>
+  <table id="NygII5Yo">
+    <tr>
+      <th>
+        <p>接口枚举</p>
+      </th>
+      <th>
+        <p>包含的业务原语</p>
+      </th>
+      <th>
+        <p>集中策略门禁（<code>enforce_command_policy</code>）</p>
+      </th>
+    </tr>
+    <tr>
+      <td>
+        <p><code>AppCommand</code></p>
+      </td>
+      <td>
+        <p><code>ConfigureBackendProfile</code>、<code>ClearBackendProfile</code>、<code>AttachWorkspace</code>、<code>DetachWorkspace</code>、<code>RegisterProject</code>、<code>CreateSession</code>、<code>SendChat</code>、<code>SteerTurn</code>、<code>CancelSession</code>、<code>ReplyPermission</code>、<code>DelegateChildSession</code>、<code>ArchiveSession</code></p>
+      </td>
+      <td>
+        <p>1. <code>ConfigureBackendProfile / ClearBackendProfile / AttachWorkspace / DetachWorkspace / RegisterProject</code> 强制要求 <code>LocalHost</code> 权威，远端调用直接返回 <code>Forbidden</code>；<br />2. 当工作区处于 <code>ExpiredReadOnly</code> 时，远端发起的新协作派发（建会话/发消息/Steer/子会话委派）返回 <code>EntitlementReadOnly</code>，但<b>本机操作与会话归档始终放行</b>。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>AppQuery</code></p>
+      </td>
+      <td>
+        <p><code>DaemonStatus</code>、<code>ListAttachedWorkspaces</code>、<code>ListProjects</code>、<code>ListSessions</code>、<code>GetSessionHistory</code>、<code>GetTurnDiff</code></p>
+      </td>
+      <td>
+        <p>在任何授权状态（包括企业 License 过期或完全断网）下始终允许本机读取历史、Diff 与状态。</p>
+      </td>
+    </tr>
+  </table>
+  <h3 id="wOuNfzHW">2. 零 I/O 纯函数会话内核 <code>lody-kernel</code></h3>
+  <p id="Y2qoW-FJ"><code>lody-kernel</code> 不依赖任何异步运行时、系统时钟或内部端口 Crate，仅暴露纯转移函数 <code>step(SessionState, KernelEvent) -&gt; (SessionState, Vec&lt;KernelAction&gt;)</code>：</p>
+  <mermaid id="_1LQquYy">stateDiagram-v2
+  [*] --&gt; Idle
+  Idle --&gt; Preparing : AdmitTurn (分配递增 Generation)
+  Preparing --&gt; Running : AgentPrepared (匹配当前 Generation)
+  Preparing --&gt; Idle : CancelRequested (输出 InterruptAgent)
+  Running --&gt; Running : AgentOutputChunk (匹配 Generation -&gt; AppendOutput)
+  Running --&gt; Settling : TurnPromptFinished (BeginSettling 有界收尾)
+  Running --&gt; Idle : CancelRequested (置位 inbox_paused + InterruptAgent)
+  Settling --&gt; Idle : SettlingCompleted (写入 RetainedTurn + warm_agent_ready)
+  Idle --&gt; Idle : AgentOutputChunk (匹配 RetainedTurn.generation -&gt; 归属上一已释放回合)</mermaid>
+  <ul id="JdV2Nlxd">
+    <li><b>代际号（<code>Generation</code>）天然免疫迟到竞态</b>：每个新回合递增 <code>Generation(u64)</code>，过期的流式块或收尾通知因代际不匹配自动成为空操作，无需散落布尔锁。</li>
+    <li><b>已释放回合精准保留（<code>RetainedTurn</code>）</b>：<code>SettlingCompleted</code> 回到 <code>Idle</code> 后保留上一轮冻结的 <code>RetainedTurn</code>，仅供同一存活 Agent 在 <code>end_turn</code> 之后继续产出的原生后台子任务输出归属；而 Schedules 与命中的 Automations 一律作为全新 <code>TurnId</code> 进入收件箱，绝不污染旧回合。</li>
+  </ul>
+  <hr id="r8731cFZ" />
+  <h2 id="3iYy8_3C">四、 向下三平面端口契约（数据平面 · 单写者存储 · 本机执行）</h2>
+  <table id="sHfAjKPK">
+    <tr>
+      <th>
+        <p>所属模块</p>
+      </th>
+      <th>
+        <p>Trait 名称</p>
+      </th>
+      <th>
+        <p>核心方法与职责</p>
+      </th>
+      <th>
+        <p>关键架构不变量</p>
+      </th>
+    </tr>
+    <tr>
+      <td>
+        <p><code>data_plane.rs</code></p>
+      </td>
+      <td>
+        <p><code>EnginePort</code></p>
+      </td>
+      <td>
+        <p><code>read_workspace_security_mode</code>、<code>read_session_meta</code>、<code>upsert_session_meta</code>、<code>promote_next_queued_draft</code>、<code>set_message_queue_paused</code>、<code>install_workspace_epoch_keys</code></p>
+      </td>
+      <td>
+        <p>CRDT 同步与内容加解密全归独立 <code>loro-repo-engine</code> 进程；<b>未晋升的排队草稿只留在数据平面文档中</b>，仅在晋升瞬间取出写入收件箱。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>data_plane.rs</code></p>
+      </td>
+      <td>
+        <p><code>HistoryPort</code></p>
+      </td>
+      <td>
+        <p><code>is_user_turn_durable</code>、<code>read_session_turns</code>、<code>upsert_turn_record</code></p>
+      </td>
+      <td>
+        <p>屏蔽 <code>Roost</code> 与原生引擎历史差异；助手回复写盘前统一通过 <code>is_user_turn_durable</code> 等待用户消息落盘。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>storage.rs</code></p>
+      </td>
+      <td>
+        <p><code>StorageLeasePort</code></p>
+      </td>
+      <td>
+        <p><code>mode() -&gt; StorageOnly | OnlineHost</code>、<code>yield_requested()</code></p>
+      </td>
+      <td>
+        <p>一次性离线命令以 <code>StorageOnly</code> 拿本机存储锁但不占在线 Host 租约；正式守护进程上线时先排空让位再开库。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>storage.rs</code></p>
+      </td>
+      <td>
+        <p><code>InboxStorePort</code></p>
+      </td>
+      <td>
+        <p><code>admit_turn</code>、<code>claim_next_runnable</code>、<code>update_submission_stage</code>、<code>set_inbox_paused</code></p>
+      </td>
+      <td>
+        <p><b>唯一准入真相源</b>（驻留 <code>operations.sqlite3</code>）：统一去重普通发送、RPC 快路径、晋升队列项、子任务回执批次、Automation 与 Schedule，维护 <code>Prepared → Submitting → Submitted/Unknown → Settled</code> 围栏。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>storage.rs</code></p>
+      </td>
+      <td>
+        <p><code>DiffStorePort</code><br /><code>ScheduleLedgerPort</code><br /><code>AutomationStorePort</code></p>
+      </td>
+      <td>
+        <p><code>capture_turn_snapshot / read_turn_diff</code>、<code>read_planning_cursor / commit_planned_slot / transition_run</code>、<code>list_programs / erase_workspace_store</code></p>
+      </td>
+      <td>
+        <p>保留现有 SQLite 文件名与表结构（<code>schedules.sqlite</code> 仅存本机执行账本 <code>schedule_cursors</code> / <code>schedule_runs</code>，Schedule 定义与确认卡归属数据平面 <code>ScheduleRepoPort</code>），支持新旧版本共享目录无损交接。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>execution.rs</code></p>
+      </td>
+      <td>
+        <p><code>ArtifactRegistryPort</code><br /><code>AcpLauncherPort</code><br /><code>AcpSessionPort</code></p>
+      </td>
+      <td>
+        <p><code>ensure_installed</code>、<code>launch_session</code>、<code>send_prompt / steer / reply_permission / cancel_turn / terminate</code></p>
+      </td>
+      <td>
+        <p>剥离后的 5 个 TS ACP 适配器走统一制品安装与标准 <code>ACP over stdio</code>；<code>steer</code> 显式返回 <code>Applied | NotApplied | Unknown</code> 三态。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>execution.rs</code></p>
+      </td>
+      <td>
+        <p><code>WorktreePort</code><br /><code>PtyPort</code></p>
+      </td>
+      <td>
+        <p><code>acquire_worktree / release_worktree</code>、<code>open_pty / resize_pty / close_pty</code></p>
+      </td>
+      <td>
+        <p>Worktree 与 PTY 作为机器级资源租约出借给会话，会话归档或异常退出时确定性回收。</p>
+      </td>
+    </tr>
+  </table>
+  <hr id="6XQ3VvXC" />
+  <h2 id="QMOmAFMh">五、 企业私有化自部署（Self-Hosted）契约详解（<code>lody-ports::backend</code>）</h2>
+  <p id="uz0hyGJR">为了彻底告别旧版编译期写死云地址、用 <code>.convex.cloud</code> 字符串替换推导鉴权域名、以及绑死单一云存储/GitHub 的历史包袱，<code>backend.rs</code> 将官方云与企业私有化统一收敛为<b>同一套单 URL 自动发现 + 六大厂商无关子端口</b>：</p>
+  <mermaid id="NmFyUtpV">sequenceDiagram
+  autonumber
+  actor User as 企业开发者 / 运维
+  participant CLI as lody (connected 构建)
+  participant Server as 企业自部署实例&lt;br/&gt;https://lody.corp.internal
+  participant FS as 本机隔离目录&lt;br/&gt;~/.lody/profiles/corp-intranet-eu/
+
+  User-&gt;&gt;CLI: lody login --server https://lody.corp.internal
+  CLI-&gt;&gt;Server: GET /.well-known/lody-configuration (支持自定义根证书 CA / 企业代理)
+  Server--&gt;&gt;CLI: WellKnownDiscoveryDocument (显式下发 API / OIDC / Streams / Blob / Mirror / Capabilities)
+  CLI-&gt;&gt;Server: 执行声明的 AuthMethod (OIDC Device+PKCE 或 PAT)
+  CLI-&gt;&gt;FS: 写入 BackendProfile 并隔离 SQLite / Roost / 凭证 / E2EE 锚点
+  Note over CLI,FS: compose_runtime 自动按 BackendProfile 装配&lt;br/&gt;内网制品镜像 + 协商式对象上传 + 企业代码托管 + License 软降级</mermaid>
+  <h3 id="DsgCi45e">1. 发现文档与网络策略模型（<code>WellKnownDiscoveryDocument</code> &amp; <code>BackendProfile</code>）</h3>
+  <codeblock id="5E0AE3pI" lang="rust">pub struct WellKnownDiscoveryDocument {
+    pub schema_version: u32,
+    pub instance_id: String,
+    pub control_api_url: String,
+    pub auth_issuer_url: String,
+    pub auth_methods: Vec&lt;AuthMethodDescriptor&gt;, // OidcDevicePkce | BrowserTokenExchange | PersonalAccessToken
+    pub streams_sync_url: Option&lt;String&gt;,
+    pub blob_service_url: Option&lt;String&gt;,
+    pub artifact_mirror_url: Option&lt;String&gt;,
+    pub preview_tunnel_url: Option&lt;String&gt;,
+    pub iroh_relays: Option&lt;IrohRelaySet&gt;,
+    pub capabilities: CapabilitySet,
+}
+
+pub struct BackendNetworkPolicy {
+    pub custom_ca_bundle_path: Option&lt;PathBuf&gt;,
+    pub https_proxy: Option&lt;String&gt;,
+    pub no_proxy: Vec&lt;String&gt;,
+    pub connect_timeout_ms: Option&lt;u64&gt;,
+}</codeblock>
+  <h3 id="bVf9sjcW">2. 六大厂商无关后端端口对照表</h3>
+  <table id="dYoxuFDg">
+    <tr>
+      <th>
+        <p>后端子端口</p>
+      </th>
+      <th>
+        <p>官方公有云典型实现</p>
+      </th>
+      <th>
+        <p>企业私有化自部署（Self-Hosted）无缝兼容方式</p>
+      </th>
+    </tr>
+    <tr>
+      <td>
+        <p><code>ControlPlanePort</code></p>
+      </td>
+      <td>
+        <p>Lody 官方控制面 + 托管账号登录 + Durable Streams 令牌</p>
+      </td>
+      <td>
+        <p>对接企业自建控制面与内部 Keycloak / Okta / Dex OIDC（<code>OidcDevicePkce</code>）或 PAT，支持内网自签根证书与正向代理。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>BlobTransferPort</code></p>
+      </td>
+      <td>
+        <p>Cloudflare R2 预签名 <code>SingleStreamPut</code> / <code>PresignedMultipart</code></p>
+      </td>
+      <td>
+        <p>通过 <code>negotiate_upload</code> 动态协商：有内网 S3 / MinIO / RustFS 时走预签名直传；无独立对象存储时走 <code>GatewayStagedChunks</code> 由服务端经 OpenDAL 落本地盘或 NAS。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>ArtifactRegistryPort</code></p>
+      </td>
+      <td>
+        <p><code>PublicDefault</code>（<code>https://artifacts.lody.ai</code>）</p>
+      </td>
+      <td>
+        <p>自动读取发现文档中的 <code>artifact_mirror_url</code> 切换为企业内网 <code>Mirror</code>，或在纯断网气隙机房挂载 <code>OfflineBundle</code> 目录校验 SHA-256 安装 ACP 适配器。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>ScmProviderPort</code></p>
+      </td>
+      <td>
+        <p><code>ScmProviderKind::GitHubCloud</code></p>
+      </td>
+      <td>
+        <p>原生支持 <code>GitHubEnterprise { base_url }</code>、<code>GitLab { base_url }</code>、<code>Gitea { base_url }</code> 与纯 SSH/HTTPS <code>GenericGit</code>。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>TunnelProviderPort</code></p>
+      </td>
+      <td>
+        <p>公网受控预览隧道 + TURN/ICE 凭据</p>
+      </td>
+      <td>
+        <p>可对接企业内网反向代理网关；若自部署实例未启用远端隧道（<code>tunnel_provider() == None</code>），自动退回纯本机 Loopback 预览代理。</p>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <p><code>EntitlementPort</code></p>
+      </td>
+      <td>
+        <p>SaaS 订阅计划配额</p>
+      </td>
+      <td>
+        <p>支持离线验签企业 License（<code>Active</code> → <code>GracePeriod</code> 宽限期提醒 → <code>ExpiredReadOnly</code> 只读软降级，永不锁死本地历史与导出）。</p>
+      </td>
+    </tr>
+  </table>
+  <hr id="p8T_P1Wx" />
+  <h2 id="DCp-5K9M">六、 外部黑盒对照靶场契约（<code>lody-conformance</code> &amp; <code>lody-scripted-acp</code>）</h2>
+  <p id="CFxM-iNZ">为确保后续填充每个接口的真实实现时始终与现有 Node CLI 保持<b>业务语义一致</b>且不锁死内部细节，<code>crates/conformance</code> 与 <code>crates/scripted-acp</code> 构成了独立的外部裁判层：</p>
+  <ul id="bEoZyZoF" type="check">
+    <li checked="true"><b>纯外部进程边界驱动</b>：仅调用公开 CLI 命令与本地 Unix Socket（<code>probe.sock</code> / <code>control.sock</code>），零内部模块引用。</li>
+    <li checked="true"><b>业务摘要归一化比对（<code>assert_business_equivalent</code>）</b>：自动剥离随机 UUID、墙钟时间戳与流式分块边界，只比对项目列表、多轮问答正文、工具审批结果、回合终态（<code>finished / canceled / failed</code>）与 Worktree 隔离效果。</li>
+    <li checked="true"><b>零 <code>sleep</code> 确定性栅栏</b>：<code>lody-scripted-acp</code> 通过文件栅栏精确控制回合挂起与释放，并在共享 <code>LODY_DATA_DIR</code> 上执行 <code>Node → Rust → Node</code> 热接力回滚测试。</li>
+  </ul>
+</doc>
+

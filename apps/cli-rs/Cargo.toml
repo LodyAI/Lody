@@ -1,0 +1,60 @@
+[workspace]
+resolver = "2"
+members = [
+  "bins/lody",
+  "crates/env",
+  "crates/ports",
+  "crates/kernel",
+  "crates/app",
+  "crates/runtime",
+  "crates/entry",
+  "crates/sqlite",
+  "crates/acp",
+  "crates/sandbox",
+  "crates/worktree",
+  "crates/engine",
+  "crates/backend",
+  "crates/scripted-acp",
+  "crates/conformance",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.91"
+publish = false
+license = "Apache-2.0"
+
+[workspace.dependencies]
+lody-env = { path = "crates/env" }
+lody-ports = { path = "crates/ports" }
+lody-kernel = { path = "crates/kernel" }
+lody-app = { path = "crates/app" }
+lody-runtime = { path = "crates/runtime" }
+lody-entry = { path = "crates/entry" }
+lody-sqlite = { path = "crates/sqlite" }
+lody-acp = { path = "crates/acp" }
+lody-sandbox = { path = "crates/sandbox" }
+lody-worktree = { path = "crates/worktree" }
+lody-engine = { path = "crates/engine" }
+lody-backend = { path = "crates/backend" }
+lody-scripted-acp = { path = "crates/scripted-acp" }
+
+axum = "=0.8.9"
+base64 = "=0.23.1"
+chrono = { version = "=0.4.45", default-features = false, features = ["std"] }
+chrono-tz = { version = "=0.10.4", default-features = false, features = ["std"] }
+clap = { version = "=4.6.7", features = ["derive"] }
+fastcdc = "=5.0.0"
+fd-lock = "=4.0.4"
+flate2 = "=1.1.11"
+ignore = "=0.4.35"
+portable-pty = "=0.9.0"
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "json"] }
+rquickjs = { version = "=0.15.0", default-features = false, features = ["std", "futures", "parallel"] }
+rusqlite = { version = "=0.41.1", features = ["bundled"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+sha2 = "=0.11.1"
+tempfile = "=3.27.0"
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "sync", "time", "macros", "net", "io-util", "signal", "process"] }
+zstd = "=0.14.5"

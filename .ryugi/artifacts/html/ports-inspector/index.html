@@ -1,0 +1,1297 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="ryugi-ui" content="1" />
+    <meta name="ryugi-icons" content="1" />
+    <title>apps/cli-rs 接口、Trait 与自部署装配探索器</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f8fafc;
+        --surface: #ffffff;
+        --surface-muted: #f1f5f9;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --text-secondary: #475569;
+        --accent: #2563eb;
+        --accent-soft: rgba(37, 99, 235, 0.1);
+        --success: #16a34a;
+        --success-soft: rgba(22, 163, 74, 0.12);
+        --warn: #d97706;
+        --warn-soft: rgba(217, 119, 6, 0.12);
+        --danger: #dc2626;
+        --danger-soft: rgba(220, 38, 38, 0.12);
+        --purple: #7c3aed;
+        --purple-soft: rgba(124, 58, 237, 0.12);
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          --bg: #0b0f19;
+          --surface: #131a2a;
+          --surface-muted: #1c2539;
+          --border: #28354f;
+          --text: #f1f5f9;
+          --text-secondary: #94a3b8;
+          --accent: #60a5fa;
+          --accent-soft: rgba(96, 165, 250, 0.16);
+          --success: #4ade80;
+          --success-soft: rgba(74, 222, 128, 0.15);
+          --warn: #fbbf24;
+          --warn-soft: rgba(251, 191, 36, 0.15);
+          --danger: #f87171;
+          --danger-soft: rgba(248, 113, 113, 0.15);
+          --purple: #c084fc;
+          --purple-soft: rgba(192, 132, 252, 0.16);
+        }
+      }
+      html[data-theme='dark'] {
+        --bg: #0b0f19;
+        --surface: #131a2a;
+        --surface-muted: #1c2539;
+        --border: #28354f;
+        --text: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --accent: #60a5fa;
+        --accent-soft: rgba(96, 165, 250, 0.16);
+        --success: #4ade80;
+        --success-soft: rgba(74, 222, 128, 0.15);
+        --warn: #fbbf24;
+        --warn-soft: rgba(251, 191, 36, 0.15);
+        --danger: #f87171;
+        --danger-soft: rgba(248, 113, 113, 0.15);
+        --purple: #c084fc;
+        --purple-soft: rgba(192, 132, 252, 0.16);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 22px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'PingFang SC', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.55;
+      }
+      .shell {
+        max-width: 1260px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .topbar {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        gap: 14px;
+        padding: 16px 20px;
+        border-radius: 14px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+      }
+      .title-box h1 {
+        margin: 0;
+        font-size: 19px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .title-box p {
+        margin: 4px 0 0;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+      .controls-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+      }
+      .view-panel {
+        display: none;
+      }
+      .view-panel.active {
+        display: block;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 18px;
+      }
+      .section-label {
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
+        margin-bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11.5px;
+        font-weight: 600;
+        font-family: var(--mono);
+      }
+      .badge-accent {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+      .badge-success {
+        background: var(--success-soft);
+        color: var(--success);
+      }
+      .badge-warn {
+        background: var(--warn-soft);
+        color: var(--warn);
+      }
+      .badge-danger {
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+      .badge-purple {
+        background: var(--purple-soft);
+        color: var(--purple);
+      }
+      .traits-layout {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        gap: 18px;
+      }
+      @media (max-width: 920px) {
+        .traits-layout {
+          grid-template-columns: 1fr;
+        }
+      }
+      .filter-bar {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .search-input {
+        width: 100%;
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--surface-muted);
+        color: var(--text);
+        font-size: 13px;
+      }
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .pill-btn {
+        border: 1px solid var(--border);
+        background: var(--surface-muted);
+        color: var(--text-secondary);
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .pill-btn.active {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .trait-list {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        max-height: 600px;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+      .trait-item {
+        text-align: left;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--surface-muted);
+        color: var(--text);
+        cursor: pointer;
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+      .trait-item:hover {
+        border-color: var(--accent);
+      }
+      .trait-item.selected {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+      }
+      .trait-item-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+      .trait-item-top code {
+        font-family: var(--mono);
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .trait-item p {
+        margin: 4px 0 0;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .code-box {
+        margin: 12px 0;
+        padding: 14px 16px;
+        border-radius: 10px;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        line-height: 1.6;
+        overflow-x: auto;
+        white-space: pre;
+        border: 1px solid #1e293b;
+      }
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin: 12px 0;
+      }
+      @media (max-width: 680px) {
+        .meta-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .meta-cell {
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        font-size: 12.5px;
+      }
+      .meta-cell strong {
+        display: block;
+        font-size: 11.5px;
+        color: var(--text-secondary);
+        margin-bottom: 3px;
+      }
+      .layer-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .layer-band {
+        display: grid;
+        grid-template-columns: 190px 1fr;
+        gap: 14px;
+        align-items: center;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+      }
+      @media (max-width: 760px) {
+        .layer-band {
+          grid-template-columns: 1fr;
+        }
+      }
+      .crate-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .crate-node {
+        padding: 9px 12px;
+        border-radius: 10px;
+        border: 1.5px solid var(--border);
+        background: var(--surface-muted);
+        cursor: pointer;
+        min-width: 170px;
+        flex: 1;
+        text-align: left;
+        color: var(--text);
+        transition: all 0.15s ease;
+      }
+      .crate-node code {
+        font-family: var(--mono);
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .crate-node small {
+        display: block;
+        margin-top: 3px;
+        font-size: 11.5px;
+        color: var(--text-secondary);
+      }
+      .crate-node.is-selected {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+      .crate-node.is-dep {
+        border-color: var(--success);
+        background: var(--success-soft);
+      }
+      .crate-node.is-caller {
+        border-color: var(--purple);
+        background: var(--purple-soft);
+      }
+      .crate-node.is-dimmed {
+        opacity: 0.42;
+      }
+      .sim-layout {
+        display: grid;
+        grid-template-columns: 350px 1fr;
+        gap: 18px;
+      }
+      @media (max-width: 920px) {
+        .sim-layout {
+          grid-template-columns: 1fr;
+        }
+      }
+      .mode-btn {
+        width: 100%;
+        text-align: left;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--surface-muted);
+        color: var(--text);
+        cursor: pointer;
+        margin-bottom: 8px;
+      }
+      .mode-btn.active {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+      .mode-btn strong {
+        display: block;
+        font-size: 13px;
+      }
+      .mode-btn span {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .cap-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .policy-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+        font-size: 12.5px;
+      }
+      .policy-table th,
+      .policy-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+      }
+      .policy-table th {
+        color: var(--text-secondary);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="title-box">
+          <h1>
+            <ryugi-icon name="layers" size="20"></ryugi-icon>
+            <code>apps/cli-rs</code> 接口、Trait 与自部署装配探索器
+          </h1>
+          <p>涵盖 20 个核心 Trait + 纯函数 SessionKernel + 13 个 Workspace Crates 编译隔离与私有化自部署模拟</p>
+        </div>
+        <div class="controls-row">
+          <ryugi-segmented id="main-tab" value="traits">
+            <ryugi-segment value="traits">21 项接口图鉴</ryugi-segment>
+            <ryugi-segment value="graph">单向依赖沙盘</ryugi-segment>
+            <ryugi-segment value="selfhost">自部署与鉴权模拟</ryugi-segment>
+          </ryugi-segmented>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px">
+            深色模式
+            <ryugi-switch id="dark-toggle"></ryugi-switch>
+          </label>
+        </div>
+      </header>
+
+      <section id="panel-traits" class="view-panel active">
+        <div class="traits-layout">
+          <div class="card">
+            <div class="section-label">
+              <span>选择抽象契约</span>
+              <span id="trait-count">21 项</span>
+            </div>
+            <div class="filter-bar">
+              <input
+                id="trait-search"
+                class="search-input"
+                type="search"
+                placeholder="搜索 Trait、方法名或自部署特性 (如 OIDC / Upload)..."
+              />
+              <div id="category-pills" class="pill-row"></div>
+            </div>
+            <div id="trait-list" class="trait-list"></div>
+          </div>
+          <div id="trait-detail" class="card"></div>
+        </div>
+      </section>
+
+      <section id="panel-graph" class="view-panel">
+        <div class="card" style="margin-bottom:14px">
+          <div class="section-label">
+            <span>点击任意 Crate 查看编译期允许的依赖方向（Cargo.toml 物理强制）</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <span class="badge badge-accent">当前选中</span>
+              <span class="badge badge-purple">上游调用方 (Callers)</span>
+              <span class="badge badge-success">允许依赖的下游 (Deps)</span>
+            </div>
+          </div>
+          <div id="crate-layers" class="layer-stack"></div>
+        </div>
+        <div id="crate-detail" class="card"></div>
+      </section>
+
+      <section id="panel-selfhost" class="view-panel">
+        <div class="sim-layout">
+          <div class="card">
+            <div class="section-label"><span>1. 选择编译形态与部署环境</span></div>
+            <div id="deploy-modes"></div>
+            <div class="section-label" style="margin-top:16px"><span>2. 选择调用方身份 (VerifiedPrincipal)</span></div>
+            <ryugi-segmented id="caller-kind" value="local">
+              <ryugi-segment value="local">LocalHost</ryugi-segment>
+              <ryugi-segment value="connected">ConnectedMember</ryugi-segment>
+              <ryugi-segment value="encrypted">EncryptedMember</ryugi-segment>
+            </ryugi-segmented>
+          </div>
+          <div id="sim-output" class="card"></div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const CONTRACTS = [
+        {
+          id: 'ApplicationService',
+          category: 'app',
+          categoryLabel: '向上应用入口',
+          crateName: 'lody-app',
+          file: 'apps/cli-rs/crates/app/src/lib.rs',
+          implBy: 'lody-runtime::DaemonRuntime',
+          summary: '全进程唯一的命令与查询入口；CLI、mcp-stdio、本地 IPC、远端 RPC 均为它的薄投影。',
+          selfHostNote: '内建 enforce_command_policy：统一拦截非本机配置变更，并在企业授权 ExpiredReadOnly 时仅阻断新远端协作派发、保留本地读写导出。',
+          signature: `pub trait ApplicationService: Send + Sync {
+    fn execute(&self, caller: &VerifiedPrincipal, cmd: AppCommand) -> PortResult<AppResponse>;
+    fn query(&self, caller: &VerifiedPrincipal, query: AppQuery) -> PortResult<AppResponse>;
+}`
+        },
+        {
+          id: 'SessionKernel::step',
+          category: 'kernel',
+          categoryLabel: '纯状态机内核',
+          crateName: 'lody-kernel',
+          file: 'apps/cli-rs/crates/kernel/src/lib.rs',
+          implBy: '纯确定性函数（零 I/O、零时钟、零 async）',
+          summary: '会话与回合生命周期纯状态转移函数：Idle → Preparing → Running → Settling → Idle。',
+          selfHostNote: '完全与云端/自部署/加密实现解耦；只处理已验签准入的输入，支持跨语言事件流逐步对拍。',
+          signature: `pub fn step(
+    state: SessionState,
+    event: KernelEvent,
+) -> (SessionState, Vec<KernelAction>);`
+        },
+        {
+          id: 'EnginePort',
+          category: 'data',
+          categoryLabel: '数据与历史',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/data_plane.rs',
+          implBy: 'lody-engine::RepoEngineClient',
+          summary: '对接独立 loro-repo-engine 宿主进程：读写工作区安全模式、SessionMeta、晋升排队草稿及安装 E2EE Epoch 密钥。',
+          selfHostNote: '同步传输（WebSocket / SSE / Long-poll）全由外部引擎根据 ControlPlanePort 签发的 StreamsSyncToken 驱动，lodyd 不绑死任何云厂商。',
+          signature: `pub trait EnginePort: Send + Sync {
+    fn is_connected(&self) -> bool;
+    fn read_workspace_security_mode(&self, workspace_id: &WorkspaceId) -> PortResult<WorkspaceSecurityMode>;
+    fn read_session_meta(&self, workspace_id: &WorkspaceId, session_id: &SessionId) -> PortResult<Option<SessionMetaSnapshot>>;
+    fn upsert_session_meta(&self, meta: &SessionMetaSnapshot) -> PortResult<()>;
+    fn promote_next_queued_draft(&self, workspace_id: &WorkspaceId, session_id: &SessionId) -> PortResult<Option<QueuedDraftItem>>;
+    fn set_message_queue_paused(&self, workspace_id: &WorkspaceId, session_id: &SessionId, paused: bool) -> PortResult<()>;
+    fn install_workspace_epoch_keys(&self, workspace_id: &WorkspaceId, keys: &[EpochKeyMaterial]) -> PortResult<()>;
+}`
+        },
+        {
+          id: 'HistoryPort',
+          category: 'data',
+          categoryLabel: '数据与历史',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/data_plane.rs',
+          implBy: 'lody-engine::RoostHistoryStore',
+          summary: '会话回合历史读写契约，并存兼容 Roost 与原生数据面历史后端，包含用户消息落盘栅栏检查。',
+          selfHostNote: '本地优先存储于 profile 隔离目录下，离线或自部署授权到期时始终可读可导出。',
+          signature: `pub trait HistoryPort: Send + Sync {
+    fn backend_name(&self) -> &'static str;
+    fn is_user_turn_durable(&self, workspace_id: &WorkspaceId, session_id: &SessionId, turn_id: &TurnId) -> PortResult<bool>;
+    fn read_session_turns(&self, workspace_id: &WorkspaceId, session_id: &SessionId) -> PortResult<Vec<HistoryTurnRecord>>;
+    fn upsert_turn_record(&self, workspace_id: &WorkspaceId, session_id: &SessionId, record: &HistoryTurnRecord) -> PortResult<()>;
+}`
+        },
+        {
+          id: 'StorageLeasePort',
+          category: 'storage',
+          categoryLabel: '本地单写者存储',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/storage.rs',
+          implBy: 'lody-sqlite (文件锁 / 互斥租约)',
+          summary: '协调一次性命令拉起的 StorageOnly 实例与正式上线 OnlineHost 实例之间的排空让位，杜绝双进程并发开库。',
+          selfHostNote: '按有效数据目录（含自部署 profiles/<id>）独立加锁，互不干扰。',
+          signature: `pub trait StorageLeasePort: Send + Sync {
+    fn mode(&self) -> StorageLeaseMode; // StorageOnly | OnlineHost
+    fn yield_requested(&self) -> bool;
+}`
+        },
+        {
+          id: 'InboxStorePort',
+          category: 'storage',
+          categoryLabel: '本地单写者存储',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/storage.rs',
+          implBy: 'lody-sqlite::SqliteInboxStore (operations.sqlite3)',
+          summary: '全系统唯一的已激活回合准入表（消除双真相源）：统一承载幂等去重、人类抢占自动批次、6 态提交围栏与 pauseInbox。',
+          selfHostNote: '保留原 operations.sqlite3 文件名与表结构，支持 Node 与 Rust 守护进程无损双向回滚。',
+          signature: `pub trait InboxStorePort: Send + Sync {
+    fn store_name(&self) -> &'static str;
+    fn admit_turn(&self, input: &AdmittedTurnInput) -> PortResult<AdmissionVerdict>;
+    fn claim_next_runnable(&self, workspace_id: &WorkspaceId, session_id: &SessionId) -> PortResult<Option<AdmittedTurnInput>>;
+    fn update_submission_stage(&self, workspace_id: &WorkspaceId, session_id: &SessionId, turn_id: &TurnId, stage: SubmissionStage) -> PortResult<()>;
+    fn set_inbox_paused(&self, workspace_id: &WorkspaceId, session_id: &SessionId, paused: bool) -> PortResult<()>;
+}`
+        },
+        {
+          id: 'DiffStorePort',
+          category: 'storage',
+          categoryLabel: '本地单写者存储',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/storage.rs',
+          implBy: 'lody-worktree::LocalTurnDiffStore',
+          summary: '单轮内容寻址（FastCDC）代码快照捕获与按回合 Diff 摘要读取。',
+          selfHostNote: '纯本地计算与存储，零云端依赖。',
+          signature: `pub trait DiffStorePort: Send + Sync {
+    fn capture_turn_snapshot(&self, session_id: &SessionId, turn_id: &TurnId, workdir: &Path) -> PortResult<TurnDiffSummary>;
+    fn read_turn_diff(&self, session_id: &SessionId, turn_id: &TurnId) -> PortResult<Option<TurnDiffSummary>>;
+}`
+        },
+        {
+          id: 'ScheduleStorePort',
+          category: 'storage',
+          categoryLabel: '本地单写者存储',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/storage.rs',
+          implBy: 'lody-sqlite (schedules.sqlite)',
+          summary: '持久化管理定时任务（cron），触发时生成带独立 TurnId 与冻结作者身份的新回合进入 InboxStorePort。',
+          selfHostNote: '保留 schedules.sqlite 原文件名，按 profile 目录隔离。',
+          signature: `pub trait ScheduleStorePort: Send + Sync {
+    fn list_schedules(&self, workspace_id: &WorkspaceId) -> PortResult<Vec<ScheduleRecord>>;
+    fn upsert_schedule(&self, record: &ScheduleRecord) -> PortResult<()>;
+}`
+        },
+        {
+          id: 'AutomationStorePort',
+          category: 'storage',
+          categoryLabel: '本地单写者存储',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/storage.rs',
+          implBy: 'lody-sqlite (automations/<workspace>.sqlite)',
+          summary: '按工作区分库存储 Automation 脚本源码（供 rquickjs 沙箱求值），支持 E2EE 成员移除时按单工作区物理擦除。',
+          selfHostNote: '内嵌 rquickjs 执行，自部署环境无需额外部署外部脚本服务。',
+          signature: `pub trait AutomationStorePort: Send + Sync {
+    fn list_programs(&self, workspace_id: &WorkspaceId) -> PortResult<Vec<AutomationProgramRecord>>;
+    fn erase_workspace_store(&self, workspace_id: &WorkspaceId) -> PortResult<()>;
+}`
+        },
+        {
+          id: 'ArtifactRegistryPort',
+          category: 'exec',
+          categoryLabel: '本机执行与隔离',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/execution.rs',
+          implBy: 'lody-acp::ManagedArtifactInstaller',
+          summary: '下载并 SHA-256 校验外部受管运行时制品（剥离后的 5 个 TS ACP 适配器、引擎二进制等）。',
+          selfHostNote: '原生支持三模制品源：PublicDefault、企业内网 Mirror（自动从 /.well-known 的 artifact_mirror_url 注入）与气隙 OfflineBundle！',
+          signature: `pub trait ArtifactRegistryPort: Send + Sync {
+    fn source(&self) -> &ManagedArtifactSource;
+    fn ensure_installed(&self, artifact_id: &str, version: &str) -> PortResult<InstalledArtifact>;
+}`
+        },
+        {
+          id: 'AcpLauncherPort',
+          category: 'exec',
+          categoryLabel: '本机执行与隔离',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/execution.rs',
+          implBy: 'lody-acp::StdioAcpLauncher',
+          summary: '受机器级并发信号量保护的 ACP 子进程启动器，统一挂载内置 MCP Server 与环境变量。',
+          selfHostNote: '通过标准 ACP over stdio 调用任意外部或内网镜像分发的 Agent 适配器。',
+          signature: `pub trait AcpLauncherPort: Send + Sync {
+    fn max_concurrent_starts(&self) -> usize;
+    fn launch_session(&self, spec: &AcpSpawnSpec) -> PortResult<Box<dyn AcpSessionPort>>;
+}`
+        },
+        {
+          id: 'AcpSessionPort',
+          category: 'exec',
+          categoryLabel: '本机执行与隔离',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/execution.rs',
+          implBy: 'lody-acp (stdio JSON-RPC + OS 进程组/JobObject)',
+          summary: '单个存活 ACP 会话控制句柄：发送 Prompt、Steer 三态插话、答复权限/提问、取消回合与进程树终止。',
+          selfHostNote: '纯本机进程间协议，与后端部署方式正交。',
+          signature: `pub trait AcpSessionPort: Send + Sync {
+    fn acp_session_id(&self) -> &str;
+    fn send_prompt(&self, prompt_text: &str) -> PortResult<()>;
+    fn steer(&self, prompt_text: &str) -> PortResult<SteerVerdict>; // Applied | NotApplied | Unknown
+    fn reply_permission(&self, decision: &PermissionDecision) -> PortResult<()>;
+    fn cancel_turn(&self) -> PortResult<()>;
+    fn terminate(&self) -> PortResult<()>;
+}`
+        },
+        {
+          id: 'WorktreePort',
+          category: 'exec',
+          categoryLabel: '本机执行与隔离',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/execution.rs',
+          implBy: 'lody-worktree::GitWorktreeManager',
+          summary: '管理隔离会话的 Git Worktree 租约申请与归档释放。',
+          selfHostNote: '凭证代理层与 ScmProviderPort 解耦，兼容 GitHub Enterprise / GitLab / Gitea 或本机 SSH。',
+          signature: `pub trait WorktreePort: Send + Sync {
+    fn supports_git_worktree(&self) -> bool;
+    fn acquire_worktree(&self, project_id: &LocalProjectId, project_root: &Path, session_id: &SessionId, base_branch: Option<&str>) -> PortResult<WorktreeLease>;
+    fn release_worktree(&self, lease: &WorktreeLease) -> PortResult<()>;
+}`
+        },
+        {
+          id: 'PtyPort',
+          category: 'exec',
+          categoryLabel: '本机执行与隔离',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/execution.rs',
+          implBy: 'lody-acp / OS PTY 实现',
+          summary: '桌面与远端终端伪终端（PTY）打开、窗口尺寸调整与回收接口。',
+          selfHostNote: '机器级租约管理，保证会话销毁时无僵尸 shell 残留。',
+          signature: `pub trait PtyPort: Send + Sync {
+    fn open_pty(&self, spec: &PtySpawnSpec) -> PortResult<()>;
+    fn resize_pty(&self, pty_id: &str, cols: u16, rows: u16) -> PortResult<()>;
+    fn close_pty(&self, pty_id: &str) -> PortResult<()>;
+}`
+        },
+        {
+          id: 'BackendPort',
+          category: 'backend',
+          categoryLabel: '联网与自部署',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/backend.rs',
+          implBy: 'lody-backend::ConnectedBackend (仅 connected feature 编译)',
+          summary: '联网与私有化自部署总装配接口：聚合 BackendProfile、动态 CapabilitySet 与 6 个可选厂商无关子端口。',
+          selfHostNote: '核心枢纽！同一套 ConnectedBackend 通过读取 /.well-known/lody-configuration 同时服务官方公有云与任意企业自部署实例；子端口返回 None 代表该实例未开启此能力。',
+          signature: `pub trait BackendPort: Send + Sync {
+    fn profile(&self) -> &BackendProfile;
+    fn capabilities(&self) -> &CapabilitySet { &self.profile().discovery.capabilities }
+    fn control_plane(&self) -> &dyn ControlPlanePort;
+    fn blob_transfer(&self) -> Option<&dyn BlobTransferPort> { None }
+    fn scm_provider(&self) -> Option<&dyn ScmProviderPort> { None }
+    fn tunnel_provider(&self) -> Option<&dyn TunnelProviderPort> { None }
+    fn entitlement(&self) -> Option<&dyn EntitlementPort> { None }
+    fn e2ee_control(&self) -> Option<&dyn E2eeControlPort> { None }
+}`
+        },
+        {
+          id: 'ControlPlanePort',
+          category: 'backend',
+          categoryLabel: '联网与自部署',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/backend.rs',
+          implBy: 'lody-backend::HttpControlPlaneClient',
+          summary: '控制平面核心鉴权与令牌签发：校验机器访问权限、注册机器、签发 Durable Streams 同步令牌与历史读证明。',
+          selfHostNote: '配合 BackendProfile 的显式 auth_issuer_url（支持企业 OIDC/PKCE 与 PAT）及自定义根证书 CA / HTTPS 代理。',
+          signature: `pub trait ControlPlanePort: Send + Sync {
+    fn verify_machine_access(&self, check: &MachineAccessCheck) -> PortResult<MachineAccessDecision>;
+    fn register_machine(&self, workspace_id: &WorkspaceId, machine_id: &MachineId) -> PortResult<()>;
+    fn mint_streams_sync_token(&self, workspace_id: &WorkspaceId) -> PortResult<StreamsSyncToken>;
+    fn verify_session_history_read(&self, workspace_id: &WorkspaceId, machine_id: &MachineId, session_id: &SessionId, request_token: &str) -> PortResult<bool>;
+}`
+        },
+        {
+          id: 'BlobTransferPort',
+          category: 'backend',
+          categoryLabel: '联网与自部署',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/backend.rs',
+          implBy: 'lody-backend (R2 / S3 / MinIO / OpenDAL 网关)',
+          summary: '附件与大对象协商式上传接口，支持单流 PUT、预签名分片与服务端网关暂存分块三种策略。',
+          selfHostNote: '专为自部署设计：企业内网无论是接 S3/MinIO 预签名 URL，还是没有对象存储直接走网关落盘（OpenDAL fs），客户端均用同一接口自适应完成上传。',
+          signature: `pub trait BlobTransferPort: Send + Sync {
+    fn negotiate_upload(&self, req: &BlobUploadRequest) -> PortResult<NegotiatedUploadPlan>;
+    // SingleStreamPut | PresignedMultipart | GatewayStagedChunks
+}`
+        },
+        {
+          id: 'ScmProviderPort',
+          category: 'backend',
+          categoryLabel: '联网与自部署',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/backend.rs',
+          implBy: 'lody-backend (多代码托管适配器)',
+          summary: '厂商无关的代码仓库写令牌代管与 PR/MR 关联状态同步。',
+          selfHostNote: 'ScmProviderKind 原生枚举 GitHubCloud、GitHubEnterprise { base_url }、GitLab { base_url }、Gitea { base_url } 与 GenericGit。',
+          signature: `pub trait ScmProviderPort: Send + Sync {
+    fn provider_kind(&self) -> &ScmProviderKind;
+    fn issue_repo_write_token(&self, workspace_id: &WorkspaceId, repo_full_name: &str, requester: &UserId, machine_id: &MachineId) -> PortResult<ScmRepoCredential>;
+    fn associate_pull_request(&self, association: &PullRequestAssociation) -> PortResult<bool>;
+}`
+        },
+        {
+          id: 'TunnelProviderPort',
+          category: 'backend',
+          categoryLabel: '联网与自部署',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/backend.rs',
+          implBy: 'lody-backend (预览隧道鉴权与 TURN/ICE)',
+          summary: '远端 Web/设备预览控制令牌校验与短期 ICE 服务器凭据签发。',
+          selfHostNote: '自部署实例若未配置公网隧道（返回 None），自动平滑退回纯本机 Loopback 预览代理。',
+          signature: `pub trait TunnelProviderPort: Send + Sync {
+    fn verify_preview_control(&self, workspace_id: &WorkspaceId, machine_id: &MachineId, request_token: &str) -> PortResult<UserId>;
+    fn issue_ice_servers(&self, check: &MachineAccessCheck) -> PortResult<Vec<IceServerConfig>>;
+}`
+        },
+        {
+          id: 'EntitlementPort',
+          category: 'backend',
+          categoryLabel: '联网与自部署',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/backend.rs',
+          implBy: 'lody-backend (云端计费配额 / 企业离线签名 License)',
+          summary: '查询工作区授权状态：Active、GracePeriod（宽限期提示）或 ExpiredReadOnly（到期只读软降级）。',
+          selfHostNote: '铁律：allows_local_read_and_export() 恒为 true！企业 License 到期绝不锁死用户本机历史、本地会话恢复与数据导出。',
+          signature: `pub trait EntitlementPort: Send + Sync {
+    fn workspace_entitlement(&self, workspace_id: &WorkspaceId) -> PortResult<EntitlementStatus>;
+}`
+        },
+        {
+          id: 'E2eeControlPort',
+          category: 'backend',
+          categoryLabel: '联网与自部署',
+          crateName: 'lody-ports',
+          file: 'apps/cli-rs/crates/ports/src/backend.rs',
+          implBy: 'lody-backend (E2EE 控制面与可选私有 Iroh Relays)',
+          summary: '端到端加密工作区的受保护同步令牌签发与可选 Iroh 中继节点配置读取。',
+          selfHostNote: '企业自部署可配置私有内网 Iroh Relay 集群，也可设为 None 直接走内网加密 Streams RPC。',
+          signature: `pub trait E2eeControlPort: Send + Sync {
+    fn mint_encrypted_content_token(&self, workspace_id: &WorkspaceId, credential: &str) -> PortResult<StreamsSyncToken>;
+    fn iroh_relays(&self) -> Option<&IrohRelaySet>;
+}`
+        }
+      ];
+
+      const CATEGORIES = [
+        { id: 'all', label: '全部 (21)' },
+        { id: 'app', label: '应用入口 (1)' },
+        { id: 'kernel', label: '纯内核 (1)' },
+        { id: 'data', label: '数据与历史 (2)' },
+        { id: 'storage', label: '单写者存储 (5)' },
+        { id: 'exec', label: '本机执行 (5)' },
+        { id: 'backend', label: '联网与自部署 (7)' }
+      ];
+
+      const CRATES = [
+        {
+          id: 'lody',
+          layer: '组合根 (Composition Root)',
+          role: '唯一可执行文件 bins/lody；默认构建纯本地，--features connected 可选链接 lody-backend',
+          deps: ['lody-entry', 'lody-runtime', 'lody-app', 'lody-kernel', 'lody-ports', 'lody-sqlite', 'lody-acp', 'lody-worktree', 'lody-engine', 'lody-backend']
+        },
+        {
+          id: 'lody-entry',
+          layer: '协议入口投影 (Entry)',
+          role: '薄 CLI、mcp-stdio、本地 IPC (lody-mux + legacy_ipc_compat)、远端 RPC/MCP HTTP；严禁直接碰存储或内核实现',
+          deps: ['lody-app']
+        },
+        {
+          id: 'lody-runtime',
+          layer: '异步运行时外壳 (Runtime)',
+          role: '双通道 SessionActor、监管树、机器资源租约，将 lody-kernel 产出的动作桥接到 lody-ports',
+          deps: ['lody-app', 'lody-kernel', 'lody-ports']
+        },
+        {
+          id: 'lody-app',
+          layer: '唯一应用接口 (Application Interface)',
+          role: '定义 AppCommand / AppQuery / AppResponse 与 enforce_command_policy 集中鉴权及授权到期软降级',
+          deps: ['lody-kernel', 'lody-ports']
+        },
+        {
+          id: 'lody-kernel',
+          layer: '纯确定性状态机 (Kernel)',
+          role: '零 I/O、零时钟、零 async、零内部依赖！会话四阶段流转、代际过滤与保留回合归属',
+          deps: []
+        },
+        {
+          id: 'lody-ports',
+          layer: '端口与领域模型 (Ports)',
+          role: '纯 Trait 与数据结构定义（identity / error / data_plane / storage / execution / backend）；零内部依赖',
+          deps: []
+        },
+        {
+          id: 'lody-sqlite',
+          layer: '叶子实现适配器 (Implementations)',
+          role: '单写者 SQLite 连接池（保留 operations.sqlite3 统一收件箱、schedules.sqlite、automations 分库原文件名）',
+          deps: ['lody-ports']
+        },
+        {
+          id: 'lody-acp',
+          layer: '叶子实现适配器 (Implementations)',
+          role: 'ACP over stdio 客户端、进程组/JobObject 隔离与三模制品源下载校验器',
+          deps: ['lody-ports']
+        },
+        {
+          id: 'lody-worktree',
+          layer: '叶子实现适配器 (Implementations)',
+          role: 'Git Worktree 生命周期租约与 FastCDC LocalTurnDiffStore',
+          deps: ['lody-ports']
+        },
+        {
+          id: 'lody-engine',
+          layer: '叶子实现适配器 (Implementations)',
+          role: '对接独立 loro-repo-engine 宿主进程客户端 + 并存 RoostHistoryStore',
+          deps: ['lody-ports']
+        },
+        {
+          id: 'lody-backend',
+          layer: '叶子实现适配器 (仅 connected 特性链接)',
+          role: '官方云与企业自部署统一实现：/.well-known 发现、OIDC/CA、三模上传、多代码托管、Entitlement 与 E2EE',
+          deps: ['lody-ports']
+        },
+        {
+          id: 'lody-conformance',
+          layer: '外部进程黑盒靶场 (Testing)',
+          role: '仅通过外部 CLI 命令与 Unix Socket 驱动 Node / Rust 双端 A/B 对拍与共享目录热回滚',
+          deps: ['lody-scripted-acp']
+        },
+        {
+          id: 'lody-scripted-acp',
+          layer: '外部进程黑盒靶场 (Testing)',
+          role: '纯 Rust 确定性假 Agent 替身（基于显式文件栅栏，零真 sleep）',
+          deps: []
+        }
+      ];
+
+      const DEPLOY_MODES = [
+        {
+          id: 'oss-local',
+          title: '1. 默认开源本地构建 (cargo build -p lody)',
+          desc: '编译期物理裁剪 lody-backend，二进制内不含任何云端/控制面请求代码',
+          linkedBackend: false,
+          profileId: 'local',
+          dataDir: '~/.lody/',
+          artifactSource: 'PublicDefault (https://artifacts.lody.ai 或 LODY_RUNTIME_BASE_URL)',
+          uploadStrategy: '纯本地 Blob 目录（无远端上传）',
+          entitlement: '无限制（纯本机）',
+          expired: false,
+          caps: []
+        },
+        {
+          id: 'connected-idle',
+          title: '2. Connected 构建 · 未登录态 (--features connected)',
+          desc: '已链接 lody-backend，但未执行 lody login --server，组合根不构造任何联网客户端',
+          linkedBackend: true,
+          profileId: 'local',
+          dataDir: '~/.lody/',
+          artifactSource: 'PublicDefault (https://artifacts.lody.ai)',
+          uploadStrategy: '纯本地 Blob 目录（零后台云请求）',
+          entitlement: '无限制（按本地组合运行）',
+          expired: false,
+          caps: []
+        },
+        {
+          id: 'official-cloud',
+          title: '3. 官方公有云 Profile (lody login --server https://app.lody.ai)',
+          desc: '经 /.well-known 自动发现全套云服务、R2 预签名上传、GitHub App 与官方 Iroh 中继',
+          linkedBackend: true,
+          profileId: 'lody-cloud-prod',
+          dataDir: '~/.lody/profiles/lody-cloud-prod/',
+          artifactSource: 'PublicDefault (https://artifacts.lody.ai)',
+          uploadStrategy: 'SingleStreamPut / PresignedMultipart (Cloudflare R2)',
+          entitlement: 'Active',
+          expired: false,
+          caps: ['cloudSync', 'cloudAccount', 'multiWorkspace', 'billing', 'usageAnalytics', 'teamSharing', 'scmIntegration', 'remoteMachines', 'notifications', 'bugReport', 'remotePreview', 'telemetry']
+        },
+        {
+          id: 'enterprise-selfhost',
+          title: '4. 企业内网私有化自部署 (https://lody.corp.internal)',
+          desc: '企业 OIDC + 自定义内网根证书 CA + 内网制品镜像 + MinIO/OpenDAL 网关 + GitLab 私有实例',
+          linkedBackend: true,
+          profileId: 'corp-intranet-eu',
+          dataDir: '~/.lody/profiles/corp-intranet-eu/',
+          artifactSource: 'Mirror (https://artifacts.corp.internal/lody)',
+          uploadStrategy: 'GatewayStagedChunks / PresignedMultipart (内网 MinIO / OpenDAL)',
+          entitlement: 'Active (企业离线签名 License)',
+          expired: false,
+          caps: ['cloudSync', 'cloudAccount', 'multiWorkspace', 'teamSharing', 'scmIntegration', 'remoteMachines']
+        },
+        {
+          id: 'enterprise-expired',
+          title: '5. 自部署气隙环境 · License 到期软降级 (ExpiredReadOnly)',
+          desc: '离线制品包 + 企业授权过期：仅拦截新远端协作派发，本机读写、历史恢复与导出 100% 可用',
+          linkedBackend: true,
+          profileId: 'corp-airgap',
+          dataDir: '~/.lody/profiles/corp-airgap/',
+          artifactSource: 'OfflineBundle (/opt/lody/airgap-bundle)',
+          uploadStrategy: 'GatewayStagedChunks (内网网关)',
+          entitlement: 'ExpiredReadOnly (license expired)',
+          expired: true,
+          caps: ['cloudSync', 'cloudAccount', 'multiWorkspace', 'teamSharing', 'remoteMachines']
+        }
+      ];
+
+      let activeCategory = 'all';
+      let selectedContractId = CONTRACTS[0].id;
+      let selectedCrateId = 'lody-app';
+      let selectedDeployId = 'enterprise-selfhost';
+      let selectedCaller = 'local';
+
+      function escapeHtml(str) {
+        return str
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+      }
+
+      function renderPills() {
+        const box = document.getElementById('category-pills');
+        box.innerHTML = CATEGORIES.map(
+          (c) =>
+            `<button type="button" class="pill-btn ${c.id === activeCategory ? 'active' : ''}" data-cat="${c.id}">${c.label}</button>`
+        ).join('');
+        box.querySelectorAll('button').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            activeCategory = btn.dataset.cat;
+            renderPills();
+            renderTraitList();
+          });
+        });
+      }
+
+      function renderTraitList() {
+        const q = document.getElementById('trait-search').value.trim().toLowerCase();
+        const filtered = CONTRACTS.filter((item) => {
+          const catOk = activeCategory === 'all' || item.category === activeCategory;
+          const textOk =
+            !q ||
+            item.id.toLowerCase().includes(q) ||
+            item.summary.toLowerCase().includes(q) ||
+            item.selfHostNote.toLowerCase().includes(q) ||
+            item.signature.toLowerCase().includes(q);
+          return catOk && textOk;
+        });
+
+        document.getElementById('trait-count').textContent = `${filtered.length} 项`;
+        if (filtered.length > 0 && !filtered.some((x) => x.id === selectedContractId)) {
+          selectedContractId = filtered[0].id;
+        }
+
+        const listEl = document.getElementById('trait-list');
+        listEl.innerHTML = filtered
+          .map(
+            (item) => `
+            <button type="button" class="trait-item ${item.id === selectedContractId ? 'selected' : ''}" data-id="${item.id}">
+              <div class="trait-item-top">
+                <code>${escapeHtml(item.id)}</code>
+                <span class="badge badge-accent">${escapeHtml(item.crateName)}</span>
+              </div>
+              <p>${escapeHtml(item.summary)}</p>
+            </button>`
+          )
+          .join('');
+
+        listEl.querySelectorAll('.trait-item').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            selectedContractId = btn.dataset.id;
+            renderTraitList();
+            renderTraitDetail();
+          });
+        });
+
+        renderTraitDetail();
+      }
+
+      function renderTraitDetail() {
+        const item = CONTRACTS.find((x) => x.id === selectedContractId) || CONTRACTS[0];
+        const el = document.getElementById('trait-detail');
+        el.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+            <div>
+              <span class="badge badge-purple">${escapeHtml(item.categoryLabel)}</span>
+              <h2 style="margin:8px 0 4px;font-family:var(--mono);font-size:20px">${escapeHtml(item.id)}</h2>
+              <p style="margin:0;color:var(--text-secondary);font-size:13.5px">${escapeHtml(item.summary)}</p>
+            </div>
+          </div>
+          <div class="meta-grid">
+            <div class="meta-cell">
+              <strong>定义源码位置</strong>
+              <code>${escapeHtml(item.file)}</code>
+            </div>
+            <div class="meta-cell">
+              <strong>实现载体 (Implementor)</strong>
+              <code>${escapeHtml(item.implBy)}</code>
+            </div>
+          </div>
+          <div class="section-label" style="margin-top:14px"><span>Rust 契约签名</span></div>
+          <div class="code-box">${escapeHtml(item.signature)}</div>
+          <div class="meta-cell" style="border-color:var(--accent);background:var(--accent-soft)">
+            <strong style="color:var(--accent)">私有化自部署与解耦保障 (Self-Hosted & Boundary Guarantee)</strong>
+            <span>${escapeHtml(item.selfHostNote)}</span>
+          </div>
+        `;
+      }
+
+      function renderCrateGraph() {
+        const layers = [
+          '组合根 (Composition Root)',
+          '协议入口投影 (Entry)',
+          '异步运行时外壳 (Runtime)',
+          '唯一应用接口 (Application Interface)',
+          '纯确定性状态机 (Kernel)',
+          '端口与领域模型 (Ports)',
+          '叶子实现适配器 (Implementations)',
+          '叶子实现适配器 (仅 connected 特性链接)',
+          '外部进程黑盒靶场 (Testing)'
+        ];
+
+        const current = CRATES.find((c) => c.id === selectedCrateId) || CRATES[0];
+        const callers = CRATES.filter((c) => c.deps.includes(current.id)).map((c) => c.id);
+
+        const stackEl = document.getElementById('crate-layers');
+        stackEl.innerHTML = layers
+          .map((layerName) => {
+            const members = CRATES.filter((c) => c.layer === layerName);
+            return `
+              <div class="layer-band">
+                <div>
+                  <strong style="font-size:13px;display:block">${escapeHtml(layerName)}</strong>
+                </div>
+                <div class="crate-row">
+                  ${members
+                    .map((c) => {
+                      let cls = 'crate-node';
+                      if (c.id === current.id) cls += ' is-selected';
+                      else if (current.deps.includes(c.id)) cls += ' is-dep';
+                      else if (callers.includes(c.id)) cls += ' is-caller';
+                      else cls += ' is-dimmed';
+                      return `
+                        <button type="button" class="${cls}" data-crate="${c.id}">
+                          <code>${escapeHtml(c.id)}</code>
+                          <small>允许依赖: ${c.deps.length ? c.deps.join(', ') : '无 (零内部依赖)'}</small>
+                        </button>`;
+                    })
+                    .join('')}
+                </div>
+              </div>`;
+          })
+          .join('');
+
+        stackEl.querySelectorAll('.crate-node').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            selectedCrateId = btn.dataset.crate;
+            renderCrateGraph();
+          });
+        });
+
+        document.getElementById('crate-detail').innerHTML = `
+          <div class="section-label"><span>当前选中包依赖约束详情</span></div>
+          <h3 style="margin:0 0 6px;font-family:var(--mono)">${escapeHtml(current.id)}</h3>
+          <p style="margin:0 0 12px;font-size:13.5px;color:var(--text-secondary)">${escapeHtml(current.role)}</p>
+          <div class="meta-grid">
+            <div class="meta-cell">
+              <strong>允许直接依赖的下游 Crate (${current.deps.length})</strong>
+              <code>${current.deps.length ? current.deps.join(', ') : 'None (纯顶层契约/纯状态机)'}</code>
+            </div>
+            <div class="meta-cell">
+              <strong>依赖它的上游调用方 (${callers.length})</strong>
+              <code>${callers.length ? callers.join(', ') : 'None (顶层入口)'}</code>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderSelfHostSim() {
+        const modeList = document.getElementById('deploy-modes');
+        modeList.innerHTML = DEPLOY_MODES.map(
+          (m) => `
+            <button type="button" class="mode-btn ${m.id === selectedDeployId ? 'active' : ''}" data-mode="${m.id}">
+              <strong>${escapeHtml(m.title)}</strong>
+              <span>${escapeHtml(m.desc)}</span>
+            </button>`
+        ).join('');
+
+        modeList.querySelectorAll('.mode-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            selectedDeployId = btn.dataset.mode;
+            renderSelfHostSim();
+          });
+        });
+
+        const mode = DEPLOY_MODES.find((m) => m.id === selectedDeployId) || DEPLOY_MODES[0];
+        const isRemoteCaller = selectedCaller !== 'local';
+
+        const verdictFor = (actionType) => {
+          if (!mode.linkedBackend && isRemoteCaller) {
+            return { badge: 'badge-danger', text: '不可达（纯本地构建无远端网关）' };
+          }
+          if (mode.profileId === 'local' && isRemoteCaller) {
+            return { badge: 'badge-danger', text: '拒绝（未配置 BackendProfile，未开启远端监听）' };
+          }
+          if (actionType === 'host-admin') {
+            return isRemoteCaller
+              ? { badge: 'badge-danger', text: '拒绝 Forbidden（仅限 LocalHost 权限）' }
+              : { badge: 'badge-success', text: '允许（本机宿主权威）' };
+          }
+          if (actionType === 'dispatch') {
+            if (isRemoteCaller && mode.expired) {
+              return { badge: 'badge-warn', text: '拦截 EntitlementReadOnly（授权到期仅拒新远端协作派发）' };
+            }
+            return { badge: 'badge-success', text: '允许进入统一收件箱 (InboxStorePort)' };
+          }
+          return { badge: 'badge-success', text: '始终允许（历史读取 / 归档 / 本地导出永不锁死）' };
+        };
+
+        const vHost = verdictFor('host-admin');
+        const vDispatch = verdictFor('dispatch');
+        const vRead = verdictFor('read');
+
+        const ALL_CAPS = [
+          'cloudSync', 'cloudAccount', 'multiWorkspace', 'billing',
+          'usageAnalytics', 'teamSharing', 'scmIntegration', 'remoteMachines',
+          'notifications', 'bugReport', 'remotePreview', 'telemetry'
+        ];
+
+        document.getElementById('sim-output').innerHTML = `
+          <div class="section-label">
+            <span>组合根装配状态 (compose_runtime)</span>
+            <span class="badge ${mode.linkedBackend ? 'badge-purple' : 'badge-success'}">
+              ${mode.linkedBackend ? 'lody-backend 已链接' : 'lody-backend 编译期物理未链接'}
+            </span>
+          </div>
+          <div class="meta-grid">
+            <div class="meta-cell">
+              <strong>激活 Profile ID 与隔离存储路径</strong>
+              <code>${escapeHtml(mode.profileId)} → ${escapeHtml(mode.dataDir)}</code>
+            </div>
+            <div class="meta-cell">
+              <strong>受管运行时制品源 (ArtifactRegistryPort)</strong>
+              <code>${escapeHtml(mode.artifactSource)}</code>
+            </div>
+            <div class="meta-cell">
+              <strong>对象上传协商 (BlobTransferPort)</strong>
+              <code>${escapeHtml(mode.uploadStrategy)}</code>
+            </div>
+            <div class="meta-cell">
+              <strong>授权状态 (EntitlementPort)</strong>
+              <code>${escapeHtml(mode.entitlement)}</code>
+            </div>
+          </div>
+
+          <div class="section-label" style="margin-top:14px"><span>动态宣告的平台能力集 (CapabilitySet)</span></div>
+          <div class="cap-grid">
+            ${ALL_CAPS.map((cap) => {
+              const on = mode.caps.includes(cap);
+              return `<span class="badge ${on ? 'badge-success' : ''}" style="${on ? '' : 'opacity:0.4;border:1px solid var(--border)'}">${on ? '✓ ' : '× '}${cap}</span>`;
+            }).join('')}
+          </div>
+
+          <div class="section-label" style="margin-top:18px">
+            <span>enforce_command_policy 实时鉴权判定表（当前身份: ${selectedCaller}）</span>
+          </div>
+          <table class="policy-table">
+            <thead>
+              <tr>
+                <th>应用层命令 / 查询 (lody-app)</th>
+                <th>判定结果</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>ConfigureBackendProfile / RegisterProject</code></td>
+                <td><span class="badge ${vHost.badge}">${vHost.text}</span></td>
+              </tr>
+              <tr>
+                <td><code>CreateSession / SendChat / SteerTurn / DelegateChildSession</code></td>
+                <td><span class="badge ${vDispatch.badge}">${vDispatch.text}</span></td>
+              </tr>
+              <tr>
+                <td><code>GetSessionHistory / GetTurnDiff / ArchiveSession</code></td>
+                <td><span class="badge ${vRead.badge}">${vRead.text}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        `;
+      }
+
+      function init() {
+        renderPills();
+        renderTraitList();
+        renderCrateGraph();
+        renderSelfHostSim();
+
+        document.getElementById('trait-search').addEventListener('input', renderTraitList);
+
+        const tabEl = document.getElementById('main-tab');
+        const syncTab = () => {
+          const val = tabEl.value || 'traits';
+          document.getElementById('panel-traits').classList.toggle('active', val === 'traits');
+          document.getElementById('panel-graph').classList.toggle('active', val === 'graph');
+          document.getElementById('panel-selfhost').classList.toggle('active', val === 'selfhost');
+        };
+        tabEl.addEventListener('change', syncTab);
+        tabEl.addEventListener('input', syncTab);
+
+        const callerEl = document.getElementById('caller-kind');
+        const syncCaller = () => {
+          selectedCaller = callerEl.value || 'local';
+          renderSelfHostSim();
+        };
+        callerEl.addEventListener('change', syncCaller);
+        callerEl.addEventListener('input', syncCaller);
+
+        const darkEl = document.getElementById('dark-toggle');
+        const syncDark = () => {
+          if (darkEl.checked) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+          } else {
+            document.documentElement.removeAttribute('data-theme');
+          }
+        };
+        darkEl.addEventListener('change', syncDark);
+        darkEl.addEventListener('input', syncDark);
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    </script>
+  </body>
+</html>

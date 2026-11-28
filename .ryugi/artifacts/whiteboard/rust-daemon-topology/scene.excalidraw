@@ -1,0 +1,6085 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "ryugi",
+  "elements": [
+    {
+      "id": "f-current-coupling",
+      "type": "frame",
+      "x": 16,
+      "y": 36,
+      "width": 1518,
+      "height": 603,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a0",
+      "roundness": null,
+      "seed": 874697037,
+      "version": 2,
+      "versionNonce": 675869743,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "name": "1. 现状痛点：Node 单线程裂变 (7+ 进程) 与上帝对象耦合网",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-in-local",
+      "type": "rectangle",
+      "x": 360,
+      "y": 60,
+      "width": 290,
+      "height": 95,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "#e0f2fe",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "a1",
+      "roundness": null,
+      "seed": 952011602,
+      "version": 3,
+      "versionNonce": 452117416,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c1",
+          "type": "arrow"
+        },
+        {
+          "id": "7qAMYHaUJtbbR6aXWvFxd",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-in-cloud",
+      "type": "rectangle",
+      "x": 690,
+      "y": 60,
+      "width": 290,
+      "height": 95,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "#e0f2fe",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "a2",
+      "roundness": null,
+      "seed": 1344657849,
+      "version": 3,
+      "versionNonce": 1230036215,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c2",
+          "type": "arrow"
+        },
+        {
+          "id": "Kg1na892dpOrHWU6ieN22",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-in-cli",
+      "type": "rectangle",
+      "x": 1120,
+      "y": 330,
+      "width": 370,
+      "height": 95,
+      "angle": 0,
+      "strokeColor": "#d97706",
+      "backgroundColor": "#fef3c7",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "a3",
+      "roundness": null,
+      "seed": 1158617308,
+      "version": 3,
+      "versionNonce": 1876413560,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c11",
+          "type": "arrow"
+        },
+        {
+          "id": "wZrmUCTr0KvCtJDox3Jc2",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-sup",
+      "type": "rectangle",
+      "x": 40,
+      "y": 60,
+      "width": 270,
+      "height": 95,
+      "angle": 0,
+      "strokeColor": "#475569",
+      "backgroundColor": "#f1f5f9",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "a4",
+      "roundness": null,
+      "seed": 886584974,
+      "version": 3,
+      "versionNonce": 74311493,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c3",
+          "type": "arrow"
+        },
+        {
+          "id": "mHLpVgT1P5bxO05hSJ2Fx",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-fleet",
+      "type": "rectangle",
+      "x": 40,
+      "y": 230,
+      "width": 280,
+      "height": 120,
+      "angle": 0,
+      "strokeColor": "#dc2626",
+      "backgroundColor": "#fef2f2",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "a5",
+      "roundness": null,
+      "seed": 873879369,
+      "version": 4,
+      "versionNonce": 1902732341,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c3",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c4",
+          "type": "arrow"
+        },
+        {
+          "id": "vhugDeO667T_0hqW9uSSF",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-mh",
+      "type": "rectangle",
+      "x": 370,
+      "y": 230,
+      "width": 320,
+      "height": 120,
+      "angle": 0,
+      "strokeColor": "#b91c1c",
+      "backgroundColor": "#fecaca",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "a6",
+      "roundness": null,
+      "seed": 681056901,
+      "version": 8,
+      "versionNonce": 752865459,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c1",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c2",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c4",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c5",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c6",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c8",
+          "type": "arrow"
+        },
+        {
+          "id": "jp63n3vkFpCRIIKBv0Yii",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-exec",
+      "type": "rectangle",
+      "x": 750,
+      "y": 160,
+      "width": 310,
+      "height": 120,
+      "angle": 0,
+      "strokeColor": "#b91c1c",
+      "backgroundColor": "#fecaca",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "a7",
+      "roundness": null,
+      "seed": 1626015634,
+      "version": 5,
+      "versionNonce": 1950369363,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c5",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c7",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c9",
+          "type": "arrow"
+        },
+        {
+          "id": "N3LI2BQSQvIEsfyevJvLI",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-loro",
+      "type": "rectangle",
+      "x": 750,
+      "y": 330,
+      "width": 250,
+      "height": 120,
+      "angle": 0,
+      "strokeColor": "#b45309",
+      "backgroundColor": "#fde68a",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "a8",
+      "roundness": null,
+      "seed": 55588263,
+      "version": 5,
+      "versionNonce": 437005189,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c6",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c7",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c10",
+          "type": "arrow"
+        },
+        {
+          "id": "GaLYZHdvHG00fPFj99mid",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-workers",
+      "type": "rectangle",
+      "x": 40,
+      "y": 495,
+      "width": 410,
+      "height": 115,
+      "angle": 0,
+      "strokeColor": "#7e22ce",
+      "backgroundColor": "#f3e8ff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "a9",
+      "roundness": null,
+      "seed": 528927621,
+      "version": 3,
+      "versionNonce": 2024410925,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c8",
+          "type": "arrow"
+        },
+        {
+          "id": "0-Up405sSIvv131eAmHl2",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-acp-js",
+      "type": "rectangle",
+      "x": 1120,
+      "y": 160,
+      "width": 390,
+      "height": 115,
+      "angle": 0,
+      "strokeColor": "#c2410c",
+      "backgroundColor": "#ffedd5",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aA",
+      "roundness": null,
+      "seed": 1001027256,
+      "version": 3,
+      "versionNonce": 770476446,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c9",
+          "type": "arrow"
+        },
+        {
+          "id": "v5q9t8kR0W1v7w3Ew_JF9",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "c-dbs",
+      "type": "rectangle",
+      "x": 930,
+      "y": 500,
+      "width": 420,
+      "height": 115,
+      "angle": 0,
+      "strokeColor": "#dc2626",
+      "backgroundColor": "#fee2e2",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aB",
+      "roundness": null,
+      "seed": 1730907660,
+      "version": 4,
+      "versionNonce": 2147054165,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-c10",
+          "type": "arrow"
+        },
+        {
+          "id": "a-c11",
+          "type": "arrow"
+        },
+        {
+          "id": "2ZYqzI_yIOOrzPG35CqOy",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c1",
+      "type": "arrow",
+      "x": 512.054794520548,
+      "y": 159,
+      "width": 9.178082191780845,
+      "height": 67,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aC",
+      "roundness": null,
+      "seed": 1945768905,
+      "version": 4,
+      "versionNonce": 1562437918,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          9.178082191780845,
+          67
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-in-local",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-mh",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c2",
+      "type": "arrow",
+      "x": 748.931506849315,
+      "y": 159,
+      "width": 111.97260273972597,
+      "height": 67,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aD",
+      "roundness": null,
+      "seed": 741992918,
+      "version": 4,
+      "versionNonce": 2132811451,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -111.97260273972597,
+          67
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-in-cloud",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-mh",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c3",
+      "type": "arrow",
+      "x": 176.41095890410958,
+      "y": 159,
+      "width": 1.835616438356169,
+      "height": 67,
+      "angle": 0,
+      "strokeColor": "#475569",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aE",
+      "roundness": null,
+      "seed": 1670755801,
+      "version": 4,
+      "versionNonce": 1964000430,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          1.835616438356169,
+          67
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-sup",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-fleet",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c4",
+      "type": "arrow",
+      "x": 324,
+      "y": 290,
+      "width": 42,
+      "height": 0,
+      "angle": 0,
+      "strokeColor": "#dc2626",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aF",
+      "roundness": null,
+      "seed": 990988874,
+      "version": 4,
+      "versionNonce": 268723508,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          42,
+          0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-fleet",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-mh",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c5",
+      "type": "arrow",
+      "x": 694,
+      "y": 259.38666666666666,
+      "width": 52,
+      "height": 9.70666666666665,
+      "angle": 0,
+      "strokeColor": "#b91c1c",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aG",
+      "roundness": null,
+      "seed": 2059808039,
+      "version": 4,
+      "versionNonce": 741294738,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          52,
+          -9.70666666666665
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-mh",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-exec",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": "arrow",
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c6",
+      "type": "arrow",
+      "x": 694,
+      "y": 337.536231884058,
+      "width": 52,
+      "height": 15.072463768115938,
+      "angle": 0,
+      "strokeColor": "#b45309",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aH",
+      "roundness": null,
+      "seed": 445110888,
+      "version": 4,
+      "versionNonce": 151032938,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          52,
+          15.072463768115938
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-mh",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-loro",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": "arrow",
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c7",
+      "type": "arrow",
+      "x": 893.7058823529412,
+      "y": 284,
+      "width": 7.411764705882433,
+      "height": 42,
+      "angle": 0,
+      "strokeColor": "#b45309",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aI",
+      "roundness": null,
+      "seed": 516386733,
+      "version": 4,
+      "versionNonce": 1329787348,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -7.411764705882433,
+          42
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-exec",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-loro",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": "arrow",
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c8",
+      "type": "arrow",
+      "x": 460.51428571428573,
+      "y": 354,
+      "width": 148.74285714285713,
+      "height": 137,
+      "angle": 0,
+      "strokeColor": "#7e22ce",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aJ",
+      "roundness": null,
+      "seed": 1067925665,
+      "version": 4,
+      "versionNonce": 657081282,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -148.74285714285713,
+          137
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-mh",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-workers",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c9",
+      "type": "arrow",
+      "x": 1064,
+      "y": 219.03048780487805,
+      "width": 52,
+      "height": 0.31707317073170316,
+      "angle": 0,
+      "strokeColor": "#c2410c",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aK",
+      "roundness": null,
+      "seed": 50276455,
+      "version": 4,
+      "versionNonce": 1241732164,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          52,
+          -0.31707317073170316
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-exec",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-acp-js",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c10",
+      "type": "arrow",
+      "x": 976.2537313432836,
+      "y": 454,
+      "width": 66.44776119402991,
+      "height": 42,
+      "angle": 0,
+      "strokeColor": "#dc2626",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aL",
+      "roundness": null,
+      "seed": 1843413378,
+      "version": 4,
+      "versionNonce": 997039276,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          66.44776119402991,
+          42
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-loro",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-dbs",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-c11",
+      "type": "arrow",
+      "x": 1257.7916666666667,
+      "y": 429,
+      "width": 61.41666666666674,
+      "height": 67,
+      "angle": 0,
+      "strokeColor": "#d97706",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "dashed",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "aM",
+      "roundness": null,
+      "seed": 1641514200,
+      "version": 4,
+      "versionNonce": 1292884088,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -61.41666666666674,
+          67
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "c-in-cli",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "c-dbs",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "f-rust-layers",
+      "type": "frame",
+      "x": 1776,
+      "y": 36,
+      "width": 1268,
+      "height": 888,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aN",
+      "roundness": null,
+      "seed": 1211632242,
+      "version": 3,
+      "versionNonce": 1045958152,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "name": "2. 目标分层：Rust 单进程内核 lodyd 与六层单向 Cargo 架构",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l5",
+      "type": "rectangle",
+      "x": 1800,
+      "y": 60,
+      "width": 1220,
+      "height": 90,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "#dbeafe",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aO",
+      "roundness": null,
+      "seed": 573648850,
+      "version": 4,
+      "versionNonce": 244801690,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-r1",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r2",
+          "type": "arrow"
+        },
+        {
+          "id": "Pgj3u11s9pAp-jdnEokQc",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l4-local",
+      "type": "rectangle",
+      "x": 1800,
+      "y": 195,
+      "width": 590,
+      "height": 105,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "#e0e7ff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aP",
+      "roundness": null,
+      "seed": 1968736434,
+      "version": 4,
+      "versionNonce": 919508589,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-r1",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r3",
+          "type": "arrow"
+        },
+        {
+          "id": "aLqlNGo6sioSz-oJq1bVY",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l4-remote",
+      "type": "rectangle",
+      "x": 2430,
+      "y": 195,
+      "width": 590,
+      "height": 105,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "#e0e7ff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aQ",
+      "roundness": null,
+      "seed": 843438746,
+      "version": 4,
+      "versionNonce": 29303411,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-r2",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r4",
+          "type": "arrow"
+        },
+        {
+          "id": "EcXkqfkCCuZ_3Q3wVbKoh",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l3",
+      "type": "rectangle",
+      "x": 1800,
+      "y": 345,
+      "width": 1220,
+      "height": 110,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "#dcfce7",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aR",
+      "roundness": null,
+      "seed": 2096249218,
+      "version": 6,
+      "versionNonce": 1313845490,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-r3",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r4",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r5",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r6",
+          "type": "arrow"
+        },
+        {
+          "id": "0cUYmQffJbnjUGXHChNT0",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l2-acp",
+      "type": "rectangle",
+      "x": 1800,
+      "y": 500,
+      "width": 285,
+      "height": 105,
+      "angle": 0,
+      "strokeColor": "#16a34a",
+      "backgroundColor": "#f0fdf4",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aS",
+      "roundness": null,
+      "seed": 395217706,
+      "version": 4,
+      "versionNonce": 1114476059,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-r5",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r7",
+          "type": "arrow"
+        },
+        {
+          "id": "ueLKWZ_tXmC9EdS5vvA3X",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l2-wt",
+      "type": "rectangle",
+      "x": 2110,
+      "y": 500,
+      "width": 285,
+      "height": 105,
+      "angle": 0,
+      "strokeColor": "#16a34a",
+      "backgroundColor": "#f0fdf4",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aT",
+      "roundness": null,
+      "seed": 184919225,
+      "version": 2,
+      "versionNonce": 325523262,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "WpqHyM3E8iMqJaVS8hIJl",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l2-cc",
+      "type": "rectangle",
+      "x": 2420,
+      "y": 500,
+      "width": 285,
+      "height": 105,
+      "angle": 0,
+      "strokeColor": "#16a34a",
+      "backgroundColor": "#f0fdf4",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aU",
+      "roundness": null,
+      "seed": 1970947791,
+      "version": 4,
+      "versionNonce": 626626280,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-r6",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r8",
+          "type": "arrow"
+        },
+        {
+          "id": "EeyunX7S9dM5jw4sfD3xr",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l2-pv",
+      "type": "rectangle",
+      "x": 2730,
+      "y": 500,
+      "width": 290,
+      "height": 105,
+      "angle": 0,
+      "strokeColor": "#16a34a",
+      "backgroundColor": "#f0fdf4",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aV",
+      "roundness": null,
+      "seed": 1988012755,
+      "version": 2,
+      "versionNonce": 1923289993,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "UuQjcgAMGa_gTnSA6Jrpl",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l1-sync",
+      "type": "rectangle",
+      "x": 1800,
+      "y": 650,
+      "width": 390,
+      "height": 118,
+      "angle": 0,
+      "strokeColor": "#7c3aed",
+      "backgroundColor": "#f5f3ff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "dashed",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aW",
+      "roundness": null,
+      "seed": 908239165,
+      "version": 6,
+      "versionNonce": 926389444,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-r7",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r9",
+          "type": "arrow"
+        },
+        {
+          "id": "X_7O5qJ14UKhPBVjngLop",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 4,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l1-e2ee",
+      "type": "rectangle",
+      "x": 2215,
+      "y": 650,
+      "width": 390,
+      "height": 118,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "#ecfeff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aX",
+      "roundness": null,
+      "seed": 1696052103,
+      "version": 4,
+      "versionNonce": 391680316,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-r10",
+          "type": "arrow"
+        },
+        {
+          "id": "FDOnFHgU6Biid0VtO_0Ou",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l1-db",
+      "type": "rectangle",
+      "x": 2630,
+      "y": 650,
+      "width": 390,
+      "height": 118,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "#ecfeff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aY",
+      "roundness": null,
+      "seed": 332532061,
+      "version": 5,
+      "versionNonce": 1868126878,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-r8",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r11",
+          "type": "arrow"
+        },
+        {
+          "id": "F-bDM53WOIqAqg6urTYLm",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "r-l0",
+      "type": "rectangle",
+      "x": 1800,
+      "y": 815,
+      "width": 1220,
+      "height": 85,
+      "angle": 0,
+      "strokeColor": "#334155",
+      "backgroundColor": "#f1f5f9",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aZ",
+      "roundness": null,
+      "seed": 142410750,
+      "version": 6,
+      "versionNonce": 668005055,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-r9",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r10",
+          "type": "arrow"
+        },
+        {
+          "id": "a-r11",
+          "type": "arrow"
+        },
+        {
+          "id": "glG_SLl7Dr_yA5fa_PZZh",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r1",
+      "type": "arrow",
+      "x": 2301.684210526316,
+      "y": 154,
+      "width": 81.7894736842104,
+      "height": 37,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aa",
+      "roundness": null,
+      "seed": 194793277,
+      "version": 4,
+      "versionNonce": 809820175,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -81.7894736842104,
+          37
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l5",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l4-local",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r2",
+      "type": "arrow",
+      "x": 2518.315789473684,
+      "y": 154,
+      "width": 81.7894736842104,
+      "height": 37,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "ab",
+      "roundness": null,
+      "seed": 1296557923,
+      "version": 4,
+      "versionNonce": 809339712,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          81.7894736842104,
+          37
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l5",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l4-remote",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r3",
+      "type": "arrow",
+      "x": 2211.7049180327867,
+      "y": 304,
+      "width": 76.42622950819668,
+      "height": 37,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "ac",
+      "roundness": null,
+      "seed": 10377355,
+      "version": 4,
+      "versionNonce": 1648887492,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          76.42622950819668,
+          37
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l4-local",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l3",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r4",
+      "type": "arrow",
+      "x": 2608.2950819672133,
+      "y": 304,
+      "width": 76.42622950819668,
+      "height": 37,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "ad",
+      "roundness": null,
+      "seed": 998920385,
+      "version": 4,
+      "versionNonce": 418257557,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -76.42622950819668,
+          37
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l4-remote",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l3",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r5",
+      "type": "arrow",
+      "x": 2229.1311475409834,
+      "y": 459,
+      "width": 140.13114754098342,
+      "height": 45.71122994652404,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "ae",
+      "roundness": null,
+      "seed": 801426663,
+      "version": 4,
+      "versionNonce": 440291521,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -140.13114754098342,
+          45.71122994652404
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l3",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l2-acp",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r6",
+      "type": "arrow",
+      "x": 2469,
+      "y": 459,
+      "width": 37,
+      "height": 37,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "af",
+      "roundness": null,
+      "seed": 10447474,
+      "version": 4,
+      "versionNonce": 1029398655,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          37,
+          37
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l3",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l2-cc",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r7",
+      "type": "arrow",
+      "x": 1961.4536741214058,
+      "y": 609,
+      "width": 12.412140575079775,
+      "height": 37,
+      "angle": 0,
+      "strokeColor": "#16a34a",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "ag",
+      "roundness": null,
+      "seed": 1128053392,
+      "version": 5,
+      "versionNonce": 1673257814,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          12.412140575079775,
+          37
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l2-acp",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l1-sync",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r8",
+      "type": "arrow",
+      "x": 2657.268370607029,
+      "y": 609,
+      "width": 62.06070287539933,
+      "height": 37,
+      "angle": 0,
+      "strokeColor": "#16a34a",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "ah",
+      "roundness": null,
+      "seed": 125473200,
+      "version": 5,
+      "versionNonce": 459732158,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          62.06070287539933,
+          37
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l2-cc",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l1-db",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r9",
+      "type": "arrow",
+      "x": 2171.060606060606,
+      "y": 772,
+      "width": 108.98989898989885,
+      "height": 39,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "ai",
+      "roundness": null,
+      "seed": 1733849195,
+      "version": 5,
+      "versionNonce": 1431944539,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          108.98989898989885,
+          39
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l1-sync",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l0",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r10",
+      "type": "arrow",
+      "x": 2410,
+      "y": 772,
+      "width": 0,
+      "height": 39,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "aj",
+      "roundness": null,
+      "seed": 1189079686,
+      "version": 5,
+      "versionNonce": 1120498457,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          39
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l1-e2ee",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l0",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-r11",
+      "type": "arrow",
+      "x": 2648.939393939394,
+      "y": 772,
+      "width": 108.98989898989885,
+      "height": 39,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "ak",
+      "roundness": null,
+      "seed": 1289806029,
+      "version": 5,
+      "versionNonce": 993453657,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -108.98989898989885,
+          39
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "r-l1-db",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "r-l0",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "f-session-actor",
+      "type": "frame",
+      "x": 16,
+      "y": 1016,
+      "width": 1718,
+      "height": 488,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "al",
+      "roundness": null,
+      "seed": 768402658,
+      "version": 3,
+      "versionNonce": 1194318634,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "name": "3. 解耦核心：SessionActor 单信箱状态机 (消灭三路竞态与共享锁)",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-src-ipc",
+      "type": "rectangle",
+      "x": 40,
+      "y": 1040,
+      "width": 280,
+      "height": 85,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "#e0f2fe",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "am",
+      "roundness": null,
+      "seed": 79253775,
+      "version": 4,
+      "versionNonce": 1882068044,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s1",
+          "type": "arrow"
+        },
+        {
+          "id": "fO2dA3lLfpcTrsBQgKwhS",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-src-rpc",
+      "type": "rectangle",
+      "x": 40,
+      "y": 1150,
+      "width": 280,
+      "height": 110,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "#e0f2fe",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "an",
+      "roundness": null,
+      "seed": 1795437105,
+      "version": 4,
+      "versionNonce": 1554542829,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s2",
+          "type": "arrow"
+        },
+        {
+          "id": "2U6DT3t7JpA-Cdg0BpXt9",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-src-crdt",
+      "type": "rectangle",
+      "x": 40,
+      "y": 1260,
+      "width": 280,
+      "height": 85,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "#e0f2fe",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "ao",
+      "roundness": null,
+      "seed": 1149290440,
+      "version": 4,
+      "versionNonce": 1244097229,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s3",
+          "type": "arrow"
+        },
+        {
+          "id": "3mUOVr5ZxXEM0hT6MY_2A",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-src-auto",
+      "type": "rectangle",
+      "x": 40,
+      "y": 1370,
+      "width": 280,
+      "height": 110,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "#e0f2fe",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "ap",
+      "roundness": null,
+      "seed": 1340445870,
+      "version": 4,
+      "versionNonce": 1814216693,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s4",
+          "type": "arrow"
+        },
+        {
+          "id": "Ocwx75FO3ZONiejDk5EEh",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-mailbox",
+      "type": "rectangle",
+      "x": 430,
+      "y": 1185,
+      "width": 230,
+      "height": 135,
+      "angle": 0,
+      "strokeColor": "#ca8a04",
+      "backgroundColor": "#fef9c3",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "aq",
+      "roundness": null,
+      "seed": 801025432,
+      "version": 8,
+      "versionNonce": 1932367741,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s1",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s2",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s3",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s4",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s5",
+          "type": "arrow"
+        },
+        {
+          "id": "gpmqKzpjeydOuVMaXGWwy",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-idle",
+      "type": "rectangle",
+      "x": 740,
+      "y": 1310,
+      "width": 290,
+      "height": 85,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "#dcfce7",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "ar",
+      "roundness": null,
+      "seed": 2089239758,
+      "version": 5,
+      "versionNonce": 1922290317,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s6",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s9",
+          "type": "arrow"
+        },
+        {
+          "id": "vjJHIUAHLJ3e2-piAtJ4-",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-prep",
+      "type": "rectangle",
+      "x": 740,
+      "y": 1100,
+      "width": 290,
+      "height": 85,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "#dbeafe",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "as",
+      "roundness": null,
+      "seed": 1123330401,
+      "version": 6,
+      "versionNonce": 705728343,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s5",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s6",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s7",
+          "type": "arrow"
+        },
+        {
+          "id": "Y9M6Y124iJYzJ4cArzMvr",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-run",
+      "type": "rectangle",
+      "x": 1070,
+      "y": 1100,
+      "width": 290,
+      "height": 110,
+      "angle": 0,
+      "strokeColor": "#6d28d9",
+      "backgroundColor": "#ede9fe",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "at",
+      "roundness": null,
+      "seed": 142162929,
+      "version": 8,
+      "versionNonce": 481462920,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s7",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s8",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s10",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s11",
+          "type": "arrow"
+        },
+        {
+          "id": "XXr87Ey49f0x0sdTRLvzD",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-drain",
+      "type": "rectangle",
+      "x": 1070,
+      "y": 1310,
+      "width": 290,
+      "height": 85,
+      "angle": 0,
+      "strokeColor": "#c2410c",
+      "backgroundColor": "#ffedd5",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "au",
+      "roundness": null,
+      "seed": 1144075990,
+      "version": 5,
+      "versionNonce": 1201487074,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s8",
+          "type": "arrow"
+        },
+        {
+          "id": "a-s9",
+          "type": "arrow"
+        },
+        {
+          "id": "SdtKm7grt_f3CdYfwQ0FX",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-hist",
+      "type": "rectangle",
+      "x": 1430,
+      "y": 1040,
+      "width": 280,
+      "height": 105,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "#ecfeff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "av",
+      "roundness": null,
+      "seed": 1229120393,
+      "version": 4,
+      "versionNonce": 1557380623,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s10",
+          "type": "arrow"
+        },
+        {
+          "id": "4n8tcAsa3UoTeXf5EGKo9",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "s-acp",
+      "type": "rectangle",
+      "x": 1430,
+      "y": 1195,
+      "width": 280,
+      "height": 110,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "#f0fdf4",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "aw",
+      "roundness": null,
+      "seed": 2108709736,
+      "version": 4,
+      "versionNonce": 800335977,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-s11",
+          "type": "arrow"
+        },
+        {
+          "id": "ze54WFe0vqR0nDbLcIJkj",
+          "type": "text"
+        }
+      ],
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s1",
+      "type": "arrow",
+      "x": 324,
+      "y": 1082.5,
+      "width": 102,
+      "height": 127.47499999999991,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "ax",
+      "roundness": null,
+      "seed": 1057095473,
+      "version": 5,
+      "versionNonce": 939048841,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          102,
+          127.47499999999991
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-src-ipc",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-mailbox",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s2",
+      "type": "arrow",
+      "x": 324,
+      "y": 1205,
+      "width": 102,
+      "height": 33.325000000000045,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "ay",
+      "roundness": null,
+      "seed": 2041469510,
+      "version": 5,
+      "versionNonce": 1542670727,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          102,
+          33.325000000000045
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-src-rpc",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-mailbox",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s3",
+      "type": "arrow",
+      "x": 324,
+      "y": 1302.5,
+      "width": 102,
+      "height": 35.825000000000045,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "az",
+      "roundness": null,
+      "seed": 1037647935,
+      "version": 5,
+      "versionNonce": 1560210529,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          102,
+          -35.825000000000045
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-src-crdt",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-mailbox",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s4",
+      "type": "arrow",
+      "x": 324,
+      "y": 1425,
+      "width": 102,
+      "height": 129.9749999999999,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b00",
+      "roundness": null,
+      "seed": 128133877,
+      "version": 5,
+      "versionNonce": 232273941,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          102,
+          -129.9749999999999
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-src-auto",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-mailbox",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s5",
+      "type": "arrow",
+      "x": 664,
+      "y": 1214,
+      "width": 77.27272727272725,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#ca8a04",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b01",
+      "roundness": null,
+      "seed": 1087689787,
+      "version": 5,
+      "versionNonce": 608792810,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          77.27272727272725,
+          -25
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-mailbox",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-prep",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s6",
+      "type": "arrow",
+      "x": 885,
+      "y": 1306,
+      "width": 0,
+      "height": 117,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b02",
+      "roundness": null,
+      "seed": 416748455,
+      "version": 5,
+      "versionNonce": 1467371517,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          -117
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-idle",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-prep",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s7",
+      "type": "arrow",
+      "x": 1034,
+      "y": 1148.1439393939395,
+      "width": 32,
+      "height": 1.2121212121210192,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b03",
+      "roundness": null,
+      "seed": 92451560,
+      "version": 5,
+      "versionNonce": 225474556,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          32,
+          1.2121212121210192
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-prep",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-run",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s8",
+      "type": "arrow",
+      "x": 1215,
+      "y": 1214,
+      "width": 0,
+      "height": 92,
+      "angle": 0,
+      "strokeColor": "#6d28d9",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b04",
+      "roundness": null,
+      "seed": 443149352,
+      "version": 5,
+      "versionNonce": 1424783645,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          92
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-run",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-drain",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s9",
+      "type": "arrow",
+      "x": 1066,
+      "y": 1352.5,
+      "width": 32,
+      "height": 0,
+      "angle": 0,
+      "strokeColor": "#c2410c",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "dashed",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b05",
+      "roundness": null,
+      "seed": 250422130,
+      "version": 5,
+      "versionNonce": 670539516,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -32,
+          0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-drain",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-idle",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s10",
+      "type": "arrow",
+      "x": 1364,
+      "y": 1128.7676056338028,
+      "width": 62,
+      "height": 10.915492957746437,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b06",
+      "roundness": null,
+      "seed": 860248277,
+      "version": 5,
+      "versionNonce": 1631740964,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          62,
+          -10.915492957746437
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-run",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-hist",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-s11",
+      "type": "arrow",
+      "x": 1364,
+      "y": 1194.8732394366198,
+      "width": 62,
+      "height": 16.591549295774712,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b07",
+      "roundness": null,
+      "seed": 354023212,
+      "version": 5,
+      "versionNonce": 1360221487,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782015,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          62,
+          16.591549295774712
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "s-run",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "s-acp",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": "arrow",
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "7qAMYHaUJtbbR6aXWvFxd",
+      "type": "text",
+      "x": 384.6630859375,
+      "y": 70,
+      "width": 240.673828125,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b08",
+      "roundness": null,
+      "seed": 1446048801,
+      "version": 3,
+      "versionNonce": 257048058,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-in-local",
+      "originalText": "本地 4 套异构 Socket\nprobe / control / loro-v7 / terminal",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "本地 4 套异构 Socket\nprobe / control / loro-v7 /\nterminal",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "Kg1na892dpOrHWU6ieN22",
+      "type": "text",
+      "x": 715.6103515625,
+      "y": 70,
+      "width": 238.779296875,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b09",
+      "roundness": null,
+      "seed": 1850766908,
+      "version": 3,
+      "versionNonce": 1083977198,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-in-cloud",
+      "originalText": "远端双平面通道\nConvex + Loro Streams + Iroh N-API",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "远端双平面通道\nConvex + Loro Streams +\nIroh N-API",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "wZrmUCTr0KvCtJDox3Jc2",
+      "type": "text",
+      "x": 1141.62109375,
+      "y": 352.5,
+      "width": 326.7578125,
+      "height": 50,
+      "angle": 0,
+      "strokeColor": "#d97706",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b0A",
+      "roundness": null,
+      "seed": 442533506,
+      "version": 4,
+      "versionNonce": 105388480,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248963128,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-in-cli",
+      "originalText": "Standalone CLI / MCP 子进程\n绕过 Daemon 直开 SQLite (锁竞争!)",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "Standalone CLI / MCP 子进程\n绕过 Daemon 直开 SQLite (锁竞争!)",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "mHLpVgT1P5bxO05hSJ2Fx",
+      "type": "text",
+      "x": 53.57421875,
+      "y": 70,
+      "width": 242.8515625,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#475569",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b0B",
+      "roundness": null,
+      "seed": 2031657133,
+      "version": 3,
+      "versionNonce": 407298499,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-sup",
+      "originalText": "双宿主进程监督\ndaemon-runner / Electron CliService",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "双宿主进程监督\ndaemon-runner / Electron\nCliService",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "vhugDeO667T_0hqW9uSSF",
+      "type": "text",
+      "x": 56.9970703125,
+      "y": 240,
+      "width": 246.005859375,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#dc2626",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b0C",
+      "roundness": null,
+      "seed": 1733018478,
+      "version": 3,
+      "versionNonce": 892823336,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-fleet",
+      "originalText": "LodyFleet → Lody → MachineRuntime\n四层透传套娃 + 全链路散落 if(e2ee)",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "LodyFleet → Lody →\nMachineRuntime\n四层透传套娃 + 全链路散落\nif(e2ee)",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "jp63n3vkFpCRIIKBv0Yii",
+      "type": "text",
+      "x": 384.6337890625,
+      "y": 252.5,
+      "width": 290.732421875,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#b91c1c",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b0D",
+      "roundness": null,
+      "seed": 585426452,
+      "version": 3,
+      "versionNonce": 2070498732,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-mh",
+      "originalText": "MessageHandler (12,593 LOC)\n上帝对象: RPC / 鉴权 / 流缓冲 / 预览",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "MessageHandler (12,593 LOC)\n上帝对象: RPC / 鉴权 / 流缓冲 /\n预览",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "N3LI2BQSQvIEsfyevJvLI",
+      "type": "text",
+      "x": 756.3330078125,
+      "y": 170,
+      "width": 297.333984375,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#b91c1c",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b0E",
+      "roundness": null,
+      "seed": 1443551940,
+      "version": 3,
+      "versionNonce": 1199131922,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-exec",
+      "originalText": "SessionExecutionService (10,302 LOC)\nTurn 状态机 + DispatchWatcher (3.5k)",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "SessionExecutionService\n(10,302 LOC)\nTurn 状态机 + DispatchWatcher\n(3.5k)",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "GaLYZHdvHG00fPFj99mid",
+      "type": "text",
+      "x": 764.5556640625,
+      "y": 340,
+      "width": 220.888671875,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#b45309",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b0F",
+      "roundness": null,
+      "seed": 97759616,
+      "version": 3,
+      "versionNonce": 1643611067,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-loro",
+      "originalText": "LoroDocumentManager (4.4k)\nWASM 4GB 内存墙 + 双轨 Roost",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "LoroDocumentManager\n(4.4k)\nWASM 4GB 内存墙 + 双\n轨 Roost",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "0-Up405sSIvv131eAmHl2",
+      "type": "text",
+      "x": 48.447265625,
+      "y": 502.5,
+      "width": 393.10546875,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#7e22ce",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b0G",
+      "roundness": null,
+      "seed": 1403841587,
+      "version": 3,
+      "versionNonce": 1774030238,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-workers",
+      "originalText": "7+ 防御性子进程 / Worker 裂变 (~407MB 空闲 RSS)\nmcp-http-host + 4 个 CodeCollab Workers + cloudflared",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "7+ 防御性子进程 / Worker 裂变 (~407MB\n空闲 RSS)\nmcp-http-host + 4 个 CodeCollab Workers\n+ cloudflared",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "v5q9t8kR0W1v7w3Ew_JF9",
+      "type": "text",
+      "x": 1129.658203125,
+      "y": 167.5,
+      "width": 370.68359375,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#c2410c",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b0H",
+      "roundness": null,
+      "seed": 537976940,
+      "version": 3,
+      "versionNonce": 1056542829,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-acp-js",
+      "originalText": "强绑定 JS ACP Adapters (同 dist 平铺构建)\nclaude / codex / deepseek / devin / grok-acp.js",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "强绑定 JS ACP Adapters (同 dist 平铺构\n建)\nclaude / codex / deepseek / devin /\ngrok-acp.js",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "2ZYqzI_yIOOrzPG35CqOy",
+      "type": "text",
+      "x": 955.05859375,
+      "y": 520,
+      "width": 369.8828125,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#dc2626",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-current-coupling",
+      "index": "b0I",
+      "roundness": null,
+      "seed": 487704318,
+      "version": 3,
+      "versionNonce": 636729829,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "c-dbs",
+      "originalText": "10+ 碎片化 SQLite 连接各自 Checkpoint\nrepo / roost / operations / schedules / diff-store / e2ee",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "10+ 碎片化 SQLite 连接各自 Checkpoint\nrepo / roost / operations / schedules /\ndiff-store / e2ee",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "Pgj3u11s9pAp-jdnEokQc",
+      "type": "text",
+      "x": 1915.205078125,
+      "y": 80,
+      "width": 989.58984375,
+      "height": 50,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0J",
+      "roundness": null,
+      "seed": 1675828891,
+      "version": 3,
+      "versionNonce": 1837156333,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l5",
+      "originalText": "L5 宿主入口 bins/lody (单一零依赖二进制)\nlody <cmd> (<5ms 纯 RPC 薄客户端)   |   lody daemon (lodyd 单进程内核)   |   lody mcp-stdio (无状态转发)",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L5 宿主入口 bins/lody (单一零依赖二进制)\nlody <cmd> (<5ms 纯 RPC 薄客户端)   |   lody daemon (lodyd 单进程内核)   |   lody mcp-stdio (无状态转发)",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "aLqlNGo6sioSz-oJq1bVY",
+      "type": "text",
+      "x": 1877.3388671875,
+      "y": 210,
+      "width": 435.322265625,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0K",
+      "roundness": null,
+      "seed": 1584578768,
+      "version": 5,
+      "versionNonce": 2099643491,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571704,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l4-local",
+      "originalText": "L4 lody-gateway-local (本地控制与 MCP 平面)\n统一多路复用控制/终端 UDS + 内置 MCP HTTP\n(Loro 数据面已交由独立 loro-repo-rs 引擎直连!)",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L4 lody-gateway-local (本地控制与 MCP 平面)\n统一多路复用控制/终端 UDS + 内置 MCP HTTP\n(Loro 数据面已交由独立 loro-repo-rs 引擎直连!)",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "EcXkqfkCCuZ_3Q3wVbKoh",
+      "type": "text",
+      "x": 2460.859375,
+      "y": 210,
+      "width": 528.28125,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0L",
+      "roundness": null,
+      "seed": 1622093515,
+      "version": 3,
+      "versionNonce": 2122729886,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l4-remote",
+      "originalText": "L4 lody-gateway-remote & Security Middleware\nStreams RPC + 原生 lody-iroh QUIC → 统一验签解密产出 VerifiedPrincipal",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L4 lody-gateway-remote & Security Middleware\nStreams RPC + 原生 lody-iroh QUIC → 统一验签解密产出\nVerifiedPrincipal",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "0cUYmQffJbnjUGXHChNT0",
+      "type": "text",
+      "x": 1846.796875,
+      "y": 362.5,
+      "width": 1126.40625,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0M",
+      "roundness": null,
+      "seed": 1379653264,
+      "version": 3,
+      "versionNonce": 1706616974,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l3",
+      "originalText": "L3 lody-daemon-core (层级 Actor 树 + CancellationToken 结构化并发)\nFleetSupervisor  ──>  WorkspaceActor (注入 SecurityPolicy)  ──>  SessionActor / OperationInbox / AutomationActor (rquickjs)",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L3 lody-daemon-core (层级 Actor 树 + CancellationToken 结构化并发)\nFleetSupervisor  ──>  WorkspaceActor (注入 SecurityPolicy)  ──>  SessionActor / OperationInbox / AutomationActor\n(rquickjs)",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "ueLKWZ_tXmC9EdS5vvA3X",
+      "type": "text",
+      "x": 1841.5478515625,
+      "y": 515,
+      "width": 201.904296875,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#16a34a",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0N",
+      "roundness": null,
+      "seed": 336573388,
+      "version": 3,
+      "versionNonce": 1709544189,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l2-acp",
+      "originalText": "L2 lody-acp\n标准 stdio 协议客户端\n外部独立受管 Adapter",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L2 lody-acp\n标准 stdio 协议客户端\n外部独立受管 Adapter",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "WpqHyM3E8iMqJaVS8hIJl",
+      "type": "text",
+      "x": 2145.810546875,
+      "y": 515,
+      "width": 213.37890625,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#16a34a",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0O",
+      "roundness": null,
+      "seed": 1657794437,
+      "version": 3,
+      "versionNonce": 194532119,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l2-wt",
+      "originalText": "L2 lody-worktree\nGit Worktree 生命周期\nCredential Broker 服务",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L2 lody-worktree\nGit Worktree 生命周期\nCredential Broker 服务",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "EeyunX7S9dM5jw4sfD3xr",
+      "type": "text",
+      "x": 2462.5830078125,
+      "y": 515,
+      "width": 199.833984375,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#16a34a",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0P",
+      "roundness": null,
+      "seed": 540176219,
+      "version": 3,
+      "versionNonce": 1817738756,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l2-cc",
+      "originalText": "L2 lody-code-collab\nRayon 并行扫描 / Diff\nnotify 原生文件监听",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L2 lody-code-collab\nRayon 并行扫描 / Diff\nnotify 原生文件监听",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "UuQjcgAMGa_gTnSA6Jrpl",
+      "type": "text",
+      "x": 2756.240234375,
+      "y": 515,
+      "width": 237.51953125,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#16a34a",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0Q",
+      "roundness": null,
+      "seed": 873889285,
+      "version": 3,
+      "versionNonce": 675285663,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l2-pv",
+      "originalText": "L2 lody-preview\nHyper Loopback 安全代理\ncloudflared & 设备流网关",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L2 lody-preview\nHyper Loopback 安全代理\ncloudflared & 设备流网关",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "X_7O5qJ14UKhPBVjngLop",
+      "type": "text",
+      "x": 1806.6455078125,
+      "y": 659,
+      "width": 376.708984375,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0R",
+      "roundness": null,
+      "seed": 1815147213,
+      "version": 6,
+      "versionNonce": 1211815457,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261616720,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l1-sync",
+      "originalText": "L1 lody-repo-port [预留外部 SDK 接缝]\n对接 loro-repo-rs (Engine+Client, 免自研同步!)\n并存 RoostHistoryPort 统一读授权",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L1 lody-repo-port [预留外部 SDK 接缝]\n对接 loro-repo-rs (Engine+Client, 免自研\n同步!)\n并存 RoostHistoryPort 统一读授权",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "FDOnFHgU6Biid0VtO_0Ou",
+      "type": "text",
+      "x": 2221.162109375,
+      "y": 671.5,
+      "width": 377.67578125,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0S",
+      "roundness": null,
+      "seed": 1086561361,
+      "version": 4,
+      "versionNonce": 100308168,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261616720,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l1-e2ee",
+      "originalText": "L1 lody-e2ee\n纯协议 CBOR 账本验证 + HPKE/Ed25519 信封",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L1 lody-e2ee\n纯协议 CBOR 账本验证 + HPKE/Ed25519\n信封",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "F-bDM53WOIqAqg6urTYLm",
+      "type": "text",
+      "x": 2639.7216796875,
+      "y": 659,
+      "width": 370.556640625,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0T",
+      "roundness": null,
+      "seed": 1804077192,
+      "version": 6,
+      "versionNonce": 1354516804,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261616720,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l1-db",
+      "originalText": "L1 lody-backend-ports & lody-db\nSelf-Hosted 抽象 (Discovery/OIDC/OpenDAL/Mirror)\n+ Single-Owner SQLite & FastCDC 快照",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L1 lody-backend-ports & lody-db\nSelf-Hosted 抽象\n(Discovery/OIDC/OpenDAL/Mirror)\n+ Single-Owner SQLite & FastCDC 快照",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "glG_SLl7Dr_yA5fa_PZZh",
+      "type": "text",
+      "x": 1826.1376953125,
+      "y": 832.5,
+      "width": 1167.724609375,
+      "height": 50,
+      "angle": 0,
+      "strokeColor": "#334155",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-rust-layers",
+      "index": "b0U",
+      "roundness": null,
+      "seed": 1945327865,
+      "version": 4,
+      "versionNonce": 1764189985,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r-l0",
+      "originalText": "L0 基础原语层:  lody-protocol (Serde/Schemars 强类型契约)   |   lody-os (ProcessGroup / Windows JobObject / portable-pty / Keyring)",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "L0 基础原语层:  lody-protocol (Serde/Schemars 强类型契约)   |   lody-os (ProcessGroup / Windows JobObject / portable-pty /\nKeyring)",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "fO2dA3lLfpcTrsBQgKwhS",
+      "type": "text",
+      "x": 52.451171875,
+      "y": 1045,
+      "width": 255.09765625,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0V",
+      "roundness": null,
+      "seed": 718344893,
+      "version": 3,
+      "versionNonce": 55131794,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-src-ipc",
+      "originalText": "Local IPC (Electron / CLI)\n发送 / Stop / Steer / 权限回复",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "Local IPC (Electron / CLI)\n发送 / Stop / Steer / 权限回\n复",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "2U6DT3t7JpA-Cdg0BpXt9",
+      "type": "text",
+      "x": 45.8935546875,
+      "y": 1155,
+      "width": 268.212890625,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0W",
+      "roundness": null,
+      "seed": 2036119959,
+      "version": 3,
+      "versionNonce": 140683716,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-src-rpc",
+      "originalText": "Remote RPC (Streams / Iroh)\n已验签 VerifiedPrincipal 快路径",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "Remote RPC (Streams /\nIroh)\n已验签 VerifiedPrincipal 快路\n径",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "3mUOVr5ZxXEM0hT6MY_2A",
+      "type": "text",
+      "x": 50.9326171875,
+      "y": 1265,
+      "width": 258.134765625,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0X",
+      "roundness": null,
+      "seed": 1993452628,
+      "version": 3,
+      "versionNonce": 652783707,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-src-crdt",
+      "originalText": "Loro Meta / Queue 观察器\n仅投递轻量 NotifyInput 唤醒信号",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "Loro Meta / Queue 观察器\n仅投递轻量 NotifyInput 唤醒\n信号",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "Ocwx75FO3ZONiejDk5EEh",
+      "type": "text",
+      "x": 49.4970703125,
+      "y": 1375,
+      "width": 261.005859375,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#0284c7",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0Y",
+      "roundness": null,
+      "seed": 298144171,
+      "version": 3,
+      "versionNonce": 1664899227,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-src-auto",
+      "originalText": "OperationInbox & Automation\n子会话回执批次 / 定时恢复意图",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "OperationInbox &\nAutomation\n子会话回执批次 / 定时恢复意\n图",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 2,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "gpmqKzpjeydOuVMaXGWwy",
+      "type": "text",
+      "x": 436.9775390625,
+      "y": 1202.5,
+      "width": 216.044921875,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#ca8a04",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0Z",
+      "roundness": null,
+      "seed": 2013220695,
+      "version": 4,
+      "versionNonce": 1726822573,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-mailbox",
+      "originalText": "Bounded mpsc Mailbox\nSessionCommand 串行队列\n(天然无重入锁 / 无竞态)",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "Bounded mpsc Mailbox\nSessionCommand 串行\n队列\n(天然无重入锁 / 无竞态)",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "vjJHIUAHLJ3e2-piAtJ4-",
+      "type": "text",
+      "x": 753.984375,
+      "y": 1315,
+      "width": 262.03125,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0a",
+      "roundness": null,
+      "seed": 727695019,
+      "version": 4,
+      "versionNonce": 238695795,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-idle",
+      "originalText": "Phase::Idle\n可选持有 Warm AcpHandle\n空闲 TTL / 内存水位自动回收",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "Phase::Idle\n可选持有 Warm AcpHandle\n空闲 TTL / 内存水位自动回收",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "Y9M6Y124iJYzJ4cArzMvr",
+      "type": "text",
+      "x": 751.0400390625,
+      "y": 1105,
+      "width": 267.919921875,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0b",
+      "roundness": null,
+      "seed": 1439039822,
+      "version": 4,
+      "versionNonce": 2121613357,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-prep",
+      "originalText": "Phase::Preparing\nWorktree + MCP + ACP 握手\n派生独立 CancellationToken",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "Phase::Preparing\nWorktree + MCP + ACP 握手\n派生独立 CancellationToken",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "XXr87Ey49f0x0sdTRLvzD",
+      "type": "text",
+      "x": 1076.4892578125,
+      "y": 1105,
+      "width": 277.021484375,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#6d28d9",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0c",
+      "roundness": null,
+      "seed": 293410413,
+      "version": 4,
+      "versionNonce": 1499457106,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-run",
+      "originalText": "Phase::RunningTurn\n独占 TurnContext (编译期隔离)\nSteer 三态判定 / 权限挂起",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "Phase::RunningTurn\n独占 TurnContext (编译期隔离\n)\nSteer 三态判定 / 权限挂起",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "SdtKm7grt_f3CdYfwQ0FX",
+      "type": "text",
+      "x": 1087.1826171875,
+      "y": 1315,
+      "width": 255.634765625,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#c2410c",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0d",
+      "roundness": null,
+      "seed": 1750067648,
+      "version": 4,
+      "versionNonce": 1862217483,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-drain",
+      "originalText": "Phase::Draining\n有界预算收尾: Diff 快照统计\n确认 ACP 结算后归还槽位",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "Phase::Draining\n有界预算收尾: Diff 快照统计\n确认 ACP 结算后归还槽位",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "4n8tcAsa3UoTeXf5EGKo9",
+      "type": "text",
+      "x": 1438.2177734375,
+      "y": 1055,
+      "width": 263.564453125,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0e",
+      "roundness": null,
+      "seed": 880247008,
+      "version": 4,
+      "versionNonce": 911973786,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-hist",
+      "originalText": "dyn SessionHistoryRepo\n纯语义 HistoryMutation 提交\n底层透明路由 Loro 或 Roost",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "dyn SessionHistoryRepo\n纯语义 HistoryMutation 提交\n底层透明路由 Loro 或 Roost",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "ze54WFe0vqR0nDbLcIJkj",
+      "type": "text",
+      "x": 1436.4990234375,
+      "y": 1200,
+      "width": 267.001953125,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-session-actor",
+      "index": "b0f",
+      "roundness": null,
+      "seed": 1707161014,
+      "version": 4,
+      "versionNonce": 1916007509,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795248782025,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "s-acp",
+      "originalText": "AcpProcessTree (OS 沙箱组)\nJSON-RPC over stdio 异步流\n外部独立 Adapter / 原生 Agent",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "AcpProcessTree (OS 沙箱组)\nJSON-RPC over stdio 异步流\n外部独立 Adapter / 原生\nAgent",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 3,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "f-selfhost-and-repo-seams",
+      "type": "frame",
+      "x": 1790,
+      "y": 1020,
+      "width": 1530,
+      "height": 510,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "b0g",
+      "roundness": null,
+      "seed": 1856709997,
+      "version": 1,
+      "versionNonce": 411862692,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "name": "4. 两大前置预留边界：loro-repo-rs 外部引擎接缝 & 企业私有化 (Self-Hosted) 端口抽象",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "b-e2ee",
+      "type": "rectangle",
+      "x": 1800,
+      "y": 1040,
+      "width": 310,
+      "height": 110,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "#ecfeff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0h",
+      "roundness": null,
+      "seed": 1614488249,
+      "version": 3,
+      "versionNonce": 374232619,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-b1",
+          "type": "arrow"
+        },
+        {
+          "id": "RDK_ExSdkXSBzIyQA389p",
+          "type": "text"
+        }
+      ],
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "b-daemon",
+      "type": "rectangle",
+      "x": 1800,
+      "y": 1210,
+      "width": 310,
+      "height": 135,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "#dcfce7",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0i",
+      "roundness": null,
+      "seed": 852337179,
+      "version": 4,
+      "versionNonce": 1009121180,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-b2",
+          "type": "arrow"
+        },
+        {
+          "id": "a-b3",
+          "type": "arrow"
+        },
+        {
+          "id": "zGGiG3dafB_xEHYFUayE5",
+          "type": "text"
+        }
+      ],
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "b-engine",
+      "type": "rectangle",
+      "x": 2170,
+      "y": 1040,
+      "width": 340,
+      "height": 160,
+      "angle": 0,
+      "strokeColor": "#7c3aed",
+      "backgroundColor": "#f5f3ff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "dashed",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0j",
+      "roundness": null,
+      "seed": 1744688387,
+      "version": 4,
+      "versionNonce": 898208441,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-b1",
+          "type": "arrow"
+        },
+        {
+          "id": "a-b2",
+          "type": "arrow"
+        },
+        {
+          "id": "MrzIe_PGQIFihhtpGU0fm",
+          "type": "text"
+        }
+      ],
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "b-roost",
+      "type": "rectangle",
+      "x": 2170,
+      "y": 1215,
+      "width": 340,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#ca8a04",
+      "backgroundColor": "#fef9c3",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0k",
+      "roundness": null,
+      "seed": 1701024766,
+      "version": 2,
+      "versionNonce": 1718108479,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-b3",
+          "type": "arrow"
+        },
+        {
+          "id": "wd3nvRlsm--RXkGFNaKeK",
+          "type": "text"
+        }
+      ],
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "b-profile",
+      "type": "rectangle",
+      "x": 2570,
+      "y": 1185,
+      "width": 310,
+      "height": 160,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "#dbeafe",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0l",
+      "roundness": null,
+      "seed": 1372142081,
+      "version": 5,
+      "versionNonce": 206244693,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-b4",
+          "type": "arrow"
+        },
+        {
+          "id": "a-b5",
+          "type": "arrow"
+        },
+        {
+          "id": "a-b6",
+          "type": "arrow"
+        },
+        {
+          "id": "4BPDWjvUIiNUwhi79vPR0",
+          "type": "text"
+        }
+      ],
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "b-ctrl",
+      "type": "rectangle",
+      "x": 2950,
+      "y": 1030,
+      "width": 360,
+      "height": 110,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "#e0e7ff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0m",
+      "roundness": null,
+      "seed": 1264242069,
+      "version": 2,
+      "versionNonce": 518715052,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-b4",
+          "type": "arrow"
+        },
+        {
+          "id": "uiudHGGJZNHX_Hit8QkRG",
+          "type": "text"
+        }
+      ],
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "b-blob",
+      "type": "rectangle",
+      "x": 2950,
+      "y": 1195,
+      "width": 360,
+      "height": 160,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "#e0e7ff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0n",
+      "roundness": null,
+      "seed": 2043891650,
+      "version": 3,
+      "versionNonce": 1596944603,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-b5",
+          "type": "arrow"
+        },
+        {
+          "id": "xqPsV9Gq-BfSb6zveo7fj",
+          "type": "text"
+        }
+      ],
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "b-ext",
+      "type": "rectangle",
+      "x": 2950,
+      "y": 1360,
+      "width": 360,
+      "height": 160,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "#e0e7ff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0o",
+      "roundness": null,
+      "seed": 542767565,
+      "version": 3,
+      "versionNonce": 506952931,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "a-b6",
+          "type": "arrow"
+        },
+        {
+          "id": "AYJoeNTKEnZ_R8PVtragx",
+          "type": "text"
+        }
+      ],
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "shadow": true,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-b1",
+      "type": "arrow",
+      "x": 2114,
+      "y": 1092,
+      "width": 52,
+      "height": 0,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0p",
+      "roundness": null,
+      "seed": 1257158214,
+      "version": 3,
+      "versionNonce": 597842013,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          52,
+          0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "b-e2ee",
+        "focus": 0.009457695420624085,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "b-engine",
+        "focus": -0.14947342768782362,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-b2",
+      "type": "arrow",
+      "x": 2112.2496909227502,
+      "y": 1224.0214059527311,
+      "width": 55.497403460635724,
+      "height": 81.41956675360734,
+      "angle": 0,
+      "strokeColor": "#7c3aed",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0q",
+      "roundness": null,
+      "seed": 1053016999,
+      "version": 3,
+      "versionNonce": 1256101728,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          55.497403460635724,
+          -81.41956675360734
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "b-daemon",
+        "focus": -1,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "b-engine",
+        "focus": -1,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-b3",
+      "type": "arrow",
+      "x": 2114,
+      "y": 1265,
+      "width": 52,
+      "height": 0,
+      "angle": 0,
+      "strokeColor": "#ca8a04",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0r",
+      "roundness": null,
+      "seed": 942117439,
+      "version": 3,
+      "versionNonce": 699512827,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          52,
+          0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "b-daemon",
+        "focus": -0.04601605339142619,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "b-roost",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-b4",
+      "type": "arrow",
+      "x": 2881.725327670284,
+      "y": 1219.4398068189616,
+      "width": 65.91434587674576,
+      "height": 90.18333082853815,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0s",
+      "roundness": null,
+      "seed": 1182507875,
+      "version": 3,
+      "versionNonce": 752387283,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          65.91434587674576,
+          -90.18333082853815
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "b-profile",
+        "focus": -1,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "b-ctrl",
+        "focus": -1,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-b5",
+      "type": "arrow",
+      "x": 2884,
+      "y": 1250,
+      "width": 62,
+      "height": 0,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0t",
+      "roundness": null,
+      "seed": 412104736,
+      "version": 3,
+      "versionNonce": 1976610213,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          62,
+          0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "b-profile",
+        "focus": 0,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "b-blob",
+        "focus": 0,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "a-b6",
+      "type": "arrow",
+      "x": 2881.725327670284,
+      "y": 1280.5601931810384,
+      "width": 65.91434587674576,
+      "height": 90.18333082853815,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0u",
+      "roundness": null,
+      "seed": 108690940,
+      "version": 3,
+      "versionNonce": 2102975196,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571684,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          65.91434587674576,
+          90.18333082853815
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "b-profile",
+        "focus": 1,
+        "gap": 4
+      },
+      "endBinding": {
+        "elementId": "b-ext",
+        "focus": 1,
+        "gap": 4
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "RDK_ExSdkXSBzIyQA389p",
+      "type": "text",
+      "x": 1828.8232421875,
+      "y": 1045,
+      "width": 252.353515625,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#0e7490",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0v",
+      "roundness": null,
+      "seed": 199153224,
+      "version": 2,
+      "versionNonce": 1086572530,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571704,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "b-e2ee",
+      "originalText": "lody-e2ee (密钥不进引擎)\n管理账本/信箱 + 按需装入 EpochKey\n缺钥回调触发账本 Catch-up",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "lody-e2ee (密钥不进引擎)\n管理账本/信箱 + 按需装入\nEpochKey\n缺钥回调触发账本 Catch-up",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "zGGiG3dafB_xEHYFUayE5",
+      "type": "text",
+      "x": 1806.30859375,
+      "y": 1215,
+      "width": 297.3828125,
+      "height": 125,
+      "angle": 0,
+      "strokeColor": "#15803d",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0w",
+      "roundness": null,
+      "seed": 29461176,
+      "version": 2,
+      "versionNonce": 1208479264,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571704,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "b-daemon",
+      "originalText": "lodyd 编排层 (零自研 CRDT 同步)\n仅消费 RepoEnginePort + RoostPort\n有界条件读 / 增量订阅",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "lodyd 编排层 (零自研 CRDT 同步\n)\n仅消费 RepoEnginePort +\nRoostPort\n有界条件读 / 增量订阅",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "MrzIe_PGQIFihhtpGU0fm",
+      "type": "text",
+      "x": 2178.9990234375,
+      "y": 1057.5,
+      "width": 322.001953125,
+      "height": 125,
+      "angle": 0,
+      "strokeColor": "#7c3aed",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0x",
+      "roundness": null,
+      "seed": 1399473087,
+      "version": 2,
+      "versionNonce": 506068993,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571704,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "b-engine",
+      "originalText": "[外部预留] loro-repo-rs Engine\n独占 Meta/Flock/Doc 存储与宿主接管\n自带 WS(loro-ds-v1)/SSE/Long-poll 云同步",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "[外部预留] loro-repo-rs Engine\n独占 Meta/Flock/Doc 存储与宿主接\n管\n自带 WS(loro-ds-v1)/SSE/Long-poll\n云同步",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "wd3nvRlsm--RXkGFNaKeK",
+      "type": "text",
+      "x": 2176.8505859375,
+      "y": 1227.5,
+      "width": 326.298828125,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#ca8a04",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0y",
+      "roundness": null,
+      "seed": 1004247478,
+      "version": 2,
+      "versionNonce": 1703144148,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571704,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "b-roost",
+      "originalText": "RoostHistoryPort (并存默认历史)\n与 loro-repo-rs 共存 · 统一读权限契约",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "RoostHistoryPort (并存默认历史)\n与 loro-repo-rs 共存 · 统一读权限契\n约",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "4BPDWjvUIiNUwhi79vPR0",
+      "type": "text",
+      "x": 2577.2900390625,
+      "y": 1190,
+      "width": 295.419921875,
+      "height": 150,
+      "angle": 0,
+      "strokeColor": "#1d4ed8",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b0z",
+      "roundness": null,
+      "seed": 1053944489,
+      "version": 2,
+      "versionNonce": 1216388331,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571704,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "b-profile",
+      "originalText": "运行时 BackendProfile & 自动发现\n/.well-known/lody-configuration\n单二进制通吃 Local / SaaS / SelfHosted\n按 profile_id 物理隔离本地目录",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "运行时 BackendProfile & 自动发\n现\n/.well-known/lody-configuration\n单二进制通吃 Local / SaaS /\nSelfHosted\n按 profile_id 物理隔离本地目录",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "uiudHGGJZNHX_Hit8QkRG",
+      "type": "text",
+      "x": 2958.5302734375,
+      "y": 1035,
+      "width": 342.939453125,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b10",
+      "roundness": null,
+      "seed": 1279666455,
+      "version": 2,
+      "versionNonce": 1492286546,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571704,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "b-ctrl",
+      "originalText": "ControlPlanePort & EntitlementPort\n自托管 Convex + OIDC SSO + 企业根证书 CA\nEd25519 离线 License 宽限期软降级",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "ControlPlanePort & EntitlementPort\n自托管 Convex + OIDC SSO + 企业根\n证书 CA\nEd25519 离线 License 宽限期软降级",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "xqPsV9Gq-BfSb6zveo7fj",
+      "type": "text",
+      "x": 2963.798828125,
+      "y": 1200,
+      "width": 332.40234375,
+      "height": 150,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b11",
+      "roundness": null,
+      "seed": 1914635941,
+      "version": 2,
+      "versionNonce": 185580098,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571704,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "b-blob",
+      "originalText": "BlobTransferPort & ArtifactRegistryPort\n兼容 R2 与 OpenDAL (S3/MinIO/FS) 上传策略\n内网 Runtime 镜像源 & 气隙离线 Bundle",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "BlobTransferPort &\nArtifactRegistryPort\n兼容 R2 与 OpenDAL (S3/MinIO/FS)\n上传策略\n内网 Runtime 镜像源 & 气隙离线\nBundle",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    },
+    {
+      "id": "AYJoeNTKEnZ_R8PVtragx",
+      "type": "text",
+      "x": 2964.9951171875,
+      "y": 1365,
+      "width": 330.009765625,
+      "height": 150,
+      "angle": 0,
+      "strokeColor": "#4338ca",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": "f-selfhost-and-repo-seams",
+      "index": "b12",
+      "roundness": null,
+      "seed": 970925140,
+      "version": 2,
+      "versionNonce": 1527230287,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1795261571704,
+      "link": null,
+      "locked": false,
+      "fontSize": 20,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "b-ext",
+      "originalText": "ScmProviderPort & TunnelProviderPort\nGitHub / GHES / GitLab 自定义 API 端点\nCloudflared / 企业内网网关按能力启停",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "text": "ScmProviderPort &\nTunnelProviderPort\nGitHub / GHES / GitLab 自定义 API\n端点\nCloudflared / 企业内网网关按能力启\n停",
+      "customData": {
+        "ryugiAuthor": "agent",
+        "ryugiRev": 1,
+        "ryugiLastBy": "agent"
+      }
+    }
+  ],
+  "appState": {
+    "name": "Lody CLI → Rust Daemon (lodyd) 架构解耦与拓扑演进",
+    "viewBackgroundColor": "#f8fafc"
+  },
+  "files": {}
+}
