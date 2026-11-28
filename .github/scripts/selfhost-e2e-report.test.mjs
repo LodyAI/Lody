@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   extractPrivateFailureDetails,
   formatPublicStatusLine,
@@ -28,6 +30,40 @@ await test('public status line exposes only suite statuses and never private pat
     '[selfhost-e2e] status=failed exitCode=1 suites=cloud:failed,e2e:passed'
   );
   assert.doesNotMatch(publicLine, /convex|internalSecret|loro-dev/u);
+});
+
+await test('iOS failure reporter exposes only the last recognized phase from the private log', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'selfhost-report-'));
+  try {
+    const logPath = join(dir, 'private.log');
+    writeFileSync(
+      logPath,
+      [
+        '[mobile-ios-auth-smoke] Ensuring selfhost stack (instance=internal-name)...',
+        '[mobile-ios-auth-smoke] Preparing mobile iOS test-build for https://private.example...',
+        '[mobile-ios-auth-smoke] Launching ai.lody.mobile on simulator...',
+        '[mobile-ios-auth-smoke] FAIL: auth of synthetic-account failed',
+        'unrelated output [mobile-ios-auth-smoke] PASS (should be ignored)',
+      ].join('\n'),
+      'utf8'
+    );
+    const reporterPath = fileURLToPath(new URL('./selfhost-e2e-report.mjs', import.meta.url));
+    const result = spawnSync(process.execPath, [reporterPath, dir, '1', logPath], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        FEISHU_ALERT_WEBHOOK_URL: '',
+        SELFHOST_SUITE_LABEL: 'selfhost-mobile-ios-smoke',
+      },
+    });
+    assert.equal(result.status, 1);
+    assert.deepEqual(result.stdout.trim().split('\n'), [
+      '[selfhost-e2e] status=failed exitCode=1 suites=unavailable',
+      '[selfhost-e2e] mobile-ios-phase=verify-auth',
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 await test('private failure details retain journey and shard breakdown for internal Feishu alerts', () => {
