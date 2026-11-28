@@ -250,6 +250,8 @@ import {
   countLiveActivityConversationStatuses,
   buildLodyConversationsLiveActivityId,
   LODY_CONVERSATIONS_LIVE_ACTIVITY_SCHEMA_VERSION,
+  isFreshLodyPresenceState,
+  isSessionActiveWithHeartbeat,
   type LiveActivityConversationItem,
   type LiveActivityStatusCounts,
   getCodeCollabFileIndexFlockDocId,
@@ -13017,6 +13019,45 @@ export class MessageHandler {
     }
   }
 
+  private resolveLiveActivitySessionStatuses(
+    sessionMetas: readonly SessionMeta[],
+    nowMs: number
+  ): ReadonlyMap<string, SessionStatus> {
+    const freshPresenceBySession = new Map<string, SessionStatus>();
+    try {
+      const states = this.workspaceDocument.getPresenceStates?.() ?? {};
+      for (const state of Object.values(states)) {
+        if (state.kind !== 'session') continue;
+        if (!isFreshLodyPresenceState(state, nowMs)) continue;
+        freshPresenceBySession.set(state.sessionId, state.status);
+      }
+    } catch (error) {
+      reportIfWasmFault(error);
+    }
+
+    const liveStatuses = new Map<string, SessionStatus>();
+    for (const meta of sessionMetas) {
+      // Durable `idle` written on turn completion overrides lingering finalizing presence.
+      if (meta.status?.type === 'idle') continue;
+      if (this.pendingPermissionRequests.has(meta.id)) {
+        liveStatuses.set(meta.id, SessionStatusFactory.requestPermission());
+        continue;
+      }
+      const presenceStatus = freshPresenceBySession.get(meta.id);
+      const hasActivePresence = this.hasSessionActivePresence(meta.id) || presenceStatus != null;
+      const isHeartbeatActive = isSessionActiveWithHeartbeat(meta.status, meta.lastRunningSeen);
+      if (!hasActivePresence && !isHeartbeatActive) continue;
+      if (meta.status?.type === 'requestPermission') {
+        liveStatuses.set(meta.id, SessionStatusFactory.requestPermission());
+      } else if (meta.status != null) {
+        liveStatuses.set(meta.id, meta.status);
+      } else if (presenceStatus != null) {
+        liveStatuses.set(meta.id, presenceStatus);
+      }
+    }
+    return liveStatuses;
+  }
+
   private async buildLiveActivitySummary(userId: string): Promise<LiveActivitySummary> {
     const sessionMetas = (
       await Promise.all(
@@ -13030,6 +13071,7 @@ export class MessageHandler {
       )
     ).filter((meta): meta is SessionMeta => meta !== undefined);
     const nowMs = getServerNow();
+    const liveSessionStatuses = this.resolveLiveActivitySessionStatuses(sessionMetas, nowMs);
     const items = buildLiveActivityConversationItems({
       sessions: sessionMetas,
       currentUserId: userId,
@@ -13041,22 +13083,39 @@ export class MessageHandler {
         unread: 'Completed',
       },
       formatUpdatedAt: (updatedAt) => formatLiveActivityUpdatedAt(updatedAt, nowMs),
+      maxItems: 4,
+      liveSessionStatuses,
     });
+    const statusCounts = countLiveActivityConversationStatuses({
+      sessions: sessionMetas,
+      currentUserId: userId,
+      liveSessionStatuses,
+    });
+    const totalCount = countLiveActivityConversationCandidates({
+      sessions: sessionMetas,
+      currentUserId: userId,
+      liveSessionStatuses,
+    });
+    const maxContentStateBytes = 3200;
+    const boundedItems = [...items];
+    while (
+      boundedItems.length > 0 &&
+      Buffer.byteLength(
+        JSON.stringify({ totalCount, statusCounts, items: boundedItems, updatedAt: nowMs }),
+        'utf8'
+      ) > maxContentStateBytes
+    ) {
+      boundedItems.pop();
+    }
     const summary: LiveActivitySummary = {
       activityId: buildLodyConversationsLiveActivityId({
         workspaceId: this.workspaceId,
         userId,
         schemaVersion: LODY_CONVERSATIONS_LIVE_ACTIVITY_SCHEMA_VERSION,
       }),
-      totalCount: countLiveActivityConversationCandidates({
-        sessions: sessionMetas,
-        currentUserId: userId,
-      }),
-      statusCounts: countLiveActivityConversationStatuses({
-        sessions: sessionMetas,
-        currentUserId: userId,
-      }),
-      items,
+      totalCount,
+      statusCounts,
+      items: boundedItems,
       updatedAt: nowMs,
     };
     return summary;
