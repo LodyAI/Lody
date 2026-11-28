@@ -19,6 +19,7 @@ import {
   prRemoteImagesEnabledAtom,
   queuedMessageBehaviorAtom,
   sessionSidebarCodeChangesOnlyAtom,
+  steerForceInterruptAtom,
   userAtom,
 } from '@/atoms';
 import { useAtom, useAtomValue } from 'jotai';
@@ -130,6 +131,8 @@ export function GeneralSettingsComponent() {
   const preferenceId = useId();
   const codeChangesLabelId = `${preferenceId}-code-changes-label`;
   const codeChangesHelperId = `${preferenceId}-code-changes-helper`;
+  const steerForceInterruptLabelId = `${preferenceId}-steer-force-interrupt-label`;
+  const steerForceInterruptHelperId = `${preferenceId}-steer-force-interrupt-helper`;
   const prImagesLabelId = `${preferenceId}-pr-images-label`;
   const prImagesHelperId = `${preferenceId}-pr-images-helper`;
   const notificationLabelId = `${preferenceId}-notification-label`;
@@ -147,6 +150,7 @@ export function GeneralSettingsComponent() {
     sessionSidebarCodeChangesOnlyAtom
   );
   const [queuedMessageBehavior, setQueuedMessageBehavior] = useAtom(queuedMessageBehaviorAtom);
+  const [steerForceInterrupt, setSteerForceInterrupt] = useAtom(steerForceInterruptAtom);
   const [prImagesEnabled, setPrImagesEnabled] = useAtom(prRemoteImagesEnabledAtom);
   const [preventSleepEnabled, setPreventSleepEnabled] = useState(true);
   const [cliAutoStartEnabled, setCliAutoStartEnabled] = useState(true);
@@ -715,6 +719,28 @@ export function GeneralSettingsComponent() {
               onChange={setQueuedMessageBehavior}
             />
           </CompactRow>
+          {queuedMessageBehavior === 'guide' ? (
+            <CompactRow
+              labelId={steerForceInterruptLabelId}
+              helperId={steerForceInterruptHelperId}
+              label={t(
+                'settings.general.sessions.queuedMessageBehavior.forceInterrupt.label',
+                "Force interrupt and send when steering isn't supported"
+              )}
+              helper={t(
+                'settings.general.sessions.queuedMessageBehavior.forceInterrupt.helper',
+                'For protocols that do not support mid-run steering, cancel the active turn and send your message instead of waiting for it to finish.'
+              )}
+            >
+              <Switch
+                id="steer-force-interrupt-toggle"
+                aria-labelledby={steerForceInterruptLabelId}
+                aria-describedby={steerForceInterruptHelperId}
+                checked={steerForceInterrupt}
+                onCheckedChange={setSteerForceInterrupt}
+              />
+            </CompactRow>
+          ) : null}
           {isElectron ? (
             <div id="path-launchers" {...stylex.props(styles.anchor)}>
               <PathLaunchersSettings isElectron={isElectron} platform={electronPlatform} inline />

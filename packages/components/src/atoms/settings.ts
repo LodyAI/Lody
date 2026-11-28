@@ -290,6 +290,11 @@ export const queuedMessageBehaviorAtom = atom(
   }
 );
 
+export const steerForceInterruptAtom = atomWithStorage<boolean>(
+  'lody-steer-force-interrupt',
+  false
+);
+
 /** localStorage keys for developer-only beta gates — keep in sync with the atoms below. */
 export const DEVELOPER_MODE_STORAGE_KEY = 'lody-developer-mode-enabled';
 export const INBOX_BETA_STORAGE_KEY = 'lody-inbox-beta-enabled';

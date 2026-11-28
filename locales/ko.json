@@ -4055,6 +4055,8 @@
   "settings.general.preventSleep.label": "절전 모드 방지",
   "settings.general.sessions.codeOnlyLineChanges.helper": "사이드바의 변경 줄 수 계산에서 문서, 테스트 및 개발 설정 파일을 제외합니다.",
   "settings.general.sessions.codeOnlyLineChanges.label": "코드 변경 줄 수만 표시",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.helper": "실행 중 스티어링을 지원하지 않는 프로토콜의 경우, 완료를 기다리지 않고 현재 턴을 중단한 뒤 새 메시지를 전송합니다.",
+  "settings.general.sessions.queuedMessageBehavior.forceInterrupt.label": "스티어링 미지원 시 현재 작업 강제 중단 후 전송",
   "settings.general.sessions.queuedMessageBehavior.guide": "즉시 유도",
   "settings.general.sessions.queuedMessageBehavior.helper": "에이전트가 작업 중일 때 보낸 메시지에 적용됩니다.",
   "settings.general.sessions.queuedMessageBehavior.label": "대기 메시지 동작",

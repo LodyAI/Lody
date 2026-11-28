@@ -1,6 +1,7 @@
 export type SessionMessageSubmitRoute =
   | { type: 'direct_dispatch' }
   | { type: 'guide' }
+  | { type: 'interrupt_and_queue' }
   | { type: 'queue'; reason: 'forced' | 'prompt_busy' | 'unfinished_assistant_turn' };
 
 export type SessionMessageSubmitRouteInput = {
@@ -12,6 +13,8 @@ export type SessionMessageSubmitRouteInput = {
   isPromptBusy: boolean;
   hasUnfinishedAssistantTurn: boolean;
   queuedMessageBehavior: 'queue' | 'guide';
+  steerForceInterrupt?: boolean;
+  isSteerKnownUnsupported?: boolean;
 };
 
 /**
@@ -35,6 +38,8 @@ export function resolveSessionMessageSubmitRoute({
   nativeSteerAvailable,
   hasUnfinishedAssistantTurn,
   queuedMessageBehavior,
+  steerForceInterrupt = false,
+  isSteerKnownUnsupported = false,
 }: SessionMessageSubmitRouteInput): SessionMessageSubmitRoute {
   if (forceDirect) {
     return { type: 'direct_dispatch' };
@@ -52,6 +57,17 @@ export function resolveSessionMessageSubmitRoute({
     hasUnfinishedAssistantTurn
   ) {
     return { type: 'guide' };
+  }
+  if (
+    !forceQueue &&
+    !invertBehavior &&
+    queuedMessageBehavior === 'guide' &&
+    steerForceInterrupt &&
+    isSteerKnownUnsupported &&
+    isPromptBusy &&
+    hasUnfinishedAssistantTurn
+  ) {
+    return { type: 'interrupt_and_queue' };
   }
   if (forceQueue) {
     return { type: 'queue', reason: 'forced' };

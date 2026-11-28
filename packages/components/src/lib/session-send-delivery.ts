@@ -525,7 +525,7 @@ export async function steerUserTurn(
   sessionId: SessionId,
   expectedTurnId: string,
   userTurnId: string,
-  options?: { machineId?: MachineId | null; onApplied?: () => void }
+  options?: { machineId?: MachineId | null; onApplied?: () => void; onUnsupported?: () => void }
 ): Promise<boolean> {
   const entry = await readUserTurn(runtime, sessionId, userTurnId);
   const inputConfig = normalizeSessionTurnInputConfig(entry?.inputConfig);
@@ -566,7 +566,13 @@ export async function steerUserTurn(
   ) {
     await promoteGuideToFollowUp(runtime, sessionId, userTurnId, { inputConfig, machineId });
     log('steer became an ordinary follow-up for %s/%s', sessionId, userTurnId);
+    if (response?.disposition === 'unsupported') {
+      options?.onUnsupported?.();
+    }
     return false;
+  }
+  if (response?.disposition === 'unsupported') {
+    options?.onUnsupported?.();
   }
   // `recoveryOwned`: the daemon requeues or settles the turn itself. Anything
   // else (delivery-unknown, timeout, transport error) is uncertain: leave the

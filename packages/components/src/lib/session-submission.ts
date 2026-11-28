@@ -346,7 +346,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     sessionId: SessionId,
     expectedTurnId: string,
     userTurnId: string,
-    options?: { machineId?: MachineId | null }
+    options?: { machineId?: MachineId | null; onUnsupported?: () => void }
   ): Promise<boolean> => {
     if (!runtime) {
       throw new Error('Runtime not ready');
@@ -361,6 +361,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     return steerUserTurn(runtime, sessionId, expectedTurnId, userTurnId, {
       machineId: options?.machineId,
       onApplied: () => onRpcDelivered(sessionId, userTurnId),
+      onUnsupported: options?.onUnsupported,
     });
   };
 

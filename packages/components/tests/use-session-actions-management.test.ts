@@ -1147,6 +1147,59 @@ describe('useSessionActions', () => {
     }
   );
 
+  it('invokes onUnsupported when steer is rejected with disposition unsupported', async () => {
+    const sessionId = 'session-steer-unsupported' as SessionId;
+    const userTurnId = 'user-turn-steer-unsupported';
+    const machineId = 'machine-1' as MachineId;
+    const history = [
+      {
+        id: userTurnId,
+        role: 'user',
+        userId: 'user-1',
+        timestamp: '2026-07-17T00:00:00.000Z',
+        status: 'pending_apply',
+        read: false,
+        inputConfig: {
+          prompt: 'unsupported guide',
+          inputBlocks: [{ type: 'text', text: 'unsupported guide' }],
+          cliType: 'builtin',
+          agentType: 'kimi',
+        },
+      },
+    ];
+    const onUnsupported = vi.fn();
+    const runtime = createRuntime({}) as WorkspaceRuntime & {
+      withSessionStore: WorkspaceRuntime['withSessionStore'];
+      requestSessionSteer: WorkspaceRuntime['requestSessionSteer'];
+    };
+    runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
+      fn({
+        getState: vi.fn(() => ({ history })),
+        sessionData: sessionDataOver(history),
+        setState: vi.fn(),
+        waitUntilSynced: vi.fn(async () => undefined),
+      })
+    ) as unknown as WorkspaceRuntime['withSessionStore'];
+    runtime.requestSessionSteer = vi.fn(async () => ({
+      type: 'session/steer_response' as const,
+      sessionId,
+      userTurnId,
+      applied: false,
+      recoveryOwned: true,
+      disposition: 'unsupported' as const,
+    })) as WorkspaceRuntime['requestSessionSteer'];
+    const actions = await renderActions(runtime);
+
+    await expect(
+      actions.requestSessionSteer(sessionId, 'assistant:user-1', userTurnId, {
+        machineId,
+        onUnsupported,
+      })
+    ).resolves.toBe(false);
+
+    expect(onUnsupported).toHaveBeenCalledOnce();
+  });
+
   it('closes only the selected tab while retaining all lifecycle and dispatch state', async () => {
     const tree = createContainmentSessions('close', false);
     const rootSession = {
