@@ -81,6 +81,21 @@ chunk boundary into U+FFFD. A flock bundle carries file paths as literal UTF-8 J
 that corruption becomes a permanent garbled LWW key in the receiver's replica;
 `isCorruptedCodeCollabWorkspacePath` prunes the survivors.
 
+## Renderer receive confirmation
+
+`LocalLoroTransportAdapter` reports a doc room as receive-confirmed only while the room
+is joined, no chunk transfer is partial, and the renderer's oplog covers the last
+`serverVersion` from a join reply or push. Uploads never advance that target, and
+operations waiting for dependencies stay outside the oplog. A join acknowledgement with
+chunks behind it therefore stays unconfirmed until the final chunk is imported. The
+conversation status shows Synced only on this confirmation, not on room status alone.
+
+The server advances each subscriber's sent frontier when it sends, so a frame the relay
+drops is never resent. A complete import that still leaves a gap triggers one immediate
+incremental rejoin per unconfirmed period. A transfer that receives no frame within the
+receive stall timeout (15 seconds) also rejoins, so a lost final chunk cannot leave the
+conversation Syncing indefinitely.
+
 ## Room bridging and its cost
 
 `LoroDocumentManager` bridges named Flock docs opened by a renderer into

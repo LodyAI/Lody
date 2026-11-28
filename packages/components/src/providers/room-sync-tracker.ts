@@ -13,6 +13,36 @@ export type TrackedRoomSubscription = {
   readonly firstSyncedWithRemote: Promise<void>;
 };
 
+export type ReceiveConfirmationSource = (listener: (confirmed: boolean) => void) => () => void;
+
+export function createReceiveConfirmationHub() {
+  const confirmed = new Set<string>();
+  const listeners = new Map<string, Set<(confirmed: boolean) => void>>();
+  return {
+    publish(docId: string, next: boolean): void {
+      if (confirmed.has(docId) === next) return;
+      if (next) confirmed.add(docId);
+      else confirmed.delete(docId);
+      for (const listener of Array.from(listeners.get(docId) ?? [])) listener(next);
+    },
+    source(docId: string): ReceiveConfirmationSource {
+      return (listener) => {
+        let docListeners = listeners.get(docId);
+        if (!docListeners) {
+          docListeners = new Set();
+          listeners.set(docId, docListeners);
+        }
+        docListeners.add(listener);
+        listener(confirmed.has(docId));
+        return () => {
+          docListeners.delete(listener);
+          if (docListeners.size === 0) listeners.delete(docId);
+        };
+      };
+    },
+  };
+}
+
 const isTerminalRoomStatus = (status: RepoTransportRoomStatus | null): boolean =>
   status === 'disconnected' || status === 'error';
 
@@ -21,7 +51,8 @@ const isReconnectStatus = (status: RepoTransportRoomStatus | null): boolean =>
 
 export type RoomSyncTracker = {
   readonly roomId: string;
-  attach: (sub: TrackedRoomSubscription) => void;
+  /** With `receive`, a joined room is `'synced'` only while that source confirms. */
+  attach: (sub: TrackedRoomSubscription, receive?: ReceiveConfirmationSource) => void;
   markFirstSynced: () => void;
   markFirstSyncFailed: () => void;
   /**
@@ -50,6 +81,8 @@ export function createRoomSyncTracker(roomId: string): RoomSyncTracker {
   let activeSubscription: TrackedRoomSubscription | null = null;
   let firstSyncRecovery: Promise<void> | null = null;
   let detachStatusListener: (() => void) | null = null;
+  let receiveConfirmed: boolean | null = null;
+  let detachReceiveListener: (() => void) | null = null;
   const listeners = new Set<(state: RoomSyncState) => void>();
 
   const getSyncState = (): RoomSyncState => {
@@ -63,7 +96,7 @@ export function createRoomSyncTracker(roomId: string): RoomSyncTracker {
     }
     if (status === 'joined') {
       if (firstSynced) {
-        return 'synced';
+        return receiveConfirmed === false ? 'syncing' : 'synced';
       }
       return initialSyncFailed ? 'error' : 'syncing';
     }
@@ -128,12 +161,27 @@ export function createRoomSyncTracker(roomId: string): RoomSyncTracker {
     emitSyncState();
   };
 
+  const detachReceive = () => {
+    detachReceiveListener?.();
+    detachReceiveListener = null;
+    receiveConfirmed = null;
+  };
+
   const tracker: RoomSyncTracker = {
     roomId,
-    attach: (sub) => {
+    attach: (sub, receive) => {
       stopped = false;
       detachStatusListener?.();
+      detachReceive();
       activeSubscription = sub;
+      if (receive) {
+        receiveConfirmed = false;
+        detachReceiveListener = receive((confirmed) => {
+          if (receiveConfirmed === confirmed) return;
+          receiveConfirmed = confirmed;
+          emitSyncState();
+        });
+      }
       detachStatusListener = sub.onStatusChange(setStatus);
       // A binding emits its status when it attaches, which is before a join
       // resolves and hands it here. Adopt it, or a previous failed join's
@@ -167,6 +215,7 @@ export function createRoomSyncTracker(roomId: string): RoomSyncTracker {
       firstSyncRecovery = null;
       detachStatusListener?.();
       detachStatusListener = null;
+      detachReceive();
       activeSubscription = null;
       emitSyncState();
     },
@@ -190,6 +239,7 @@ export function createRoomSyncTracker(roomId: string): RoomSyncTracker {
       disposed = true;
       detachStatusListener?.();
       detachStatusListener = null;
+      detachReceive();
       activeSubscription = null;
       emitSyncState();
       listeners.clear();
